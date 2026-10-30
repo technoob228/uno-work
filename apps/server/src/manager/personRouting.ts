@@ -100,6 +100,23 @@ function offeredModel(provider: ServerProvider, model: string): string {
   return sameFamily?.slug ?? slug;
 }
 
+const UNO_CREDITS_NOT_ALLOWED = "not signed in (and not allowed to use Uno credits)";
+
+/**
+ * Claude Code with no sign-in of its own reports itself ready on Uno AI
+ * (`auth.type` "unoAi"), but its driver refuses every turn until the person
+ * allows Uno credits on this machine (ClaudeDriver `makeUnoCreditsGuard`,
+ * canary 30.10: the chat was created, then died on start).
+ */
+function unoCreditsNotAllowed(
+  provider: ServerProvider,
+  harnessUnoCredits: Readonly<Record<string, boolean>>,
+): string | null {
+  if (provider.driver !== "claudeAgent") return null;
+  if (provider.auth.status !== "authenticated" || provider.auth.type !== "unoAi") return null;
+  return harnessUnoCredits[provider.driver] === true ? null : UNO_CREDITS_NOT_ALLOWED;
+}
+
 /**
  * A chat an assistant starts on a harness that can't take it here (not
  * installed, off, not signed in) is not started: the model gets one line to
@@ -112,19 +129,24 @@ function offeredModel(provider: ServerProvider, model: string): string {
 export function selectionNotReadyMessage(
   selection: ModelSelection,
   providers: ReadonlyArray<ServerProvider>,
+  /** Settings `harnessUnoCredits`: harnesses allowed to run on Uno credits here. */
+  harnessUnoCredits: Readonly<Record<string, boolean>> = {},
 ): string | null {
   const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
   if (provider === undefined) return null;
-  const reason = providerNotReadyReason(provider);
+  const reason =
+    providerNotReadyReason(provider) ?? unoCreditsNotAllowed(provider, harnessUnoCredits);
   if (reason === null) return null;
   const label =
     HARNESS_LABELS[provider.driver] ?? provider.displayName ?? String(provider.instanceId);
   const fix =
     reason === "not signed in"
       ? "Settings → Agents → Sign in"
-      : reason === "turned off"
-        ? "Settings → Agents → turn it on"
-        : "Settings → Agents → install it";
+      : reason === UNO_CREDITS_NOT_ALLOWED
+        ? "sign in to Claude, or allow it to use Uno credits"
+        : reason === "turned off"
+          ? "Settings → Agents → turn it on"
+          : "Settings → Agents → install it";
   return (
     `${label} is ${reason} on this computer — the chat was NOT started and nothing is running. ` +
     `Don't start it on another model yourself; tell the person in one line and ask: ` +

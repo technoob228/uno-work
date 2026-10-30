@@ -150,6 +150,8 @@ export interface AgentThreadsDeps {
     caller: OrchestrationThreadShell,
   ) => Effect.Effect<AssistantAccessView | null>;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  /** Settings `harnessUnoCredits` (Claude Code on Uno credits allowed here). Absent: {}. */
+  readonly getHarnessUnoCredits?: Effect.Effect<Readonly<Record<string, boolean>>>;
   /**
    * This computer's box id (null on a laptop): the only `computerId` a new
    * thread may name for now (assistants/targetComputer.ts). Absent = null.
@@ -738,7 +740,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         // An assistant's chat on a harness that can't start here is not
         // started at all: the model hears why and asks the person.
         if (assistantProjectId !== null) {
-          const notReady = selectionNotReadyMessage(modelSelection, yield* deps.getProviders);
+          const notReady = selectionNotReadyMessage(
+            modelSelection,
+            yield* deps.getProviders,
+            deps.getHarnessUnoCredits === undefined ? {} : yield* deps.getHarnessUnoCredits,
+          );
           if (notReady !== null) return yield* fail(409, "harness_not_ready", notReady);
         }
 

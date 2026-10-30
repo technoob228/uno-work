@@ -226,6 +226,7 @@ const makeManagerToolService = Effect.gen(function* () {
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   // Optional: test wirings without providers skip the person's routing rows.
   const providerRegistry = Option.getOrNull(yield* Effect.serviceOption(ProviderRegistry));
+  const settingsService = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
 
   /**
    * The model a chat the assistant starts runs on, after the person's
@@ -258,7 +259,16 @@ const makeManagerToolService = Effect.gen(function* () {
       const notReady =
         selection === null
           ? null
-          : selectionNotReadyMessage(selection, yield* providerRegistry.getProviders);
+          : selectionNotReadyMessage(
+              selection,
+              yield* providerRegistry.getProviders,
+              settingsService === null
+                ? {}
+                : yield* settingsService.getSettings.pipe(
+                    Effect.map((settings) => settings.harnessUnoCredits),
+                    Effect.orElseSucceed(() => ({})),
+                  ),
+            );
       if (notReady !== null) return yield* new ManagerInvalidRequestError({ detail: notReady });
       return selection;
     });

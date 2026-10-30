@@ -122,6 +122,14 @@ describe("selectionNotReadyMessage (any chat an assistant starts)", () => {
     expect(message).toContain("Не стартовал");
   });
 
+  it("Claude on Uno AI without Uno credits allowed: not started (canary 30.10)", () => {
+    const onUnoAi = provider("claudeAgent", { auth: { status: "authenticated", type: "unoAi" } });
+    const message = selectionNotReadyMessage(claude, [onUnoAi]);
+    expect(message).toContain("NOT started");
+    expect(message).toContain("allow it to use Uno credits");
+    expect(selectionNotReadyMessage(claude, [onUnoAi], { claudeAgent: true })).toBeNull();
+  });
+
   it("ready, or a provider this computer doesn't list: start as before", () => {
     expect(selectionNotReadyMessage(claude, [provider("claudeAgent")])).toBeNull();
     expect(selectionNotReadyMessage(claude, [provider("uno")])).toBeNull();
