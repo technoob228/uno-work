@@ -3608,7 +3608,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       if (chat === "new_chat") parts.push("start a new chat in Ask mode each time");
       if (chat === "off") parts.push("stop starting a chat");
       const instruction = str(args, "chatInstruction")?.trim();
-      if (instruction && chat !== "off") parts.push(`what it does: ${instruction.slice(0, 200)}`);
+      if (instruction && chat !== "off") parts.push(`what it does: ${instruction}`);
       return parts.join(" · ") || undefined;
     },
     run: (deps, args) =>

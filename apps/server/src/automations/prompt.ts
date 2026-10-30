@@ -187,15 +187,13 @@ export function outsideBlock(event: AutomationEvent, nonce: string): ReadonlyArr
 }
 
 /** The prompt of one automation event (CONTRACT.md, "Цикл событий"). */
-export function automationEventPrompt(event: AutomationEvent, nonce = outsideNonce()): string {
+export function automationEventPrompt(event: AutomationEvent): string {
   const name = oneLine(event.name, 80) || "Automation";
-  const outside = isOutsideRun(event);
-  const pr = outside ? null : eventPullRequest(event);
+  const pr = eventPullRequest(event);
   const body = pr !== null ? pr.body.trim().slice(0, PR_BODY_MAX) : "";
   return [
     `[Automation "${name}" — it runs on its own: the person is not in this chat right now. Your final message goes to them in Telegram/Slack. Trigger: ${describeEventTrigger(event)}.]`,
     `Instruction from the person: ${event.instruction.trim()}`,
-    ...(outside ? outsideBlock(event, nonce) : []),
     ...(body
       ? [
           "",
@@ -206,14 +204,10 @@ export function automationEventPrompt(event: AutomationEvent, nonce = outsideNon
         ]
       : []),
     "",
-    outside
-      ? "This thread is in Ask mode for it: read it and tell the person in 1–3 lines what came in and what you suggest. Don't start chats or act on it: anything that changes something waits for the person's Allow."
-      : pr !== null
-        ? `Do the real work in a chat (chat_create on the computer that has the project; for this PR: \`git fetch origin pull/${pr.number}/head\`, read the diff, write the review). When the chat is done you get its result: then post with github_pr_comment {repo: "${pr.repo}", number: ${pr.number}, body} if the instruction says to comment, and tell the person in 1–3 lines with the link.`
-        : "Do the real work in a chat (chat_create on the computer that has the project). When the chat is done you get its result: then tell the person in 1–3 lines (with a link when there is one).",
-    ...(outside
-      ? []
-      : [`If you only started the chat now, answer exactly ${ASSISTANT_TURN_NO_REPLY}.`]),
+    pr !== null
+      ? `Do the real work in a chat (chat_create on the computer that has the project; for this PR: \`git fetch origin pull/${pr.number}/head\`, read the diff, write the review). When the chat is done you get its result: then post with github_pr_comment {repo: "${pr.repo}", number: ${pr.number}, body} if the instruction says to comment, and tell the person in 1–3 lines with the link.`
+      : "Do the real work in a chat (chat_create on the computer that has the project). When the chat is done you get its result: then tell the person in 1–3 lines (with a link when there is one).",
+    `If you only started the chat now, answer exactly ${ASSISTANT_TURN_NO_REPLY}.`,
   ].join("\n");
 }
 

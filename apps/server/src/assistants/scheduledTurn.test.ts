@@ -11,6 +11,7 @@ import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurn
 import {
   AssistantScheduledTurns,
   SCHEDULED_THREAD_TITLE,
+  canHoldOutsideText,
   isNoReply,
   makeAssistantScheduledTurns,
   wrapScheduledPrompt,
@@ -34,14 +35,18 @@ interface World {
   reply: string | null;
 }
 
-function makeLayer(world: World, options: { mainChat: boolean; projectId: string }) {
+function makeLayer(
+  world: World,
+  options: { mainChat: boolean; projectId: string; chatProjectId?: string },
+) {
   let requestedAt: string | null = null;
   let requestedMessageId: string | null = null;
   const threads = options.mainChat
     ? [
         {
           id: MAIN,
-          projectId: ProjectId.make("assistant-home"),
+          projectId: ProjectId.make(options.chatProjectId ?? "assistant-home"),
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
           title: "Uno",
           assistantRole: "chat",
           archivedAt: null,
@@ -235,7 +240,7 @@ describe("scheduled assistant turn", () => {
   });
 
   describe("a stranger's text (a form, a webhook)", () => {
-    const inChat = (world: World, ask: boolean, marks: string[]) =>
+    const inChat = (world: World, ask: boolean, marks: string[], chatProjectId = "p-work") =>
       Effect.runPromise(
         Effect.gen(function* () {
           const turns = yield* AssistantScheduledTurns;
@@ -246,7 +251,11 @@ describe("scheduled assistant turn", () => {
             reason: "automation 7",
             ...(ask ? { ask: true, onThread: (id) => Effect.sync(() => void marks.push(id)) } : {}),
           });
-        }).pipe(Effect.provide(makeLayer(world, { mainChat: true, projectId: "assistant-home" }))),
+        }).pipe(
+          Effect.provide(
+            makeLayer(world, { mainChat: true, projectId: "assistant-home", chatProjectId }),
+          ),
+        ),
       );
 
     it("puts a Full access chat in Ask before the turn, marked first", async () => {
@@ -270,33 +279,19 @@ describe("scheduled assistant turn", () => {
       expect(world.dispatched.map((command) => command.type)).toEqual(["thread.turn.start"]);
     });
 
-    it("an assistant reads it in its own thread, never in Uno's main conversation", async () => {
-      const world = freshWorld("A new order came in.");
-      const marks: string[] = [];
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const turns = yield* AssistantScheduledTurns;
-          return yield* turns.runEvent({
-            projectId: ProjectId.make("assistant-home"),
-            prompt: "[Automation …]",
-            header: "⚙️ Orders\n\n",
-            threadTitle: "From outside",
-            source: "automation",
-            timeoutSec: 30,
-            ask: true,
-            onThread: (id) => Effect.sync(() => void marks.push(id)),
-          });
-        }).pipe(Effect.provide(makeLayer(world, { mainChat: true, projectId: "assistant-home" }))),
-      );
-      expect(world.dispatched.map((command) => command.type)).toEqual([
-        "thread.create",
-        "thread.runtime-mode.set",
-        "thread.turn.start",
-      ]);
-      const start = world.dispatched[2]!;
-      expect(start.threadId).not.toBe(MAIN);
-      expect(start.runtimeMode).toBe("approval-required");
-      expect(marks).toEqual([start.threadId]);
+    it("refuses a chat that can't ask: an assistant's, or on Hermes", () => {
+      const codex = { instanceId: "codex" };
+      expect(canHoldOutsideText("p-work", codex)).toBe(true);
+      expect(canHoldOutsideText("p-work", { instanceId: "claudeAgent" })).toBe(true);
+      expect(canHoldOutsideText("assistant-home", codex)).toBe(false);
+      expect(canHoldOutsideText("assistant-ada", codex)).toBe(false);
+      expect(canHoldOutsideText("p-work", { instanceId: "hermes" })).toBe(false);
+    });
+
+    it("an assistant's chat gets no turn", async () => {
+      const world = freshWorld("Read it.");
+      await expect(inChat(world, true, [], "assistant-home")).rejects.toThrow();
+      expect(world.dispatched).toEqual([]);
     });
   });
 

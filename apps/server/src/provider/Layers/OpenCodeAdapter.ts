@@ -2413,7 +2413,9 @@ export function makeOpenCodeAdapter(
               const permission = buildOpenCodePermissionRules(input.runtimeMode);
               // Resume: the same OpenCode session, if it still exists and
               // belongs to this directory. Any failure falls back to a new
-              // session — the thread keeps working, only without history.
+              // session — the thread keeps working, only without history. That
+              // includes the permission update: an old session must not go on
+              // under wider rules than the mode the thread was just put in.
               const resumed =
                 resumeFrom !== undefined && resumeFrom.directory === directory
                   ? yield* runOpenCodeSdk("session.get", () =>
@@ -2430,7 +2432,7 @@ export function makeOpenCodeAdapter(
                                 sessionID: existing.id,
                                 permission,
                               } as Parameters<typeof client.session.update>[0]),
-                            ).pipe(Effect.ignore({ log: true }))
+                            )
                           : Effect.void,
                       ),
                       Effect.catch((cause) =>

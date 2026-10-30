@@ -268,17 +268,6 @@ describe("text from the outside (site forms, webhooks)", () => {
     expect(prompt).toContain('<outside_input_n>\n{"a":1}\n</outside_input_n>');
   });
 
-  it("an assistant reads the same block", () => {
-    const hook = form({
-      kind: "webhook",
-      executor: { kind: "assistant" },
-      payload: { body: "text" },
-    });
-    expect(automationEventPrompt(hook, "n")).toContain(
-      "<outside_input_n>\ntext\n</outside_input_n>",
-    );
-  });
-
   it("a cut text says so", () => {
     const hook = form({ kind: "webhook", payload: { body: "text", truncated: true } });
     expect(automationChatPrompt(hook, "n")).toContain("It was cut to fit.");

@@ -45,7 +45,7 @@ import {
   type TurnDiffSummary,
 } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
-import ChatMarkdown, { RemoteImagesOffContext } from "../ChatMarkdown";
+import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
@@ -79,7 +79,6 @@ import {
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   changedFilesSummaryLabel,
-  holdsOutsideText,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
@@ -328,7 +327,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
-  const outsideText = useMemo(() => holdsOutsideText(timelineEntries), [timelineEntries]);
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -427,35 +425,33 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }
 
   return (
-    <RemoteImagesOffContext.Provider value={outsideText}>
-      <TimelineRowCtx.Provider value={sharedState}>
-        <LegendList<MessagesTimelineRow>
-          ref={listRef}
-          data={rows}
-          keyExtractor={keyExtractor}
-          renderItem={renderItem}
-          estimatedItemSize={90}
-          initialScrollAtEnd
-          maintainScrollAtEnd
-          maintainScrollAtEndThreshold={0.1}
-          maintainVisibleContentPosition
-          onScroll={handleScroll}
-          onItemSizeChanged={handleItemSizeChanged}
-          className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
-          ListHeaderComponent={TIMELINE_LIST_HEADER}
-          ListFooterComponent={
-            endOfFeed ? (
-              <div className="mx-auto w-full min-w-0 max-w-3xl">
-                {endOfFeed}
-                {TIMELINE_LIST_FOOTER}
-              </div>
-            ) : (
-              TIMELINE_LIST_FOOTER
-            )
-          }
-        />
-      </TimelineRowCtx.Provider>
-    </RemoteImagesOffContext.Provider>
+    <TimelineRowCtx.Provider value={sharedState}>
+      <LegendList<MessagesTimelineRow>
+        ref={listRef}
+        data={rows}
+        keyExtractor={keyExtractor}
+        renderItem={renderItem}
+        estimatedItemSize={90}
+        initialScrollAtEnd
+        maintainScrollAtEnd
+        maintainScrollAtEndThreshold={0.1}
+        maintainVisibleContentPosition
+        onScroll={handleScroll}
+        onItemSizeChanged={handleItemSizeChanged}
+        className="h-full overflow-x-hidden overscroll-y-contain px-3 sm:px-5"
+        ListHeaderComponent={TIMELINE_LIST_HEADER}
+        ListFooterComponent={
+          endOfFeed ? (
+            <div className="mx-auto w-full min-w-0 max-w-3xl">
+              {endOfFeed}
+              {TIMELINE_LIST_FOOTER}
+            </div>
+          ) : (
+            TIMELINE_LIST_FOOTER
+          )
+        }
+      />
+    </TimelineRowCtx.Provider>
   );
 });
 

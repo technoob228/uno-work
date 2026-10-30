@@ -50,7 +50,7 @@ const UNAVAILABLE =
 const TRIGGER_SCHEMA = {
   type: "object",
   description:
-    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (day of week 0 = Sunday; at most every 15 minutes: "*/30 * * * *" = every 30 minutes, "0 9 * * 1,3,5" = Mon, Wed, Fri at 9), the person\'s IANA time zone (ask if unknown) and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. When another service calls a secret URL: {"kind":"webhook"} (the person copies the URL from the Automations page; you never see it).',
+    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (day of week 0 = Sunday; at most every 15 minutes: "*/30 * * * *" = every 30 minutes, "0 9 * * 1,3,5" = Mon, Wed, Fri at 9), the person\'s IANA time zone (ask if unknown) and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. When another service calls a secret URL: {"kind":"webhook"} (only for a chat, not an assistant; the person copies the URL from the Automations page; you never see it).',
   properties: {
     kind: { type: "string", enum: ["schedule", "github.pull_request", "webhook"] },
     cron: { type: "string" },

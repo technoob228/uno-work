@@ -448,11 +448,9 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
   const problem =
     inChat && draft.when === "event" && draft.source === "call"
       ? "After a call is for an assistant."
-      : formEvent && !inChat
-        ? "Pick a chat for the form."
-        : formEvent && inChat && executor === null
-          ? "Pick a chat for the form."
-          : draftProblem(draft);
+      : outsideEvent && (!inChat || executor === null)
+        ? "Pick a chat for it."
+        : draftProblem(draft);
   const listed = useAutomationsOn(environmentId);
   // Webhooks and forms show only where the console has them on, or when
   // this one already is one.
@@ -720,7 +718,7 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                     on={draft.source === "webhook"}
                     icon={<WebhookIcon className="size-4" />}
                     title="A webhook"
-                    hint="Another service calls a secret URL. Copy it after you save."
+                    hint="Another service calls a secret URL. It goes to one chat."
                     onClick={() => set({ source: "webhook" })}
                     testId="automation-source-webhook"
                   />
@@ -732,18 +730,20 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                     onClick={() => set({ source: "form" })}
                     testId="automation-source-form"
                   />
-                  {formEvent ? (
+                  {outsideEvent ? (
                     <div className="flex flex-col gap-1.5 pl-1">
-                      <Input
-                        value={draft.slug}
-                        onChange={(event) => set({ slug: event.target.value })}
-                        disabled={editing !== null}
-                        placeholder="Site name, e.g. report"
-                        aria-label="Site"
-                        autoComplete="off"
-                        spellCheck={false}
-                        data-testid="automation-site"
-                      />
+                      {formEvent ? (
+                        <Input
+                          value={draft.slug}
+                          onChange={(event) => set({ slug: event.target.value })}
+                          disabled={editing !== null}
+                          placeholder="Site name, e.g. report"
+                          aria-label="Site"
+                          autoComplete="off"
+                          spellCheck={false}
+                          data-testid="automation-site"
+                        />
+                      ) : null}
                       {!editing && !props.chat ? (
                         <select
                           value={pickedChatKey}
@@ -875,15 +875,7 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                 ? "Runs in this chat, with what it already knows, in the chat's own mode"
                 : "Opens a new chat in the project each time, set up like this one"}
           </p>
-        ) : choice && outsideEvent && !formEvent ? (
-          <p
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            data-testid="automation-mode-line"
-          >
-            <HandIcon className="size-3.5 text-amber-500" />
-            {askLine(true)}
-          </p>
-        ) : choice && !formEvent ? (
+        ) : choice && !outsideEvent ? (
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"
             data-testid="automation-mode-line"

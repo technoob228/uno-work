@@ -23,6 +23,7 @@ import {
   CommandId,
   MessageId,
   ThreadId,
+  isAssistantProjectId,
   type ManagerAssistantTurnInput,
   type ManagerAssistantTurnResult,
   type ProjectId,
@@ -42,6 +43,21 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistantAccess.ts";
 import { assistantProjectOfCaller } from "./schedules.ts";
+
+const OUTSIDE_TEXT_REFUSED =
+  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or Hermes, which runs commands without asking). Pick a chat on Claude, Codex or OpenCode.";
+
+/**
+ * Ask mode must hold for a stranger's text. It doesn't in an assistant's
+ * project (its `uno-manager` tools run at once) nor on Hermes, whose modes
+ * cover only edits: a shell command asks only on its dangerous-pattern list.
+ */
+export function canHoldOutsideText(
+  projectId: string,
+  modelSelection: { readonly instanceId: string },
+): boolean {
+  return !isAssistantProjectId(projectId) && !/hermes/i.test(modelSelection.instanceId);
+}
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */
 export const SCHEDULED_THREAD_TITLE = "Scheduled tasks";
@@ -86,13 +102,6 @@ export interface AssistantEventTurnInput {
   readonly timeoutSec?: number;
   /** Who started it, for the command origin ("notetaker"). */
   readonly source: string;
-  /**
-   * The prompt carries a stranger's text (a webhook): the turn runs in its own
-   * thread `threadTitle`, never in Uno's main conversation, and that thread
-   * works in Ask mode. `onThread` runs before the turn starts.
-   */
-  readonly ask?: boolean;
-  readonly onThread?: (threadId: string) => Effect.Effect<void>;
 }
 
 /**
@@ -176,15 +185,10 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
     const pollMs = options?.pollMs ?? POLL_MS;
 
     /** The thread a scheduled turn of `projectId` runs in (created if needed). */
-    const targetThread = (
-      projectId: ProjectId,
-      tokenId: string,
-      title = SCHEDULED_THREAD_TITLE,
-      ownThread = false,
-    ) =>
+    const targetThread = (projectId: ProjectId, tokenId: string, title = SCHEDULED_THREAD_TITLE) =>
       Effect.gen(function* () {
         const snapshot = yield* projections.getShellSnapshot();
-        if (projectId === ASSISTANT_PROJECT_ID && !ownThread) {
+        if (projectId === ASSISTANT_PROJECT_ID) {
           const main = findMarkedAssistantChat(snapshot.threads);
           if (main !== null) return main.id;
         }
@@ -352,8 +356,6 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
         timeoutSec: input.timeoutSec ?? ASSISTANT_SCHEDULE_DEFAULT_MINUTES * 60,
         logName: input.source,
         failurePrefix: "The assistant could not finish",
-        ...(input.ask ? { ask: true } : {}),
-        ...(input.onThread ? { onThread: input.onThread } : {}),
       });
 
     const runIn = (input: {
@@ -365,22 +367,13 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
       readonly timeoutSec: number;
       readonly logName: string | null;
       readonly failurePrefix: string;
-      readonly ask?: boolean;
-      readonly onThread?: (threadId: string) => Effect.Effect<void>;
     }) =>
       Effect.gen(function* () {
         const { projectId } = input;
         const caller = { tokenId: input.tokenId };
         const deadlineMs = Date.now() + input.timeoutSec * 1_000;
-        const threadId = yield* targetThread(
-          projectId,
-          caller.tokenId,
-          input.threadTitle,
-          input.ask === true,
-        );
-        if (input.onThread) yield* input.onThread(threadId);
+        const threadId = yield* targetThread(projectId, caller.tokenId, input.threadTitle);
         yield* waitUntilIdle(threadId);
-        if (input.ask) yield* narrowToAsk(threadId, `${input.logName ?? "assistant"} outside run`);
         const shell = yield* projections
           .getThreadShellById(threadId)
           .pipe(Effect.orElseSucceed(() => Option.none()));
@@ -399,7 +392,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             },
             // The assistant's own mode ("Autonomous" = full access,
             // "Cautious" = auto-accept-edits) — never widened here.
-            runtimeMode: input.ask ? "approval-required" : yield* ownRuntimeMode(projectId),
+            runtimeMode: yield* ownRuntimeMode(projectId),
             interactionMode: Option.isSome(shell) ? shell.value.interactionMode : "default",
             createdAt: requestedAtIso,
           },
@@ -465,6 +458,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
               "The chat this automation runs in was deleted or archived — pick another chat for it or delete it.",
             );
           }
+          if (ask && !canHoldOutsideText(thread.projectId, thread.modelSelection)) {
+            return yield* turnError(409, OUTSIDE_TEXT_REFUSED);
+          }
           return thread.id;
         }
         const project = snapshot.projects.find((p) => p.id === target.projectId);
@@ -487,6 +483,9 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             409,
             "The project has no chat to copy a model from: open one chat in it first.",
           );
+        }
+        if (ask && !canHoldOutsideText(project.id, modelSelection)) {
+          return yield* turnError(409, OUTSIDE_TEXT_REFUSED);
         }
         const threadId = ThreadId.make(crypto.randomUUID());
         yield* engine.dispatch(

@@ -6,9 +6,10 @@
  * `unoWork/policy.ts`) — whatever mode the chat is put back in.
  *
  * A file in the state dir: a restart in the middle of a run must not open the
- * gate. It fails closed: a file that can't be read gates every chat until the
- * next write, and a mark that can't be written stops the run. The console caps
- * outside runs at 100 a day, so the last 50,000 chats are over a year of them.
+ * gate. It fails closed: a file that can't be read gates every chat and is
+ * left as it is until someone repairs it, and a mark that can't be written
+ * stops the run. The console caps outside runs at 100 a day, so the last 50,000
+ * chats are over a year of them.
  *
  * @module automations/outsideThreads
  */
@@ -53,7 +54,7 @@ export const makeOutsideThreads = (file: string, keep = OUTSIDE_THREADS_KEEP) =>
       }
     });
     const { ids } = read;
-    let unreadable = read.unreadable;
+    const { unreadable } = read;
     if (unreadable) {
       yield* Effect.logError("outside threads file unreadable: every chat asks first").pipe(
         Effect.annotateLogs({ file }),
@@ -66,18 +67,18 @@ export const makeOutsideThreads = (file: string, keep = OUTSIDE_THREADS_KEEP) =>
       mark: (threadId) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
-            if (set.has(threadId) && !unreadable) return;
-            ids.push(threadId);
-            set.add(threadId);
-            while (ids.length > keep) set.delete(ids.shift()!);
-            const snapshot = JSON.stringify({ threads: ids });
+            if (set.has(threadId) || unreadable) return;
+            const next = [...ids, threadId].slice(-keep);
+            const snapshot = JSON.stringify({ threads: next });
             yield* Effect.promise(async () => {
               await fs.mkdir(path.dirname(file), { recursive: true });
               const tmp = `${file}.${process.pid}.tmp`;
               await fs.writeFile(tmp, snapshot, { mode: 0o600 });
               await fs.rename(tmp, file);
             });
-            unreadable = false;
+            ids.splice(0, ids.length, ...next);
+            set.clear();
+            for (const id of next) set.add(id);
           }),
         ),
     };

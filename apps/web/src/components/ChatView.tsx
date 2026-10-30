@@ -40,6 +40,8 @@ import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RemoteImagesOffContext } from "./ChatMarkdown";
+import { holdsOutsideText } from "./chat/MessagesTimeline.logic";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -956,6 +958,18 @@ export default function ChatView(props: ChatViewProps) {
       : true,
   );
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  // The server changed the chat's mode (a form or a webhook put it in Ask): a
+  // mode left in the composer must not quietly put the old one back on send.
+  const seenServerMode = useRef<{ threadId: string; mode: RuntimeMode } | null>(null);
+  const serverRuntimeMode = isServerThread ? (serverThread?.runtimeMode ?? null) : null;
+  useEffect(() => {
+    if (serverRuntimeMode === null) return;
+    const seen = seenServerMode.current;
+    seenServerMode.current = { threadId, mode: serverRuntimeMode };
+    if (seen?.threadId === threadId && seen.mode !== serverRuntimeMode) {
+      setComposerDraftRuntimeMode(composerDraftTarget, null);
+    }
+  }, [composerDraftTarget, serverRuntimeMode, setComposerDraftRuntimeMode, threadId]);
   // Plan mode is legacy (Settings → Legacy, upstream 48aa875c0e). Off, the
   // effective mode is "default" even for chats stored in plan mode, so nobody
   // is stuck in it with the switch hidden; the next send stores "default".
@@ -1814,6 +1828,10 @@ export default function ChatView(props: ChatViewProps) {
     optimisticUserMessages,
     outboxChatMessages,
   ]);
+  const outsideText = useMemo(
+    () => holdsOutsideText(timelineMessages.map((message) => ({ kind: "message", message }))),
+    [timelineMessages],
+  );
   const timelineEntries = useMemo(
     () =>
       deriveTimelineEntries(
@@ -4761,534 +4779,540 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
-      {isDraggingOverWindow ? (
-        <div
-          className="pointer-events-none fixed inset-1.5 z-50 flex items-start justify-center rounded-2xl pt-4 ring-2 ring-primary/50"
-          data-testid="chat-drop-overlay"
-        >
-          <span className="rounded-full bg-primary px-3 py-1 text-primary-foreground text-xs">
-            Drop to add to this chat
-          </span>
-        </div>
-      ) : null}
-      {/* Top bar */}
-      {!isPreviewFocusMode && !isEmbedded ? (
-        <header
-          className={cn(
-            "border-b border-border",
-            isElectron
-              ? cn(
-                  "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
-                  sidebarHidden ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5" : "pl-3 sm:pl-5",
-                  reserveTitleBarControlInset &&
-                    "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
-                )
-              : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
-          )}
-        >
-          <ChatHeader
-            activeThreadEnvironmentId={activeThread.environmentId}
-            activeThreadId={activeThread.id}
-            {...(routeKind === "draft" && draftId ? { draftId } : {})}
-            activeThreadTitle={activeThread.title}
-            activeProjectName={activeProject?.name}
-            activeProjectCwd={activeProject?.cwd}
-            hideDraftFolderChip={isDraftHeroState}
-            isGitRepo={isGitRepo}
-            openInCwd={gitCwd}
-            activeProjectScripts={activeProject?.scripts}
-            preferredScriptId={
-              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
-            }
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            terminalAvailable={activeProject !== undefined}
-            terminalOpen={terminalState.terminalOpen}
-            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-            diffToggleShortcutLabel={diffPanelShortcutLabel}
-            panelToggleShortcutLabel={panelToggleShortcutLabel}
-            gitCwd={gitCwd}
-            diffOpen={diffOpen}
-            onRunProjectScript={runProjectScript}
-            onAddProjectScript={saveProjectScript}
-            onUpdateProjectScript={updateProjectScript}
-            onDeleteProjectScript={deleteProjectScript}
-            onToggleTerminal={toggleTerminalVisibility}
-            onToggleDiff={onToggleDiff}
-          />
-        </header>
-      ) : null}
-
-      {/* Error banner */}
-      {!isPreviewFocusMode ? (
-        <>
-          <ProviderStatusBanner
-            status={
-              // Assistant chats show Hermes' state in AssistantEngine; a lost
-              // sign-in gets the in-chat HarnessReauthCard instead.
-              harnessAuth?.isAssistant || harnessAuth?.loss ? null : activeProviderStatus
-            }
-            action={
-              unoProviderFallbackTarget && lockedProvider === null
-                ? {
-                    label: "Switch to built-in Uno AI",
-                    onClick: () =>
-                      onProviderModelSelect(
-                        unoProviderFallbackTarget.instanceId,
-                        unoProviderFallbackTarget.model,
-                      ),
-                  }
-                : null
-            }
-            hint={
-              unoProviderFallbackTarget && lockedProvider !== null
-                ? "Built-in Uno AI is available — start a new chat to use it."
-                : null
-            }
-          />
-          <CloudSleepsBanner
-            environmentId={activeThread.environmentId}
-            threadId={activeThread.id}
-          />
-          <UnoBillingTopUpBanner
-            active={activeThread.session?.lastErrorClass === "billing_error"}
-            sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
-            sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
-            environmentId={activeThread.environmentId}
-          />
-          {/* A failed turn: a quiet line at the end of the feed (S4, upstream
-              bd3287b640); a plate up here only when the feed is hidden. */}
-          {showsTimeline(embeddedVisibility) ? null : threadErrorNotice("banner")}
-        </>
-      ) : null}
-      {/* Main content area with optional plan sidebar */}
-      <div className="flex min-h-0 min-w-0 flex-1">
-        {/* Chat column */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Messages Wrapper */}
-          <div ref={setMessagesViewport} className="relative flex min-h-0 flex-1 flex-col">
-            {activeThread ? (
-              <ReplySelectionToolbar
-                viewport={messagesViewport}
-                onQuote={(quote) =>
-                  useComposerQuotesStore.getState().add(activeThread.id, { ...quote, page: null })
-                }
-                onQuoteAndSend={(quote) => {
-                  useComposerQuotesStore.getState().add(activeThread.id, { ...quote, page: null });
-                  void onSendRef.current();
-                }}
-              />
-            ) : null}
-            {/* Messages — LegendList handles virtualization and scrolling internally */}
-            {showsTimeline(embeddedVisibility) && !isDraftHeroState ? (
-              <MessagesTimeline
-                key={activeThread.id}
-                isWorking={isWorking}
-                messagesLoaded={!isServerThread || serverThreadDetailLoaded}
-                activeTurnInProgress={isWorking || !latestTurnSettled}
-                activeTurnId={activeLatestTurn?.turnId ?? null}
-                activeTurnStartedAt={activeWorkStartedAt}
-                listRef={legendListRef}
-                timelineEntries={visibleTimelineEntries}
-                completionDividerBeforeEntryId={completionDividerBeforeEntryId}
-                completionSummary={completionSummary}
-                turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-                activeThreadEnvironmentId={activeThread.environmentId}
-                routeThreadKey={routeThreadKey}
-                onOpenTurnDiff={onOpenTurnDiff}
-                revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
-                onRevertUserMessage={onRevertUserMessage}
-                isRevertingCheckpoint={isRevertingCheckpoint}
-                onImageExpand={onExpandTimelineImage}
-                markdownCwd={gitCwd ?? undefined}
-                resolvedTheme={resolvedTheme}
-                timestampFormat={timestampFormat}
-                workspaceRoot={activeWorkspaceRoot}
-                onIsAtEndChange={onIsAtEndChange}
-                latestTurn={activeLatestTurn}
-                pendingApprovals={pendingApprovals}
-                respondingRequestIds={respondingRequestIds}
-                onRespondToApproval={onRespondToApproval}
-                endOfFeed={
-                  <>
-                    <QueuedMessagesList
-                      messages={queuedMessages}
-                      onSendNow={onSendQueuedNow}
-                      onEdit={onEditQueued}
-                      onDelete={onDeleteQueued}
-                    />
-                    {threadErrorNotice("feed")}
-                    {planLimitStopText !== null && isServerThread ? (
-                      <ChatPlanLimitNotice
-                        environmentId={activeThread.environmentId}
-                        threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
-                        driver={selectedProvider}
-                        instanceId={
-                          activeThread.session?.providerInstanceId ??
-                          activeThread.modelSelection.instanceId
-                        }
-                        currentModel={activeThread.modelSelection.model}
-                        stopText={planLimitStopText}
-                        stoppedAt={activeLatestTurn?.completedAt ?? null}
-                        lastRequest={lastUserMessageText ?? ""}
-                        smartTarget={smartTargetHere}
-                        canContinueWithHistory={isElectron && Boolean(activeProject)}
-                        onContinueWithAccount={onContinueWithAccount}
-                      />
-                    ) : null}
-                    {planResume !== null && isServerThread ? (
-                      <PlanResumeLine
-                        environmentId={activeThread.environmentId}
-                        threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
-                        resumeAt={planResume.resumeAt}
-                      />
-                    ) : null}
-                  </>
-                }
-              />
-            ) : null}
-
-            {/* The feed dissolves into the composer instead of being cut off. */}
-            {showsTimeline(embeddedVisibility) ? (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-8 bg-linear-to-t from-background to-transparent" />
-            ) : null}
-
-            {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
-            {showScrollToBottom && showsTimeline(embeddedVisibility) && (
-              <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 justify-center">
-                <button
-                  type="button"
-                  onClick={() => scrollToEnd(true)}
-                  className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 py-1 text-foreground/80 text-xs shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
-                >
-                  <ChevronDownIcon className="size-3.5" />
-                  Scroll to end
-                </button>
-              </div>
-            )}
+    <RemoteImagesOffContext.Provider value={outsideText}>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+        {isDraggingOverWindow ? (
+          <div
+            className="pointer-events-none fixed inset-1.5 z-50 flex items-start justify-center rounded-2xl pt-4 ring-2 ring-primary/50"
+            data-testid="chat-drop-overlay"
+          >
+            <span className="rounded-full bg-primary px-3 py-1 text-primary-foreground text-xs">
+              Drop to add to this chat
+            </span>
           </div>
-
-          {isFocusChatMinimized ? (
-            <ChatMiniWindow
-              // Another chat opened while folded starts from what it has on screen.
-              key={activeThread.id}
-              variant={chatDockVariant}
-              title={activeThread.title}
-              status={focusChatStatus}
-              messages={focusPreviewMessages}
-              pendingApproval={activePendingApproval}
-              approvalResponding={
-                activePendingApproval !== null &&
-                respondingRequestIds.includes(activePendingApproval.requestId)
+        ) : null}
+        {/* Top bar */}
+        {!isPreviewFocusMode && !isEmbedded ? (
+          <header
+            className={cn(
+              "border-b border-border",
+              isElectron
+                ? cn(
+                    "drag-region flex h-[52px] items-center pr-3 sm:pr-5 wco:h-[env(titlebar-area-height)]",
+                    sidebarHidden ? "pl-[78px] fullscreen:pl-3 sm:fullscreen:pl-5" : "pl-3 sm:pl-5",
+                    reserveTitleBarControlInset &&
+                      "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
+                  )
+                : "pb-2 pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-2 sm:pb-3 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-3",
+            )}
+          >
+            <ChatHeader
+              activeThreadEnvironmentId={activeThread.environmentId}
+              activeThreadId={activeThread.id}
+              {...(routeKind === "draft" && draftId ? { draftId } : {})}
+              activeThreadTitle={activeThread.title}
+              activeProjectName={activeProject?.name}
+              activeProjectCwd={activeProject?.cwd}
+              hideDraftFolderChip={isDraftHeroState}
+              isGitRepo={isGitRepo}
+              openInCwd={gitCwd}
+              activeProjectScripts={activeProject?.scripts}
+              preferredScriptId={
+                activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
               }
-              onRespondToApproval={onRespondToApproval}
-              onRestore={restoreFocusChat}
-              onReply={replyFromFocusChat}
-              onOpenChat={openChatFromFocus}
+              keybindings={keybindings}
+              availableEditors={availableEditors}
+              terminalAvailable={activeProject !== undefined}
+              terminalOpen={terminalState.terminalOpen}
+              terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+              diffToggleShortcutLabel={diffPanelShortcutLabel}
+              panelToggleShortcutLabel={panelToggleShortcutLabel}
+              gitCwd={gitCwd}
+              diffOpen={diffOpen}
+              onRunProjectScript={runProjectScript}
+              onAddProjectScript={saveProjectScript}
+              onUpdateProjectScript={updateProjectScript}
+              onDeleteProjectScript={deleteProjectScript}
+              onToggleTerminal={toggleTerminalVisibility}
+              onToggleDiff={onToggleDiff}
             />
-          ) : null}
-          {isPreviewFocusMode && !fullscreenChatDock ? (
-            <LegacyFocusChatPreview
-              mode={focusChatPanelMode === "expanded" ? "expanded" : "peek"}
-              onModeChange={setFocusChatPanelMode}
-              messages={focusPreviewMessages}
-              sidebarVisible={sidebarVisible}
-            />
-          ) : null}
+          </header>
+        ) : null}
 
-          {/* Input bar */}
-          {showComposer ? (
-            <div
-              ref={setFocusComposerElement}
-              className={cn(
-                "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
-                isEmbedded && "px-2 pb-2 sm:px-2",
-                isGitRepo
-                  ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
-                  : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
-                isPreviewFocusMode &&
-                  "pointer-events-none fixed bottom-2 right-0 z-[70] border-0 bg-transparent px-4 pb-0 pt-0 sm:bottom-3 sm:px-6",
-                // Folded into the mini window: the composer keeps its draft, out of sight.
-                isFocusChatMinimized && "hidden",
+        {/* Error banner */}
+        {!isPreviewFocusMode ? (
+          <>
+            <ProviderStatusBanner
+              status={
+                // Assistant chats show Hermes' state in AssistantEngine; a lost
+                // sign-in gets the in-chat HarnessReauthCard instead.
+                harnessAuth?.isAssistant || harnessAuth?.loss ? null : activeProviderStatus
+              }
+              action={
+                unoProviderFallbackTarget && lockedProvider === null
+                  ? {
+                      label: "Switch to built-in Uno AI",
+                      onClick: () =>
+                        onProviderModelSelect(
+                          unoProviderFallbackTarget.instanceId,
+                          unoProviderFallbackTarget.model,
+                        ),
+                    }
+                  : null
+              }
+              hint={
+                unoProviderFallbackTarget && lockedProvider !== null
+                  ? "Built-in Uno AI is available — start a new chat to use it."
+                  : null
+              }
+            />
+            <CloudSleepsBanner
+              environmentId={activeThread.environmentId}
+              threadId={activeThread.id}
+            />
+            <UnoBillingTopUpBanner
+              active={activeThread.session?.lastErrorClass === "billing_error"}
+              sessionUpdatedAt={activeThread.session?.updatedAt ?? null}
+              sessionError={activeThread.session?.lastError ?? activeThread.error ?? null}
+              environmentId={activeThread.environmentId}
+            />
+            {/* A failed turn: a quiet line at the end of the feed (S4, upstream
+              bd3287b640); a plate up here only when the feed is hidden. */}
+            {showsTimeline(embeddedVisibility) ? null : threadErrorNotice("banner")}
+          </>
+        ) : null}
+        {/* Main content area with optional plan sidebar */}
+        <div className="flex min-h-0 min-w-0 flex-1">
+          {/* Chat column */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* Messages Wrapper */}
+            <div ref={setMessagesViewport} className="relative flex min-h-0 flex-1 flex-col">
+              {activeThread ? (
+                <ReplySelectionToolbar
+                  viewport={messagesViewport}
+                  onQuote={(quote) =>
+                    useComposerQuotesStore.getState().add(activeThread.id, { ...quote, page: null })
+                  }
+                  onQuoteAndSend={(quote) => {
+                    useComposerQuotesStore
+                      .getState()
+                      .add(activeThread.id, { ...quote, page: null });
+                    void onSendRef.current();
+                  }}
+                />
+              ) : null}
+              {/* Messages — LegendList handles virtualization and scrolling internally */}
+              {showsTimeline(embeddedVisibility) && !isDraftHeroState ? (
+                <MessagesTimeline
+                  key={activeThread.id}
+                  isWorking={isWorking}
+                  messagesLoaded={!isServerThread || serverThreadDetailLoaded}
+                  activeTurnInProgress={isWorking || !latestTurnSettled}
+                  activeTurnId={activeLatestTurn?.turnId ?? null}
+                  activeTurnStartedAt={activeWorkStartedAt}
+                  listRef={legendListRef}
+                  timelineEntries={visibleTimelineEntries}
+                  completionDividerBeforeEntryId={completionDividerBeforeEntryId}
+                  completionSummary={completionSummary}
+                  turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
+                  activeThreadEnvironmentId={activeThread.environmentId}
+                  routeThreadKey={routeThreadKey}
+                  onOpenTurnDiff={onOpenTurnDiff}
+                  revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                  onRevertUserMessage={onRevertUserMessage}
+                  isRevertingCheckpoint={isRevertingCheckpoint}
+                  onImageExpand={onExpandTimelineImage}
+                  markdownCwd={gitCwd ?? undefined}
+                  resolvedTheme={resolvedTheme}
+                  timestampFormat={timestampFormat}
+                  workspaceRoot={activeWorkspaceRoot}
+                  onIsAtEndChange={onIsAtEndChange}
+                  latestTurn={activeLatestTurn}
+                  pendingApprovals={pendingApprovals}
+                  respondingRequestIds={respondingRequestIds}
+                  onRespondToApproval={onRespondToApproval}
+                  endOfFeed={
+                    <>
+                      <QueuedMessagesList
+                        messages={queuedMessages}
+                        onSendNow={onSendQueuedNow}
+                        onEdit={onEditQueued}
+                        onDelete={onDeleteQueued}
+                      />
+                      {threadErrorNotice("feed")}
+                      {planLimitStopText !== null && isServerThread ? (
+                        <ChatPlanLimitNotice
+                          environmentId={activeThread.environmentId}
+                          threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
+                          driver={selectedProvider}
+                          instanceId={
+                            activeThread.session?.providerInstanceId ??
+                            activeThread.modelSelection.instanceId
+                          }
+                          currentModel={activeThread.modelSelection.model}
+                          stopText={planLimitStopText}
+                          stoppedAt={activeLatestTurn?.completedAt ?? null}
+                          lastRequest={lastUserMessageText ?? ""}
+                          smartTarget={smartTargetHere}
+                          canContinueWithHistory={isElectron && Boolean(activeProject)}
+                          onContinueWithAccount={onContinueWithAccount}
+                        />
+                      ) : null}
+                      {planResume !== null && isServerThread ? (
+                        <PlanResumeLine
+                          environmentId={activeThread.environmentId}
+                          threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
+                          resumeAt={planResume.resumeAt}
+                        />
+                      ) : null}
+                    </>
+                  }
+                />
+              ) : null}
+
+              {/* The feed dissolves into the composer instead of being cut off. */}
+              {showsTimeline(embeddedVisibility) ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-8 bg-linear-to-t from-background to-transparent" />
+              ) : null}
+
+              {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
+              {showScrollToBottom && showsTimeline(embeddedVisibility) && (
+                <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => scrollToEnd(true)}
+                    className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 py-1 text-foreground/80 text-xs shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
+                  >
+                    <ChevronDownIcon className="size-3.5" />
+                    Scroll to end
+                  </button>
+                </div>
               )}
-              style={
-                isPreviewFocusMode
-                  ? { left: sidebarVisible ? "var(--sidebar-width)" : "0px" }
-                  : undefined
-              }
-            >
+            </div>
+
+            {isFocusChatMinimized ? (
+              <ChatMiniWindow
+                // Another chat opened while folded starts from what it has on screen.
+                key={activeThread.id}
+                variant={chatDockVariant}
+                title={activeThread.title}
+                status={focusChatStatus}
+                messages={focusPreviewMessages}
+                pendingApproval={activePendingApproval}
+                approvalResponding={
+                  activePendingApproval !== null &&
+                  respondingRequestIds.includes(activePendingApproval.requestId)
+                }
+                onRespondToApproval={onRespondToApproval}
+                onRestore={restoreFocusChat}
+                onReply={replyFromFocusChat}
+                onOpenChat={openChatFromFocus}
+              />
+            ) : null}
+            {isPreviewFocusMode && !fullscreenChatDock ? (
+              <LegacyFocusChatPreview
+                mode={focusChatPanelMode === "expanded" ? "expanded" : "peek"}
+                onModeChange={setFocusChatPanelMode}
+                messages={focusPreviewMessages}
+                sidebarVisible={sidebarVisible}
+              />
+            ) : null}
+
+            {/* Input bar */}
+            {showComposer ? (
               <div
-                ref={draftHeroTransitionGroupRef}
+                ref={setFocusComposerElement}
                 className={cn(
-                  "relative isolate",
-                  isPreviewFocusMode && "pointer-events-auto",
-                  // ~800px in the middle, like the full composer (max-w-208).
-                  isChatDockMode && "mx-auto w-full max-w-208",
-                  // One dense block: the latest step is the top edge of the composer.
-                  isChatDockMode &&
-                    focusChatComposerIsStrip &&
-                    "rounded-2xl border border-border/70 bg-card/95 shadow-xl shadow-black/10 backdrop-blur-xl",
+                  "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
+                  isEmbedded && "px-2 pb-2 sm:px-2",
+                  isGitRepo
+                    ? "pb-[calc(env(safe-area-inset-bottom)+0.25rem)]"
+                    : "pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:pb-[calc(env(safe-area-inset-bottom)+1rem)]",
+                  isPreviewFocusMode &&
+                    "pointer-events-none fixed bottom-2 right-0 z-[70] border-0 bg-transparent px-4 pb-0 pt-0 sm:bottom-3 sm:px-6",
+                  // Folded into the mini window: the composer keeps its draft, out of sight.
+                  isFocusChatMinimized && "hidden",
                 )}
-                data-chat-dock={isChatDockMode ? "true" : undefined}
-                data-draft-hero={isDraftHeroState ? "true" : undefined}
+                style={
+                  isPreviewFocusMode
+                    ? { left: sidebarVisible ? "var(--sidebar-width)" : "0px" }
+                    : undefined
+                }
               >
-                {isDraftHeroState && draftId && activeProject ? (
-                  // Out of flow, above the box, so the composer itself is what's centred.
-                  <div className="absolute inset-x-0 bottom-full pb-6">
-                    <DraftHeroHeadline
+                <div
+                  ref={draftHeroTransitionGroupRef}
+                  className={cn(
+                    "relative isolate",
+                    isPreviewFocusMode && "pointer-events-auto",
+                    // ~800px in the middle, like the full composer (max-w-208).
+                    isChatDockMode && "mx-auto w-full max-w-208",
+                    // One dense block: the latest step is the top edge of the composer.
+                    isChatDockMode &&
+                      focusChatComposerIsStrip &&
+                      "rounded-2xl border border-border/70 bg-card/95 shadow-xl shadow-black/10 backdrop-blur-xl",
+                  )}
+                  data-chat-dock={isChatDockMode ? "true" : undefined}
+                  data-draft-hero={isDraftHeroState ? "true" : undefined}
+                >
+                  {isDraftHeroState && draftId && activeProject ? (
+                    // Out of flow, above the box, so the composer itself is what's centred.
+                    <div className="absolute inset-x-0 bottom-full pb-6">
+                      <DraftHeroHeadline
+                        environmentId={activeThread.environmentId}
+                        draftId={draftId}
+                        projectName={activeProject.name}
+                        projectCwd={activeProject.cwd}
+                      />
+                    </div>
+                  ) : null}
+                  {isChatDockMode ? (
+                    <FullscreenChatDockHeader
+                      status={focusChatStatus}
+                      latestStep={latestFocusPreviewMessage?.text ?? ""}
+                      expanded={focusChatPanelMode === "expanded"}
+                      messages={focusPreviewMessages}
+                      onToggleExpanded={() =>
+                        setFocusChatPanelMode((mode) => (mode === "expanded" ? "peek" : "expanded"))
+                      }
+                      onMinimize={() => setFocusChatPanelMode("minimized")}
+                      detached={!focusChatComposerIsStrip}
+                      markdownCwd={gitCwd ?? undefined}
+                    />
+                  ) : null}
+                  {isServerThread &&
+                  (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
+                    <ThreadControlBar
                       environmentId={activeThread.environmentId}
+                      threadId={activeThread.id}
+                      spawnedByThreadId={activeThread.spawnedByThreadId}
+                      controller={activeThread.controller}
+                      agentsClosedAt={activeThread.agentsClosedAt}
+                    />
+                  ) : null}
+                  {activeThread && isAssistantConversation(activeThread) ? (
+                    <AssistantEngineBanner environmentId={activeThread.environmentId} />
+                  ) : null}
+                  {harnessAuth?.loss ? (
+                    <HarnessReauthCard
+                      key={`${activeThread.id}:${harnessAuth.loss.kind}:${harnessAuth.loss.driver}`}
+                      loss={harnessAuth.loss}
+                      environmentId={activeThread.environmentId}
+                      providerStatus={harnessAuth.providerStatus}
+                      {...(isServerThread && lastUserMessageText
+                        ? { onRetry: onRetryAfterReauth }
+                        : {})}
+                      fallbackAction={
+                        !harnessAuth.isAssistant &&
+                        unoProviderFallbackTarget &&
+                        lockedProvider === null
+                          ? {
+                              label: "Switch to built-in Uno AI",
+                              onClick: () =>
+                                onProviderModelSelect(
+                                  unoProviderFallbackTarget.instanceId,
+                                  unoProviderFallbackTarget.model,
+                                ),
+                            }
+                          : null
+                      }
+                      onDismiss={() => setThreadError(activeThread.id, null)}
+                    />
+                  ) : null}
+                  <AiBusyNotice
+                    environmentId={activeThread?.environmentId ?? null}
+                    active={
+                      isWorking && (selectedProvider === "uno" || selectedProvider === "hermes")
+                    }
+                  />
+                  <ComposerBannerStack
+                    className="relative z-0"
+                    items={
+                      notificationSoftAskBanner && selfUpdate.view?.kind !== "updating"
+                        ? [...composerBannerItems, notificationSoftAskBanner]
+                        : composerBannerItems
+                    }
+                  />
+                  {selfUpdate.dialog}
+                  <div className="relative z-10">
+                    <ChatComposer
+                      ref={composerRef}
+                      composerDraftTarget={composerDraftTarget}
+                      environmentId={environmentId}
+                      routeKind={routeKind}
+                      routeThreadRef={routeThreadRef}
                       draftId={draftId}
-                      projectName={activeProject.name}
-                      projectCwd={activeProject.cwd}
+                      onDropFolder={onDropFolder}
+                      activeThreadId={activeThreadId}
+                      activeThreadEnvironmentId={activeThread?.environmentId}
+                      activeThread={activeThread}
+                      isServerThread={isServerThread}
+                      isLocalDraftThread={isLocalDraftThread}
+                      forceCompact={isPreviewFocusMode}
+                      inDock={isChatDockMode}
+                      hideRuntimeModeControl={isEmbedded}
+                      phase={phase}
+                      isConnecting={isConnecting}
+                      isSendBusy={isSendBusy}
+                      isPreparingWorktree={isPreparingWorktree}
+                      environmentUnavailable={
+                        // Existing chats stay writable offline: sends go to the outbox.
+                        isServerThread ? null : activeEnvironmentUnavailableState
+                      }
+                      activePendingApproval={activePendingApproval}
+                      pendingApprovals={pendingApprovals}
+                      pendingUserInputs={pendingUserInputs}
+                      activePendingProgress={activePendingProgress}
+                      activePendingResolvedAnswers={activePendingResolvedAnswers}
+                      activePendingIsResponding={activePendingIsResponding}
+                      activePendingDraftAnswers={activePendingDraftAnswers}
+                      activePendingQuestionIndex={activePendingQuestionIndex}
+                      respondingRequestIds={respondingRequestIds}
+                      showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                      activeProposedPlan={activeProposedPlan}
+                      activePlan={activePlan as { turnId?: TurnId } | null}
+                      sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+                      planSidebarLabel={planSidebarLabel}
+                      planSidebarOpen={planSidebarOpen}
+                      runtimeMode={runtimeMode}
+                      interactionMode={interactionMode}
+                      lockedProvider={lockedProvider}
+                      providerStatuses={providerStatuses as ServerProvider[]}
+                      activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
+                      activeThreadModelSelection={activeThread?.modelSelection}
+                      activeThreadActivities={activeThread?.activities}
+                      resolvedTheme={resolvedTheme}
+                      settings={settings}
+                      keybindings={keybindings}
+                      terminalOpen={Boolean(terminalState.terminalOpen)}
+                      gitCwd={gitCwd}
+                      promptRef={promptRef}
+                      composerImagesRef={composerImagesRef}
+                      composerVideosRef={composerVideosRef}
+                      composerTerminalContextsRef={composerTerminalContextsRef}
+                      shouldAutoScrollRef={isAtEndRef}
+                      scheduleStickToBottom={scrollToEnd}
+                      isEmbedded={isEmbedded}
+                      onSend={onComposerSend}
+                      onInterrupt={onInterrupt}
+                      onImplementPlanInNewThread={onImplementPlanInNewThread}
+                      onRespondToApproval={onRespondToApproval}
+                      onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
+                      onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                      onAnswerActivePendingUserInput={onAnswerActivePendingUserInput}
+                      onPreviousActivePendingUserInputQuestion={
+                        onPreviousActivePendingUserInputQuestion
+                      }
+                      onChangeActivePendingUserInputCustomAnswer={
+                        onChangeActivePendingUserInputCustomAnswer
+                      }
+                      onProviderModelSelect={onProviderModelSelect}
+                      toggleInteractionMode={toggleInteractionMode}
+                      handleRuntimeModeChange={handleRuntimeModeChange}
+                      handleInteractionModeChange={handleInteractionModeChange}
+                      togglePlanSidebar={togglePlanSidebar}
+                      focusComposer={focusComposer}
+                      scheduleComposerFocus={scheduleComposerFocus}
+                      setThreadError={setThreadError}
+                      onExpandImage={onExpandTimelineImage}
                     />
                   </div>
-                ) : null}
-                {isChatDockMode ? (
-                  <FullscreenChatDockHeader
-                    status={focusChatStatus}
-                    latestStep={latestFocusPreviewMessage?.text ?? ""}
-                    expanded={focusChatPanelMode === "expanded"}
-                    messages={focusPreviewMessages}
-                    onToggleExpanded={() =>
-                      setFocusChatPanelMode((mode) => (mode === "expanded" ? "peek" : "expanded"))
-                    }
-                    onMinimize={() => setFocusChatPanelMode("minimized")}
-                    detached={!focusChatComposerIsStrip}
-                    markdownCwd={gitCwd ?? undefined}
-                  />
-                ) : null}
-                {isServerThread &&
-                (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
-                  <ThreadControlBar
+                </div>
+                {devMode && isGitRepo && !isEmbedded && (
+                  <BranchToolbar
                     environmentId={activeThread.environmentId}
                     threadId={activeThread.id}
-                    spawnedByThreadId={activeThread.spawnedByThreadId}
-                    controller={activeThread.controller}
-                    agentsClosedAt={activeThread.agentsClosedAt}
-                  />
-                ) : null}
-                {activeThread && isAssistantConversation(activeThread) ? (
-                  <AssistantEngineBanner environmentId={activeThread.environmentId} />
-                ) : null}
-                {harnessAuth?.loss ? (
-                  <HarnessReauthCard
-                    key={`${activeThread.id}:${harnessAuth.loss.kind}:${harnessAuth.loss.driver}`}
-                    loss={harnessAuth.loss}
-                    environmentId={activeThread.environmentId}
-                    providerStatus={harnessAuth.providerStatus}
-                    {...(isServerThread && lastUserMessageText
-                      ? { onRetry: onRetryAfterReauth }
+                    {...(routeKind === "draft" && draftId ? { draftId } : {})}
+                    onEnvModeChange={onEnvModeChange}
+                    {...(canOverrideServerThreadEnvMode
+                      ? { effectiveEnvModeOverride: envMode }
                       : {})}
-                    fallbackAction={
-                      !harnessAuth.isAssistant &&
-                      unoProviderFallbackTarget &&
-                      lockedProvider === null
-                        ? {
-                            label: "Switch to built-in Uno AI",
-                            onClick: () =>
-                              onProviderModelSelect(
-                                unoProviderFallbackTarget.instanceId,
-                                unoProviderFallbackTarget.model,
-                              ),
-                          }
-                        : null
-                    }
-                    onDismiss={() => setThreadError(activeThread.id, null)}
+                    {...(canOverrideServerThreadEnvMode
+                      ? {
+                          activeThreadBranchOverride: activeThreadBranch,
+                          onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                        }
+                      : {})}
+                    envLocked={envLocked}
+                    onComposerFocusRequest={scheduleComposerFocus}
+                    {...(canCheckoutPullRequestIntoThread
+                      ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                      : {})}
+                    {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                    availableEnvironments={logicalProjectEnvironments}
                   />
-                ) : null}
-                <AiBusyNotice
-                  environmentId={activeThread?.environmentId ?? null}
-                  active={
-                    isWorking && (selectedProvider === "uno" || selectedProvider === "hermes")
-                  }
-                />
-                <ComposerBannerStack
-                  className="relative z-0"
-                  items={
-                    notificationSoftAskBanner && selfUpdate.view?.kind !== "updating"
-                      ? [...composerBannerItems, notificationSoftAskBanner]
-                      : composerBannerItems
-                  }
-                />
-                {selfUpdate.dialog}
-                <div className="relative z-10">
-                  <ChatComposer
-                    ref={composerRef}
-                    composerDraftTarget={composerDraftTarget}
-                    environmentId={environmentId}
-                    routeKind={routeKind}
-                    routeThreadRef={routeThreadRef}
+                )}
+              </div>
+            ) : null}
+
+            {isDraftHeroState && draftId ? (
+              // The lower half of the page: the composer sits between this and the
+              // empty timeline above, in the middle; a few hints right under it.
+              <div className="min-h-0 flex-1 overflow-hidden px-3 pt-1 sm:px-5">
+                <div className="mx-auto flex w-full max-w-208 flex-col gap-3">
+                  <DraftPlanRoomNotice
+                    environmentId={activeThread.environmentId}
                     draftId={draftId}
-                    onDropFolder={onDropFolder}
-                    activeThreadId={activeThreadId}
-                    activeThreadEnvironmentId={activeThread?.environmentId}
-                    activeThread={activeThread}
-                    isServerThread={isServerThread}
-                    isLocalDraftThread={isLocalDraftThread}
-                    forceCompact={isPreviewFocusMode}
-                    inDock={isChatDockMode}
-                    hideRuntimeModeControl={isEmbedded}
-                    phase={phase}
-                    isConnecting={isConnecting}
-                    isSendBusy={isSendBusy}
-                    isPreparingWorktree={isPreparingWorktree}
-                    environmentUnavailable={
-                      // Existing chats stay writable offline: sends go to the outbox.
-                      isServerThread ? null : activeEnvironmentUnavailableState
+                    driver={selectedProvider}
+                    instanceId={composerActiveProvider ?? activeProviderInstanceId}
+                    smartTarget={smartTargetHere}
+                    onUseModel={(selection) =>
+                      onProviderModelSelect(selection.instanceId, selection.model)
                     }
-                    activePendingApproval={activePendingApproval}
-                    pendingApprovals={pendingApprovals}
-                    pendingUserInputs={pendingUserInputs}
-                    activePendingProgress={activePendingProgress}
-                    activePendingResolvedAnswers={activePendingResolvedAnswers}
-                    activePendingIsResponding={activePendingIsResponding}
-                    activePendingDraftAnswers={activePendingDraftAnswers}
-                    activePendingQuestionIndex={activePendingQuestionIndex}
-                    respondingRequestIds={respondingRequestIds}
-                    showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-                    activeProposedPlan={activeProposedPlan}
-                    activePlan={activePlan as { turnId?: TurnId } | null}
-                    sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-                    planSidebarLabel={planSidebarLabel}
-                    planSidebarOpen={planSidebarOpen}
-                    runtimeMode={runtimeMode}
-                    interactionMode={interactionMode}
-                    lockedProvider={lockedProvider}
-                    providerStatuses={providerStatuses as ServerProvider[]}
-                    activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
-                    activeThreadModelSelection={activeThread?.modelSelection}
-                    activeThreadActivities={activeThread?.activities}
-                    resolvedTheme={resolvedTheme}
-                    settings={settings}
-                    keybindings={keybindings}
-                    terminalOpen={Boolean(terminalState.terminalOpen)}
-                    gitCwd={gitCwd}
-                    promptRef={promptRef}
-                    composerImagesRef={composerImagesRef}
-                    composerVideosRef={composerVideosRef}
-                    composerTerminalContextsRef={composerTerminalContextsRef}
-                    shouldAutoScrollRef={isAtEndRef}
-                    scheduleStickToBottom={scrollToEnd}
-                    isEmbedded={isEmbedded}
-                    onSend={onComposerSend}
-                    onInterrupt={onInterrupt}
-                    onImplementPlanInNewThread={onImplementPlanInNewThread}
-                    onRespondToApproval={onRespondToApproval}
-                    onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
-                    onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
-                    onAnswerActivePendingUserInput={onAnswerActivePendingUserInput}
-                    onPreviousActivePendingUserInputQuestion={
-                      onPreviousActivePendingUserInputQuestion
-                    }
-                    onChangeActivePendingUserInputCustomAnswer={
-                      onChangeActivePendingUserInputCustomAnswer
-                    }
-                    onProviderModelSelect={onProviderModelSelect}
-                    toggleInteractionMode={toggleInteractionMode}
-                    handleRuntimeModeChange={handleRuntimeModeChange}
-                    handleInteractionModeChange={handleInteractionModeChange}
-                    togglePlanSidebar={togglePlanSidebar}
-                    focusComposer={focusComposer}
-                    scheduleComposerFocus={scheduleComposerFocus}
-                    setThreadError={setThreadError}
-                    onExpandImage={onExpandTimelineImage}
+                  />
+                  <DraftHeroStarters
+                    environmentId={activeThread.environmentId}
+                    draftId={draftId}
+                    onPicked={scheduleComposerFocus}
                   />
                 </div>
               </div>
-              {devMode && isGitRepo && !isEmbedded && (
-                <BranchToolbar
-                  environmentId={activeThread.environmentId}
-                  threadId={activeThread.id}
-                  {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                  onEnvModeChange={onEnvModeChange}
-                  {...(canOverrideServerThreadEnvMode ? { effectiveEnvModeOverride: envMode } : {})}
-                  {...(canOverrideServerThreadEnvMode
-                    ? {
-                        activeThreadBranchOverride: activeThreadBranch,
-                        onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                      }
-                    : {})}
-                  envLocked={envLocked}
-                  onComposerFocusRequest={scheduleComposerFocus}
-                  {...(canCheckoutPullRequestIntoThread
-                    ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                    : {})}
-                  {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                  availableEnvironments={logicalProjectEnvironments}
-                />
-              )}
-            </div>
-          ) : null}
+            ) : null}
 
-          {isDraftHeroState && draftId ? (
-            // The lower half of the page: the composer sits between this and the
-            // empty timeline above, in the middle; a few hints right under it.
-            <div className="min-h-0 flex-1 overflow-hidden px-3 pt-1 sm:px-5">
-              <div className="mx-auto flex w-full max-w-208 flex-col gap-3">
-                <DraftPlanRoomNotice
-                  environmentId={activeThread.environmentId}
-                  draftId={draftId}
-                  driver={selectedProvider}
-                  instanceId={composerActiveProvider ?? activeProviderInstanceId}
-                  smartTarget={smartTargetHere}
-                  onUseModel={(selection) =>
-                    onProviderModelSelect(selection.instanceId, selection.model)
+            {pullRequestDialogState ? (
+              <PullRequestThreadDialog
+                key={pullRequestDialogState.key}
+                open
+                environmentId={activeThread.environmentId}
+                threadId={activeThread.id}
+                cwd={activeProject?.cwd ?? null}
+                initialReference={pullRequestDialogState.initialReference}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    closePullRequestDialog();
                   }
-                />
-                <DraftHeroStarters
-                  environmentId={activeThread.environmentId}
-                  draftId={draftId}
-                  onPicked={scheduleComposerFocus}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          {pullRequestDialogState ? (
-            <PullRequestThreadDialog
-              key={pullRequestDialogState.key}
-              open
-              environmentId={activeThread.environmentId}
-              threadId={activeThread.id}
-              cwd={activeProject?.cwd ?? null}
-              initialReference={pullRequestDialogState.initialReference}
-              onOpenChange={(open) => {
-                if (!open) {
-                  closePullRequestDialog();
-                }
-              }}
-              onPrepared={handlePreparedPullRequestThread}
-            />
-          ) : null}
+                }}
+                onPrepared={handlePreparedPullRequestThread}
+              />
+            ) : null}
+          </div>
+          {/* end chat column */}
         </div>
-        {/* end chat column */}
+        {/* end horizontal flex container */}
+
+        {(isEmbedded ? [] : mountedTerminalThreadRefs).map(
+          ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+            <PersistentThreadTerminalDrawer
+              key={mountedThreadKey}
+              threadRef={mountedThreadRef}
+              threadId={mountedThreadRef.threadId}
+              visible={mountedThreadKey === activeThreadKey && terminalState.terminalOpen}
+              launchContext={
+                mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
+              }
+              focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+              splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+              newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+              closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+              keybindings={keybindings}
+              onAddTerminalContext={addTerminalContextToDraft}
+            />
+          ),
+        )}
+
+        {expandedImage && (
+          <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
+        )}
       </div>
-      {/* end horizontal flex container */}
-
-      {(isEmbedded ? [] : mountedTerminalThreadRefs).map(
-        ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-          <PersistentThreadTerminalDrawer
-            key={mountedThreadKey}
-            threadRef={mountedThreadRef}
-            threadId={mountedThreadRef.threadId}
-            visible={mountedThreadKey === activeThreadKey && terminalState.terminalOpen}
-            launchContext={
-              mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
-            }
-            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            keybindings={keybindings}
-            onAddTerminalContext={addTerminalContextToDraft}
-          />
-        ),
-      )}
-
-      {expandedImage && (
-        <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
-      )}
-    </div>
+    </RemoteImagesOffContext.Provider>
   );
 }
