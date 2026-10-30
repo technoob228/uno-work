@@ -125,14 +125,17 @@ function packageTitle(args: ReadonlyArray<string>): string | null {
     return "Wants to remove packages";
   }
   if (sub === "test") return "Wants to run the tests";
-  if (sub === "run" && name) return name === "test" ? "Wants to run the tests" : `Wants to run ${name}`;
+  if (sub === "run" && name)
+    return name === "test" ? "Wants to run the tests" : `Wants to run ${name}`;
   return null;
 }
 
 function curlTitle(args: ReadonlyArray<string>): string | null {
   const host = hostOf(args.find((arg) => /^[a-z+]+:\/\//i.test(arg)));
   if (!host) return null;
-  const sends = args.some((arg) => /^(?:-d|-F|-T|--data.*|--form|--upload-file|-X|--request)$/.test(arg));
+  const sends = args.some((arg) =>
+    /^(?:-d|-F|-T|--data.*|--form|--upload-file|-X|--request)$/.test(arg),
+  );
   return sends ? `Wants to send data to ${host}` : `Wants to download from ${host}`;
 }
 

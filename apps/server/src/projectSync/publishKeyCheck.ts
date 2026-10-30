@@ -41,9 +41,7 @@ export const layer = Layer.succeed(PublishKeyCheck, {
       catch: (cause) =>
         new PublishKeyCheckError({
           message:
-            cause instanceof Error
-              ? cause.message
-              : "Couldn't read the project before publishing.",
+            cause instanceof Error ? cause.message : "Couldn't read the project before publishing.",
         }),
     }),
 });

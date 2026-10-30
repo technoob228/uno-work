@@ -1466,9 +1466,12 @@ describe("deriveTimelineEntries", () => {
       [],
       [],
     );
-    expect(
-      entries.map((entry) => (entry.kind === "message" ? entry.message.text : null)),
-    ).toEqual([NO_REPLY_TEXT, NO_REPLY_TEXT, "NO_REPLY", "I said NO_REPLY earlier"]);
+    expect(entries.map((entry) => (entry.kind === "message" ? entry.message.text : null))).toEqual([
+      NO_REPLY_TEXT,
+      NO_REPLY_TEXT,
+      "NO_REPLY",
+      "I said NO_REPLY earlier",
+    ]);
   });
 
   it("includes proposed plans alongside messages and work entries in chronological order", () => {

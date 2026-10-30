@@ -942,7 +942,13 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
         // Paths out of the project stay the engine's to refuse.
         const target = path.resolve(dir, relative);
         const inside = target.startsWith(`${path.resolve(dir)}${path.sep}`);
-        if (inside && !(await stat(target).then(() => true, () => false))) {
+        if (
+          inside &&
+          !(await stat(target).then(
+            () => true,
+            () => false,
+          ))
+        ) {
           throw new ProjectSyncFailure("There's no file or folder with that name in this project.");
         }
       }
