@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 
+import { SUPPORT_TELEGRAM } from "@t3tools/shared/supportDraft";
+
 import { CONSOLE_URL } from "../account/accountOverview";
 import { planTitle } from "../account/billingModel";
 import { balanceQuery, subscriptionQuery } from "../components/myuno/myUnoQueries";
@@ -161,7 +163,7 @@ export function LiteAccountMenu() {
       {
         label: "Help",
         icon: <CircleHelpIcon />,
-        href: `${CONSOLE_URL}/docs`,
+        href: `https://t.me/${SUPPORT_TELEGRAM}`,
         testId: "lite-menu-help",
       },
     ];

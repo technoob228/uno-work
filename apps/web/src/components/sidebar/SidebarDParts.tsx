@@ -48,6 +48,7 @@ import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { toggleDevMode, useDevMode } from "../../devMode";
 import { FixWorkDialog } from "../../fixWork/FixWorkDialog";
+import { GetHelpDialog } from "./GetHelpDialog";
 import { FIX_WORK_COPY } from "../../fixWork/fixWork";
 import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
@@ -168,9 +169,13 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
     />
   );
   const [fixWorkOpen, setFixWorkOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   return (
     <>
       {fixWorkOpen ? <FixWorkDialog open onOpenChange={setFixWorkOpen} /> : null}
+      {helpOpen ? (
+        <GetHelpDialog open onOpenChange={setHelpOpen} onFixWork={() => setFixWorkOpen(true)} />
+      ) : null}
       <Menu>
         {trigger}
         <MenuPopup
@@ -226,10 +231,15 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
               </MenuItem>
             </>
           ) : null}
-          <MenuItem onClick={() => openExternal(`${CONSOLE_URL}/docs`)}>
+          <MenuItem
+            data-testid="sidebar-help"
+            onClick={() => {
+              close();
+              setHelpOpen(true);
+            }}
+          >
             <CircleHelpIcon />
-            <span className="flex-1">Help</span>
-            <ArrowUpRightIcon className="opacity-60" />
+            Help
           </MenuItem>
           <MenuItem
             data-testid="sidebar-fix-work"
