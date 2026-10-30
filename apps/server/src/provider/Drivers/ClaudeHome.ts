@@ -26,8 +26,17 @@ export const makeClaudeEnvironment = Effect.fn("makeClaudeEnvironment")(function
   };
 });
 
+/**
+ * Two instances continue each other's chats only with one Claude home: the
+ * transcripts are in its config dir. `accountConfigDir` — the instance's own
+ * `CLAUDE_CONFIG_DIR` (a second account): a group of its own.
+ */
 export const makeClaudeContinuationGroupKey = Effect.fn("makeClaudeContinuationGroupKey")(
-  function* (config: Pick<ClaudeSettings, "homePath">): Effect.fn.Return<string, never, Path.Path> {
+  function* (
+    config: Pick<ClaudeSettings, "homePath">,
+    accountConfigDir?: string | null,
+  ): Effect.fn.Return<string, never, Path.Path> {
+    if (accountConfigDir) return `claude:config:${accountConfigDir}`;
     const resolvedHomePath = yield* resolveClaudeHomePath(config);
     return `claude:home:${resolvedHomePath}`;
   },

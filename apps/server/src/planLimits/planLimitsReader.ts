@@ -31,9 +31,11 @@
  * @module planLimits/planLimitsReader
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import nodePath from "node:path";
 
+import { planProviderForDriver } from "@t3tools/shared/planLimitRules";
 import type {
   PlanLimits,
   PlanLimitsAccount,
@@ -42,6 +44,7 @@ import type {
   ServerSettings,
 } from "@t3tools/contracts";
 
+import { accountFolderOf } from "../provider/providerAccounts.ts";
 import { agentHomes } from "../skills/skillScan.ts";
 
 import {
@@ -74,6 +77,15 @@ export interface PlanLimitsHomes {
   readonly claudeConfigDir: string;
   /** `CODEX_HOME` (its `auth.json`). */
   readonly codexHome: string;
+  /** Second accounts: each with a sign-in folder of its own (provider/providerAccounts.ts). */
+  readonly accounts?: ReadonlyArray<PlanLimitsSecondAccount>;
+}
+
+export interface PlanLimitsSecondAccount {
+  readonly instanceId: string;
+  readonly provider: PlanLimitsAccount["provider"];
+  /** Claude: its `CLAUDE_CONFIG_DIR`. ChatGPT: its shadow `CODEX_HOME`. */
+  readonly folder: string;
 }
 
 function expandHome(path: string, home: string): string {
@@ -87,26 +99,47 @@ function expandHome(path: string, home: string): string {
  * which keeps an `auth.json` of its own.
  */
 export function planLimitsHomes(
-  settings: Pick<ServerSettings, "providers">,
+  settings: Pick<ServerSettings, "providers"> & Partial<Pick<ServerSettings, "providerInstances">>,
   home: string,
   env: NodeJS.ProcessEnv,
 ): PlanLimitsHomes {
   const agents = agentHomes(settings, home, env);
   const configDir = env.CLAUDE_CONFIG_DIR?.trim();
   const shadow = settings.providers.codex.shadowHomePath?.trim();
+  const accounts = Object.entries(settings.providerInstances ?? {}).flatMap(
+    ([instanceId, instance]): PlanLimitsSecondAccount[] => {
+      if (instance.enabled === false) return [];
+      const provider = planProviderForDriver(instance.driver);
+      const folder = accountFolderOf(instance);
+      return provider && folder ? [{ instanceId, provider, folder }] : [];
+    },
+  );
   return {
     claudeHome: nodePath.dirname(agents.claudeDir),
     claudeConfigDir: configDir ? expandHome(configDir, home) : agents.claudeDir,
     codexHome: shadow ? expandHome(shadow, home) : agents.codexHome,
+    ...(accounts.length > 0 ? { accounts } : {}),
   };
 }
 
 /** Claude Code's Keychain item (macOS only). */
 export interface ClaudeKeychain {
   /** Is there an item? Attributes only — never the secret, never a prompt. */
-  readonly exists: () => Promise<boolean>;
+  readonly exists: (service?: string) => Promise<boolean>;
   /** The item's JSON; `blocked` once a read failed or didn't answer in time. */
-  readonly read: () => Promise<{ readonly raw: string | null; readonly blocked: boolean }>;
+  readonly read: (
+    service?: string,
+  ) => Promise<{ readonly raw: string | null; readonly blocked: boolean }>;
+}
+
+/**
+ * Claude Code's Keychain item for a `CLAUDE_CONFIG_DIR` of its own: the default
+ * name plus the first 8 hex of the folder's sha256 (the CLI's own rule, read
+ * from its code 30.10), so a second account never touches the first's item.
+ */
+export function claudeKeychainService(configDir: string): string {
+  const hash = createHash("sha256").update(configDir.normalize("NFC")).digest("hex");
+  return `${CLAUDE_KEYCHAIN_SERVICE}-${hash.slice(0, 8)}`;
 }
 
 export type SecurityRun = (
@@ -131,21 +164,18 @@ const runSecurity: SecurityRun = (args, timeoutMs) =>
  * until the daemon restarts: the item is then reported as there but locked.
  */
 export function makeMacClaudeKeychain(run: SecurityRun = runSecurity): ClaudeKeychain {
-  let blocked = false;
+  const blocked = new Set<string>();
   return {
-    exists: async () => {
-      if (blocked) return true;
-      const result = await run(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE], 3_000);
+    exists: async (service = CLAUDE_KEYCHAIN_SERVICE) => {
+      if (blocked.has(service)) return true;
+      const result = await run(["find-generic-password", "-s", service], 3_000);
       return result.ok;
     },
-    read: async () => {
-      if (blocked) return { raw: null, blocked: true };
-      const result = await run(
-        ["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE, "-w"],
-        KEYCHAIN_TIMEOUT_MS,
-      );
+    read: async (service = CLAUDE_KEYCHAIN_SERVICE) => {
+      if (blocked.has(service)) return { raw: null, blocked: true };
+      const result = await run(["find-generic-password", "-s", service, "-w"], KEYCHAIN_TIMEOUT_MS);
       if (result.ok) return { raw: result.stdout.trim(), blocked: false };
-      blocked = true;
+      blocked.add(service);
       return { raw: null, blocked: true };
     },
   };
@@ -232,6 +262,8 @@ type Credential =
 
 interface SignIn {
   readonly id: string;
+  /** A second account's provider instance. */
+  readonly instanceId?: string;
   readonly provider: PlanLimitsAccount["provider"];
   readonly plan: string | undefined;
   readonly email: string | undefined;
@@ -261,6 +293,8 @@ export interface PlanLimitsReaderDeps {
 export interface PlanLimitsReadInput {
   readonly homes: PlanLimitsHomes;
   readonly signInsOnly?: boolean;
+  /** Reuse numbers no older than this, below {@link PLAN_LIMITS_MAX_AGE_MS}. */
+  readonly maxAgeMs?: number;
 }
 
 export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
@@ -285,7 +319,12 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
       stale: true,
     });
   }
-  let lastRead: { readonly at: number; readonly result: PlanLimits } | null = null;
+  let lastRead: {
+    readonly at: number;
+    readonly result: PlanLimits;
+    /** Which sign-ins it covers: an account added since isn't in it. */
+    readonly key: string;
+  } | null = null;
   let running: Promise<PlanLimits> | null = null;
 
   const persist = async () => {
@@ -298,22 +337,31 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
     await rename(tmp, deps.cacheFile);
   };
 
-  const claudeSignIn = async (homes: PlanLimitsHomes): Promise<SignIn | null> => {
+  /** `folder`: a second account's `CLAUDE_CONFIG_DIR`; absent: the computer's main sign-in. */
+  const claudeSignIn = async (
+    homes: PlanLimitsHomes,
+    second?: PlanLimitsSecondAccount,
+  ): Promise<SignIn | null> => {
+    const configDir = second?.folder ?? homes.claudeConfigDir;
+    const service = second ? claudeKeychainService(second.folder) : undefined;
     const file = parseClaudeCredentials(
-      await readText(nodePath.join(homes.claudeConfigDir, ".credentials.json")),
+      await readText(nodePath.join(configDir, ".credentials.json")),
     );
+    // With a `CLAUDE_CONFIG_DIR` of its own Claude Code keeps `.claude.json` there.
     const config = parseClaudeConfig(
-      (await readText(nodePath.join(homes.claudeHome, ".claude.json"))) ??
-        (await readText(nodePath.join(homes.claudeConfigDir, ".claude.json"))),
+      (second ? null : await readText(nodePath.join(homes.claudeHome, ".claude.json"))) ??
+        (await readText(nodePath.join(configDir, ".claude.json"))),
     );
     const fresh = (credential: ClaudeCredential | null) =>
       credential !== null && (credential.expiresAt === null || credential.expiresAt > now());
     // A Mac keeps the sign-in in the Keychain; a file there may be an old one.
-    const inKeychain = !fresh(file) && deps.keychain !== null && (await deps.keychain.exists());
+    const inKeychain =
+      !fresh(file) && deps.keychain !== null && (await deps.keychain.exists(service));
     if (!file && !inKeychain) return null;
-    const id = `claude:${config.email ?? "default"}`;
+    const id = `claude:${config.email ?? second?.instanceId ?? "default"}`;
     return {
       id,
+      ...(second ? { instanceId: second.instanceId } : {}),
       provider: "claude",
       plan: claudePlanLabel(file?.subscriptionType, file?.rateLimitTier ?? config.rateLimitTier),
       email: config.email,
@@ -326,7 +374,7 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
           return { kind: "claude", value, ...(plan ? { plan } : {}) };
         };
         if (!inKeychain || deps.keychain === null) return file ? withPlan(file) : null;
-        const { raw, blocked } = await deps.keychain.read();
+        const { raw, blocked } = await deps.keychain.read(service);
         const fromKeychain = parseClaudeCredentials(raw);
         if (fromKeychain) return withPlan(fromKeychain);
         if (file) return withPlan(file);
@@ -335,11 +383,16 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
     };
   };
 
-  const chatgptSignIn = async (homes: PlanLimitsHomes): Promise<SignIn | null> => {
-    const auth = parseCodexAuth(await readText(nodePath.join(homes.codexHome, "auth.json")));
+  const chatgptSignIn = async (
+    homes: PlanLimitsHomes,
+    second?: PlanLimitsSecondAccount,
+  ): Promise<SignIn | null> => {
+    const codexHome = second?.folder ?? homes.codexHome;
+    const auth = parseCodexAuth(await readText(nodePath.join(codexHome, "auth.json")));
     if (!auth) return null;
     return {
-      id: `chatgpt:${auth.email ?? auth.accountId ?? "default"}`,
+      id: `chatgpt:${auth.email ?? auth.accountId ?? second?.instanceId ?? "default"}`,
+      ...(second ? { instanceId: second.instanceId } : {}),
       provider: "chatgpt",
       plan: chatgptPlanLabel(auth.planType),
       email: auth.email,
@@ -347,12 +400,24 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
     };
   };
 
+  /** Main sign-ins first: one account signed in twice counts once, as the main one. */
   const signIns = async (homes: PlanLimitsHomes): Promise<SignIn[]> => {
     const found = await Promise.all([
       claudeSignIn(homes).catch(() => null),
       chatgptSignIn(homes).catch(() => null),
+      ...(homes.accounts ?? []).map((second) =>
+        (second.provider === "claude"
+          ? claudeSignIn(homes, second)
+          : chatgptSignIn(homes, second)
+        ).catch(() => null),
+      ),
     ]);
-    return found.filter((signIn): signIn is SignIn => signIn !== null);
+    const seen = new Set<string>();
+    return found.filter((signIn): signIn is SignIn => {
+      if (signIn === null || seen.has(signIn.id)) return false;
+      seen.add(signIn.id);
+      return true;
+    });
   };
 
   const getJson = async (
@@ -418,6 +483,7 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
     const mail = signIn.email ?? email ?? lastGood.get(signIn.id)?.email;
     return {
       id: signIn.id,
+      ...(signIn.instanceId ? { instanceId: signIn.instanceId } : {}),
       provider: signIn.provider,
       ...(plan ? { plan } : {}),
       ...(mail ? { email: mail } : {}),
@@ -487,10 +553,12 @@ export async function openPlanLimitsReader(deps: PlanLimitsReaderDeps) {
         return { accounts: found.map((signIn) => accountOf(signIn)) };
       }
       if (running) return await running;
-      if (lastRead && now() - lastRead.at < PLAN_LIMITS_MAX_AGE_MS) return lastRead.result;
+      const maxAge = Math.min(input.maxAgeMs ?? PLAN_LIMITS_MAX_AGE_MS, PLAN_LIMITS_MAX_AGE_MS);
+      const key = JSON.stringify(input.homes);
+      if (lastRead && lastRead.key === key && now() - lastRead.at < maxAge) return lastRead.result;
       running = readAll(input.homes)
         .then((result) => {
-          lastRead = { at: now(), result };
+          lastRead = { at: now(), result, key };
           return result;
         })
         .finally(() => {

@@ -49,10 +49,12 @@ export const CLAUDE_HIDDEN_ENTRIES = [
 export function claudeSandboxExtras(input: {
   /** The HOME Claude runs with (the person's, or the instance's `homePath`). */
   readonly claudeHome: string;
+  /** A second account's `CLAUDE_CONFIG_DIR`: there instead of `<claudeHome>/.claude`. */
+  readonly configDir?: string | null | undefined;
   /** Folders whose sessions it may keep: the sandbox's writable folders. */
   readonly workDirs: ReadonlyArray<string>;
 }): HarnessSandboxExtras {
-  const dotClaude = nodePath.join(input.claudeHome, ".claude");
+  const dotClaude = input.configDir?.trim() || nodePath.join(input.claudeHome, ".claude");
   const projects = nodePath.join(dotClaude, "projects");
   const sessionDirs = [...new Set(input.workDirs.map(claudeProjectDirName))].map((name) =>
     nodePath.join(projects, name),

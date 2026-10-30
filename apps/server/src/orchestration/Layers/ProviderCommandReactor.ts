@@ -53,7 +53,7 @@ import {
   launchesOfTurn,
   type LaunchFact,
 } from "../../manager/launchTruth.ts";
-import { applyHandoffSeed, resolvePendingHandoffSeed } from "../handoff.ts";
+import { applyHandoffSeed, buildAccountSwitchSeed, resolvePendingHandoffSeed } from "../handoff.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { classifyOrchestrationErrorDetail as classifyProviderErrorDetail } from "../../provider/unoBilling.ts";
@@ -616,15 +616,22 @@ const make = Effect.gen(function* () {
           detail: `Thread '${threadId}' is bound to driver '${currentInfo.driverKind}' and cannot switch to '${desiredInfo.driverKind}'.`,
         });
       }
+      // Another account of the provider ("Continue with <account>"): its CLI
+      // can't resume this session, the picker doesn't offer it. The new one
+      // starts fresh; the turn carries the history (accountSwitchSeed).
       if (
+        activeSession !== undefined &&
         currentInfo.continuationIdentity.continuationKey !==
-        desiredInfo.continuationIdentity.continuationKey
+          desiredInfo.continuationIdentity.continuationKey
       ) {
-        return yield* new ProviderAdapterRequestError({
-          provider: preferredProvider,
-          method: "thread.turn.start",
-          detail: `Thread '${threadId}' cannot switch from instance '${currentInstanceId}' to '${desiredInstanceId}' because their provider resume state is incompatible.`,
+        yield* Effect.logInfo("provider command reactor switching a chat to another account", {
+          threadId,
+          currentInstanceId,
+          desiredInstanceId,
         });
+        yield* providerService.stopSession({ threadId });
+        sessionStartSelections.delete(threadId);
+        activeSession = undefined;
       }
     }
     const project = yield* resolveProject(thread.projectId);
@@ -1110,6 +1117,11 @@ const make = Effect.gen(function* () {
     // A message another thread's agent sent reaches the harness with a line
     // saying who it is from and how to answer (plan 22); the stored message
     // and the UI keep the clean text.
+    const accountSwitch = yield* accountSwitchSeedForTurn({
+      thread,
+      modelSelection: event.payload.modelSelection,
+      currentMessageId: message.id,
+    });
     const senderThreadId = message.sentByThreadId ?? null;
     const promptText =
       senderThreadId === null
@@ -1122,7 +1134,7 @@ const make = Effect.gen(function* () {
           });
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: applyHandoffSeed(pendingHandoffSeed, promptText),
+      messageText: applyHandoffSeed(pendingHandoffSeed ?? accountSwitch, promptText),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1154,6 +1166,33 @@ const make = Effect.gen(function* () {
       Effect.forkScoped,
     );
   });
+
+  /**
+   * The chat moves to an account that can't resume its session: what it says
+   * in the new session's first prompt. Null for a turn that stays put, or
+   * moves between accounts of one home (Codex keeps its session then).
+   */
+  const accountSwitchSeedForTurn = (input: {
+    readonly thread: OrchestrationThread;
+    readonly modelSelection: ModelSelection | undefined;
+    readonly currentMessageId: string;
+  }) =>
+    Effect.gen(function* () {
+      const previous = input.thread.session?.providerInstanceId;
+      const next = input.modelSelection?.instanceId;
+      if (previous === undefined || next === undefined || previous === next) return null;
+      const [from, to] = yield* Effect.all([
+        providerService.getInstanceInfo(previous),
+        providerService.getInstanceInfo(next),
+      ]);
+      if (from.driverKind !== to.driverKind) return null;
+      if (from.continuationIdentity.continuationKey === to.continuationIdentity.continuationKey) {
+        return null;
+      }
+      return buildAccountSwitchSeed({
+        messages: input.thread.messages.filter((entry) => entry.id !== input.currentMessageId),
+      });
+    }).pipe(Effect.orElseSucceed(() => null));
 
   /**
    * Start an assistant chat's harness before its message arrives (see

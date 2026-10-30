@@ -23,6 +23,9 @@
  *   signed in elsewhere     while a browser sign-in waits, the daemon re-probes
  *                           the harness: a login done in a terminal ends the job
  *                           as succeeded instead of blocking the row for 10 min.
+ *   a second account        `instanceId` on any of these: the same flow in that
+ *                           instance's own sign-in folder (providerAccounts.ts);
+ *                           one sign-in at a time per account, not per harness.
  *   sign out codex          `codex logout`.
  *   sign out claudeAgent    `claude auth logout` + drop the stored
  *                           ANTHROPIC_API_KEY; on a Uno box Claude Code then
@@ -40,6 +43,10 @@ import {
   ClaudeSettings,
   CodexSettings,
   defaultInstanceIdForDriver,
+  type ProviderAccountAddInput,
+  type ProviderAccountAddResult,
+  type ProviderAccountRemoveInput,
+  type ProviderAccountRemoveResult,
   type ProviderAuthCancelInput,
   type ProviderAuthCancelResult,
   type ProviderAuthDriver,
@@ -58,14 +65,25 @@ import {
   type ProviderInstallStatusInput,
   type ProviderInstanceConfig,
   type ProviderInstanceEnvironmentVariable,
+  type ProviderInstanceId,
   ProviderSetupRpcError,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Path, Schema } from "effect";
 
-import { expandHomePath } from "../../pathExpansion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
+import { resolveCodexHomeLayout } from "../Drivers/CodexHomeLayout.ts";
 import { deriveProviderInstanceConfigMap } from "../Layers/ProviderInstanceRegistryHydration.ts";
+import {
+  accountDisplayName,
+  accountFolder,
+  accountFolderOf,
+  accountInstanceConfig,
+  isAccountFolder,
+  newAccountInstanceId,
+  prepareAccountFolder,
+  removeAccountFolder,
+} from "../providerAccounts.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { isInstallableDriver, resolveInstallPlan } from "./harnessInstallCommands.ts";
@@ -107,6 +125,14 @@ export interface HarnessSetupShape {
   readonly authCancel: (
     input: ProviderAuthCancelInput,
   ) => Effect.Effect<ProviderAuthCancelResult, ProviderSetupRpcError>;
+  /** A second account: its folder and instance. Refused unless the setting is on. */
+  readonly accountAdd: (
+    input: ProviderAccountAddInput,
+  ) => Effect.Effect<ProviderAccountAddResult, ProviderSetupRpcError>;
+  /** Sign the account out, drop its folder and instance. */
+  readonly accountRemove: (
+    input: ProviderAccountRemoveInput,
+  ) => Effect.Effect<ProviderAccountRemoveResult, ProviderSetupRpcError>;
 }
 
 export class HarnessSetup extends Context.Service<HarnessSetup, HarnessSetupShape>()(
@@ -136,19 +162,25 @@ export interface HarnessSetupRunnerDeps {
   readonly baseEnv: NodeJS.ProcessEnv;
   readonly probeNpmGlobalWritable: () => Promise<boolean>;
   readonly probeUvAvailable: () => Promise<boolean>;
-  /** Binary + environment the daemon itself uses to run that driver's CLI. */
-  readonly resolveCliEnvironment: (driver: ProviderAuthDriver) => Promise<CliEnvironment>;
+  /** Binary + environment the daemon itself uses to run that driver's CLI (or that instance's). */
+  readonly resolveCliEnvironment: (
+    driver: ProviderAuthDriver,
+    instanceId?: ProviderInstanceId,
+  ) => Promise<CliEnvironment>;
   readonly storeClaudeApiKey: (apiKey: string) => Promise<void>;
   /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
   readonly removeClaudeApiKey: () => Promise<boolean>;
-  readonly refreshProvider: (driver: ProviderDriverKind) => Promise<void>;
+  readonly refreshProvider: (
+    driver: ProviderDriverKind,
+    instanceId?: ProviderInstanceId,
+  ) => Promise<void>;
   /**
    * The harness's sign-in as the daemon sees it; `refresh` re-probes the CLI
    * first. Absent: a waiting sign-in is not watched for a login done elsewhere.
    */
   readonly probeAuth?: (
     driver: ProviderAuthDriver,
-    options: { readonly refresh: boolean },
+    options: { readonly refresh: boolean; readonly instanceId?: ProviderInstanceId },
   ) => Promise<HarnessAuthProbe>;
   readonly authWatchIntervalMs?: number;
   readonly authTimeoutMs?: number;
@@ -164,6 +196,9 @@ interface InstallExtra {
 }
 
 interface AuthExtra {
+  readonly driver: ProviderAuthDriver;
+  /** A second account's sign-in; absent: the harness's default one. */
+  readonly instanceId?: ProviderInstanceId;
   readonly method: ProviderAuthMethod;
   readonly verificationUrl?: string;
   readonly userCode?: string;
@@ -227,9 +262,12 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     void work.finally(() => pending.delete(work));
   };
 
-  const refreshAfterSuccess = async (driver: ProviderDriverKind) => {
+  const refreshAfterSuccess = async (
+    driver: ProviderDriverKind,
+    instanceId?: ProviderInstanceId,
+  ) => {
     try {
-      await deps.refreshProvider(driver);
+      await (instanceId ? deps.refreshProvider(driver, instanceId) : deps.refreshProvider(driver));
     } catch (error) {
       log("provider refresh after setup failed", { driver, error: String(error) });
     }
@@ -372,9 +410,15 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
 
   /* ------------------------------ auth ----------------------------- */
 
+  /** One sign-in at a time per account: the store's key for a job. */
+  const authJobKey = (input: {
+    readonly driver: ProviderAuthDriver;
+    readonly instanceId?: ProviderInstanceId | undefined;
+  }): string => input.instanceId ?? input.driver;
+
   const toAuthStatus = (job: SetupJobRecord<AuthExtra>): ProviderAuthJobStatus => ({
     jobId: job.jobId,
-    driver: job.driver as ProviderAuthDriver,
+    driver: job.extra.driver,
     method: job.extra.method,
     state: job.state,
     log: job.log,
@@ -410,13 +454,14 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
   const watchForSignInElsewhere = async (job: SetupJobRecord<AuthExtra>): Promise<() => void> => {
     const probeAuth = deps.probeAuth;
     if (!probeAuth) return () => {};
-    const driver = job.driver as ProviderAuthDriver;
-    const baseline = await probeAuth(driver, { refresh: false }).catch(() => null);
+    const { driver, instanceId } = job.extra;
+    const scope = instanceId ? { instanceId } : {};
+    const baseline = await probeAuth(driver, { refresh: false, ...scope }).catch(() => null);
     let probing = false;
     const timer = setInterval(() => {
       if (probing) return;
       probing = true;
-      void probeAuth(driver, { refresh: true })
+      void probeAuth(driver, { refresh: true, ...scope })
         .then((now) => {
           const signedInElsewhere =
             now.authenticated && (!baseline?.authenticated || now.signature !== baseline.signature);
@@ -447,8 +492,10 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       readonly parsePrompt: boolean;
     },
   ) => {
-    const driver = job.driver as ProviderAuthDriver;
-    const cli = await deps.resolveCliEnvironment(driver);
+    const { driver, instanceId } = job.extra;
+    const cli = await (instanceId
+      ? deps.resolveCliEnvironment(driver, instanceId)
+      : deps.resolveCliEnvironment(driver));
     auths.markRunning(job.jobId);
     auths.appendLog(job.jobId, `$ ${cli.binaryPath} ${input.args.join(" ")}\n`);
     const stopWatching = input.parsePrompt ? await watchForSignInElsewhere(job) : () => {};
@@ -496,7 +543,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     if (result.code === 0) {
       auths.updateExtra(job.jobId, { needsCodeInput: false });
       auths.finish(job.jobId, { state: "succeeded" });
-      await refreshAfterSuccess(ProviderDriverKind.make(driver));
+      await refreshAfterSuccess(ProviderDriverKind.make(driver), instanceId);
       return;
     }
     const current = auths.get(job.jobId);
@@ -509,8 +556,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
   };
 
   const runAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
-    const driver = job.driver as ProviderAuthDriver;
-    const method = job.extra.method;
+    const { driver, method } = job.extra;
 
     if (driver === "claudeAgent" && method === "apiKey") {
       auths.markRunning(job.jobId);
@@ -543,7 +589,13 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     if (input.method === "apiKey" && !apiKey) {
       throw fail("invalid", "Paste an API key first.");
     }
-    const waiting = auths.findActive("auth", input.driver);
+    // A second account is a plan's sign-in, not an API key: the key is the
+    // default instance's, and an extra one would read as a provider's account.
+    if (input.method === "apiKey" && input.instanceId) {
+      throw fail("invalid", "A second account signs in with its plan, not an API key.");
+    }
+    const jobKey = authJobKey(input);
+    const waiting = auths.findActive("auth", jobKey);
     if (waiting) {
       // The same browser sign-in asked for again (the page was closed or
       // reloaded): its link and code are still good — hand it back.
@@ -558,8 +610,13 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     }
     const started = auths.start({
       kind: "auth",
-      driver: input.driver,
-      extra: { method: input.method, needsCodeInput: false },
+      driver: jobKey,
+      extra: {
+        driver: input.driver,
+        ...(input.instanceId ? { instanceId: input.instanceId } : {}),
+        method: input.method,
+        needsCodeInput: false,
+      },
       ...(apiKey ? { secret: apiKey } : {}),
     });
     if (!started.ok) {
@@ -598,7 +655,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
   };
 
   const authCancel = (input: ProviderAuthCancelInput): ProviderAuthCancelResult => {
-    const waiting = auths.findActive("auth", input.driver);
+    const waiting = auths.findActive("auth", authJobKey(input));
     const cancelled = waiting
       ? settleFromOutside(
           waiting.jobId,
@@ -652,19 +709,23 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
   const authSignOut = async (
     input: ProviderAuthSignOutInput,
   ): Promise<ProviderAuthSignOutResult> => {
-    const driver = input.driver;
+    const { driver, instanceId } = input;
     // Signing out while a sign-in still waits for its browser half: that
     // sign-in is moot — stop it rather than ask the person to hunt for it.
-    authCancel({ driver });
-    const cli = await deps.resolveCliEnvironment(driver);
+    authCancel(input);
+    const cli = await (instanceId
+      ? deps.resolveCliEnvironment(driver, instanceId)
+      : deps.resolveCliEnvironment(driver));
     const args = driver === "codex" ? ["logout"] : ["auth", "logout"];
     const result = await runQuick(
       cli.binaryPath,
       args,
       withUserLocalBinOnPath({ ...deps.baseEnv, ...cli.env }, deps.homeDir),
     );
-    const removedKey = driver === "claudeAgent" ? await deps.removeClaudeApiKey() : false;
-    await refreshAfterSuccess(ProviderDriverKind.make(driver));
+    // The stored key is the default instance's: a second account has none.
+    const removedKey =
+      driver === "claudeAgent" && !instanceId ? await deps.removeClaudeApiKey() : false;
+    await refreshAfterSuccess(ProviderDriverKind.make(driver), instanceId);
     // `claude auth logout` without a login, or after only an API key, may
     // complain; the stored key going away is a sign-out too.
     if (result.code === 0 || removedKey) return { driver, signedOut: true };
@@ -751,8 +812,12 @@ const liftSync =
           : new ProviderSetupRpcError({ code: "failed", message: describeError(error) }),
     });
 
-export function makeHarnessSetupShape(runner: HarnessSetupRunner): HarnessSetupShape {
+export function makeHarnessSetupShape(
+  runner: HarnessSetupRunner,
+  accounts: Pick<HarnessSetupShape, "accountAdd" | "accountRemove">,
+): HarnessSetupShape {
   return {
+    ...accounts,
     installStart: liftSync(runner.installStart),
     installStatus: liftSync(runner.installStatus),
     authStart: liftSync(runner.authStart),
@@ -831,24 +896,26 @@ export const HarnessSetupLive = Layer.effect(
     const homeDir = NodeOS.homedir();
     const baseEnv = withUserLocalBinOnPath(process.env, homeDir);
 
-    const resolveCliEnvironment = (driver: ProviderAuthDriver) =>
+    const resolveCliEnvironment = (driver: ProviderAuthDriver, instanceId?: ProviderInstanceId) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instance =
           deriveProviderInstanceConfigMap(settings)[
-            defaultInstanceIdForDriver(ProviderDriverKind.make(driver))
+            instanceId ?? defaultInstanceIdForDriver(ProviderDriverKind.make(driver))
           ];
+        if (instanceId && instance?.driver !== driver) {
+          return yield* fail("notFound", "This account is not on this computer any more.");
+        }
         const instanceEnv = mergeProviderInstanceEnvironment(instance?.environment, baseEnv);
         if (driver === "codex") {
           const config = decodeCodexSettings(instance?.config ?? {});
-          const homePath = config.homePath.trim();
+          // A shadow home holds that account's auth.json: `codex login` writes it there.
+          const { effectiveHomePath } = yield* resolveCodexHomeLayout(config);
           return {
             binaryPath: config.binaryPath,
             env: {
               ...instanceEnv,
-              ...(homePath.length > 0
-                ? { CODEX_HOME: path.resolve(expandHomePath(homePath)) }
-                : {}),
+              ...(effectiveHomePath ? { CODEX_HOME: effectiveHomePath } : {}),
             },
           } satisfies CliEnvironment;
         }
@@ -909,22 +976,33 @@ export const HarnessSetupLive = Layer.effect(
       baseEnv,
       probeNpmGlobalWritable: () => probeNpmGlobalWritable(baseEnv),
       probeUvAvailable: () => probeCommandAvailable("uv", baseEnv),
-      resolveCliEnvironment: (driver) => runPromise(resolveCliEnvironment(driver)),
+      resolveCliEnvironment: (driver, instanceId) =>
+        runPromise(resolveCliEnvironment(driver, instanceId)),
       storeClaudeApiKey: (apiKey) => runPromise(storeClaudeApiKey(apiKey)),
       removeClaudeApiKey: () => runPromise(removeClaudeApiKey),
-      refreshProvider: (driver) =>
-        runPromise(providerRegistry.refresh(driver)).then(() => undefined),
+      refreshProvider: (driver, instanceId) =>
+        runPromise(
+          instanceId
+            ? providerRegistry.refreshInstance(instanceId)
+            : providerRegistry.refresh(driver),
+        ).then(() => undefined),
       probeAuth: (driver, options) => {
         const kind = ProviderDriverKind.make(driver);
+        const wanted = options.instanceId ?? defaultInstanceIdForDriver(kind);
         return runPromise(
-          options.refresh ? providerRegistry.refresh(kind) : providerRegistry.getProviders,
+          !options.refresh
+            ? providerRegistry.getProviders
+            : options.instanceId
+              ? providerRegistry.refreshInstance(options.instanceId)
+              : providerRegistry.refresh(kind),
         ).then((providers) =>
           describeHarnessAuth(
             providers.find(
-              (provider) =>
-                provider.driver === kind &&
-                provider.instanceId === defaultInstanceIdForDriver(kind),
-            ) ?? providers.find((provider) => provider.driver === kind),
+              (provider) => provider.driver === kind && provider.instanceId === wanted,
+            ) ??
+              (options.instanceId
+                ? undefined
+                : providers.find((provider) => provider.driver === kind)),
           ),
         );
       },
@@ -933,7 +1011,68 @@ export const HarnessSetupLive = Layer.effect(
       },
     });
 
+    const accountAdd: HarnessSetupShape["accountAdd"] = (input) =>
+      Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings;
+        if (!settings.multipleAccounts) {
+          return yield* fail("invalid", 'Turn on "Use more than one account" first.');
+        }
+        const instanceId = newAccountInstanceId(input.driver);
+        const folder = accountFolder(homeDir, instanceId);
+        yield* Effect.tryPromise({
+          try: () =>
+            prepareAccountFolder({
+              driver: input.driver,
+              home: homeDir,
+              folder,
+              claudeDir: path.join(homeDir, ".claude"),
+            }),
+          catch: (error) => fail("failed", describeError(error)),
+        });
+        const instance = accountInstanceConfig({ driver: input.driver, name: input.name, folder });
+        yield* serverSettings.updateSettings({
+          providerInstances: { ...settings.providerInstances, [instanceId]: instance },
+        });
+        return { instanceId, displayName: accountDisplayName(input.driver, input.name) };
+      }).pipe(
+        Effect.mapError((error) =>
+          isProviderSetupRpcError(error) ? error : fail("failed", describeError(error)),
+        ),
+      );
+
+    const accountRemove: HarnessSetupShape["accountRemove"] = ({ instanceId }) =>
+      Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings;
+        const instance = settings.providerInstances[instanceId];
+        const folder = instance ? accountFolderOf(instance) : null;
+        if (!instance || folder === null || !isAccountFolder(homeDir, folder)) {
+          return yield* fail("notFound", "This is not a second account of this computer.");
+        }
+        const driver = instance.driver as ProviderAuthDriver;
+        // Sign out first: on a Mac the sign-in is a Keychain item, not in the folder.
+        const signedOut = yield* Effect.tryPromise({
+          try: () => runner.authSignOut({ driver, instanceId }),
+          catch: (error) => fail("failed", describeError(error)),
+        });
+        yield* Effect.tryPromise({
+          try: () => removeAccountFolder(homeDir, folder),
+          catch: (error) => fail("failed", describeError(error)),
+        });
+        const { [instanceId]: _gone, ...rest } = settings.providerInstances;
+        yield* serverSettings.updateSettings({ providerInstances: rest });
+        return {
+          instanceId,
+          removed: true,
+          // The folder is gone either way; a refused sign-out only matters on a Mac.
+          ...(signedOut.signedOut ? {} : { error: signedOut.error ?? "Sign-out failed." }),
+        };
+      }).pipe(
+        Effect.mapError((error) =>
+          isProviderSetupRpcError(error) ? error : fail("failed", describeError(error)),
+        ),
+      );
+
     yield* Effect.addFinalizer(() => Effect.sync(() => runner.shutdown()));
-    return makeHarnessSetupShape(runner);
+    return makeHarnessSetupShape(runner, { accountAdd, accountRemove });
   }),
 );
