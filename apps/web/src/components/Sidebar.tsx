@@ -231,7 +231,7 @@ import {
 import { useAssistantChat } from "../assistant/useAssistantChat";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarThreadUndoNotice } from "./sidebar/SidebarThreadUndoNotice";
-import { renderRecentsByTime } from "./sidebar/SidebarRecentsByTime";
+import { chatAgeLabel, chatAgeTitle } from "./sidebar/chatAgeLabel";
 import {
   offerThreadUndo,
   snapshotThreadForUndo,
@@ -864,6 +864,12 @@ interface SidebarThreadRowProps {
   placeName?: string | null;
   /** Sidebar D: the place is the home folder (chats outside any project). */
   placeHome?: boolean;
+  /**
+   * Sidebar D: the time the list is sorted by (ms) — the row ends with how
+   * long ago that was ("5m", "2h", "Oct 12"), small and muted (30.10, instead
+   * of the Today / Yesterday groups). Absent: no age.
+   */
+  activityAtMs?: number;
   section: SidebarSection;
   isActive: boolean;
   jumpLabel: string | null;
@@ -1247,6 +1253,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const actionCount = [showRead, showDSnooze, showDone].filter(Boolean).length;
     const actionsWidthRem = actionCount * 1.625 + Math.max(0, actionCount - 1) * 0.125;
     const tailHide = hasActions ? D_ROW_TAIL_HIDE : undefined;
+    // The age gives way to "Ready" and the working spinner (they already say
+    // "now"); a dot (needs your OK, asks you, failed) keeps it.
+    const ageLabel =
+      props.activityAtMs === undefined || mark === "your-turn" || mark === "working"
+        ? ""
+        : chatAgeLabel(props.activityAtMs, Date.parse(props.now));
     return (
       <li data-thread-item className="list-none">
         <div
@@ -1273,7 +1285,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 ? ({ "--row-actions-w": `${actionsWidthRem}rem` } as React.CSSProperties)
                 : undefined
             }
-            className={cn("flex min-w-0 flex-1 items-center gap-2", hasActions && D_ROW_FADE)}
+            className={cn(
+              "@container/sidebar-row-content flex min-w-0 flex-1 items-center gap-2",
+              hasActions && D_ROW_FADE,
+            )}
           >
             {props.placeName ? (
               <Tooltip>
@@ -1334,8 +1349,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               <span className={cn("contents", tailHide)}>{machineMark}</span>
             ) : null}
             <span
-              className={cn("ml-auto flex h-6 min-w-4 shrink-0 items-center justify-end", tailHide)}
+              className={cn(
+                "ml-auto flex h-6 shrink-0 items-center justify-end gap-1.5",
+                mark ? "min-w-4" : null,
+                tailHide,
+              )}
             >
+              {ageLabel ? (
+                <span
+                  data-testid="sidebar-row-age"
+                  title={chatAgeTitle(props.activityAtMs ?? Number.NaN)}
+                  className="hidden text-[11px] whitespace-nowrap tabular-nums text-sidebar-muted-foreground/60 @[10rem]/sidebar-row-content:inline"
+                >
+                  {ageLabel}
+                </span>
+              ) : null}
               <SidebarDMark mark={mark} />
             </span>
           </div>
@@ -3668,6 +3696,10 @@ export default function Sidebar() {
     );
   }
 
+  // The age at the end of a D row is the time the list is sorted by, so the
+  // ages only grow reading down (30.10: instead of Today / Yesterday groups).
+  const dTimeOf = (thread: SidebarThreadSummary) =>
+    getThreadSortTimestamp(thread, sidebarThreadSortOrder);
   const renderRow = (
     thread: SidebarThreadSummary,
     section: SidebarSection,
@@ -3700,6 +3732,7 @@ export default function Sidebar() {
         {...(options?.place
           ? { placeName: options.place.name, placeHome: options.place.home }
           : {})}
+        {...(options?.d ? { activityAtMs: dTimeOf(thread) } : {})}
         computerIcon={sidebarViewMenu}
         fromUno={
           options?.d === true && !options.underUno
@@ -4038,10 +4071,6 @@ export default function Sidebar() {
         if (clicked) handlers.get(clicked)?.();
       });
     };
-  // Recents and the one list fall into Today / Yesterday / This week / Older
-  // by the time they are sorted by.
-  const dTimeOf = (thread: SidebarThreadSummary) =>
-    getThreadSortTimestamp(thread, sidebarThreadSortOrder);
   const dChatRows = (
     key: string,
     chats: ReadonlyArray<SidebarThreadSummary>,
@@ -4062,15 +4091,7 @@ export default function Sidebar() {
     const rows = preview?.visible ?? chats;
     return (
       <>
-        {/* One list: Today / Yesterday / This week / Older (29.10). */}
-        {key === "list"
-          ? renderRecentsByTime({
-              chats: rows,
-              timeOf: dTimeOf,
-              now: new Date(now),
-              renderRow: row,
-            })
-          : rows.map(row)}
+        {rows.map(row)}
         {preview && (preview.hiddenCount > 0 || preview.canCollapse) ? (
           <SidebarDShowMoreRow
             nested={place.nested}
@@ -4280,12 +4301,9 @@ export default function Sidebar() {
         );
       })}
       {dGroups.recents.length > 0 ? <SidebarDSectionLabel label="Recents" /> : null}
-      {renderRecentsByTime({
-        chats: dPreviews.legacy?.recents.visible ?? [],
-        timeOf: dTimeOf,
-        now: new Date(now),
-        renderRow: (thread) => renderRow(thread, "active", { d: true }),
-      })}
+      {(dPreviews.legacy?.recents.visible ?? []).map((thread) =>
+        renderRow(thread, "active", { d: true }),
+      )}
       {dPreviews.legacy &&
       (dPreviews.legacy.recents.hiddenCount > 0 || dPreviews.legacy.recents.canCollapse) ? (
         <SidebarDShowMoreRow
