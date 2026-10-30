@@ -4,6 +4,7 @@ import {
   AssistantsView,
   type AssistantsRouteSearch,
 } from "../components/assistants/AssistantsView";
+import { assistantProfileTab } from "../components/assistants/assistantSettingsNav.logic";
 
 export const Route = createFileRoute("/_chat/assistants")({
   validateSearch: (search: Record<string, unknown>): AssistantsRouteSearch => {
@@ -19,7 +20,11 @@ export const Route = createFileRoute("/_chat/assistants")({
       const projectId =
         typeof project === "string" ? /^assistant-[\w-]+/.exec(project)?.[0] : undefined;
       const environmentId = typeof env === "string" ? /^[\w.:-]+/.exec(env)?.[0] : undefined;
-      return projectId && environmentId ? { view, project: projectId, env: environmentId } : {};
+      // Its page opens on a tab (?tab=…, 29.10); none or unknown = General.
+      const tab = assistantProfileTab(search["tab"]);
+      return projectId && environmentId
+        ? { view, project: projectId, env: environmentId, ...(tab !== "general" ? { tab } : {}) }
+        : {};
     }
     if (view === "uno-setup") {
       // Uno's first-run screen (assistants D); without `env`: the active computer.

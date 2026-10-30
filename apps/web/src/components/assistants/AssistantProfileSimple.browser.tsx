@@ -23,9 +23,11 @@ let members: ReadonlyArray<unknown> = [];
 
 const historyBack = vi.fn();
 let canGoBack = false;
+let tabInUrl: string | undefined;
 vi.mock("@tanstack/react-router", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useNavigate: () => navigate,
+  useSearch: () => ({ tab: tabInUrl }),
   useCanGoBack: () => canGoBack,
   useRouter: () => ({ history: { back: historyBack } }),
 }));
@@ -143,6 +145,7 @@ function wrap(node: React.ReactNode) {
 beforeEach(() => {
   teamShown = true;
   canGoBack = false;
+  tabInUrl = undefined;
   historyBack.mockReset();
   navigate.mockReset();
   quickCreate.mockClear();
@@ -181,7 +184,8 @@ describe("sidebar: '+' opens the gallery", () => {
 });
 
 describe("its page", () => {
-  it("links its own Telegram bot right on the page; its projects are picked in sight", async () => {
+  it("links its own Telegram bot on Apps & Telegram", async () => {
+    tabInUrl = "apps";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
@@ -193,6 +197,13 @@ describe("its page", () => {
     await expect.element(screen.getByTestId("uno-connect-telegram-dialog")).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     await screen.getByRole("button", { name: "Close" }).first().click();
+  });
+
+  it("its projects are picked on Where it works, without a second level switch", async () => {
+    tabInUrl = "where";
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
     // "Where it can look": the projects, no second permission switch (Misha 29.10).
     await expect
       .element(screen.getByTestId("assistant-profile-where"))
@@ -208,17 +219,32 @@ describe("its page", () => {
       .toHaveTextContent("Sees everything on this computer");
   });
 
-  it("the permission level is changed in one place", async () => {
+  it("the permission level is changed in one place: General", async () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
+    await expect
+      .element(screen.getByTestId("assistant-profile-tab-general"))
+      .toHaveAttribute("aria-selected", "true");
     await expect.element(screen.getByTestId("assistant-mode-switch")).toBeInTheDocument();
-    await screen.getByTestId("assistant-advanced-toggle").click();
     expect(screen.getByTestId("assistant-profile-access").query()).toBeNull();
-    expect(screen.getByTestId("assistant-mode-switch").elements()).toHaveLength(1);
+    expect(screen.getByTestId("assistant-advanced-toggle").query()).toBeNull();
+  });
+
+  it("a tab click stays on its page and replaces the entry (Back goes to the chat)", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await screen.getByTestId("assistant-profile-tab-memory").click();
+    expect(navigate).toHaveBeenCalledWith({
+      to: "/assistants",
+      search: { view: "profile", env: "env-1", project: "assistant-scout", tab: "memory" },
+      replace: true,
+    });
   });
 
   it("with Telegram linked: no card, the bot in the rows", async () => {
+    tabInUrl = "apps";
     members = [
       member("assistant-home", "Uno"),
       member("assistant-scout", "Scout", { telegram: true }),
@@ -232,23 +258,27 @@ describe("its page", () => {
     expect(screen.getByTestId("assistant-connect-telegram").query()).toBeNull();
   });
 
-  it("its computer, apps and AI are in sight; Advanced keeps the rest", async () => {
+  it("Where it works: its computer, projects and AI", async () => {
+    tabInUrl = "where";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
     await expect
       .element(screen.getByTestId("assistant-profile-works-on-section"))
       .toBeInTheDocument();
-    await expect.element(screen.getByTestId("assistant-profile-can-use")).toBeInTheDocument();
+    await expect.element(screen.getByTestId("assistant-profile-where")).toBeInTheDocument();
     await expect.element(screen.getByText("The AI it runs on")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-mode-switch").query()).toBeNull();
   });
 
-  it("memory and instructions are edited on the page, not on another one", async () => {
+  it("Memory & instructions: edited on its own tab, not on another page", async () => {
+    tabInUrl = "memory";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
-    await screen.getByTestId("assistant-profile-memory-edit").click();
-    await expect.element(screen.getByTestId("assistant-profile-memory-editor")).toBeInTheDocument();
+    await expect
+      .element(screen.getByTestId("assistant-profile-memory-editor"))
+      .toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 

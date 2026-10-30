@@ -125,7 +125,7 @@ export function AssistantChatHeaderActions({
     void (uno && !devMode
       ? navigate({
           to: "/assistants",
-          search: { view: "profile", env: uno.environmentId, project: uno.projectId },
+          search: { view: "profile", env: uno.environmentId, project: uno.projectId, tab: "memory" },
         })
       : devMode
         ? navigate({

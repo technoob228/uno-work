@@ -80,7 +80,7 @@ import { UnoSetupPage } from "./UnoSetupPage";
 import { AssistantAiChoice } from "./AssistantAiChoice";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { useAssistantTeam, useTeamShown } from "./useAssistantTeam";
-import { memberOfLegacyView } from "./assistantSettingsNav.logic";
+import { type AssistantProfileTab, memberOfLegacyView } from "./assistantSettingsNav.logic";
 import { AssistantsTeamList } from "./AssistantsTeamList";
 import {
   ASSISTANT_COMPUTERS_KEY,
@@ -129,6 +129,8 @@ export interface AssistantsRouteSearch {
   readonly box?: number;
   readonly project?: string;
   readonly env?: string;
+  /** The tab of an assistant's page (`view=profile`); none = General. */
+  readonly tab?: AssistantProfileTab;
 }
 
 const SUMMARY_KEY = ["uno-assistant", "summary"] as const;

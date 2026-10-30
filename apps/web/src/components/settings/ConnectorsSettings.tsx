@@ -60,6 +60,8 @@ export function ConnectorsSettings() {
                       view: "profile",
                       env: member.environmentId,
                       project: member.projectId,
+                      // Its apps are on that tab (29.10).
+                      tab: "apps",
                     },
                   })
                 }
