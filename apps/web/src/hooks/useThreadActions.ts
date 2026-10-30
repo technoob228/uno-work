@@ -135,10 +135,10 @@ export function useThreadActions() {
         deletedIds && deletedIds.size > 0
           ? threads.filter((entry) => entry.id === threadRef.threadId || !deletedIds.has(entry.id))
           : threads;
-      const orphanedWorktreePath = getOrphanedWorktreePathForThread(
-        survivingThreads,
-        threadRef.threadId,
-      );
+      // No branch: not a git copy but a folder of the chat's own, which stays.
+      const orphanedWorktreePath = thread.branch
+        ? getOrphanedWorktreePathForThread(survivingThreads, threadRef.threadId)
+        : null;
       const displayWorktreePath = orphanedWorktreePath
         ? formatWorktreePathForDisplay(orphanedWorktreePath)
         : null;

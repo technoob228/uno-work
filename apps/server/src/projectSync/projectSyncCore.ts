@@ -6,6 +6,8 @@
  * project's `.env` (0600) on every computer — never in the synced files.
  *
  * New folders in ~/projects sync by themselves; older ones get one question.
+ * A project can also live in a private GitHub or GitLab repository (`host`):
+ * it is a git project, and each sync pushes and pulls what's committed there.
  *
  * Plain promises with every dependency injected (tests use fakes); the
  * Effect service around it is `ProjectSyncService.ts`.
@@ -23,11 +25,14 @@ import {
   type ProjectSyncEntry,
   type ProjectSyncFiles,
   type ProjectSyncHistory,
+  type ProjectSyncHost,
   type ProjectSyncMode,
   type ProjectSyncProjectRef,
   type ProjectSyncSnapshot,
   type ProjectSyncState,
 } from "@t3tools/contracts";
+
+import { NO_PROJECT_FOLDER } from "@t3tools/shared/noProject";
 
 import { secretNameProblem, upsertEnvContent } from "../secretsEnv.ts";
 import {
@@ -71,6 +76,7 @@ export interface EngineResult {
   } | null;
   readonly held?: ReadonlyArray<string>;
   readonly message: string;
+  readonly host?: { readonly state: EngineState; readonly message: string };
 }
 
 export interface EngineCtx {
@@ -82,9 +88,21 @@ export interface EngineCtx {
 
 export interface SyncEngine {
   readonly syncProject: (
-    input: { dir: string; name?: string | null; adopt?: boolean },
+    input: {
+      dir: string;
+      name?: string | null;
+      adopt?: boolean;
+      hostRemote?: string | null;
+      skipCloud?: boolean;
+    },
     ctx: EngineCtx,
   ) => Promise<EngineResult>;
+  readonly startRepository: (input: { dir: string; name: string }, ctx: EngineCtx) => Promise<void>;
+  readonly keysBeforePublish: (
+    input: { dir: string },
+    ctx: EngineCtx,
+  ) => Promise<ReadonlyArray<string>>;
+  readonly heldFromPublishMessage: (files: ReadonlyArray<string>) => string;
   readonly getProject: (
     input: { name: string; dir?: string | null },
     ctx: EngineCtx,
@@ -167,6 +185,8 @@ interface Stored {
   held?: ReadonlyArray<string>;
   /** Turned on by itself (a new folder in ~/projects), not by the person. */
   auto?: boolean;
+  /** The project's GitHub or GitLab repository: pushed to and pulled from on each sync. */
+  host?: ProjectSyncHost;
 }
 
 /** What this computer remembers across projects. */
@@ -298,9 +318,15 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const folderOf = (project: ProjectRef) =>
     path.resolve(expandHome(deps.home, project.workspaceRoot));
 
-  /** A folder of its own right in ~/projects: what syncs without being asked. */
-  const inProjectsFolder = (project: ProjectRef) =>
-    path.dirname(folderOf(project)) === path.join(path.resolve(deps.home), "projects");
+  /**
+   * A folder of its own right in ~/projects, or a chat without a project that
+   * became one (~/chats): what syncs without being asked.
+   */
+  const inProjectsFolder = (project: ProjectRef) => {
+    const parent = path.dirname(folderOf(project));
+    const home = path.resolve(deps.home);
+    return parent === path.join(home, "projects") || parent === path.join(home, NO_PROJECT_FOLDER);
+  };
 
   /** Projects of this computer nobody decided about yet, by whether they came after `since`. */
   const undecided = async () => {
@@ -366,6 +392,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       lastSyncedAt: entry.lastSyncedAt,
       conflict: entry.enabled ? entry.conflict : null,
       held: entry.enabled ? (entry.held ?? []) : [],
+      host: entry.host ?? null,
     };
   };
 
@@ -413,6 +440,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     }
     const engine = await deps.engine();
     const ctx = await engineCtx();
+    // Without a way to the Uno cloud a project with a repository still goes there.
+    const cloud = await deps.available();
+    const toHost = entry.host ? { hostRemote: entry.host.remote, skipCloud: !cloud } : {};
     let result: EngineResult;
     const keep = pendingResolve.get(projectId);
     pendingResolve.delete(projectId);
@@ -429,9 +459,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       }
     } else if (entry.name) {
       // Ours already: it may (re)join the cloud's history (a moved folder).
-      result = await engine.syncProject({ dir, name: entry.name, adopt: true }, ctx);
+      result = await engine.syncProject({ dir, name: entry.name, adopt: true, ...toHost }, ctx);
     } else {
-      result = await firstSync(engine, dir, ctx);
+      result = await firstSync(engine, dir, ctx, toHost);
     }
     lastRun.set(projectId, result);
     quietUntil.set(projectId, deps.timers.now() + OWN_WRITES_QUIET_MS);
@@ -455,7 +485,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       : null;
     if (result.state !== "busy") entry.held = [...(result.held ?? [])];
     if (result.ok) entry.lastSyncedAt = new Date(deps.timers.now()).toISOString();
-    if (result.ok && entry.name) {
+    if (result.ok && entry.name && cloud) {
       await syncKeys(projectId, entry, pendingUpload.delete(projectId)).catch((error) =>
         deps.log("warn", "project sync: keys didn't sync", {
           project: entry.name,
@@ -467,15 +497,20 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   }
 
   /** A project's first sync: its folder's name, or name-2… when that name is another project. */
-  async function firstSync(engine: SyncEngine, dir: string, ctx: EngineCtx) {
-    let result = await engine.syncProject({ dir, name: null }, ctx);
+  async function firstSync(
+    engine: SyncEngine,
+    dir: string,
+    ctx: EngineCtx,
+    toHost: { readonly hostRemote?: string; readonly skipCloud?: boolean },
+  ) {
+    let result = await engine.syncProject({ dir, name: null, ...toHost }, ctx);
     const base = result.name || engine.defaultName(dir);
     for (
       let n = 2;
       n <= 6 && result.state === "blocked" && /different project/.test(result.message);
       n += 1
     ) {
-      result = await engine.syncProject({ dir, name: `${base}-${n}`.slice(0, 64) }, ctx);
+      result = await engine.syncProject({ dir, name: `${base}-${n}`.slice(0, 64), ...toHost }, ctx);
     }
     return result;
   }
@@ -732,6 +767,45 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
 
     setEnabled: (projectId: string, enabled: boolean): Promise<ProjectSyncEntry> =>
       enabled ? enable(projectId) : disable(projectId),
+
+    /**
+     * A new project's folder, its own git and first version, before it is a
+     * project: it syncs as a repository from its first moment (a folder Uno
+     * saw without git stays a snapshot).
+     */
+    startRepository: async (folder: string, name: string) => {
+      const dir = path.resolve(expandHome(deps.home, folder));
+      if (dir === path.resolve(deps.home)) {
+        throw new ProjectSyncFailure("Pick a folder inside your home folder.");
+      }
+      const engine = await deps.engine();
+      await engine.startRepository({ dir, name }, await engineCtx());
+    },
+
+    /** Where the project's folder is, for what publishes it. */
+    folderOf: async (projectId: string) => {
+      const project = await projectOf(projectId);
+      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+      return folderOf(project);
+    },
+
+    /** The project was published: from now on its repository is kept in step too. */
+    hostConnected: async (projectId: string, host: ProjectSyncHost) => {
+      await load();
+      const project = await projectOf(projectId);
+      if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
+      const dir = folderOf(project);
+      const entry: Stored = store[projectId] ?? newEntry(dir);
+      store[projectId] = entry;
+      entry.enabled = true;
+      entry.dir = dir;
+      entry.host = host;
+      await persist();
+      startWatch(projectId, dir);
+      await scheduler.runNow(projectId);
+      elsewhere = null;
+      return view(projectId);
+    },
 
     syncNow: async (projectId: string) => {
       await load();

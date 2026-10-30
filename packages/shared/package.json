@@ -140,6 +140,10 @@
       "types": "./src/handoff.ts",
       "import": "./src/handoff.ts"
     },
+    "./noProject": {
+      "types": "./src/noProject.ts",
+      "import": "./src/noProject.ts"
+    },
     "./unoDrive": {
       "types": "./src/unoDrive.ts",
       "import": "./src/unoDrive.ts"

@@ -2,6 +2,7 @@
  * Two computers' daemons, end to end: the real sync engine and git helper
  * (packages/app-sdk), the cloud in a folder, the Uno vault faked in memory.
  */
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -60,7 +61,7 @@ function memoryVault() {
   return { vault, projects, reveals };
 }
 
-function computer(label: string, vault: ProjectVault) {
+function computer(label: string, vault: ProjectVault, options?: { readonly cloud?: boolean }) {
   const home = path.join(root, label);
   const stateDir = path.join(home, ".t3", "userdata");
   fs.mkdirSync(stateDir, { recursive: true });
@@ -85,7 +86,7 @@ function computer(label: string, vault: ProjectVault) {
       const file = path.join(home, ".uno", "sdk", "js", "uno-sync.mjs");
       return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
     },
-    available: async () => true,
+    available: async () => options?.cloud !== false,
     person: async () => "Misha",
     turnRunning: async (projectId) => busy.has(projectId),
     vault,
@@ -442,6 +443,137 @@ describe("versions, files, keys in files", { timeout: 120_000 }, () => {
       SECRET_PATTERN: RegExp;
     };
     expect(engine.SECRET_PATTERN.source).toBe(SECRET_TOKEN_PATTERN.source);
+  });
+});
+
+describe("a project with its own repository", { timeout: 120_000 }, () => {
+  /** A bare repository stands in for GitHub: no test here reaches a real host. */
+  const hostFor = (label: string) => {
+    const bare = path.join(root, `${label}-host.git`);
+    run(root, "init", "-q", "--bare", "--initial-branch=main", bare);
+    return bare;
+  };
+  const run = (cwd: string, ...args: string[]) => {
+    const done = spawnSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: root,
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_AUTHOR_NAME: "T",
+        GIT_AUTHOR_EMAIL: "t@example.com",
+        GIT_COMMITTER_NAME: "T",
+        GIT_COMMITTER_EMAIL: "t@example.com",
+      },
+    });
+    if (done.status !== 0) throw new Error(done.stderr);
+    return done.stdout.trim();
+  };
+  const hostHas = (bare: string, message: string) =>
+    run(bare, "log", "--format=%s", "main").includes(message);
+  const started = async (at: ReturnType<typeof computer>, name: string) => {
+    const dir = path.join(at.home, "projects", name);
+    await at.core.startRepository(dir, name);
+    const id = `p-${at.projects.length + 1}`;
+    at.projects.push({
+      id,
+      title: name,
+      workspaceRoot: dir,
+      createdAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await at.core.status();
+    await at.core.adoptNewProjects();
+    return { id, dir };
+  };
+  const host = {
+    provider: "github" as const,
+    repository: "misha/site",
+    url: "https://github.com/misha/site",
+  };
+
+  it("syncs as a repository from the start, and its host is pushed to and pulled from", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault);
+    const { id, dir } = await started(a, "site");
+    const bare = hostFor("a");
+    run(dir, "remote", "add", "origin", bare);
+
+    const entry = await a.core.hostConnected(id, { ...host, remote: "origin" });
+    expect(entry).toMatchObject({ enabled: true, mode: "git", state: "synced", name: "site" });
+    expect(entry.host).toEqual({ ...host, remote: "origin" });
+    expect(fs.existsSync(path.join(dir, ".uno-git"))).toBe(false);
+    expect(hostHas(bare, "Initial commit")).toBe(true);
+
+    fs.writeFileSync(path.join(dir, "page.html"), "hi\n");
+    run(dir, "add", "page.html");
+    run(dir, "commit", "-q", "-m", "a page");
+    await a.core.syncNow(id);
+    expect(hostHas(bare, "a page")).toBe(true);
+    expect((await a.core.entry(id)).host?.repository).toBe("misha/site");
+  });
+
+  it("keeps a key away from the host", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault);
+    const { id, dir } = await started(a, "site");
+    const bare = hostFor("a");
+    run(dir, "remote", "add", "origin", bare);
+    await a.core.hostConnected(id, { ...host, remote: "origin" });
+
+    fs.writeFileSync(path.join(dir, "config.json"), `${FAKE_KEY}\n`);
+    run(dir, "add", "config.json");
+    run(dir, "commit", "-q", "-m", "with a key");
+    const entry = await a.core.syncNow(id);
+    expect(entry.held).toContain("config.json");
+    expect(JSON.stringify(entry)).not.toContain(FAKE_KEY);
+    expect(hostHas(bare, "with a key")).toBe(false);
+  });
+
+  it("still goes to its host on a computer with no way to the Uno cloud", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault, { cloud: false });
+    const dir = path.join(a.home, "projects", "site");
+    await a.core.startRepository(dir, "site");
+    a.projects.push({ id: "p-1", title: "site", workspaceRoot: dir });
+    const bare = hostFor("a");
+    run(dir, "remote", "add", "origin", bare);
+
+    const entry = await a.core.hostConnected("p-1", { ...host, remote: "origin" });
+    expect(entry).toMatchObject({ enabled: true, state: "synced" });
+    expect(hostHas(bare, "Initial commit")).toBe(true);
+  });
+
+  it("won't start in the home folder or over someone's files", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault);
+    await expect(a.core.startRepository(a.home, "home")).rejects.toThrow(/inside your home/);
+    const taken = path.join(a.home, "projects", "taken");
+    fs.mkdirSync(taken, { recursive: true });
+    fs.writeFileSync(path.join(taken, "mine.txt"), "x");
+    await expect(a.core.startRepository(taken, "taken")).rejects.toThrow(/already has files/);
+  });
+});
+
+describe("chats without a project", { timeout: 120_000 }, () => {
+  it("a chat's folder that became a project syncs by itself; ~/chats itself never does", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault);
+    await a.core.status();
+    const at = new Date(Date.now() + 60_000).toISOString();
+    const chats = path.join(a.home, "chats");
+    const folder = path.join(chats, "2026-10-30-a-chat-c3d4e5f6");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "notes.md"), "notes\n");
+    a.projects.push(
+      { id: "no-project", title: "No project", workspaceRoot: chats, createdAt: at },
+      { id: "promoted", title: "A chat", workspaceRoot: folder, createdAt: at },
+    );
+
+    await a.core.adoptNewProjects();
+    expect((await a.core.entry("promoted")).enabled).toBe(true);
+    expect((await a.core.entry("no-project")).enabled).toBe(false);
+    a.core.stop();
   });
 });
 

@@ -19,6 +19,7 @@ import {
   type ScopedProjectRef,
   type ServerProvider,
 } from "@t3tools/contracts";
+import { NO_PROJECT_TITLE, isNoProjectRoot } from "@t3tools/shared/noProject";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -59,6 +60,8 @@ export async function resolveHomeFolder(environmentId: EnvironmentId): Promise<s
   }
 }
 
+const HOME_FOLDER_RETRY_MS = 3000;
+
 /** The home folder for rendering ("is this chat in the home folder?"). */
 export function useHomeFolderPath(environmentId: EnvironmentId | null): string | null {
   return (
@@ -67,6 +70,8 @@ export function useHomeFolderPath(environmentId: EnvironmentId | null): string |
       queryFn: () => resolveHomeFolder(environmentId!),
       enabled: environmentId !== null,
       staleTime: Number.POSITIVE_INFINITY,
+      // Not answered yet (a computer still connecting): ask again, don't keep the "no".
+      refetchInterval: (query) => (query.state.data ? false : HOME_FOLDER_RETRY_MS),
     }).data ?? null
   );
 }
@@ -104,15 +109,17 @@ export async function ensureFolderProjectOn(
     options?.providers ?? readEnvironmentServerConfig(environmentId)?.providers ?? [];
   const selection = options?.defaultModelSelection ?? pickUsableDefaultModelSelection(providers);
   const projectId = newProjectId();
+  const home = await resolveHomeFolder(environmentId);
+  const noProject = home !== null && isNoProjectRoot(folder, home);
   await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
     type: "project.create",
     commandId: newCommandId(),
     projectId,
-    title: title ?? inferProjectTitleFromPath(folder),
+    title: noProject ? NO_PROJECT_TITLE : (title ?? inferProjectTitleFromPath(folder)),
     workspaceRoot: folder,
-    // "Empty project" makes the folder; every other path points at one
-    // that is already there.
-    createWorkspaceRootIfMissing: options?.createFolder === true,
+    // "Empty project" and "No project" make the folder; every other path
+    // points at one that is already there.
+    createWorkspaceRootIfMissing: noProject || options?.createFolder === true,
     defaultModelSelection: selection ?? {
       instanceId: ProviderInstanceId.make("codex"),
       model: DEFAULT_MODEL,

@@ -345,6 +345,7 @@ import {
   ProjectSecretSetInput,
   ProjectSecretsList,
   ProjectSyncAnswerInput,
+  ProjectSyncConnectHostInput,
   ProjectSyncEntry,
   ProjectSyncError,
   ProjectSyncFiles,
@@ -359,6 +360,7 @@ import {
   ProjectSyncSetEnabledInput,
   ProjectSyncSetLocalOnlyInput,
   ProjectSyncSnapshot,
+  ProjectSyncStartRepositoryInput,
 } from "./projectSync.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -494,6 +496,8 @@ export const WS_METHODS = {
   projectSyncSetLocalOnly: "projectSync.setLocalOnly",
   projectSyncIntroSeen: "projectSync.introSeen",
   projectSyncAnswerOld: "projectSync.answerOld",
+  projectSyncStartRepository: "projectSync.startRepository",
+  projectSyncConnectHost: "projectSync.connectHost",
   projectSecretsList: "projectSecrets.list",
   projectSecretsSet: "projectSecrets.set",
   projectSecretsRemove: "projectSecrets.remove",
@@ -775,6 +779,17 @@ export const WsProjectSyncStatusRpc = Rpc.make(WS_METHODS.projectSyncStatus, {
 
 export const WsProjectSyncSetEnabledRpc = Rpc.make(WS_METHODS.projectSyncSetEnabled, {
   payload: ProjectSyncSetEnabledInput,
+  success: ProjectSyncEntry,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncStartRepositoryRpc = Rpc.make(WS_METHODS.projectSyncStartRepository, {
+  payload: ProjectSyncStartRepositoryInput,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncConnectHostRpc = Rpc.make(WS_METHODS.projectSyncConnectHost, {
+  payload: ProjectSyncConnectHostInput,
   success: ProjectSyncEntry,
   error: ProjectSyncError,
 });
@@ -2380,6 +2395,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectSyncSetLocalOnlyRpc,
   WsProjectSyncIntroSeenRpc,
   WsProjectSyncAnswerOldRpc,
+  WsProjectSyncStartRepositoryRpc,
+  WsProjectSyncConnectHostRpc,
   WsProjectSecretsListRpc,
   WsProjectSecretsSetRpc,
   WsProjectSecretsRemoveRpc,

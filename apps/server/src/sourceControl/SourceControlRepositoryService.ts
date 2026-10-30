@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../config.ts";
+import { PublishKeyCheck } from "../projectSync/publishKeyCheck.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
@@ -128,6 +129,9 @@ function selectRemoteUrl(
   }
 }
 
+const SSH_REFUSED_RE =
+  /permission denied \(publickey|host key verification failed|could not read from remote repository|port 22/i;
+
 function expandHomePath(input: string, path: Path.Path): string {
   if (input === "~") {
     return NodeOS.homedir();
@@ -144,6 +148,7 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
   const git = yield* GitVcsDriver.GitVcsDriver;
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  const keyCheck = yield* PublishKeyCheck;
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -282,6 +287,25 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         provider: input.provider,
       });
       const provider = yield* providers.get(providerKind);
+      // Before anything exists out there: keys don't leave, and a project that
+      // has them doesn't leave an empty repository behind.
+      const problem = yield* keyCheck.problem(input.cwd).pipe(
+        Effect.mapError((cause) =>
+          repositoryError({
+            operation: "publishRepository",
+            provider: providerKind,
+            detail: cause.message,
+            cause,
+          }),
+        ),
+      );
+      if (problem !== null) {
+        return yield* repositoryError({
+          operation: "publishRepository",
+          provider: providerKind,
+          detail: problem,
+        });
+      }
       const urls = yield* provider.createRepository({
         cwd: input.cwd,
         repository: input.repository.trim(),
@@ -321,7 +345,21 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         };
       }
 
-      const pushResult = yield* git.pushCurrentBranch(input.cwd, null, { remoteName });
+      const push = git.pushCurrentBranch(input.cwd, null, { remoteName });
+      // "auto" starts with SSH: a computer signed in over HTTPS has no key for it.
+      const pushResult = yield* push.pipe(
+        Effect.catch((error) =>
+          (input.protocol ?? "auto") === "auto" && SSH_REFUSED_RE.test(error.message)
+            ? git
+                .execute({
+                  operation: "SourceControlRepositoryService.publishRepository.useHttps",
+                  cwd: input.cwd,
+                  args: ["remote", "set-url", remoteName, urls.url],
+                })
+                .pipe(Effect.andThen(push))
+            : Effect.fail(error),
+        ),
+      );
 
       return {
         repository: toRepositoryInfo(providerKind, urls),

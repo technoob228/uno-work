@@ -1,19 +1,28 @@
 /**
  * "in [Home folder ▾]" on a new chat — where it works. A searchable list
  * (upstream T3 Code's draft project picker, #17664 / #10790: favicon, search
- * field, "Add project" last) over this computer's folders: the home folder,
- * every folder already worked in (newest chat first), then the ways to bring
- * one in — Another folder…, New folder…, Upload a folder…, Clone from
- * GitHub… (the folder chip's choices, so both say the same). With the
- * assistants update the list also has the assistants, right under the home
- * folder (Misha 30.10): a chat can start with one instead of in a folder.
+ * field, "Add project" last) over this computer's folders: No project (a light
+ * folder of the chat's own, Misha 30.10), the home folder, every folder already
+ * worked in (newest chat first), then the ways to bring one in — New project…,
+ * Another folder…, Upload a folder…, Clone from GitHub… (the folder chip's
+ * choices, so both say the same). With the assistants update the list also has
+ * the assistants, right under the home folder (Misha 30.10): a chat can start
+ * with one instead of in a folder.
  *
  * `variant`: "inline" — a word in the draft screen's question; "chip" —
  * Home's composer row.
  */
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
-import { ChevronDownIcon, FolderIcon, FolderOpenIcon, HouseIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  HouseIcon,
+  MessageSquareDashedIcon,
+} from "lucide-react";
 import { useMemo, useState } from "react";
+
+import { NO_PROJECT_TITLE, isNoProjectRoot } from "@t3tools/shared/noProject";
 
 import { cn } from "~/lib/utils";
 import { folderDisplayName, useHomeFolderPath } from "../../hooks/useFolderChats";
@@ -21,7 +30,12 @@ import { type ChatFolderSource, openFolderForChat } from "../../navigation/newPr
 import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import type { TeamMember } from "../assistants/useAssistantTeam";
 import { ChatInFolderDialog } from "../computer/ChatInFolderDialog";
-import { BRING_FOLDER, type PickedFolder, useRecentFolders } from "../computer/FolderChipMenu";
+import {
+  BRING_FOLDER,
+  type PickedFolder,
+  noProjectFolder,
+  useRecentFolders,
+} from "../computer/FolderChipMenu";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Button, InlineButton } from "../ui/button";
 import {
@@ -39,6 +53,7 @@ import { usePickerShortcut, withShortcutHint } from "./usePickerShortcut";
 
 const NO_ASSISTANTS: ReadonlyArray<TeamMember> = [];
 const HOME_VALUE = "home";
+const NO_PROJECT_VALUE = "no-project";
 const ANOTHER_VALUE = "action:another";
 const sourceValue = (source: ChatFolderSource) => `action:${source}`;
 const assistantValue = (member: TeamMember) => `assistant:${member.key}`;
@@ -97,17 +112,23 @@ export function NewChatFolderPicker({
   );
   const items = useMemo<PickerItem[]>(
     () => [
+      ...(home ? [{ value: NO_PROJECT_VALUE, label: NO_PROJECT_TITLE }] : []),
       { value: HOME_VALUE, label: "Home folder" },
       ...assistants.map((member) => ({
         value: assistantValue(member),
         label: member.profile.name,
       })),
       ...folders.map((project) => ({ value: `project:${project.id}`, label: project.name })),
+      ...BRING_FOLDER.slice(0, 1).map(({ source, label }) => ({
+        value: sourceValue(source),
+        label,
+      })),
       { value: ANOTHER_VALUE, label: "Another folder…" },
-      ...BRING_FOLDER.map(({ source, label }) => ({ value: sourceValue(source), label })),
+      ...BRING_FOLDER.slice(1).map(({ source, label }) => ({ value: sourceValue(source), label })),
     ],
-    [assistants, folders],
+    [assistants, folders, home],
   );
+  const noProject = folder !== null && home !== null && isNoProjectRoot(folder.cwd, home);
   const search = query.trim();
   // While searching: folders only (the ways to bring one in stay for an empty field).
   const filteredItems =
@@ -121,8 +142,10 @@ export function NewChatFolderPicker({
   const selected = assistant
     ? (items.find((item) => item.value === assistantValue(assistant)) ?? null)
     : folder === null
-      ? (items[0] ?? null)
-      : (items.find((item) => folderByValue.get(item.value)?.cwd === folder.cwd) ?? null);
+      ? (items.find((item) => item.value === HOME_VALUE) ?? null)
+      : noProject
+        ? (items.find((item) => item.value === NO_PROJECT_VALUE) ?? null)
+        : (items.find((item) => folderByValue.get(item.value)?.cwd === folder.cwd) ?? null);
   const label = assistant ? assistant.profile.name : folder ? folder.name : "Home folder";
   // A hairline opens each group, while the whole list shows.
   const firstOfGroup = new Set(
@@ -131,7 +154,7 @@ export function NewChatFolderPicker({
       : [
           assistants[0] ? assistantValue(assistants[0]) : null,
           assistants.length > 0 && folders[0] ? `project:${folders[0].id}` : null,
-          ANOTHER_VALUE,
+          sourceValue(BRING_FOLDER[0]!.source),
         ],
   );
   const searchNoun = assistants.length > 0 ? "folders and assistants" : "folders";
@@ -146,6 +169,7 @@ export function NewChatFolderPicker({
 
   const pick = (item: PickerItem) => {
     if (item.value === HOME_VALUE) return onPick(null);
+    if (item.value === NO_PROJECT_VALUE) return home ? onPick(noProjectFolder(home)) : undefined;
     const member = assistantByValue.get(item.value);
     if (member) return onPickAssistant?.(member);
     if (item.value === ANOTHER_VALUE) {
@@ -154,8 +178,10 @@ export function NewChatFolderPicker({
     }
     const bring = BRING_FOLDER.find(({ source }) => sourceValue(source) === item.value);
     if (bring) {
-      openFolderForChat(bring.source, ({ name, folder: cwd, projectRef }) =>
-        onPick({ cwd, name }, projectRef),
+      openFolderForChat(
+        bring.source,
+        ({ name, folder: cwd, projectRef }) => onPick({ cwd, name }, projectRef),
+        { environmentId },
       );
       return;
     }
@@ -213,6 +239,8 @@ export function NewChatFolderPicker({
                 tone={assistant.profile.tone}
                 className="size-4"
               />
+            ) : noProject ? (
+              <MessageSquareDashedIcon />
             ) : folder ? (
               <FolderIcon />
             ) : (
@@ -254,6 +282,8 @@ export function NewChatFolderPicker({
                 >
                   {item.value === HOME_VALUE ? (
                     <HouseIcon className="size-4 shrink-0 text-muted-foreground" />
+                  ) : item.value === NO_PROJECT_VALUE ? (
+                    <MessageSquareDashedIcon className="size-4 shrink-0 text-muted-foreground" />
                   ) : member ? (
                     <AssistantAvatar
                       emoji={member.profile.emoji}

@@ -1044,9 +1044,9 @@ export default function ChatView(props: ChatViewProps) {
       openFolderForChat(
         "upload",
         ({ folder, projectRef }) => moveDraftToFolder(draftId, folder, projectRef),
-        files,
+        { files, environmentId },
       );
-  }, [draftId, hasDraftFolder, moveDraftToFolder]);
+  }, [draftId, environmentId, hasDraftFolder, moveDraftToFolder]);
 
   useEffect(() => {
     if (routeKind !== "server") {

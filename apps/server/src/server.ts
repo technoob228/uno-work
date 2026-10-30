@@ -130,6 +130,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
+import * as PublishKeyCheck from "./projectSync/publishKeyCheck.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
@@ -387,6 +388,7 @@ const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
 );
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
+  Layer.provide(PublishKeyCheck.layer),
   Layer.provideMerge(GitVcsDriver.layer),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
 );

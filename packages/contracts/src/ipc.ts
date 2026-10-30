@@ -3,6 +3,7 @@ import type {
   ProjectSecretSetInput,
   ProjectSecretsList,
   ProjectSyncAnswerInput,
+  ProjectSyncConnectHostInput,
   ProjectSyncEntry,
   ProjectSyncFiles,
   ProjectSyncGetHereInput,
@@ -15,6 +16,7 @@ import type {
   ProjectSyncSetEnabledInput,
   ProjectSyncSetLocalOnlyInput,
   ProjectSyncSnapshot,
+  ProjectSyncStartRepositoryInput,
 } from "./projectSync.ts";
 import type {
   SkillsAddInput,
@@ -1003,6 +1005,8 @@ export interface EnvironmentApi {
     setLocalOnly: (input: ProjectSyncSetLocalOnlyInput) => Promise<ProjectSyncFiles>;
     introSeen: () => Promise<void>;
     answerOld: (input: ProjectSyncAnswerInput) => Promise<void>;
+    startRepository: (input: ProjectSyncStartRepositoryInput) => Promise<void>;
+    connectHost: (input: ProjectSyncConnectHostInput) => Promise<ProjectSyncEntry>;
     secretsList: (input: ProjectSyncProjectInput) => Promise<ProjectSecretsList>;
     secretsSet: (input: ProjectSecretSetInput) => Promise<ProjectSecretsList>;
     secretsRemove: (input: ProjectSecretRemoveInput) => Promise<ProjectSecretsList>;

@@ -276,6 +276,15 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Bring your own.** `AddEnvModal`: честный текст и событие воронки `connect_path` с `props.card = "bring_your_own"`. Без аккаунтного транспорта событие не пишется.
 - **Fix Work (меню аккаунта).** `POST /api/fix-work/prepare` (только владелец) кладёт в `<stateDir>/fix-work/<stamp>/` плейбук, контекст и очищенный хвост логов, веб открывает чат в режиме Ask. Письмо это тул `support_draft`: демон чистит секреты (`redactForSupport`) и показывает карточку, человек отправляет сам. Границы держат плейбук, Ask и очистка на демоне, песочницы нет.
 
+### Поток newproject (волна T3→Work, 30.10)
+
+- **No project.** Пункт в пикере нового чата и на Home (`NewChatFolderPicker`, `FolderChipMenu`). У компьютера один проект с корнем `~/chats` (`packages/shared/src/noProject.ts`), демон при bootstrap чата делает ему свою папку `~/chats/<дата>-<слова>` (`project/noProjectFolder.ts`, `noProjectChatFolder` в `ws.ts`). Ошибка папки отправку не ломает. Превращение в проект: прежний `thread.project.adopt`. Папки не чистятся, как и scratch у T3.
+- **New project в пикере.** Тот же `NewProjectDialog`, шаг `empty`: имя (живёт в `newProjectStore`, чтобы не пропасть при смене компьютера), компьютер (`NewChatComputerPicker`, вместе с `activeEnvironmentId`), куда синкать (`projectDestinations`: Uno, подключённые GitHub/GitLab, только на этом компьютере). Upload и Clone идут по-старому.
+- **Подключён = `server.discoverSourceControl`:** `gh`/`glab` на этом компьютере залогинены. GitHub App аккаунта здесь не считается.
+- **Проект с репозиторием.** Порядок важен: `projectSync.startRepository` (git и первый коммит) до `project.create`, иначе папка навсегда останется snapshot. Потом `projectSync.connectHost` в фоне с тостом: приватный репозиторий, remote, `Stored.host`. `syncGit` обменивается с хостом через `exchangeHost` (`hostRemote`, `skipCloud`), провал хоста не останавливает Uno.
+- **Ключи.** `SourceControlRepositoryService` до `createRepository` вызывает `PublishKeyCheck` (`keysBeforePublish` из `uno-sync`, вся история HEAD), ошибка проверки тоже запрещает публикацию. Дальше каждый push к хосту идёт через `keysLeavingWith` со своим кэшем `uno-held-<remote>.json`. Правка `uno-sync.mjs` требует `node apps/server/scripts/embed-app-sdk.ts`.
+- **Демо:** `?hosts=github,gitlab` включает хосты, сценарий `apps/web/demo-e2e/newproject-shots.mjs`. Харнесс демо не кодирует ответы, поэтому void-RPC отвечает `null`: `undefined` выпадает из JSON.
+
 ### Смена агента в начатом чате (handoff, волна T3→Work, 30.10)
 
 В начатом чате можно выбрать другого агента: следующее сообщение уходит ему, и он продолжает с контекстом. Основа — `apps/server/src/orchestration/handoff.ts` (`buildAgentSwitchSeed`), поведение как у T3 (`docs/user/portable-handoffs.md`).

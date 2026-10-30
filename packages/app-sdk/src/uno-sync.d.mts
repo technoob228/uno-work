@@ -50,6 +50,18 @@ export interface SyncResult {
   /** Files with something that looks like a key inside: they wait on this computer. */
   held: string[];
   message: string;
+  /** The project's GitHub or GitLab side of this sync, when it has one. */
+  host?: HostSync;
+}
+
+export interface HostSync {
+  remote: string;
+  /** Its name for people: "GitHub", "GitLab" or the remote's name. */
+  place: string;
+  state: SyncState;
+  pushed: boolean;
+  pulled: boolean;
+  message: string;
 }
 
 export interface ProjectMeta {
@@ -79,9 +91,28 @@ export declare function writeMeta(storage: Storage, name: string, meta: ProjectM
 export declare function readConflict(gitDir: string): Promise<ConflictRecord | null>;
 
 export declare function syncProject(
-  input: { dir: string; name?: string | null; adopt?: boolean; reason?: string },
+  input: {
+    dir: string;
+    name?: string | null;
+    adopt?: boolean;
+    reason?: string;
+    /** A remote that is pulled from and pushed to on each sync, next to the Uno cloud. */
+    hostRemote?: string | null;
+    /** This computer has no way to the Uno cloud: only `hostRemote` syncs. */
+    skipCloud?: boolean;
+  },
   ctx: SyncCtx,
 ): Promise<SyncResult>;
+
+/** The files with a key in everything a push of this folder's HEAD to a new place would carry. */
+export declare function keysBeforePublish(input: { dir: string }, ctx: SyncCtx): Promise<string[]>;
+export declare function heldFromPublishMessage(files: string[]): string;
+
+/** A new folder with its own git and a first version, ready for a host. */
+export declare function startRepository(
+  input: { dir: string; name: string },
+  ctx: SyncCtx,
+): Promise<void>;
 
 export declare function resolveConflict(
   input: { dir: string; name: string; keep: "mine" | "theirs" | "dismiss" },

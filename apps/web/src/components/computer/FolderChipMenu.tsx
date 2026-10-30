@@ -1,12 +1,13 @@
 /**
- * The "Home folder ▾" chip: where a new chat works. One click opens the recent
- * folders on this computer, "Another folder…" (the click-through folder
- * picker — no paths to type) and three ways to bring a folder in (08.10): New
- * folder…, Upload a folder…, Clone from GitHub… — the New project dialog's
- * steps, worded as folders; the new folder lands in `~/projects/<name>` and
- * the chat moves there with what was typed. Shared by Home's composer and a
- * new chat's header, so both offer the same choice. Nothing changes until the
- * person picks: the chat works in the home folder.
+ * The "Home folder ▾" chip: where a new chat works. One click opens "No
+ * project" (a light folder of the chat's own in `~/chats`), the recent folders
+ * on this computer, "Another folder…" (the click-through folder picker — no
+ * paths to type) and three ways to bring a folder in (08.10): New project…,
+ * Upload a folder…, Clone from GitHub… — the New project dialog's steps; the
+ * new folder lands in `~/projects/<name>` and the chat moves there with what
+ * was typed. Shared by Home's composer and a new chat's header, so both offer
+ * the same choice. Nothing changes until the person picks: the chat works in
+ * the home folder.
  */
 import {
   isAssistantProjectId,
@@ -20,9 +21,12 @@ import {
   FolderPlusIcon,
   FolderUpIcon,
   HouseIcon,
+  MessageSquareDashedIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+
+import { NO_PROJECT_TITLE, isNoProjectRoot, noProjectRoot } from "@t3tools/shared/noProject";
 
 import { cn } from "~/lib/utils";
 import { folderDisplayName, useHomeFolderPath } from "../../hooks/useFolderChats";
@@ -54,7 +58,7 @@ export const BRING_FOLDER: ReadonlyArray<{
   label: string;
   Icon: React.ComponentType<{ className?: string }>;
 }> = [
-  { source: "empty", label: "New folder…", Icon: FolderPlusIcon },
+  { source: "empty", label: "New project…", Icon: FolderPlusIcon },
   { source: "upload", label: "Upload a folder…", Icon: FolderUpIcon },
   { source: "github", label: "Clone from GitHub…", Icon: GitHubIcon },
 ];
@@ -64,12 +68,18 @@ export interface PickedFolder {
   readonly name: string;
 }
 
+/** The "No project" choice on this computer. */
+export function noProjectFolder(home: string): PickedFolder {
+  return { cwd: noProjectRoot(home), name: NO_PROJECT_TITLE };
+}
+
 /**
  * This computer's folders (projects) for "Work in", newest chat first, as in
  * the sidebar — the project's own updatedAt barely moves (it is the folder's
  * settings), so a folder worked in every day could fall off the list behind
- * ones untouched since spring (15.10). The home folder and assistants' folders
- * are not in it. Shared by the chip and the new chat's searchable picker.
+ * ones untouched since spring (15.10). The home folder, "No project" and
+ * assistants' folders are not in it. Shared by the chip and the new chat's
+ * searchable picker.
  */
 export function useRecentFolders(
   environmentId: EnvironmentId | null,
@@ -84,7 +94,8 @@ export function useRecentFolders(
       (project) =>
         project.environmentId === environmentId &&
         !isAssistantProjectId(project.id) &&
-        normalizeProjectPathForComparison(project.cwd) !== homeKey,
+        normalizeProjectPathForComparison(project.cwd) !== homeKey &&
+        !(home && isNoProjectRoot(project.cwd, home)),
     );
     const sorted = sortProjectsForSidebar(
       mine,
@@ -140,6 +151,15 @@ export function FolderChipMenu({
         <MenuPopup align="start">
           <MenuGroup>
             <MenuGroupLabel>Work in</MenuGroupLabel>
+            {home ? (
+              <MenuItem
+                data-testid="folder-chip-no-project"
+                onClick={() => onPick(noProjectFolder(home))}
+              >
+                <MessageSquareDashedIcon />
+                {NO_PROJECT_TITLE}
+              </MenuItem>
+            ) : null}
             <MenuItem onClick={() => onPick(null)}>
               <HouseIcon />
               Home folder
@@ -164,8 +184,10 @@ export function FolderChipMenu({
               key={source}
               data-testid={`folder-chip-${source}`}
               onClick={() =>
-                openFolderForChat(source, ({ name, folder: cwd, projectRef }) =>
-                  onPick({ cwd, name }, projectRef),
+                openFolderForChat(
+                  source,
+                  ({ name, folder: cwd, projectRef }) => onPick({ cwd, name }, projectRef),
+                  { environmentId },
                 )
               }
             >

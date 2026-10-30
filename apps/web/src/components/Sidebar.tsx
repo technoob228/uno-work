@@ -103,6 +103,8 @@ import {
 } from "../environments/threadSnoozeSupport";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
+import { NO_PROJECT_TITLE, isNoProjectRoot } from "@t3tools/shared/noProject";
+
 import { HOME_FOLDER_TITLE, useFolderChats, useHomeFolderPath } from "../hooks/useFolderChats";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useLocalStorage } from "../hooks/useLocalStorage";
@@ -916,9 +918,10 @@ interface SidebarThreadRowProps {
 async function turnChatIntoProjectWithNotice(
   threadRef: ScopedThreadRef,
   folder: string,
+  title: string,
 ): Promise<void> {
   try {
-    await turnChatIntoProject(threadRef, folder);
+    await turnChatIntoProject(threadRef, folder, title);
     toastManager.add(stackedThreadToast({ type: "success", title: "The chat is a project now" }));
   } catch (error) {
     toastManager.add(
@@ -1165,6 +1168,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   ) : (
     <span
       data-testid={`thread-title-${thread.id}`}
+      title={thread.title}
       className={cn(
         "min-w-0 flex-1 truncate text-sm",
         shouldRecede ? "font-normal" : "font-medium",
@@ -1361,6 +1365,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             ) : (
               <span
                 data-testid={`thread-title-${thread.id}`}
+                title={thread.title}
                 className={cn(
                   "min-w-0 flex-1 truncate text-sm",
                   props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
@@ -1786,7 +1791,9 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             className="size-4 shrink-0"
           />
         ) : null}
-        <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+        <span className="min-w-0 flex-1 truncate" title={thread.title}>
+          {thread.title}
+        </span>
         <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
           {threadTimeLabel(thread)}
         </span>
@@ -2306,9 +2313,11 @@ export default function Sidebar() {
         (project.environmentId === dThisComputer
           ? (dHomeFolderPath?.replace(/\/+$/, "") ?? null)
           : null);
-      if (home !== null) return project.cwd.replace(/\/+$/, "") === home;
+      if (home !== null) {
+        return project.cwd.replace(/\/+$/, "") === home || isNoProjectRoot(project.cwd, home);
+      }
       // Computer not answering yet: the home folder's project carries its name.
-      return project.name === HOME_FOLDER_TITLE;
+      return project.name === HOME_FOLDER_TITLE || project.name === NO_PROJECT_TITLE;
     },
     [dHomeFolderPath, dHomePaths, dThisComputer],
   );
@@ -3492,7 +3501,7 @@ export default function Sidebar() {
             if (projectOffer?.kind === "pick-folder") {
               setProjectFolderTarget(threadRef);
             } else if (projectOffer?.kind === "own-folder") {
-              void turnChatIntoProjectWithNotice(threadRef, projectOffer.folder);
+              void turnChatIntoProjectWithNotice(threadRef, projectOffer.folder, thread.title);
             }
             return;
           case "pin":

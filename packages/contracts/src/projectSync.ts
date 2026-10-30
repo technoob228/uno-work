@@ -49,6 +49,24 @@ export type ProjectSyncConflict = typeof ProjectSyncConflict.Type;
 export const ProjectSyncMode = Schema.Literals(["snapshot", "git"]);
 export type ProjectSyncMode = typeof ProjectSyncMode.Type;
 
+/** Where a project can live besides the Uno cloud. */
+export const ProjectSyncHostProvider = Schema.Literals(["github", "gitlab"]);
+export type ProjectSyncHostProvider = typeof ProjectSyncHostProvider.Type;
+
+/**
+ * The project's private repository on GitHub or GitLab: it is a git project,
+ * and what's committed is pushed and pulled by itself.
+ */
+export const ProjectSyncHost = Schema.Struct({
+  provider: ProjectSyncHostProvider,
+  /** `owner/name`. */
+  repository: Schema.String,
+  url: Schema.String,
+  /** The git remote on this computer. */
+  remote: Schema.String,
+});
+export type ProjectSyncHost = typeof ProjectSyncHost.Type;
+
 export const ProjectSyncEntry = Schema.Struct({
   projectId: ProjectId,
   enabled: Schema.Boolean,
@@ -65,6 +83,8 @@ export const ProjectSyncEntry = Schema.Struct({
    * still syncs; the row stays `synced` and says so.
    */
   held: Schema.optional(Schema.Array(Schema.String)),
+  /** Set for a project that also lives in a GitHub or GitLab repository. */
+  host: Schema.optional(Schema.NullOr(ProjectSyncHost)),
 });
 export type ProjectSyncEntry = typeof ProjectSyncEntry.Type;
 
@@ -118,6 +138,22 @@ export type ProjectSyncIntroSeenInput = typeof ProjectSyncIntroSeenInput.Type;
 
 export const ProjectSyncAnswerInput = Schema.Struct({ turnOn: Schema.Boolean });
 export type ProjectSyncAnswerInput = typeof ProjectSyncAnswerInput.Type;
+
+/** A new folder with its own git and a first version, before it becomes a project. */
+export const ProjectSyncStartRepositoryInput = Schema.Struct({
+  folder: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+});
+export type ProjectSyncStartRepositoryInput = typeof ProjectSyncStartRepositoryInput.Type;
+
+/** Publish the project as a private repository and keep it in step from then on. */
+export const ProjectSyncConnectHostInput = Schema.Struct({
+  projectId: ProjectId,
+  provider: ProjectSyncHostProvider,
+  /** `name`, or `owner/name`. */
+  repository: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+});
+export type ProjectSyncConnectHostInput = typeof ProjectSyncConnectHostInput.Type;
 
 /** One saved version of a project: "how it was". */
 export const ProjectVersionFile = Schema.Struct({

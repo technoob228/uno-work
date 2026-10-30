@@ -8,9 +8,6 @@
  * @module projectSync/ProjectSyncService
  */
 import os from "node:os";
-import path from "node:path";
-import { stat } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
 
 import {
   CommandId,
@@ -21,12 +18,12 @@ import {
   type ProjectSyncFiles,
   type ProjectSyncGetHereResult,
   type ProjectSyncHistory,
+  type ProjectSyncHost,
   type ProjectSyncSnapshot,
   ThreadId,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer, Option, Stream } from "effect";
 
-import { installSdkFiles } from "../appSdk/sdkFiles.ts";
 import { ServerConfig } from "../config.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -41,6 +38,7 @@ import {
   type ProjectSyncCore,
   type SyncEngine,
 } from "./projectSyncCore.ts";
+import { loadEngine } from "./syncEngine.ts";
 import { consoleProjectVault } from "./vaultProjectSecrets.ts";
 
 export interface ProjectSyncShape {
@@ -72,6 +70,12 @@ export interface ProjectSyncShape {
     localOnly: boolean,
   ) => Effect.Effect<ProjectSyncFiles, ProjectSyncError>;
   readonly introSeen: Effect.Effect<void, ProjectSyncError>;
+  readonly startRepository: (folder: string, name: string) => Effect.Effect<void, ProjectSyncError>;
+  readonly folderOf: (projectId: string) => Effect.Effect<string, ProjectSyncError>;
+  readonly hostConnected: (
+    projectId: string,
+    host: ProjectSyncHost,
+  ) => Effect.Effect<ProjectSyncEntry, ProjectSyncError>;
   readonly answerOld: (turnOn: boolean) => Effect.Effect<void, ProjectSyncError>;
   readonly secretsList: (projectId: string) => Effect.Effect<ProjectSecretsList, ProjectSyncError>;
   readonly secretSet: (
@@ -116,13 +120,6 @@ export function cloudKeyOf(uno: {
   if (box) return box;
   const key = uno.apiKey.trim();
   return key && !key.startsWith("unollm_") ? key : null;
-}
-
-/** The engine the daemon wrote to `~/.uno/sdk/js/` (it runs next to the git helper it starts). */
-async function loadEngine(home: string): Promise<SyncEngine> {
-  const file = path.join(home, ".uno", "sdk", "js", "uno-sync.mjs");
-  if (!(await stat(file).catch(() => null))) await installSdkFiles(home);
-  return (await import(pathToFileURL(file).href)) as SyncEngine;
 }
 
 const make = Effect.gen(function* () {
@@ -288,6 +285,9 @@ const make = Effect.gen(function* () {
     setLocalOnly: (projectId, relative, localOnly) =>
       attempt(() => core.setLocalOnly(projectId, relative, localOnly)),
     introSeen: attempt(() => core.introSeen()),
+    startRepository: (folder, name) => attempt(() => core.startRepository(folder, name)),
+    folderOf: (projectId) => attempt(() => core.folderOf(projectId)),
+    hostConnected: (projectId, host) => attempt(() => core.hostConnected(projectId, host)),
     answerOld: (turnOn) => attempt(() => core.answerOld(turnOn)),
     secretsList: (projectId) => attempt(() => core.secretsList(projectId)),
     secretSet: (projectId, name, value) =>

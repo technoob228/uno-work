@@ -3,7 +3,8 @@
  * `DraftHeroProjectHeading` (one line when it fits, the question and the
  * pickers on two lines when it doesn't), with Uno Work's words and a second
  * picker for the computer. With an assistant picked the question is shorter:
- * "Ask [Ada]".
+ * "Ask [Ada]". Without a project there is no folder to ask about: "New chat
+ * with [No project] on [computer]".
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
@@ -13,6 +14,7 @@ export function DraftHeroProjectHeading({
   folderName,
   computerName,
   asksAssistant = false,
+  noProject = false,
 }: {
   folderPicker: ReactNode;
   /** Null: the question is only about the folder. */
@@ -22,7 +24,12 @@ export function DraftHeroProjectHeading({
   computerName: string | null;
   /** `folderPicker` names an assistant (it lives where the assistant does: no computer). */
   asksAssistant?: boolean;
+  /** `folderPicker` says "No project". */
+  noProject?: boolean;
 }) {
+  const question = noProject ? "New chat" : "What should we do";
+  const word = noProject ? "with" : "in";
+  const end = noProject ? "" : "?";
   const containerRef = useRef<HTMLDivElement>(null);
   const inlineRef = useRef<HTMLSpanElement>(null);
   const [fitsInline, setFitsInline] = useState(false);
@@ -70,17 +77,20 @@ export function DraftHeroProjectHeading({
           ref={inlineRef}
           className="flex w-max items-baseline gap-2 whitespace-nowrap font-normal text-3xl tracking-tight"
         >
-          <span>What should we do in</span>
+          <span>
+            {question} {word}
+          </span>
           <span className="font-medium">{folderName}</span>
           {computerName !== null ? (
             <>
               <span>on</span>
               <span>
-                <span className="font-medium">{computerName}</span>?
+                <span className="font-medium">{computerName}</span>
+                {end}
               </span>
             </>
           ) : (
-            <span>?</span>
+            <span>{end}</span>
           )}
         </span>
       </span>
@@ -89,9 +99,9 @@ export function DraftHeroProjectHeading({
         data-testid="draft-hero-heading"
       >
         <span className="max-w-full lg:group-data-[inline=true]/draft-hero:shrink-0">
-          What should we do
-          <span className="lg:group-data-[inline=true]/draft-hero:hidden">?</span>
-          <span className="hidden lg:group-data-[inline=true]/draft-hero:inline"> in</span>
+          {question}
+          <span className="lg:group-data-[inline=true]/draft-hero:hidden">{end}</span>
+          <span className="hidden lg:group-data-[inline=true]/draft-hero:inline"> {word}</span>
         </span>
         <span className="flex min-w-0 max-w-full flex-wrap items-baseline justify-center gap-x-2 text-base tracking-normal lg:group-data-[inline=true]/draft-hero:flex-nowrap lg:group-data-[inline=true]/draft-hero:text-3xl lg:group-data-[inline=true]/draft-hero:tracking-tight">
           <span className="min-w-0">{folderPicker}</span>
@@ -103,9 +113,11 @@ export function DraftHeroProjectHeading({
               <span className="min-w-0">{computerPicker}</span>
             </>
           ) : null}
-          <span className="-ml-2 hidden shrink-0 lg:group-data-[inline=true]/draft-hero:inline">
-            ?
-          </span>
+          {end ? (
+            <span className="-ml-2 hidden shrink-0 lg:group-data-[inline=true]/draft-hero:inline">
+              {end}
+            </span>
+          ) : null}
         </span>
       </h1>
     </div>

@@ -14,7 +14,9 @@
 //     .git and no hidden files.
 //   - A folder with its own git: the same path on its own repository (remote
 //     `uno`, added next to its GitHub one), committed work only — Uno never
-//     commits for the person there.
+//     commits for the person there. A project started on GitHub or GitLab from
+//     Uno Work (`startRepository`) also pulls from and pushes to that repository
+//     on each sync (`hostRemote`).
 //
 // A sync: save local changes → fetch → fast-forward, or merge when both
 // computers changed it. Text changes in different places merge; one file
@@ -149,6 +151,14 @@ export const DEFAULT_EXCLUDES = [
   ".uno-git.*",
 ];
 
+/** A new repository's `.gitignore`: what never travels, examples of `.env` excepted (isKeyFile). */
+const NEW_REPOSITORY_IGNORES = [
+  ...DEFAULT_EXCLUDES.filter((line) => !/^(#|\.git\/|\.uno-git)/.test(line)),
+  "!.env.example",
+  "!.env.sample",
+  "!.env.template",
+];
+
 /** Paths a project's own git must not carry for Uno to sync it (keys). */
 const KEY_FILE_RE =
   /(^|\/)(\.env(\..*)?|\.envrc|[^/]*\.(pem|key|p12|pfx|jks|keystore|ppk)|id_(rsa|dsa|ecdsa|ed25519)[^/]*|\.netrc|\.npmrc|\.pypirc)$/;
@@ -165,7 +175,10 @@ export function isKeyFile(/** @type {string} */ relative) {
  * @typedef {"synced" | "conflict" | "too-big" | "blocked" | "busy" | "error" | "empty"} SyncState
  * @typedef {{ ok: boolean, name: string, dir: string, mode: "snapshot" | "git", state: SyncState,
  *   pushed: boolean, pulled: boolean, changedFiles: number, head: string | null,
- *   conflict: ConflictRecord | null, held: string[], message: string }} SyncResult
+ *   conflict: ConflictRecord | null, held: string[], message: string, host?: HostSync }} SyncResult
+ * @typedef {{ remote: string, place: string, state: SyncState, pushed: boolean, pulled: boolean,
+ *   message: string }} HostSync
+ *   The project's GitHub or GitLab side of a sync (`hostRemote`).
  * @typedef {{ mode: "snapshot" | "git", remotes?: Record<string, string>, folderName?: string,
  *   createdBy?: string, createdAt?: string }} ProjectMeta
  */
@@ -661,26 +674,22 @@ async function holdFilesWithKeys(at) {
   return held;
 }
 
-const scanFile = (/** @type {string} */ gitDir) => path.join(gitDir, "uno-held.json");
+const scanFile = (/** @type {string} */ gitDir, /** @type {string | null} */ remote) =>
+  path.join(
+    gitDir,
+    remote ? `uno-held-${remote.replace(/[^A-Za-z0-9._-]/g, "_")}.json` : "uno-held.json",
+  );
 
 /**
- * A repository: what would leave with `tip` — every object of the commits
- * that aren't on any remote yet, history included (a key taken out in a later
- * commit still leaves with the earlier one). Commits already on a remote
- * aren't read: a clone doesn't start by answering for its whole past.
- * @param {string} tip @param {string} gitDir
+ * The files with a key among the objects `revisions` name, by name or by
+ * what's inside.
+ * @param {string[]} revisions arguments of `git rev-list --objects`
  * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
- * @returns {Promise<string[]>} the files with a key (by name, or by what's inside)
+ * @returns {Promise<string[]>}
  */
-async function keysLeavingWith(tip, gitDir, at) {
-  // A held project is looked at on every sync: its answer stays until the tip moves.
-  const seen = await fsp
-    .readFile(scanFile(gitDir), "utf8")
-    .then((text) => JSON.parse(text))
-    .catch(() => null);
-  if (seen?.tip === tip && Array.isArray(seen.held)) return seen.held;
+async function keysIn(revisions, at) {
   const listed = await gitOk(
-    ["-c", "core.quotePath=false", "rev-list", "--objects", tip, "--not", "--remotes"],
+    ["-c", "core.quotePath=false", "rev-list", "--objects", ...revisions],
     at,
     "Couldn't check the project before syncing",
   );
@@ -700,9 +709,83 @@ async function keysLeavingWith(tip, gitDir, at) {
   for (const oid of await objectsWithKeys([...byObject.keys()], at)) {
     held.add(/** @type {string} */ (byObject.get(oid)));
   }
-  const result = [...held].toSorted();
-  await fsp.writeFile(scanFile(gitDir), JSON.stringify({ tip, held: result })).catch(() => {});
+  return [...held].toSorted();
+}
+
+/**
+ * A repository: what would leave with `tip` — every object of the commits
+ * that aren't on any remote yet (or, with `remote`, aren't on that one: a
+ * GitHub repository hasn't seen what the Uno cloud has), history included (a
+ * key taken out in a later commit still leaves with the earlier one). Commits
+ * already there aren't read: a clone doesn't start by answering for its whole
+ * past.
+ * @param {string} tip @param {string} gitDir
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ * @param {string | null} [remote]
+ * @returns {Promise<string[]>} the files with a key (by name, or by what's inside)
+ */
+async function keysLeavingWith(tip, gitDir, at, remote = null) {
+  // A held project is looked at on every sync: its answer stays until the tip moves.
+  const seen = await fsp
+    .readFile(scanFile(gitDir, remote), "utf8")
+    .then((text) => JSON.parse(text))
+    .catch(() => null);
+  if (seen?.tip === tip && Array.isArray(seen.held)) return seen.held;
+  const result = await keysIn([tip, "--not", remote ? `--remotes=${remote}` : "--remotes"], at);
+  await fsp
+    .writeFile(scanFile(gitDir, remote), JSON.stringify({ tip, held: result }))
+    .catch(() => {});
   return result;
+}
+
+/**
+ * Before a repository goes somewhere new (a GitHub or GitLab repository):
+ * nothing has been there, so the whole history of what would be pushed is
+ * read. Failing to read throws: nothing leaves unread.
+ * @param {{ dir: string }} input
+ * @param {Ctx} ctx
+ * @returns {Promise<string[]>} the files with a key; none for a folder without git
+ */
+export async function keysBeforePublish(input, ctx) {
+  const env = await gitEnv(ctx);
+  const own = await ownGit(path.resolve(input.dir), env);
+  if (!own) return [];
+  const at = { env, cwd: own.top };
+  return (await revOf("HEAD", at)) ? keysIn(["HEAD"], at) : [];
+}
+
+/**
+ * A new project that lives in a repository: `dir` (new or empty) gets its own
+ * git with a first version, so it syncs as a repository from its first
+ * moment, and a `.gitignore` that keeps keys and packages out of it.
+ * @param {{ dir: string, name: string }} input
+ * @param {Ctx} ctx
+ */
+export async function startRepository(input, ctx) {
+  const dir = path.resolve(input.dir);
+  const entries = await fsp.readdir(dir).catch(() => null);
+  if (entries !== null && entries.length > 0) {
+    throw new SyncError(`${dir} already has files in it. Pick a new name.`, "blocked");
+  }
+  await fsp.mkdir(dir, { recursive: true });
+  const env = await gitEnv(ctx);
+  const at = { env, cwd: dir };
+  const failed = "Couldn't start the project's repository";
+  await gitOk(["init", "-q"], at, failed);
+  await gitOk(["symbolic-ref", "HEAD", "refs/heads/main"], at, failed);
+  if (!(await git(["config", "user.email"], at)).stdout.trim()) {
+    const author = authorEnv(ctx);
+    await gitOk(["config", "--local", "user.name", author.GIT_AUTHOR_NAME], at, failed);
+    await gitOk(["config", "--local", "user.email", author.GIT_AUTHOR_EMAIL], at, failed);
+  }
+  await fsp.writeFile(path.join(dir, "README.md"), `# ${input.name}\n`);
+  await fsp.writeFile(path.join(dir, ".gitignore"), `${NEW_REPOSITORY_IGNORES.join("\n")}\n`);
+  await gitOk(["add", "--force", "--", "README.md", ".gitignore"], at, failed);
+  await gitOk(
+    ["-c", "commit.gpgSign=false", "commit", "-q", "--no-verify", "-m", "Initial commit"],
+    at,
+    failed,
+  );
 }
 
 const fileList = (/** @type {string[]} */ files) =>
@@ -718,6 +801,11 @@ export function heldMessage(/** @type {string[]} */ files) {
 /** A repository can't send a file on its own: everything new waits with it. */
 function heldInHistoryMessage(/** @type {string[]} */ files) {
   return `New versions of this project are waiting on this computer: it looks like there's a key in ${fileList(files)}. Ask the agent to take it out of the project's history; the key itself goes to this project's Keys.`;
+}
+
+/** Why a repository wasn't published. Never the value. */
+export function heldFromPublishMessage(/** @type {string[]} */ files) {
+  return `Nothing was published: it looks like there's a key in ${fileList(files)}, in the project or in its history. Move the key to this project's Keys and ask the agent to take it out of the history.`;
 }
 
 // ── The merge: newer version of a file wins, both stay in history ───────
@@ -876,7 +964,8 @@ async function writeConflict(gitDir, record) {
 // ── One sync ────────────────────────────────────────────────────────────
 
 /**
- * @typedef {{ dir: string, name?: string | null, adopt?: boolean, reason?: string }} SyncInput
+ * @typedef {{ dir: string, name?: string | null, adopt?: boolean, reason?: string,
+ *   hostRemote?: string | null, skipCloud?: boolean }} SyncInput
  *   adopt: the folder may join a cloud project with a different history (Get it here).
  */
 
@@ -1117,13 +1206,33 @@ async function syncGit(input, gitDir, ctx, result) {
         "blocked",
       );
     }
+    if (!(await git(["config", "user.email"], at)).stdout.trim()) {
+      Object.assign(env, authorEnv(ctx));
+    }
+    const dirty = (await git(["status", "--porcelain", "--untracked-files=no"], at)).stdout.trim();
+    if (input.hostRemote && head) {
+      await exchangeHost({
+        input,
+        remote: input.hostRemote,
+        gitDir,
+        branch,
+        at,
+        ctx,
+        result,
+        dirty,
+      });
+    }
+    if (input.skipCloud) {
+      const host = result.host;
+      result.ok = !host || !hostFailed(host);
+      result.state = !host ? "empty" : result.conflict ? "conflict" : host.state;
+      result.message = host?.message ?? "Nothing to sync yet: no version is saved.";
+      return;
+    }
     const hasRemote = (await git(["remote", "get-url", "uno"], at)).code === 0;
     const already = hasRemote ? await remoteName(input.dir, env) : null;
     if (already && already !== input.name) {
       throw new SyncError(`This project already syncs as "${already}".`, "blocked");
-    }
-    if (!(await git(["config", "user.email"], at)).stdout.trim()) {
-      Object.assign(env, authorEnv(ctx));
     }
     const storage = storageOf(ctx);
     const meta = await readMeta(storage, input.name);
@@ -1150,7 +1259,6 @@ async function syncGit(input, gitDir, ctx, result) {
         "Couldn't add the Uno remote",
       );
     }
-    const dirty = (await git(["status", "--porcelain", "--untracked-files=no"], at)).stdout.trim();
     await exchange({
       at,
       gitDir,
@@ -1177,10 +1285,80 @@ async function syncGit(input, gitDir, ctx, result) {
       result.message =
         `${result.message} Changes not saved as a version stay on this computer until they are.`.trim();
     }
+    if (result.host && hostFailed(result.host) && result.ok && result.state !== "conflict") {
+      result.state = result.host.state;
+      result.message = result.host.message;
+    }
   } finally {
     await release();
   }
 }
+
+/** The name people know a remote's host by; the remote's own name for anything else. */
+function hostLabel(/** @type {string} */ url, /** @type {string} */ remote) {
+  return /github/i.test(url) ? "GitHub" : /gitlab/i.test(url) ? "GitLab" : remote;
+}
+
+/**
+ * The project's GitHub or GitLab repository (`hostRemote`): the same exchange
+ * as with the cloud — pull, merge, push the committed work — and what would
+ * leave is read first. A failure here is said and stops nothing else: the Uno
+ * cloud still syncs.
+ * @param {{ input: SyncInput & { dir: string, name: string }, remote: string, gitDir: string,
+ *   branch: string, at: { env: NodeJS.ProcessEnv, cwd: string }, ctx: Ctx, result: SyncResult,
+ *   dirty: string }} x
+ */
+async function exchangeHost(x) {
+  const { at, branch, gitDir, input, remote, result } = x;
+  /** @type {SyncResult} */
+  const side = { ...result, ok: false, state: "error", conflict: null, held: [], message: "" };
+  const url = await git(["remote", "get-url", remote], at);
+  const place = hostLabel(url.stdout, remote);
+  try {
+    if (url.code !== 0) throw new SyncError(`This project has no "${remote}" remote any more.`);
+    await exchange({
+      at,
+      gitDir,
+      branch,
+      input,
+      result: side,
+      storage: null,
+      meta: null,
+      remote,
+      place,
+      from: place,
+      localTime: (file) => commitTimeOf("HEAD", file, at),
+      mergeMessage: (from) => `Merge changes from ${from ?? place} (Uno sync)`,
+      person: personOf(x.ctx),
+      refuseUnrelated: false,
+      keysLeaving: (tip) => keysLeavingWith(tip, gitDir, at, remote),
+      dirtyHint: x.dirty
+        ? `${place} has changes to files you're still working on here. Ask the agent to save your changes as a version and it syncs.`
+        : undefined,
+    });
+  } catch (error) {
+    if (!(error instanceof UnoGitError)) throw error;
+    side.state = error instanceof SyncError ? error.state : "error";
+    side.message = `${place}: ${error.message}`;
+  }
+  result.pushed = result.pushed || side.pushed;
+  result.pulled = result.pulled || side.pulled;
+  result.conflict = side.conflict ?? result.conflict;
+  result.held = [...new Set([...result.held, ...side.held])].toSorted();
+  result.head = side.head ?? result.head;
+  result.host = {
+    remote,
+    place,
+    state: side.state,
+    pushed: side.pushed,
+    pulled: side.pulled,
+    message: side.message,
+  };
+}
+
+/** A host's sync that needs the person; "busy" just runs again. */
+const hostFailed = (/** @type {HostSync} */ host) =>
+  !["synced", "conflict", "busy"].includes(host.state);
 
 /** The repository's other remotes, fit to set up on the other computers. */
 async function remotesToShare(/** @type {any} */ at) {
@@ -1200,28 +1378,33 @@ async function remotesToShare(/** @type {any} */ at) {
  * Exchange the branch with the cloud: fetch, fast-forward or merge, push.
  * Retries when another computer pushed in between.
  * @param {{ at: any, gitDir: string, branch: string, input: SyncInput & { name: string },
- *   result: SyncResult, storage: import("./git-remote-uno.mjs").Storage,
- *   meta: ProjectMeta | null, writeMetaAs: ProjectMeta,
+ *   result: SyncResult, storage: import("./git-remote-uno.mjs").Storage | null,
+ *   meta: ProjectMeta | null, writeMetaAs?: ProjectMeta,
  *   localTime: (file: string) => Promise<number>, mergeMessage: (from: string | null) => string,
  *   person: string | null, refuseUnrelated?: boolean, dirtyHint?: string,
- *   keysLeaving?: (tip: string) => Promise<string[]> }} x
+ *   keysLeaving?: (tip: string) => Promise<string[]>, remote?: string, place?: string,
+ *   from?: string }} x
  *   keysLeaving: what would leave is read first; with a finding nothing is pushed.
+ *   remote/place/from: another remote than the Uno cloud (a GitHub repository), its name for
+ *   people, and who its changes are from.
  */
 async function exchange(x) {
   const { at, branch, result } = x;
+  const to = x.remote ?? "uno";
+  const place = x.place ?? "your Uno cloud";
   const ref = `refs/heads/${branch}`;
-  const remoteRef = `refs/remotes/uno/${branch}`;
+  const remoteRef = `refs/remotes/${to}/${branch}`;
   /** @type {ConflictRecord | null} */
   let conflict = await readConflict(x.gitDir);
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     const fetched = await git(
-      ["fetch", "-q", "--no-tags", "uno", `+refs/heads/${branch}:${remoteRef}`],
+      ["fetch", "-q", "--no-tags", to, `+refs/heads/${branch}:${remoteRef}`],
       at,
     );
     // An empty cloud project has no such branch yet: that's fine.
     if (fetched.code !== 0 && !/couldn't find remote ref|no such ref/i.test(fetched.stderr)) {
       throw new SyncError(
-        (fetched.stderr.trim().split("\n").at(-1) ?? "Couldn't reach your Uno cloud.").replace(
+        (fetched.stderr.trim().split("\n").at(-1) ?? `Couldn't reach ${place}.`).replace(
           /^(fatal|error|uno): /,
           "",
         ),
@@ -1254,7 +1437,7 @@ async function exchange(x) {
             "blocked",
           );
         }
-        const from = await theirHost(x.storage, x.input.name);
+        const from = x.from ?? (x.storage ? await theirHost(x.storage, x.input.name) : null);
         const merged = await mergeNewerWins({
           mine: local,
           theirs: remote,
@@ -1291,11 +1474,11 @@ async function exchange(x) {
     const leaving = next && next !== remote;
     const waiting = leaving && x.keysLeaving ? await x.keysLeaving(next) : [];
     if (leaving && waiting.length === 0) {
-      const pushed = await git(["push", "-q", "--no-verify", "uno", `${ref}:${ref}`], at);
+      const pushed = await git(["push", "-q", "--no-verify", to, `${ref}:${ref}`], at);
       if (pushed.code !== 0) {
         if (/fetch first|non-fast-forward|rejected/i.test(pushed.stderr) && attempt < 3) continue;
         throw new SyncError(
-          (pushed.stderr.trim().split("\n").at(-1) ?? "Couldn't save to your Uno cloud.").replace(
+          (pushed.stderr.trim().split("\n").at(-1) ?? `Couldn't save to ${place}.`).replace(
             /^(fatal|error|uno): /,
             "",
           ),
@@ -1305,7 +1488,7 @@ async function exchange(x) {
       result.pushed = true;
       await git(["update-ref", remoteRef, next], at);
     }
-    if (!x.meta && next && waiting.length === 0) {
+    if (x.storage && x.writeMetaAs && !x.meta && next && waiting.length === 0) {
       await writeMeta(x.storage, x.input.name, x.writeMetaAs).catch(() => undefined);
     }
     if (waiting.length > 0) result.held = waiting;

@@ -11,13 +11,14 @@ import {
   entriesByProject,
   fileCount,
   groupVersions,
+  hostLine,
   nameList,
+  projectKeyCount,
   refreshEveryMs,
   syncLabel,
   syncMarkOf,
   toggleMenuLabel,
   versionDay,
-  projectKeyCount,
   versionLine,
 } from "./projectSync.logic";
 import { mostUrgent } from "./ProjectSyncParts";
@@ -209,5 +210,24 @@ describe("projectKeyCount", () => {
 
   it("adds key files that hold other keys", () => {
     expect(projectKeyCount(2, [".env", "certs/server.pem", "apps/api/.env"])).toBe(4);
+  });
+});
+
+describe("hostLine", () => {
+  const host = {
+    provider: "github" as const,
+    repository: "misha/site",
+    url: "https://github.com/misha/site",
+    remote: "origin",
+  };
+
+  it("says it plainly, with git's words only in Dev Mode", () => {
+    expect(hostLine(host, false)).toBe(
+      "Also in your GitHub account. Saved versions go there by themselves.",
+    );
+    expect(hostLine(host, false)).not.toMatch(/\b(git|commit|branch|push|pull)\b/i);
+    expect(hostLine({ ...host, provider: "gitlab" }, false)).toContain("GitLab");
+    expect(hostLine(host, true)).toContain("remote origin");
+    expect(hostLine(host, true)).toContain("private");
   });
 });

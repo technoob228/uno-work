@@ -15,7 +15,9 @@ import {
   MAX_FILE_BYTES,
   builtFolders,
   getProject,
+  heldFromPublishMessage,
   isKeyFile,
+  keysBeforePublish,
   listCloudProjects,
   projectFiles,
   projectHistory,
@@ -25,6 +27,7 @@ import {
   safeRemoteUrl,
   setLocalOnly,
   snapshotGitDir,
+  startRepository,
   syncProject,
   versionAuthor,
 } from "./uno-sync.mjs";
@@ -841,5 +844,177 @@ describe("rules", () => {
     expect(safeRemoteUrl("https://tok@github.com/me/x.git")).toBeNull();
     expect(safeRemoteUrl("file:///etc")).toBeNull();
     expect(safeRemoteUrl("ext::sh -c evil")).toBeNull();
+  });
+});
+
+describe("a project that lives on GitHub or GitLab", { timeout: 60_000 }, () => {
+  /** A bare repository in a folder stands in for the host: nothing here reaches a real one. */
+  function host(at: Computer) {
+    const bare = path.join(root, "host.git");
+    gitIn(root, at.env, "init", "-q", "--bare", "--initial-branch=main", bare);
+    return bare;
+  }
+  const hostLog = (at: Computer, bare: string) => gitIn(bare, at.env, "log", "--format=%s", "main");
+  async function started(at: Computer, name = "site") {
+    const dir = path.join(at.home, "projects", name);
+    await startRepository({ dir, name }, at);
+    const bare = host(at);
+    gitIn(dir, at.env, "remote", "add", "origin", bare);
+    return { dir, bare };
+  }
+  const commitAll = (at: Computer, dir: string, message: string) => {
+    gitIn(dir, at.env, "add", "-A");
+    gitIn(dir, at.env, "commit", "-q", "-m", message);
+  };
+
+  it("starts with its own git, one version, and keys and packages kept out", async () => {
+    const a = computer("a");
+    const dir = path.join(a.home, "projects", "site");
+    await startRepository({ dir, name: "site" }, a);
+    expect(read(path.join(dir, "README.md"))).toBe("# site\n");
+    expect(gitIn(dir, a.env, "log", "--format=%s")).toBe("Initial commit");
+    expect(gitIn(dir, a.env, "symbolic-ref", "--short", "HEAD")).toBe("main");
+    write(path.join(dir, ".env"), `KEY=${FAKE_KEY}\n`);
+    write(path.join(dir, ".env.example"), "KEY=\n");
+    write(path.join(dir, "node_modules", "x.js"), "x\n");
+    gitIn(dir, a.env, "add", "-A");
+    expect(gitIn(dir, a.env, "diff", "--cached", "--name-only")).toBe(".env.example");
+  });
+
+  it("won't start in a folder that already has files", async () => {
+    const a = computer("a");
+    const dir = a.folder("taken");
+    write(path.join(dir, "mine.txt"), "x\n");
+    await expect(startRepository({ dir, name: "taken" }, a)).rejects.toThrow(/already has files/);
+    expect(exists(path.join(dir, ".git"))).toBe(false);
+  });
+
+  it("pushes what's committed, pulls what's new there, and the Uno cloud stays in step", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    write(path.join(dir, "page.html"), "<h1>hi</h1>\n");
+    commitAll(a, dir, "first page");
+
+    const first = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(first).toMatchObject({ ok: true, state: "synced", mode: "git", pushed: true });
+    expect(first.host).toMatchObject({ remote: "origin", state: "synced", pushed: true });
+    expect(hostLog(a, bare).split("\n")).toEqual(["first page", "Initial commit"]);
+    expect(gitIn(dir, a.env, "remote", "get-url", "uno")).toBe("uno::site");
+
+    // Someone pushed to the host from elsewhere.
+    const other = path.join(root, "elsewhere");
+    gitIn(root, a.env, "clone", "-q", bare, other);
+    write(path.join(other, "notes.md"), "from the web\n");
+    commitAll(a, other, "from elsewhere");
+    gitIn(other, a.env, "push", "-q", "origin", "HEAD:main");
+
+    const second = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(second).toMatchObject({ ok: true, state: "synced", pulled: true });
+    expect(read(path.join(dir, "notes.md"))).toBe("from the web\n");
+
+    // Uncommitted work stays here: only saved versions leave.
+    write(path.join(dir, "draft.md"), "not saved\n");
+    await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(hostLog(a, bare)).not.toContain("draft");
+  });
+
+  it("merges when both sides moved, and the merge goes back to the host", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    const other = path.join(root, "elsewhere");
+    gitIn(root, a.env, "clone", "-q", bare, other);
+    write(path.join(other, "b.md"), "b\n");
+    commitAll(a, other, "there");
+    gitIn(other, a.env, "push", "-q", "origin", "HEAD:main");
+    write(path.join(dir, "a.md"), "a\n");
+    commitAll(a, dir, "here");
+
+    const merged = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(merged).toMatchObject({ ok: true, state: "synced", pulled: true });
+    expect(read(path.join(dir, "b.md"))).toBe("b\n");
+    expect(hostLog(a, bare)).toContain("Merge changes from");
+  });
+
+  it("a key in a commit never reaches the host, and the value is never shown", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    write(path.join(dir, "config.json"), `{ "token": "${FAKE_KEY}" }\n`);
+    commitAll(a, dir, "with a key");
+
+    const held = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(held.held).toContain("config.json");
+    expect(held.host?.pushed).toBe(false);
+    expect(JSON.stringify(held)).not.toContain(FAKE_KEY);
+    expect(hostLog(a, bare)).not.toContain("with a key");
+  });
+
+  it("keeps the host's reading apart: a commit the cloud has is still read for the host", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    write(path.join(dir, "page.html"), "ok\n");
+    commitAll(a, dir, "on the cloud only");
+    await syncProject({ dir, name: "site" }, a);
+    write(path.join(dir, "config.json"), `${FAKE_GITHUB}\n`);
+    commitAll(a, dir, "the key");
+    gitIn(dir, a.env, "push", "-q", "uno", "main:main");
+    gitIn(dir, a.env, "fetch", "-q", "uno");
+
+    const held = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(held.held).toContain("config.json");
+    expect(exists(path.join(bare, "refs", "heads", "main"))).toBe(false);
+  });
+
+  it("reads the whole history before publishing, and leaves no value in the answer", async () => {
+    const a = computer("a");
+    const dir = path.join(a.home, "projects", "site");
+    await startRepository({ dir, name: "site" }, a);
+    expect(await keysBeforePublish({ dir }, a)).toEqual([]);
+    write(path.join(dir, "config.json"), `${FAKE_KEY}\n`);
+    commitAll(a, dir, "key");
+    fs.rmSync(path.join(dir, "config.json"));
+    commitAll(a, dir, "take it out");
+    write(path.join(dir, "secret.pem"), "-----BEGIN-----\n");
+    gitIn(dir, a.env, "add", "--force", "secret.pem");
+    gitIn(dir, a.env, "commit", "-q", "-m", "a key file");
+
+    const found = await keysBeforePublish({ dir }, a);
+    expect(found).toEqual(["config.json", "secret.pem"]);
+    expect(heldFromPublishMessage(found)).toContain("Nothing was published");
+    expect(heldFromPublishMessage(found)).not.toContain(FAKE_KEY);
+    expect(await keysBeforePublish({ dir: a.folder("no-such-folder") }, a)).toEqual([]);
+  });
+
+  it("works without the Uno cloud when this computer has no way to it", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    write(path.join(dir, "page.html"), "ok\n");
+    commitAll(a, dir, "first page");
+    const noCloud = { ...a, env: { ...a.env, [FAKE_STORAGE_ENV]: "" } };
+
+    const result = await syncProject(
+      { dir, name: "site", hostRemote: "origin", skipCloud: true },
+      noCloud,
+    );
+    expect(result).toMatchObject({ ok: true, state: "synced", pushed: true });
+    expect(hostLog(a, bare)).toContain("first page");
+    expect(
+      spawnSync("git", ["remote", "get-url", "uno"], { cwd: dir, env: a.env }).status,
+    ).not.toBe(0);
+  });
+
+  it("a host that can't be reached says so; the Uno cloud still syncs", async () => {
+    const a = computer("a");
+    const { dir, bare } = await started(a);
+    fs.rmSync(bare, { recursive: true });
+    write(path.join(dir, "page.html"), "ok\n");
+    commitAll(a, dir, "first page");
+
+    const result = await syncProject({ dir, name: "site", hostRemote: "origin" }, a);
+    expect(result).toMatchObject({ ok: true, state: "error", pushed: true });
+    expect(result.host?.pushed).toBe(false);
+    expect(result.message).toMatch(/^origin: /);
+    expect(gitIn(dir, a.env, "ls-remote", "uno", "main")).toContain("refs/heads/main");
   });
 });

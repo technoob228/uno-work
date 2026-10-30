@@ -16,6 +16,7 @@
  */
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { isNoProjectRoot } from "@t3tools/shared/noProject";
 import { memo, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../../composerDraftStore";
@@ -128,6 +129,7 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
         folderName={assistant ? assistant.profile.name : folder ? folder.name : "Home folder"}
         computerName={assistant || spacesOn ? null : computerName}
         asksAssistant={assistant !== null}
+        noProject={home !== null && isNoProjectRoot(projectCwd, home)}
       />
     </div>
   );

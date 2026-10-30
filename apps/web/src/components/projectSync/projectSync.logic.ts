@@ -7,6 +7,7 @@
 import type {
   EnvironmentId,
   ProjectSyncEntry,
+  ProjectSyncHost,
   ProjectSyncSnapshot,
   ProjectSyncState,
   ProjectVersion,
@@ -55,6 +56,14 @@ export function syncLabel(entry: ProjectSyncEntry, now = Date.now()): string {
     default:
       return entry.message || "Couldn't sync.";
   }
+}
+
+/** Where else the project lives. Git's words only in Dev Mode. */
+export function hostLine(host: ProjectSyncHost, devMode: boolean): string {
+  const label = host.provider === "github" ? "GitHub" : "GitLab";
+  return devMode
+    ? `${host.url} · private · remote ${host.remote} · pushes and pulls by itself`
+    : `Also in your ${label} account. Saved versions go there by themselves.`;
 }
 
 /** "plan.md changed on both computers. The newer version is here; the other one is kept." */
