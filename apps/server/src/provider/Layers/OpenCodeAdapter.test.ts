@@ -27,6 +27,7 @@ import {
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
 import {
+  OPENCODE_DECLINED_FEEDBACK,
   OPENCODE_STALL_RETRY_PROMPT,
   appendOpenCodeAssistantTextDelta,
   isOpenCodeStreamStall,
@@ -66,7 +67,7 @@ const runtimeMock = {
     /** Delay before the subscribed events arrive (lets a test start a turn first). */
     subscribeDelayMs: 0,
     connectEnvironments: [] as Array<NodeJS.ProcessEnv | undefined>,
-    permissionReplies: [] as Array<{ requestID: string; reply: string }>,
+    permissionReplies: [] as Array<{ requestID: string; reply: string; message?: string }>,
     questionReplies: [] as Array<{ requestID: string; answers: unknown }>,
     sessionParents: {} as Record<string, string | undefined>,
     sessionGetCalls: [] as string[],
@@ -207,7 +208,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
       },
       permission: {
-        reply: async (input: { requestID: string; reply: string }) => {
+        reply: async (input: { requestID: string; reply: string; message?: string }) => {
           runtimeMock.state.permissionReplies.push(input);
           return { data: true };
         },
@@ -1514,6 +1515,37 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       );
       assert.deepEqual(runtimeMock.state.permissionReplies, [
         { requestID: "perm-grandchild", reply: "once" },
+      ]);
+    }),
+  );
+
+  it.effect("a Decline tells the agent to say so, a Cancel just stops", () =>
+    Effect.gen(function* () {
+      const asked = (id: string) => ({
+        type: "permission.asked",
+        properties: {
+          id,
+          sessionID: "http://127.0.0.1:9999/session",
+          permission: "bash",
+          patterns: ["ls"],
+          metadata: {},
+          always: [],
+        },
+      });
+      runtimeMock.state.subscribedEvents = [asked("perm-declined"), asked("perm-cancelled")];
+      const adapter = yield* OpenCodeAdapter;
+      const threadId = asThreadId("thread-decline");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("opencode"),
+        threadId,
+        runtimeMode: "approval-required",
+      });
+      yield* sleep(20);
+      yield* adapter.respondToRequest(threadId, ApprovalRequestId.make("perm-declined"), "decline");
+      yield* adapter.respondToRequest(threadId, ApprovalRequestId.make("perm-cancelled"), "cancel");
+      assert.deepEqual(runtimeMock.state.permissionReplies, [
+        { requestID: "perm-declined", reply: "reject", message: OPENCODE_DECLINED_FEEDBACK },
+        { requestID: "perm-cancelled", reply: "reject" },
       ]);
     }),
   );

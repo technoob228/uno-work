@@ -53,7 +53,7 @@ import {
   XIcon,
   type LucideIcon,
 } from "lucide-react";
-import { type ClipboardEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ClipboardEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { resolveComposerSubmissionIntent } from "~/composer-logic";
 import {
@@ -124,7 +124,8 @@ import { useOwnAgentStart } from "./useOwnAgentStart";
 import { useSetupHandoff } from "../../setup/useSetupHome";
 import type { HomeStarter } from "./homeStarters";
 
-const carriesFiles = (event: DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
+const carriesFiles = (event: DragEvent) =>
+  Array.from(event.dataTransfer?.types ?? []).includes("Files");
 
 const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
   "approval-required": LockIcon,
@@ -501,6 +502,59 @@ export function HomeComposer({
     }
   };
 
+  const takeDrop = (data: DataTransfer) => {
+    if (!dataTransferHasFolderOrZip(data)) {
+      // Not a project: pictures are attached to the first message.
+      attachFiles(Array.from(data.files));
+      return;
+    }
+    if (!minimal && text.trim()) {
+      // A task is typed: don't replace it — the upload becomes the
+      // folder this task works in (the chip's "Upload a folder…").
+      void readDroppedUploadFiles(data).then((files) => {
+        if (files.length === 0) return;
+        openFolderForChat(
+          "upload",
+          ({ name, folder: cwd }) => {
+            setFolder({ cwd, name });
+            ref.current?.focus();
+          },
+          { files, environmentId: targetEnvironmentId },
+        );
+      });
+      return;
+    }
+    onDropProject?.(data);
+  };
+
+  // Anywhere in the window, as in a chat: next to the box the browser would
+  // open the file in place of the app. A drop something else took stays its own.
+  useEffect(() => {
+    const onOver = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      setDragging(true);
+    };
+    const onLeave = (event: DragEvent) => {
+      if (event.relatedTarget === null) setDragging(false);
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      setDragging(false);
+      if (event.defaultPrevented || !event.dataTransfer) return;
+      event.preventDefault();
+      takeDrop(event.dataTransfer);
+    };
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("drop", onDrop);
+    };
+  });
+
   return (
     <div className="flex flex-col gap-2.5">
       <div
@@ -508,41 +562,6 @@ export function HomeComposer({
           "relative rounded-[20px] border bg-card shadow-xs/5 transition-colors has-focus-visible:border-ring/45",
           dragging && "border-primary border-dashed bg-primary/[0.03]",
         )}
-        onDragOver={(event) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          setDragging(true);
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-        }}
-        onDrop={(event) => {
-          if (!carriesFiles(event)) return;
-          event.preventDefault();
-          setDragging(false);
-          if (!dataTransferHasFolderOrZip(event.dataTransfer)) {
-            // Not a project: pictures are attached to the first message.
-            attachFiles(Array.from(event.dataTransfer.files));
-            return;
-          }
-          if (!minimal && text.trim()) {
-            // A task is typed: don't replace it — the upload becomes the
-            // folder this task works in (the chip's "Upload a folder…").
-            void readDroppedUploadFiles(event.dataTransfer).then((files) => {
-              if (files.length === 0) return;
-              openFolderForChat(
-                "upload",
-                ({ name, folder: cwd }) => {
-                  setFolder({ cwd, name });
-                  ref.current?.focus();
-                },
-                { files, environmentId: targetEnvironmentId },
-              );
-            });
-            return;
-          }
-          onDropProject?.(event.dataTransfer);
-        }}
         data-testid="home-composer-box"
       >
         {dragging ? (

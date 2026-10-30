@@ -443,6 +443,13 @@ export function describeOpenCodePermission(
   return label ?? (target || permission);
 }
 
+/**
+ * A bare reject ends OpenCode's turn: the person pressed Decline and the chat
+ * went quiet (qa 30.10). With a message the agent goes on and can say so.
+ */
+export const OPENCODE_DECLINED_FEEDBACK =
+  "The person declined this. Don't try it another way. Tell them in one or two plain sentences what you wanted to do and what happens without it, then stop.";
+
 function mapPermissionDecision(reply: "once" | "always" | "reject"): string {
   switch (reply) {
     case "once":
@@ -2787,6 +2794,7 @@ export function makeOpenCodeAdapter(
         context.client.permission.reply({
           requestID: requestId,
           reply: toOpenCodePermissionReply(decision),
+          ...(decision === "decline" ? { message: OPENCODE_DECLINED_FEEDBACK } : {}),
         }),
       ).pipe(Effect.mapError(toRequestError));
     });

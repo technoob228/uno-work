@@ -34,6 +34,11 @@ export function fixWorkPrompt(problem: string, playbookPath: string): string {
   return `Fix Work. What went wrong: ${what}\n\nFollow the steps in ${playbookPath}`;
 }
 
+/** The person's own words: the line for the agent stays out of their bubble. */
+export function fixWorkVisibleText(text: string): string {
+  return text.replace(/^(Fix Work\. [\s\S]*?)\n\nFollow the steps in \S+$/, "$1");
+}
+
 export async function prepareFixWork(environmentId: EnvironmentId): Promise<string> {
   try {
     const { playbookPath } = await environmentFetchJson<{ playbookPath: string }>({

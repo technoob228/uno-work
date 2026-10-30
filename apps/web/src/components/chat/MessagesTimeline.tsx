@@ -50,6 +50,7 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import type { ThreadFindMatch } from "./threadFind";
 import { useThreadFindReveal } from "./useThreadFindReveal";
+import { fixWorkVisibleText } from "../../fixWork/fixWork";
 import {
   BotIcon,
   CheckIcon,
@@ -618,7 +619,9 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           );
           const displayedWithRecording = deriveDisplayedUserMessageState(row.message.text);
           // Loom Work: a screen recording block shows as a player card.
-          const recordingPart = extractRecordingBlock(displayedWithRecording.visibleText);
+          const recordingPart = extractRecordingBlock(
+            fixWorkVisibleText(displayedWithRecording.visibleText),
+          );
           const quotesPart = extractQuotes(recordingPart.text);
           const displayedUserMessage = {
             ...displayedWithRecording,

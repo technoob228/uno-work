@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FIX_WORK_RUNTIME_MODE, fixWorkPrompt } from "./fixWork";
+import { FIX_WORK_RUNTIME_MODE, fixWorkPrompt, fixWorkVisibleText } from "./fixWork";
 
 describe("fixWorkPrompt", () => {
   it("keeps the person's words and points at the playbook", () => {
@@ -15,5 +15,14 @@ describe("fixWorkPrompt", () => {
 
   it("runs in Ask mode", () => {
     expect(FIX_WORK_RUNTIME_MODE).toBe("approval-required");
+  });
+});
+
+describe("fixWorkVisibleText", () => {
+  it("keeps what the person wrote, without the playbook's path", () => {
+    expect(fixWorkVisibleText(fixWorkPrompt("White page", "/home/uno/fix/PLAYBOOK.md"))).toBe(
+      "Fix Work. What went wrong: White page",
+    );
+    expect(fixWorkVisibleText("Follow the steps in /tmp/x")).toBe("Follow the steps in /tmp/x");
   });
 });

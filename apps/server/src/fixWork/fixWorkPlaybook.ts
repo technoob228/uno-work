@@ -12,7 +12,9 @@ export const FIX_WORK_PLAYBOOK = `# Fix Work
 
 The person's Uno Work is misbehaving. Find the cause, fix what is safe to fix on this computer, and write a letter to support if a person at Uno needs to look.
 
-The person is often not a developer. Plain words, short messages, no jargon.
+The person is often not a developer. Plain words, short messages, no jargon, in the language of their first message.
+
+Each command costs them a click, and they are waiting. Check the likeliest cause first and stop looking once you have it.
 
 ## Boundaries
 
