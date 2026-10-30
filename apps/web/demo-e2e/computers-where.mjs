@@ -1,5 +1,5 @@
-// Which computer is on screen (Misha 30.10): a chat names its own computer, and
-// outside a chat Home's picker decides where a new chat and Terminal go.
+// Which computer is on screen (Misha 30.10): a chat names its own computer; Home
+// sets none apart: its picker places a new chat, its Terminal asks where.
 //   node demo-e2e/computers-where.mjs [shots-dir]
 import { dismissBanners, launch, openDemo, serve } from "./harness.mjs";
 
@@ -29,8 +29,16 @@ await page.waitForTimeout(2500);
 await dismissBanners(page);
 
 await page.getByTestId("home-terminal").waitFor({ timeout: 20_000 });
-expect("Home starts on", await text("home-computer-chip"), "uno-work");
-expect("Terminal on Home says", await text("home-terminal"), "uno-work");
+expect("New chat starts on", await text("home-computer-chip"), "uno-work");
+const pill = page.getByTestId("home-computer-pill");
+expect("Home's chip names uno-work", await pill.innerText(), "uno-work");
+expect("Home's chip names MacBook", await pill.innerText(), "MacBook");
+expect("Terminal on Home has no computer", await text("home-terminal"), "Terminal");
+expect(
+  "Terminal on Home names none",
+  String((await text("home-terminal")).includes("uno-work")),
+  "false",
+);
 await shot("1-home");
 
 const macbook = await page.evaluate(() => window.__assistDemo.environmentOf("mac"));
@@ -43,16 +51,30 @@ expect("The others are just dots", String((await chip.innerText()).includes("uno
 await shot("2-macbook-chat");
 
 await go("#/computer");
-expect("Opening a chat leaves Home's computer alone", await text("home-computer-chip"), "uno-work");
+expect("Opening a chat leaves Home's picker alone", await text("home-computer-chip"), "uno-work");
 
-await page.getByTestId("home-computer-chip").click();
-await page.getByTestId("new-chat-computer-option").getByText("MacBook").click();
-await page.waitForTimeout(1500);
-expect("Picked on Home", await text("home-computer-chip"), "MacBook");
-expect("Terminal follows the pick", await text("home-terminal"), "MacBook");
-await shot("3-home-picked-macbook");
+// The chip's menu on Home tags no computer as chosen.
+await pill.click();
+await page.waitForTimeout(800);
+const menu = await text("computers-menu");
+expect("No computer is tagged", String(menu.includes("selected")), "false");
+expect(
+  "No terminal in the rows",
+  String(await page.getByTestId("computers-row-terminal").count()),
+  "0",
+);
+await shot("3-chip-rows");
+await page.keyboard.press("Escape");
+await page.waitForTimeout(400);
 
+// Terminal asks where, and the answer does not move the new chat's computer.
 await page.getByTestId("home-terminal").click();
+await page.waitForTimeout(600);
+const options = page.getByTestId("home-terminal-option");
+expect("Terminal offers uno-work", await options.allInnerTexts(), "uno-work");
+expect("Terminal offers MacBook", await options.allInnerTexts(), "MacBook");
+await shot("4-terminal-choice");
+await options.filter({ hasText: "MacBook" }).click();
 await page.waitForTimeout(3500);
 await dismissBanners(page);
 expect("The new chat is on", await text("new-chat-computer-picker"), "MacBook");
@@ -62,19 +84,17 @@ expect(
   "MacBook",
 );
 expect("The terminal says", await text("terminal-computer"), "MacBook");
-await shot("4-terminal-on-macbook");
+await shot("5-terminal-on-macbook");
 
-// Any computer's terminal from the chip, whatever is picked.
 await go("#/computer");
-await page.getByTestId("home-computer-pill").click();
-await page.waitForTimeout(800);
-await shot("5-chip-rows");
-const rows = page.getByTestId("computers-row");
-await rows.filter({ hasText: "uno-work" }).getByTestId("computers-row-terminal").click();
+expect("Terminal's pick leaves Home's picker alone", await text("home-computer-chip"), "uno-work");
+await page.getByTestId("home-terminal").click();
+await page.waitForTimeout(600);
+await page.getByTestId("home-terminal-option").filter({ hasText: "uno-work" }).click();
 await page.waitForTimeout(3500);
 await dismissBanners(page);
-expect("The chip's Terminal opened on", await text("terminal-computer"), "uno-work");
-await shot("6-terminal-from-chip");
+expect("The other choice opens on", await text("terminal-computer"), "uno-work");
+await shot("6-terminal-on-uno-work");
 
 // Spaces: a space is its computer.
 const spaces = await (
@@ -95,12 +115,15 @@ await spaces.getByTestId("computers-row-switch").first().click();
 await spaces.waitForTimeout(3000);
 await dismissBanners(spaces);
 expect("Spaces: a switch lands on Home", spaces.url(), "#/computer");
+if (out) await spaces.screenshot({ path: `${out}/7-space-macbook-home.png` });
+await spaces.getByTestId("home-terminal").click();
+await spaces.waitForTimeout(3500);
+await dismissBanners(spaces);
 expect(
-  "Spaces: Terminal is the space's",
-  await spaces.getByTestId("home-terminal").innerText(),
+  "Spaces: Terminal opens right on the space's computer",
+  await spaces.getByTestId("terminal-computer").first().innerText(),
   "MacBook",
 );
-if (out) await spaces.screenshot({ path: `${out}/7-space-macbook-home.png` });
 
 await browser.close();
 server.close();

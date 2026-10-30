@@ -32,7 +32,6 @@ import {
   LayoutGridIcon,
   MonitorIcon,
   RefreshCwIcon,
-  TerminalIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -41,6 +40,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { useSpaceScope } from "../../spaces";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
@@ -70,7 +70,7 @@ import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
 import { ComputerPill } from "./home/ComputerPill";
 import { useOverviewComputers } from "./home/ComputersOverview";
-import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
+import { HomeTerminalButton } from "./home/HomeTerminalButton";
 import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
@@ -169,8 +169,9 @@ export function ComputerView() {
     inFlight: appsQuery.data?.installed.apps ?? [],
   });
   const launchers = useHomeLaunchers(environmentId);
-  const terminalComputer = useNameAmongComputers(environmentId);
   const overviewComputers = useOverviewComputers();
+  // A space is its computer: its Terminal has nowhere else to go.
+  const terminalComputers = useSpaceScope() === null ? overviewComputers : [];
   // The console's first message / a Uno AI chat moving to this computer.
   useUnoAiArrivals(thisMachine ? environmentId : null, launchers.startTask);
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
@@ -439,26 +440,12 @@ export function ComputerView() {
                   </>
                 ) : null}
                 <div className="ml-auto flex min-w-0 items-center gap-1.5">
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    onClick={() => void launchers.openTerminal()}
-                    disabled={linkDown}
-                    aria-label={terminalComputer ? `Terminal on ${terminalComputer}` : "Terminal"}
-                    title={
-                      linkDown
-                        ? `${terminalComputer ?? "This computer"} is offline`
-                        : terminalComputer
-                          ? `Open a terminal on ${terminalComputer}`
-                          : "Open a terminal on this computer"
-                    }
-                    data-testid="home-terminal"
-                  >
-                    <TerminalIcon className="size-3.5" />
-                    <span className="hidden sm:inline">
-                      {terminalComputer ? `Terminal · ${terminalComputer}` : "Terminal"}
-                    </span>
-                  </Button>
+                  <HomeTerminalButton
+                    computers={terminalComputers}
+                    homeId={environmentId}
+                    linkDown={linkDown}
+                    onOpen={() => void launchers.openTerminal()}
+                  />
                   {pill}
                 </div>
               </>

@@ -27,7 +27,6 @@ import {
   Loader2Icon,
   MemoryStickIcon,
   PlusIcon,
-  TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -48,7 +47,6 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
 import { localMetricsQueryOptions } from "../computerQueries";
 import { formatGb, formatMemory, percent } from "../computerFormat";
 import { Meter } from "../computerUi";
-import { useHomeLaunchers } from "../useHomeLaunchers";
 import { CONNECTION_ACTION_LABEL } from "./connectionStatus";
 import { type ComputerConnection, useComputerConnection } from "./useComputerConnection";
 
@@ -198,9 +196,9 @@ function Mark({
 }: {
   computer: SidebarDComputer;
   live: Live | null;
-  /** The computer on screen (the chat's, Home's, the space's), set apart from the others. */
+  /** The one computer the chip names: the chat's or the space's. Home has none. */
   current?: boolean;
-  /** Just the status dot: a chat's chip names its own computer, the others stay quiet. */
+  /** Just the status dot: a chat's or a space's chip names only its own computer. */
   quiet?: boolean;
   /** The tooltip's start, "This chat runs on " in a chat. */
   lead?: string;
@@ -218,10 +216,7 @@ function Mark({
   }
   return (
     <span
-      className={cn(
-        "flex min-w-0 items-center gap-1",
-        current && "-my-1 rounded-full bg-primary/10 px-2 py-1 font-semibold text-primary",
-      )}
+      className="flex min-w-0 items-center gap-1"
       data-testid="computers-chip-mark"
       title={title}
     >
@@ -229,7 +224,8 @@ function Mark({
       <KindIcon cloud={computer.cloud ?? false} className="size-3 text-muted-foreground" />
       <span
         className={cn(
-          "max-w-20 truncate text-[11px]",
+          "truncate text-[11px]",
+          current ? "max-w-40 font-medium" : "max-w-20",
           live?.up ? "text-foreground/90" : "text-muted-foreground",
         )}
       >
@@ -266,8 +262,8 @@ function Bars({ live }: { live: Live }) {
 function LiveRow(props: {
   computer: SidebarDComputer;
   isThis: boolean;
-  /** How the row of the computer on screen is tagged: "this chat", "selected", "this space". */
-  thisWord: string;
+  /** The tag on the row of the computer on screen: "this chat", "this space"; Home has none. */
+  thisWord: string | null;
   /** Spaces on: switch to this computer's space (null — spaces off). */
   onSwitchSpace: (() => void) | null;
   open: boolean;
@@ -280,13 +276,8 @@ function LiveRow(props: {
   const environmentId = computer.environmentId as EnvironmentId;
   const live = useLive(environmentId);
   const navigate = useNavigate();
-  const launchers = useHomeLaunchers(environmentId);
   const status = live.connection.status;
   const dropped = recentDrops(environmentId);
-  const openTerminal = () => {
-    props.onClose();
-    void launchers.openTerminal();
-  };
   const openChat = (threadId: ThreadId) => {
     props.onClose();
     void navigate({
@@ -318,7 +309,7 @@ function LiveRow(props: {
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-1.5">
             <span className="truncate text-sm font-medium">{computer.label}</span>
-            {props.isThis ? (
+            {props.isThis && props.thisWord ? (
               <span className="shrink-0 text-[10px] text-muted-foreground">{props.thisWord}</span>
             ) : null}
           </span>
@@ -362,29 +353,6 @@ function LiveRow(props: {
             className="shrink-0 rounded-md border border-border px-2 py-0.5 text-[11px] font-medium hover:bg-accent"
           >
             Switch
-          </span>
-        ) : null}
-        {live.up && (props.isThis || !props.onSwitchSpace) ? (
-          // Every computer's own terminal, whatever is on screen: nothing to guess.
-          <span
-            role="button"
-            tabIndex={0}
-            data-testid="computers-row-terminal"
-            aria-label={`Terminal on ${computer.label}`}
-            title={`Terminal on ${computer.label}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              openTerminal();
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" && event.key !== " ") return;
-              event.preventDefault();
-              event.stopPropagation();
-              openTerminal();
-            }}
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <TerminalIcon className="size-3.5" />
           </span>
         ) : null}
         <ChevronRightIcon
@@ -545,7 +513,9 @@ export function ComputersPill(props: {
   const spaceScope = useSpaceScope();
   const switchSpace = useSwitchSpace();
   const thisId = props.focusId ?? spaceScope ?? primaryId;
-  const thisWord = spaceScope ? "this space" : inChat ? "this chat" : "selected";
+  const thisWord = spaceScope ? "this space" : inChat ? "this chat" : null;
+  // Home has no computer of its own: all are named, none set apart.
+  const focused = thisWord !== null;
   const chatComputer = inChat
     ? props.computers.find((computer) => computer.environmentId === thisId)
     : undefined;
@@ -554,10 +524,10 @@ export function ComputersPill(props: {
     () =>
       props.computers.toSorted(
         (a, b) =>
-          Number(b.environmentId === thisId) - Number(a.environmentId === thisId) ||
+          (focused ? Number(b.environmentId === thisId) - Number(a.environmentId === thisId) : 0) ||
           Number(a.environmentId === null) - Number(b.environmentId === null),
       ),
-    [props.computers, thisId],
+    [focused, props.computers, thisId],
   );
   const asleep = computers.filter((computer) => computer.environmentId === null).length;
   const summary = `${computers.length} computers${asleep > 0 ? ` · ${asleep} asleep` : ""}`;
@@ -593,12 +563,12 @@ export function ComputersPill(props: {
                   <LiveMark
                     key={computer.key}
                     computer={computer}
-                    current={computer.environmentId === thisId}
-                    quiet={inChat && computer.environmentId !== thisId}
+                    current={focused && computer.environmentId === thisId}
+                    quiet={focused && computer.environmentId !== thisId}
                     lead={chatComputer === computer ? "This chat runs on " : ""}
                   />
                 ) : (
-                  <Mark key={computer.key} computer={computer} live={null} quiet={inChat} />
+                  <Mark key={computer.key} computer={computer} live={null} quiet={focused} />
                 ),
               )}
               <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
