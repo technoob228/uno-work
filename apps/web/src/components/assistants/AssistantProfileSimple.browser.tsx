@@ -276,9 +276,7 @@ describe("its page", () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
-    await expect
-      .element(screen.getByTestId("assistant-profile-memory-editor"))
-      .toBeInTheDocument();
+    await expect.element(screen.getByTestId("assistant-profile-memory-editor")).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
 

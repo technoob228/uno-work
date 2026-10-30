@@ -263,7 +263,11 @@ function ProfileTabs(props: {
       className="-mt-2 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"
       data-testid="assistant-profile-tabs"
     >
-      <div className="flex min-w-max gap-1 border-b border-border" role="tablist" aria-label="Its settings">
+      <div
+        className="flex min-w-max gap-1 border-b border-border"
+        role="tablist"
+        aria-label="Its settings"
+      >
         {ASSISTANT_PROFILE_TABS.map((entry) => (
           <button
             key={entry.id}
@@ -558,7 +562,11 @@ export function AssistantProfileSimple(props: {
             {/* Its settings by tabs (Misha 29.10: "a lot to scroll"); the tab is in the address. */}
             <ProfileTabs tab={tab} onTab={setTab} />
             {tab === "general" ? (
-              <div className="flex flex-col gap-6" role="tabpanel" data-testid="assistant-profile-panel-general">
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-general"
+              >
                 <Section title="Permission level" testId="assistant-profile-mode">
                   <div className="p-2">
                     <AssistantModeSwitch member={member} />
@@ -676,12 +684,14 @@ export function AssistantProfileSimple(props: {
                     )}
                   </div>
                 )}
-
-
               </div>
             ) : null}
             {tab === "where" ? (
-              <div className="flex flex-col gap-6" role="tabpanel" data-testid="assistant-profile-panel-where">
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-where"
+              >
                 <Section title="Where it works" testId="assistant-profile-works-on-section">
                   <TeamWorksOn member={member} />
                 </Section>
@@ -709,12 +719,14 @@ export function AssistantProfileSimple(props: {
                 >
                   <TeamRunsOn member={member} changing={changingBrain} />
                 </Section>
-
-
               </div>
             ) : null}
             {tab === "apps" ? (
-              <div className="flex flex-col gap-6" role="tabpanel" data-testid="assistant-profile-panel-apps">
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-apps"
+              >
                 {/* The one next step, then the other ways to reach it. */}
                 {!member.revoked && !telegramLinked && member.isUno ? (
                   <ConnectTelegramCard member={member} />
@@ -751,12 +763,14 @@ export function AssistantProfileSimple(props: {
                     </Section>
                   )}
                 />
-
-
               </div>
             ) : null}
             {tab === "memory" ? (
-              <div className="flex flex-col gap-6" role="tabpanel" data-testid="assistant-profile-panel-memory">
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-memory"
+              >
                 <Section
                   title={
                     member.isUno ? "Memory · shared with your helpers" : "Memory · shared with Uno"
@@ -773,11 +787,14 @@ export function AssistantProfileSimple(props: {
                     />
                   </div>
                 </Section>
-
               </div>
             ) : null}
             {tab === "tasks" ? (
-              <div className="flex flex-col gap-6" role="tabpanel" data-testid="assistant-profile-panel-tasks">
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-tasks"
+              >
                 {/* What it does by itself: on a schedule or when something happens (28.10). */}
                 <AutomationsSection member={member} />
 
@@ -787,7 +804,11 @@ export function AssistantProfileSimple(props: {
                       member.chats.conversations
                         .slice(0, 6)
                         .map((thread) => (
-                          <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
                         ))
                     ) : (
                       <p className="px-3 py-2 text-sm text-muted-foreground">
@@ -804,15 +825,19 @@ export function AssistantProfileSimple(props: {
                       running
                         .slice(0, 4)
                         .map((thread) => (
-                          <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
                         ))
                     ) : (
-                      <p className="px-3 pt-0 pb-2 text-xs text-muted-foreground">Nothing running.</p>
+                      <p className="px-3 pt-0 pb-2 text-xs text-muted-foreground">
+                        Nothing running.
+                      </p>
                     )}
                   </Section>
                 </div>
-
-
               </div>
             ) : null}
           </div>

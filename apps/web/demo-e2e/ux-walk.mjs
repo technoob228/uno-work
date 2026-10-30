@@ -468,8 +468,8 @@ async function desktop() {
       await row(page, "assistant-mia").getByTestId("sidebar-assistant-face").click();
       await page.getByTestId("assistant-profile").waitFor();
       const tasksTab = page.getByTestId("assistant-profile-tab-tasks");
-    if ((await tasksTab.count()) > 0) await tasksTab.click();
-    const section = page.getByText(/Automations/).first();
+      if ((await tasksTab.count()) > 0) await tasksTab.click();
+      const section = page.getByText(/Automations/).first();
       await section.scrollIntoViewIfNeeded();
       await snap(page, "d24-automations");
     },
