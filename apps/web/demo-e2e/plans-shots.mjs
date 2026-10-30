@@ -75,6 +75,20 @@ async function newChat(page) {
     await shot(page, "01-home-plan-limits");
     log.push(`  widget: ${await text(page, "home-plan-limits")}`);
   });
+  await step("Home's box: Claude here is at its limit", async () => {
+    await page.getByTestId("home-composer").scrollIntoViewIfNeeded();
+    await page.getByTestId("home-plan-room").waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(600);
+    await shot(page, "01b-home-box-limit");
+    log.push(`  home: ${await text(page, "home-plan-room")}`);
+    await page.getByTestId("home-plan-room-start-on").click();
+    await page.getByTestId("home-computer-chip").getByText("MacBook").waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(800);
+    await shot(page, "01c-home-box-on-macbook");
+    await page.getByTestId("home-computer-chip").click();
+    await page.getByTestId("new-chat-computer-option").getByText("uno-work").click();
+    await page.waitForTimeout(800);
+  });
   await step("New chat on uno-work: the plan is at its limit", async () => {
     await newChat(page);
     await shot(page, "02-new-chat");

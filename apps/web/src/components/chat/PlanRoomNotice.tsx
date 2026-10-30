@@ -334,3 +334,87 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
     </div>
   );
 });
+
+/**
+ * Home's box ("What do you want to build?"): the same line under it when the
+ * model picked there runs on a plan that is at its limit on the picked
+ * computer. "Start on MacBook" switches Home's own computer chip — nothing
+ * starts until the person sends. With "Switch by itself" the chip moves on
+ * its own (once per computer per 15 minutes) and the line says so.
+ */
+export const HomePlanRoomLine = memo(function HomePlanRoomLine({
+  environmentId,
+  driver,
+  onPickComputer,
+}: {
+  environmentId: EnvironmentId | null;
+  driver: string | null;
+  onPickComputer: (environmentId: EnvironmentId) => void;
+}) {
+  const provider = environmentId ? planProviderForDriver(driver) : null;
+  const { computers } = usePlanComputers({ enabled: provider !== null });
+  const mode = useSettings((settings) => settings.planLimitSwitch);
+  const clock = useMinuteClock();
+  const now = Math.max(Date.parse(clock), Date.now());
+  const [switchedFrom, setSwitchedFrom] = useState<{
+    readonly text: string;
+    readonly to: EnvironmentId;
+  } | null>(null);
+
+  const room =
+    environmentId === null
+      ? ({ kind: "ok" } as const)
+      : pickComputerForNewChat({ currentEnvironmentId: environmentId, provider, computers, now });
+  const alternative = room.kind === "full" ? room.alternative : null;
+  const movedLately =
+    environmentId !== null &&
+    Date.now() - (autoMovedFrom.get(environmentId) ?? 0) < AUTO_MOVE_QUIET_MS;
+  const autoTarget =
+    mode === "auto" && alternative && !movedLately ? alternative.environmentId : null;
+  useEffect(() => {
+    if (autoTarget === null || environmentId === null || room.kind !== "full" || !alternative) {
+      return;
+    }
+    autoMovedFrom.set(environmentId, Date.now());
+    setSwitchedFrom({
+      text: planStartedOnLine({
+        startedOn: alternative.computerName,
+        provider: room.provider,
+        blockedComputerName: room.computerName,
+        resetsAt: room.resetsAt,
+        now,
+      }).replace(/^Started on/, "Switched to"),
+      to: alternative.environmentId,
+    });
+    onPickComputer(alternative.environmentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per computer and target
+  }, [autoTarget, environmentId]);
+
+  if (room.kind !== "full") {
+    return switchedFrom && switchedFrom.to === environmentId ? (
+      <NoticeLine text={switchedFrom.text} testId="home-plan-room-switched" />
+    ) : null;
+  }
+  return (
+    <NoticeLine
+      text={planFullLine({
+        provider: room.provider,
+        computerName: room.computerName,
+        resetsAt: room.resetsAt,
+        now,
+      })}
+      testId="home-plan-room"
+    >
+      {alternative ? (
+        <Button
+          size="xs"
+          variant="outline"
+          onClick={() => onPickComputer(alternative.environmentId)}
+          data-testid="home-plan-room-start-on"
+        >
+          Start on {alternative.computerName}
+        </Button>
+      ) : null}
+    </NoticeLine>
+  );
+});
