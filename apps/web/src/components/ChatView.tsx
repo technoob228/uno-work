@@ -3104,7 +3104,7 @@ export default function ChatView(props: ChatViewProps) {
     intent: ComposerSubmissionIntent = "foreground",
   ) => {
     e?.preventDefault();
-    const inBackground = intent === "background" && !queued;
+    const inBackground = intent !== "foreground" && !queued;
     // A queued message that can't go now is not lost: back first, held.
     const keepQueued = () => {
       if (queued) useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued);
@@ -3294,11 +3294,13 @@ export default function ChatView(props: ChatViewProps) {
       runtimeMode,
     };
     const startNextChat = () =>
-      handleNewThread(projectRefForNextChat, nextChatOptions).catch(() => {
-        toastManager.add(
-          stackedThreadToast({ type: "warning", title: "Couldn't open a new chat" }),
-        );
-      });
+      intent === "background-home"
+        ? navigate({ to: "/", replace: true })
+        : handleNewThread(projectRefForNextChat, nextChatOptions).catch(() => {
+            toastManager.add(
+              stackedThreadToast({ type: "warning", title: "Couldn't open a new chat" }),
+            );
+          });
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -3869,7 +3871,13 @@ export default function ChatView(props: ChatViewProps) {
       return () => clearTimeout(timer);
     }
     usePendingSendStore.getState().clear();
-    if (decision === "send") void onSendRef.current();
+    if (decision === "send") {
+      void onSendRef.current(
+        undefined,
+        undefined,
+        pendingSend?.backToHome ? "background-home" : "foreground",
+      );
+    }
   });
 
   const onInterrupt = async () => {

@@ -81,6 +81,29 @@ export function loadComposerStash(): void {
     .catch(() => undefined);
 }
 
+export type SetAsideResult =
+  /** The box held something: it's aside now. */
+  | { readonly kind: "aside"; readonly entry: StashedMessage }
+  /** An empty box and one message set aside: it comes back. */
+  | { readonly kind: "back"; readonly entry: StashedMessage }
+  /** An empty box and several: the person picks. */
+  | { readonly kind: "pick" }
+  | { readonly kind: "nothing" };
+
+/** ⌘S on a box, whichever box it is. */
+export function setAsideOrBringBack(
+  input: Omit<StashedMessage, "id" | "createdAt">,
+): SetAsideResult {
+  const store = useComposerStashStore.getState();
+  const entry = store.stash(input);
+  if (entry) return { kind: "aside", entry };
+  const { entries } = useComposerStashStore.getState();
+  const only = entries.length === 1 ? entries[0] : undefined;
+  const taken = only ? store.take(only.id) : null;
+  if (taken) return { kind: "back", entry: taken };
+  return entries.length > 1 ? { kind: "pick" } : { kind: "nothing" };
+}
+
 type StashTarget = (entry: StashedMessage) => void;
 let stashTarget: StashTarget | null = null;
 

@@ -18,17 +18,31 @@ export interface PendingSend {
   readonly draftId: DraftId;
   readonly prompt: string;
   readonly requestedAt: number;
+  /** Home's ⌘Enter: the task goes and the person is back on Home. */
+  readonly backToHome?: boolean;
 }
 
 interface PendingSendState {
   readonly pending: PendingSend | null;
-  readonly request: (draftId: DraftId, prompt: string) => void;
+  readonly request: (
+    draftId: DraftId,
+    prompt: string,
+    options?: { readonly backToHome?: boolean },
+  ) => void;
   readonly clear: () => void;
 }
 
 export const usePendingSendStore = create<PendingSendState>((set) => ({
   pending: null,
-  request: (draftId, prompt) => set({ pending: { draftId, prompt, requestedAt: Date.now() } }),
+  request: (draftId, prompt, options) =>
+    set({
+      pending: {
+        draftId,
+        prompt,
+        requestedAt: Date.now(),
+        ...(options?.backToHome ? { backToHome: true } : {}),
+      },
+    }),
   clear: () => set({ pending: null }),
 }));
 
