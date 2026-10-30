@@ -234,7 +234,10 @@ export function AssistantChatHeaderActions({
       )}
       {devMode || (compact && uno) ? null : (
         <>
-          <AssistantMemoryChip environmentId={environmentId} onOpenSettings={openSettings} />
+          {/* Uno's memory is on its page (Misha 29.10: Telegram stays, Memory goes). */}
+          {uno ? null : (
+            <AssistantMemoryChip environmentId={environmentId} onOpenSettings={openSettings} />
+          )}
           {/* The AI is picked in the composer below and on Uno's page: with
               the page there, the header's copy of the picker goes (29.10). */}
           {uno ? null : (
