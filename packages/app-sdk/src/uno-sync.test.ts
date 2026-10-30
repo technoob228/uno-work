@@ -547,6 +547,36 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     expect(empty).toEqual({ mode: "snapshot", versions: [], more: false });
   });
 
+  it("counts a file kept here once, also when it's all its folder holds", async () => {
+    const a = computer("a");
+    const dir = a.folder("data-only");
+    write(path.join(dir, "plan.md"), "plan\n");
+    write(path.join(dir, "data", "sample.csv"), "1,2\n");
+    write(path.join(dir, "conf", ".env"), "API_KEY=x\n");
+    await sync(a, dir, "data-only");
+
+    await setLocalOnly({ dir, path: "data/sample.csv", localOnly: true }, a);
+    const files = await projectFiles({ dir }, a);
+    expect(files.localOnly).toEqual([{ path: "data/sample.csv", yours: true }]);
+    expect(files.keyFiles).toEqual(["conf/.env"]);
+  });
+
+  it("marks the versions this person saved", async () => {
+    const a = { ...computer("a"), person: "misha@x.io" };
+    const b = { ...computer("b"), person: "anna" };
+    const dir = a.folder("marks");
+    write(path.join(dir, "plan.md"), "one\n");
+    await sync(a, dir, "marks");
+    expect((await projectHistory({ dir }, a)).versions[0]).toMatchObject({
+      person: "misha@x.io",
+      mine: true,
+    });
+    expect((await projectHistory({ dir }, b)).versions[0]).toMatchObject({
+      person: "misha@x.io",
+      mine: false,
+    });
+  });
+
   it("says what travels, what stays here, and lets the person choose", async () => {
     const a = computer("a");
     const b = computer("b");

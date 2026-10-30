@@ -95,6 +95,8 @@ export interface ProjectVersion {
   at: string;
   person: string | null;
   computer: string | null;
+  /** This person saved it. */
+  mine: boolean;
   note: string | null;
   files: Array<{ path: string; change: "added" | "changed" | "removed" }>;
   moreFiles: number;
