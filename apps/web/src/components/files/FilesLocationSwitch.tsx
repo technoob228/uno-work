@@ -25,8 +25,9 @@ export function FilesLocationSwitch({
         ? "bg-background font-medium text-foreground shadow-xs"
         : "text-muted-foreground hover:text-foreground",
     );
+  // Under 400 px the open name goes too: it pushed Recent off the row.
   const label = (active: boolean) =>
-    narrow ? (active ? undefined : "sr-only") : "hidden sm:inline";
+    narrow ? (active ? "sr-only min-[400px]:not-sr-only" : "sr-only") : "hidden sm:inline";
   return (
     <div
       className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/70 p-0.5"
