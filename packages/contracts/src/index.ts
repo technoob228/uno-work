@@ -13,6 +13,7 @@ export * from "./providerSetup.ts";
 export * from "./customHarness.ts";
 export * from "./model.ts";
 export * from "./keybindings.ts";
+export * from "./threadSearch.ts";
 export * from "./server.ts";
 export * from "./settings.ts";
 export * from "./skills.ts";

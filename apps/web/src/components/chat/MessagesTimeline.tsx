@@ -47,6 +47,8 @@ import {
 } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
+import type { ThreadFindMatch } from "./threadFind";
+import { useThreadFindReveal } from "./useThreadFindReveal";
 import {
   BotIcon,
   CheckIcon,
@@ -185,6 +187,10 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   /** The chat's latest turn: a finished one folds into "Worked for …". */
   latestTurn?: TimelineLatestTurn | null;
+  /** Find in chat (⌘F): what to highlight, and the match to bring into view. */
+  findQuery?: string;
+  findMatch?: ThreadFindMatch | null;
+  findNavigationId?: number;
   /**
    * The chat's state at the very end of the feed, as quiet lines (a failed
    * turn and its "Try again"), instead of a plate above the chat.
@@ -251,6 +257,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   onIsAtEndChange,
   latestTurn = null,
+  findQuery = "",
+  findMatch = null,
+  findNavigationId = 0,
   pendingApprovals = EMPTY_PENDING_APPROVALS,
   respondingRequestIds = EMPTY_REQUEST_IDS,
   onRespondToApproval,
@@ -328,6 +337,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+
+  const findRowIndex = findMatch
+    ? rows.findIndex((row) => row.kind === "message" && row.message.id === findMatch.messageId)
+    : -1;
+  const onFindMissingRow = useCallback(
+    (match: ThreadFindMatch) => {
+      // A note inside a finished turn hides in its fold until the turn opens.
+      const entry = timelineEntries.find(
+        (candidate) => candidate.kind === "message" && candidate.message.id === match.messageId,
+      );
+      const turnId = entry?.kind === "message" ? entry.message.turnId : null;
+      if (!turnId) return;
+      setExpandedTurnIds((current) =>
+        current.has(turnId) ? current : new Set(current).add(turnId),
+      );
+    },
+    [timelineEntries],
+  );
+  useThreadFindReveal({
+    listRef,
+    query: findQuery,
+    match: findMatch,
+    navigationId: findNavigationId,
+    rowIndex: findRowIndex,
+    onMissingRow: onFindMissingRow,
+  });
 
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
@@ -671,10 +706,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   ) : (
                     (displayedUserMessage.visibleText.trim().length > 0 ||
                       terminalContexts.length > 0) && (
-                      <UserMessageBody
-                        text={displayedUserMessage.visibleText}
-                        terminalContexts={terminalContexts}
-                      />
+                      <div data-thread-find-text>
+                        <UserMessageBody
+                          text={displayedUserMessage.visibleText}
+                          terminalContexts={terminalContexts}
+                        />
+                      </div>
                     )
                   )}
                 </div>
@@ -741,7 +778,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <div {...{ [REPLY_QUOTE_SOURCE_ATTRIBUTE]: "" }}>
+                <div {...{ [REPLY_QUOTE_SOURCE_ATTRIBUTE]: "" }} data-thread-find-text>
                   <ChatMarkdown
                     text={messageText}
                     cwd={ctx.markdownCwd}

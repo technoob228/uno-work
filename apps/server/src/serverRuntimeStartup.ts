@@ -52,6 +52,7 @@ import {
 } from "./provider/autoBootstrapModelSelection.ts";
 import { awaitUsableBootDefault, bootProbesFinished } from "./provider/awaitUsableBootDefault.ts";
 import { PlanResume } from "./planResume/PlanResumeService.ts";
+import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { ThreadPullRequests } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
 import { WorktreeCleanup } from "./worktreeCleanup/WorktreeCleanup.ts";
@@ -62,6 +63,8 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 import { ORPHANED_PROVIDER_SESSION_ERROR } from "./orchestration/orphanedSession.ts";
+
+const BACKFILL_START_DELAY = "20 seconds";
 
 export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
   readonly message: string;
@@ -444,6 +447,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const providerSessionReaper = yield* ProviderSessionReaper;
   const reminderScheduler = yield* ReminderScheduler;
   const planResume = yield* PlanResume;
+  const threadSearch = yield* ThreadSearch;
   const threadPullRequests = yield* ThreadPullRequests;
   const pluginRegistry = yield* PluginRegistry;
   const pluginRuntime = yield* PluginRuntime;
@@ -512,6 +516,12 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
         yield* reminderScheduler.start().pipe(Scope.provide(reactorScope));
         yield* planResume.start().pipe(Scope.provide(reactorScope));
+        // Messages from before the search index, once startup has settled.
+        yield* Effect.sleep(BACKFILL_START_DELAY).pipe(
+          Effect.andThen(threadSearch.backfill),
+          Effect.catch((cause) => Effect.logWarning("message search backfill failed", { cause })),
+          Effect.forkIn(reactorScope),
+        );
         yield* threadPullRequests.start().pipe(Scope.provide(reactorScope));
         yield* pluginRuntime.start().pipe(Scope.provide(reactorScope));
         // Chat-copy cleanup: first pass ~10 minutes after start, then hourly.

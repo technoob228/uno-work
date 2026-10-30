@@ -189,6 +189,10 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
           if (hasRows(statement)) {
             return Effect.succeed(statement.all(...(params as any)));
           }
+          // FTS5 writes its shadow tables with 64-bit rowids, which can reach
+          // last_insert_rowid; as a number that would throw after the write
+          // already committed. A statement without rows returns nothing else.
+          statement.setReadBigInts(true);
           const result = statement.run(...(params as any));
           return Effect.succeed(raw ? (result as unknown as ReadonlyArray<any>) : []);
         } catch (cause) {
@@ -228,6 +232,7 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
                   ReadonlyArray<unknown>
                 >;
               }
+              statement.setReadBigInts(true);
               statement.run(...(params as any));
               return [];
             },

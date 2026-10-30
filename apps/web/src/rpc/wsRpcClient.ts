@@ -221,6 +221,8 @@ export interface WsRpcClient {
     readonly regenerateThreadTitle: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.regenerateThreadTitle
     >;
+    readonly searchThreads: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.searchThreads>;
+    readonly findInThread: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.findInThread>;
     readonly getThreadTranscript: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.getThreadTranscript
     >;
@@ -664,6 +666,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         ),
       getThreadTranscript: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadTranscript](input)),
+      searchThreads: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.searchThreads](input)),
+      findInThread: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.findInThread](input)),
       getFullThreadDiff: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
       subscribeShell: (listener, options) =>

@@ -15,6 +15,8 @@ export interface CommandPaletteItem {
   readonly searchTerms: ReadonlyArray<string>;
   readonly title: ReactNode;
   readonly description?: string;
+  /** Shown instead of `description`, for marked-up text: a snippet with the match. */
+  readonly descriptionContent?: ReactNode;
   readonly timestamp?: string;
   readonly icon: ReactNode;
   readonly disabled?: boolean;
@@ -214,6 +216,8 @@ export function filterCommandPaletteGroups(input: {
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
+  /** Already matched by the server, so listed as they come. */
+  messageSearchItems?: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const isActionsFilter = input.query.startsWith(">");
   const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
@@ -251,7 +255,7 @@ export function filterCommandPaletteGroups(input: {
     }
   }
 
-  return searchableGroups.flatMap((group) => {
+  const groups = searchableGroups.flatMap((group) => {
     const items = group.items
       .map((item, index) => {
         const haystack = normalizeSearchText(item.searchTerms.join(" "));
@@ -278,6 +282,13 @@ export function filterCommandPaletteGroups(input: {
 
     return [{ value: group.value, label: group.label, items }];
   });
+
+  return !input.isInSubmenu && !isActionsFilter && (input.messageSearchItems?.length ?? 0) > 0
+    ? [
+        ...groups,
+        { value: "messages-search", label: "Messages", items: input.messageSearchItems ?? [] },
+      ]
+    : groups;
 }
 
 export function buildBrowseGroups(input: {

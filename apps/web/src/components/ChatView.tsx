@@ -127,6 +127,10 @@ import {
 import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { useThreadFindStore } from "../threadFindStore";
+import { threadFindOwnsShortcut } from "./chat/threadFind";
+import { ThreadFindBar } from "./chat/ThreadFindBar";
+import { useThreadFind } from "./chat/useThreadFind";
 import { withAppShortcutDefaults } from "./appShortcuts.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { useNameAmongComputers } from "./computerSwitcher/useComputerSwitcher";
@@ -1857,6 +1861,21 @@ export default function ChatView(props: ChatViewProps) {
   );
   // Фильтр видимости встроенного чата: применяем на выборке строк, а не в
   // рендере — плагин не может ни добавить строку, ни расширить права.
+  const readTimelineScroller = useCallback(() => {
+    const node = legendListRef.current?.getScrollableNode?.();
+    return node instanceof HTMLElement ? node : null;
+  }, []);
+  const threadFind = useThreadFind({
+    threadKey: routeThreadKey,
+    environmentId: routeThreadRef.environmentId,
+    threadId: routeThreadRef.threadId,
+    revision: timelineMessages.length,
+    readContainer: readTimelineScroller,
+  });
+  const closeThreadFind = useCallback(() => {
+    useThreadFindStore.getState().close();
+    composerRef.current?.focusAtEnd();
+  }, [composerRef]);
   const visibleTimelineEntries = useMemo(
     () => filterTimelineEntriesForVisibility(timelineEntries, embeddedVisibility),
     [embeddedVisibility, timelineEntries],
@@ -3022,6 +3041,14 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
+      if (command === "chat.find") {
+        if (!isServerThread || !threadFindOwnsShortcut(document.activeElement)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        useThreadFindStore.getState().open(routeThreadKey);
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -3051,6 +3078,8 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     isEmbedded,
+    isServerThread,
+    routeThreadKey,
     activeProject,
     terminalState.terminalOpen,
     terminalState.activeTerminalId,
@@ -4966,6 +4995,9 @@ export default function ChatView(props: ChatViewProps) {
                   workspaceRoot={activeWorkspaceRoot}
                   onIsAtEndChange={onIsAtEndChange}
                   latestTurn={activeLatestTurn}
+                  findQuery={threadFind.searchedQuery}
+                  findMatch={threadFind.match}
+                  findNavigationId={threadFind.navigationId}
                   pendingApprovals={pendingApprovals}
                   respondingRequestIds={respondingRequestIds}
                   onRespondToApproval={onRespondToApproval}
@@ -5005,6 +5037,21 @@ export default function ChatView(props: ChatViewProps) {
                       ) : null}
                     </>
                   }
+                />
+              ) : null}
+
+              {threadFind.open && showsTimeline(embeddedVisibility) && !isDraftHeroState ? (
+                <ThreadFindBar
+                  query={threadFind.query}
+                  matchCount={threadFind.matchCount}
+                  activeIndex={threadFind.activeIndex}
+                  status={threadFind.status}
+                  focusRequestId={threadFind.focusRequestId}
+                  onQueryChange={threadFind.setQuery}
+                  onOlder={threadFind.older}
+                  onNewer={threadFind.newer}
+                  onRetry={threadFind.retry}
+                  onClose={closeThreadFind}
                 />
               ) : null}
 
