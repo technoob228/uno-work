@@ -261,13 +261,45 @@ export function useChatOnComputer() {
   );
 
   const moveDraft = useCallback(
-    async (draftId: DraftId, environmentId: EnvironmentId): Promise<void> => {
+    async (
+      draftId: DraftId,
+      environmentId: EnvironmentId,
+      // The model to start on there ("Claude on the MacBook" when the plan
+      // here is at its limit); without it the other computer picks its own.
+      options?: { readonly modelSelection?: ModelSelection },
+    ): Promise<void> => {
       const carry = readDraftCarry(draftId);
       await chatIn(environmentId, null);
-      applyDraftCarry(router, draftId, carry, { keepModel: false });
+      applyDraftCarry(
+        router,
+        draftId,
+        options?.modelSelection ? { ...carry, modelSelection: options.modelSelection } : carry,
+        { keepModel: options?.modelSelection !== undefined },
+      );
     },
     [chatIn, router],
   );
 
-  return { chatIn, moveDraft };
+  /**
+   * A new chat on `environmentId` (home folder) with words typed in and,
+   * optionally, the model it starts on — nothing is sent. "New chat on the
+   * MacBook" / "New chat with Uno AI" from a chat that stopped at its plan's limit.
+   */
+  const startChatOn = useCallback(
+    async (
+      environmentId: EnvironmentId,
+      start: { readonly prompt: string; readonly modelSelection?: ModelSelection | null },
+    ): Promise<void> => {
+      await chatIn(environmentId, null);
+      const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
+      const route = resolveThreadRouteTarget(params);
+      if (route?.kind !== "draft") return;
+      const store = useComposerDraftStore.getState();
+      if (start.prompt) store.setPrompt(route.draftId, start.prompt);
+      if (start.modelSelection) store.setModelSelection(route.draftId, start.modelSelection);
+    },
+    [chatIn, router],
+  );
+
+  return { chatIn, moveDraft, startChatOn };
 }

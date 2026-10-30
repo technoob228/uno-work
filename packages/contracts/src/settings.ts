@@ -159,6 +159,10 @@ export const ServerBrowserSettings = Schema.Struct({
 });
 export type ServerBrowserSettings = typeof ServerBrowserSettings.Type;
 
+/** What a new chat does when the plan here is at its limit and another computer has room. */
+export const PlanLimitSwitch = Schema.Literals(["ask", "auto"]);
+export type PlanLimitSwitch = typeof PlanLimitSwitch.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   browserAutomationLevel: BrowserAutomationLevel.pipe(
@@ -202,6 +206,11 @@ export const ClientSettingsSchema = Schema.Struct({
   // composer's Build/Plan toggle is gone by default; this brings it back
   // together with /plan, /default and Shift+Tab. Off — every chat builds.
   planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // When the person's own AI plan (Claude / ChatGPT) on this computer is at
+  // its limit and another computer of theirs has room (T3 port 30.10): a new
+  // chat asks "Start on <that computer>?" (`ask`), or starts there by itself
+  // and says so (`auto`).
+  planLimitSwitch: PlanLimitSwitch.pipe(Schema.withDecodingDefault(Effect.succeed("ask" as const))),
   unoLastModelRoute: UnoModelRoute.pipe(
     Schema.withDecodingDefault(Effect.succeed("default" as const)),
   ),
@@ -1069,6 +1078,7 @@ export const ClientSettingsPatch = Schema.Struct({
   featureFlags: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   newChatModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
+  planLimitSwitch: Schema.optionalKey(PlanLimitSwitch),
   unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(

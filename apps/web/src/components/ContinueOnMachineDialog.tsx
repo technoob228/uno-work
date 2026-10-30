@@ -80,6 +80,8 @@ export interface ContinueOnMachineDialogProps {
   readonly threadRef: ScopedThreadRef | null;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /** Picked when the dialog opens ("Continue on the MacBook" from a plan at its limit). */
+  readonly initialTargetEnvironmentId?: EnvironmentId | null;
 }
 
 interface TargetOption {
@@ -138,6 +140,7 @@ export function ContinueOnMachineDialog({
   threadRef,
   open,
   onOpenChange,
+  initialTargetEnvironmentId = null,
 }: ContinueOnMachineDialogProps) {
   const navigate = useNavigate();
   const savedRegistry = useSavedEnvironmentRegistryStore((state) => state.byId);
@@ -264,6 +267,12 @@ export function ContinueOnMachineDialog({
     },
     [savedRuntime],
   );
+
+  useEffect(() => {
+    if (open && initialTargetEnvironmentId !== null) {
+      setTargetEnvironmentId(initialTargetEnvironmentId);
+    }
+  }, [initialTargetEnvironmentId, open]);
 
   // Look at the target project as soon as a machine is picked, so the person
   // knows before pressing the button whether the project is there already.

@@ -57,6 +57,7 @@ import {
   type PlanUsageTone,
 } from "./planLimitsModel";
 import { planLimitsQueryOptions, useAiHours, useAiSpend } from "./useHomeInfo";
+import { PlanLimitsElsewhere } from "./PlanLimitsElsewhere";
 import {
   aiFastLine,
   aiHoursCaption,
@@ -622,6 +623,7 @@ export function PlanLimitsWidget({ environmentId }: { environmentId: Environment
       {accounts.map((account) => (
         <PlanLimitsAccountBlock key={account.id} account={account} now={now} />
       ))}
+      <PlanLimitsElsewhere environmentId={environmentId} now={now} />
     </div>
   );
 }

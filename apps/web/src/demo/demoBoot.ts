@@ -62,6 +62,7 @@ import {
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
 import { answerVaultRpc } from "./assist/vault";
+import { planLimitsFor } from "./assist/plans";
 import { WORLD, worldStamp } from "./assist/world";
 import "./assist/variant";
 import {
@@ -335,6 +336,8 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
         diskTotalGb: machine.os === "darwin" ? 512 : 160,
         uptimeS: 86_400 * 2,
       };
+    case WS_METHODS.unoComputerPlanLimits:
+      return planLimitsFor(machine.key);
     case WS_METHODS.unoComputerMachineApps:
       return demoMachineApps(machine);
     case WS_METHODS.workSites:

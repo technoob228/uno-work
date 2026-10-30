@@ -81,6 +81,7 @@ import { useScreenRecordingStore } from "../../../screenRecording/recordingStore
 import { type DictationDraft, resolveDictationInsert } from "../../../hooks/dictationDraft";
 import { isDictationSupported, useDictation } from "../../../hooks/useDictation";
 import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
+import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
 import { TraitsPicker } from "../../chat/TraitsPicker";
@@ -676,6 +677,16 @@ export function HomeComposer({
           </button>
         </div>
       </div>
+      {minimal ? null : (
+        <HomePlanRoomLine
+          environmentId={targetEnvironmentId}
+          driver={selectedEntry?.driverKind ?? null}
+          onPickComputer={(next) => {
+            setPickedEnvironmentId(next);
+            setFolder(null);
+          }}
+        />
+      )}
       {starters.length > 0 || onUploadProject || (recordingSupported && recordingKey) ? (
         // One row of light pills; on a narrow screen they wrap (no sideways scroll).
         <div

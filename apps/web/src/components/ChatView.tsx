@@ -181,6 +181,9 @@ import {
 } from "./chat/embeddedChatVisibility";
 import { ChatHeader } from "./chat/ChatHeader";
 import { DraftHeroHeadline, DraftHeroStarters } from "./chat/DraftHeroHeadline";
+import { ChatPlanLimitNotice, DraftPlanRoomNotice } from "./chat/PlanRoomNotice";
+import { unoSmartTarget } from "./chat/unoCreditsChoice.logic";
+import { isPlanLimitText, planProviderForDriver } from "../planRoom/planRoom.logic";
 import { resolveDraftHeroState } from "./chat/draftHero.logic";
 import { useDraftHeroLayoutTransition } from "./chat/useDraftHeroLayoutTransition";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -4020,6 +4023,24 @@ export default function ChatView(props: ChatViewProps) {
     }
     return null;
   }, [activeThread?.messages]);
+  // The person's own plan ran out (T3 port 30.10, PlanRoomNotice): the stop
+  // line is the turn's error (Codex) or — Claude Code ends the turn with it as
+  // a short "answer" — the last reply of a finished turn.
+  const planLimitStopText = useMemo(() => {
+    if (planProviderForDriver(selectedProvider) === null) return null;
+    if (isPlanLimitText(activeThread?.error)) return activeThread?.error ?? null;
+    if (activeLatestTurn?.state === "running" || !activeLatestTurn?.completedAt) return null;
+    const messages = activeThread?.messages ?? [];
+    const last = messages[messages.length - 1];
+    return last?.role === "assistant" && isPlanLimitText(last.text) ? last.text : null;
+  }, [
+    activeLatestTurn?.completedAt,
+    activeLatestTurn?.state,
+    activeThread?.error,
+    activeThread?.messages,
+    selectedProvider,
+  ]);
+  const smartTargetHere = useMemo(() => unoSmartTarget(providerStatuses), [providerStatuses]);
   const onRetryAfterReauth = useCallback(async () => {
     const api = readEnvironmentApi(environmentId);
     if (
@@ -4448,7 +4469,9 @@ export default function ChatView(props: ChatViewProps) {
         activeThread.session?.lastErrorClass === "billing_error" ||
         harnessAuth?.suppressThreadError ||
         // "Sign in or use Uno credits": the composer asks that itself.
-        isUnoCreditsChoiceRequiredText(activeThread.error)
+        isUnoCreditsChoiceRequiredText(activeThread.error) ||
+        // The plan is at its limit: ChatPlanLimitNotice says it, with the ways on.
+        planLimitStopText !== null
           ? null
           : activeThread.error
       }
@@ -4596,6 +4619,18 @@ export default function ChatView(props: ChatViewProps) {
                       onDelete={onDeleteQueued}
                     />
                     {threadErrorNotice("feed")}
+                    {planLimitStopText !== null && isServerThread ? (
+                      <ChatPlanLimitNotice
+                        environmentId={activeThread.environmentId}
+                        threadRef={scopeThreadRef(activeThread.environmentId, activeThread.id)}
+                        driver={selectedProvider}
+                        stopText={planLimitStopText}
+                        stoppedAt={activeLatestTurn?.completedAt ?? null}
+                        lastRequest={lastUserMessageText ?? ""}
+                        smartTarget={smartTargetHere}
+                        canContinueWithHistory={isElectron && Boolean(activeProject)}
+                      />
+                    ) : null}
                   </>
                 }
               />
@@ -4871,7 +4906,16 @@ export default function ChatView(props: ChatViewProps) {
             // The lower half of the page: the composer sits between this and the
             // empty timeline above, in the middle; a few hints right under it.
             <div className="min-h-0 flex-1 overflow-hidden px-3 pt-1 sm:px-5">
-              <div className="mx-auto w-full max-w-208">
+              <div className="mx-auto flex w-full max-w-208 flex-col gap-3">
+                <DraftPlanRoomNotice
+                  environmentId={activeThread.environmentId}
+                  draftId={draftId}
+                  driver={selectedProvider}
+                  smartTarget={smartTargetHere}
+                  onUseModel={(selection) =>
+                    onProviderModelSelect(selection.instanceId, selection.model)
+                  }
+                />
                 <DraftHeroStarters
                   environmentId={activeThread.environmentId}
                   draftId={draftId}

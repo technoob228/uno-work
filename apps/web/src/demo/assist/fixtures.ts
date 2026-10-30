@@ -18,6 +18,7 @@ import {
   type MachineKey,
   type ProjectSpec,
 } from "../heavyFixtures";
+import { PLAN_LIMIT_CHAT } from "./plans";
 import { type AssistWorld, macOnline } from "./world";
 
 /** An assistant the demo has: its folder on one computer, how it looks, what its daemon keeps. */
@@ -329,6 +330,13 @@ export function installAssistFixtures(world: AssistWorld) {
   const live = world.account === "live";
   const projects = live ? liveProjects() : newProjects();
   const chats = live ? liveChats(world) : [];
+  if (live && world.plans === "full") {
+    chats.push({
+      ...PLAN_LIMIT_CHAT,
+      project: "p-work-landing",
+      messages: PLAN_LIMIT_CHAT.messages.map(([role, text]) => [role, text] as const),
+    });
+  }
   for (const persona of DEMO_PERSONAS) {
     if (!live && persona.machine !== "work") continue;
     if (persona.machine === "mac" && !macOnline(world)) continue;
