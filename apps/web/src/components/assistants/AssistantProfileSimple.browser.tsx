@@ -181,7 +181,7 @@ describe("sidebar: '+' opens the gallery", () => {
 });
 
 describe("its page", () => {
-  it("links its own Telegram bot right on the page; the rest is under Advanced", async () => {
+  it("links its own Telegram bot right on the page; its projects are picked in sight", async () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
@@ -193,15 +193,12 @@ describe("its page", () => {
     await expect.element(screen.getByTestId("uno-connect-telegram-dialog")).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     await screen.getByRole("button", { name: "Close" }).first().click();
-    // Advanced is folded until asked.
-    expect(screen.getByTestId("assistant-profile-preset").query()).toBeNull();
-    await screen.getByTestId("assistant-advanced-toggle").click();
+    // "Where it can look": the projects, no second permission switch (Misha 29.10).
     await expect
-      .element(screen.getByTestId("assistant-profile-preset-itself"))
-      .toHaveTextContent("Autonomous");
-    await expect
-      .element(screen.getByTestId("assistant-profile-preset-asks-first"))
-      .toHaveTextContent("Cautious");
+      .element(screen.getByTestId("assistant-profile-where"))
+      .toHaveTextContent("All projects");
+    expect(screen.getByTestId("assistant-profile-preset-itself").query()).toBeNull();
+    expect(screen.getByTestId("assistant-profile-preset-asks-first").query()).toBeNull();
     // No sandbox here: "Only selected projects" waits for its own computer.
     await expect
       .element(screen.getByTestId("assistant-profile-preset-projects-only"))
@@ -209,6 +206,16 @@ describe("its page", () => {
     await expect
       .element(screen.getByTestId("assistant-profile-preset-projects-note"))
       .toHaveTextContent("Sees everything on this computer");
+  });
+
+  it("the permission level is changed in one place", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await expect.element(screen.getByTestId("assistant-mode-switch")).toBeInTheDocument();
+    await screen.getByTestId("assistant-advanced-toggle").click();
+    expect(screen.getByTestId("assistant-profile-access").query()).toBeNull();
+    expect(screen.getByTestId("assistant-mode-switch").elements()).toHaveLength(1);
   });
 
   it("with Telegram linked: no card, the bot in the rows", async () => {
@@ -234,7 +241,6 @@ describe("its page", () => {
       .toBeInTheDocument();
     await expect.element(screen.getByTestId("assistant-profile-can-use")).toBeInTheDocument();
     await expect.element(screen.getByText("The AI it runs on")).toBeInTheDocument();
-    expect(screen.getByTestId("assistant-profile-preset").query()).toBeNull();
   });
 
   it("memory and instructions are edited on the page, not on another one", async () => {
