@@ -1253,10 +1253,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     const actionCount = [showRead, showDSnooze, showDone].filter(Boolean).length;
     const actionsWidthRem = actionCount * 1.625 + Math.max(0, actionCount - 1) * 0.125;
     const tailHide = hasActions ? D_ROW_TAIL_HIDE : undefined;
-    // The age gives way to "Ready" and the working spinner (they already say
-    // "now"); a dot (needs your OK, asks you, failed) keeps it.
+    // Every row says its age; only the working spinner stands in for it
+    // (it already means "now"). "Ready" and the dots sit after the age.
     const ageLabel =
-      props.activityAtMs === undefined || mark === "your-turn" || mark === "working"
+      props.activityAtMs === undefined || mark === "working"
         ? ""
         : chatAgeLabel(props.activityAtMs, Date.parse(props.now));
     return (
