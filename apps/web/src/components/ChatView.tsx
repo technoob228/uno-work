@@ -127,9 +127,12 @@ import {
 import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { parseGoalCommand } from "@t3tools/shared/threadGoal";
 import { useThreadFindStore } from "../threadFindStore";
 import { threadFindOwnsShortcut } from "./chat/threadFind";
 import { ThreadFindBar } from "./chat/ThreadFindBar";
+import { ThreadGoalBar } from "./chat/ThreadGoalBar";
+import { deriveThreadGoal, isThreadGoalShown } from "./chat/threadGoal";
 import { useThreadFind } from "./chat/useThreadFind";
 import { withAppShortcutDefaults } from "./appShortcuts.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
@@ -1861,6 +1864,13 @@ export default function ChatView(props: ChatViewProps) {
   );
   // Фильтр видимости встроенного чата: применяем на выборке строк, а не в
   // рендере — плагин не может ни добавить строку, ни расширить права.
+  const threadGoal = useMemo(
+    () => deriveThreadGoal(activeThread?.activities),
+    [activeThread?.activities],
+  );
+  const [dismissedGoalId, setDismissedGoalId] = useState<string | null>(null);
+  const [goalStopping, setGoalStopping] = useState(false);
+  const pendingDraftGoalRef = useRef<string | null>(null);
   const readTimelineScroller = useCallback(() => {
     const node = legendListRef.current?.getScrollableNode?.();
     return node instanceof HTMLElement ? node : null;
@@ -2186,6 +2196,20 @@ export default function ChatView(props: ChatViewProps) {
     },
     [draftId, routeThreadRef, serverThread, setStoreThreadError],
   );
+  const onStopGoal = useCallback(async () => {
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    setGoalStopping(true);
+    await api.orchestration
+      .stopThreadGoal({ threadId })
+      .catch((error: unknown) => {
+        setThreadError(
+          threadId,
+          error instanceof Error ? error.message : "Couldn't stop the goal.",
+        );
+      })
+      .finally(() => setGoalStopping(false));
+  }, [environmentId, setThreadError, threadId]);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -3267,6 +3291,51 @@ export default function ChatView(props: ChatViewProps) {
       });
       return;
     }
+    const goalCommand = queued ? null : parseGoalCommand(trimmed);
+    if (goalCommand) {
+      const clearComposer = () => {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        composerRef.current?.resetCursorState();
+      };
+      if (goalCommand.kind === "help") {
+        setThreadError(activeThread.id, 'Say what done means: "/goal all tests pass".');
+        return;
+      }
+      if (goalCommand.kind === "stop") {
+        clearComposer();
+        if (isServerThread) await api?.orchestration.stopThreadGoal({ threadId: activeThread.id });
+        return;
+      }
+      if (linkDown || !api) {
+        setThreadError(activeThread.id, `A goal needs ${offlineLabel} online.`);
+        return;
+      }
+      if (phase === "running") {
+        setThreadError(activeThread.id, "Wait for the agent to finish, then set the goal.");
+        return;
+      }
+      if (isServerThread) {
+        try {
+          await api.orchestration.setThreadGoal({
+            threadId: activeThread.id,
+            goal: goalCommand.goal,
+          });
+        } catch (error) {
+          setThreadError(
+            activeThread.id,
+            error instanceof Error ? error.message : "Couldn't set the goal.",
+          );
+          return;
+        }
+      } else {
+        pendingDraftGoalRef.current = goalCommand.goal;
+      }
+      // The goal itself is the first message: an ordinary turn, the next ones follow it.
+      promptRef.current = goalCommand.goal;
+      await onSendRef.current(undefined, undefined, intent);
+      return;
+    }
     const standaloneSlashCommand =
       !queued &&
       !hasComposerAttachments &&
@@ -3749,6 +3818,19 @@ export default function ChatView(props: ChatViewProps) {
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
+      const draftGoal = pendingDraftGoalRef.current;
+      pendingDraftGoalRef.current = null;
+      if (draftGoal !== null) {
+        // A new chat exists from this turn on, so its goal comes after it.
+        await api.orchestration
+          .setThreadGoal({ threadId: threadIdForSend, goal: draftGoal })
+          .catch((error: unknown) => {
+            setThreadError(
+              threadIdForSend,
+              error instanceof Error ? error.message : "Couldn't set the goal.",
+            );
+          });
+      }
     })().catch(async (err: unknown) => {
       if (backgroundDraftId) {
         // Nothing reached the computer: the draft comes back whole, reachable
@@ -5219,6 +5301,17 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   />
                   {selfUpdate.dialog}
+                  {isThreadGoalShown(threadGoal, {
+                    dismissedGoalId,
+                    latestTurnId: activeLatestTurn?.turnId ?? null,
+                  }) ? (
+                    <ThreadGoalBar
+                      goal={threadGoal}
+                      stopping={goalStopping}
+                      onStop={() => void onStopGoal()}
+                      onDismiss={() => setDismissedGoalId(threadGoal.goalId)}
+                    />
+                  ) : null}
                   <div className="relative z-10">
                     <ChatComposer
                       ref={composerRef}

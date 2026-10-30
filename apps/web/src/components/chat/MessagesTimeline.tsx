@@ -15,6 +15,7 @@ import {
 } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
 import { parseUnoWorkNote, type UnoWorkNote } from "@t3tools/shared/secretRequestCopy";
+import { stripGoalMarker } from "@t3tools/shared/threadGoal";
 import { AutomationMessageRow } from "../automations/AutomationMessageRow";
 import {
   createContext,
@@ -754,7 +755,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         row.message.role === "assistant" &&
         (() => {
           // Any harness can leak the final-answer marker; it is never shown.
-          const cleanText = cleanUnoFinalAnswerText(row.message.text ?? "");
+          const cleanText = stripGoalMarker(cleanUnoFinalAnswerText(row.message.text ?? ""));
           const messageText = cleanText || (row.message.streaming ? "" : "(empty response)");
           const assistantTurnStillInProgress =
             ctx.activeTurnInProgress &&

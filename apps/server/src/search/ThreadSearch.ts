@@ -21,6 +21,7 @@ import {
   messageSearchMatchExpression,
   threadSearchVisibleText,
 } from "@t3tools/shared/threadSearch";
+import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
@@ -122,6 +123,7 @@ const make = Effect.gen(function* () {
     threads.deleted_at IS NULL
     AND projects.deleted_at IS NULL
     AND messages.role IN ('user', 'assistant')
+    AND messages.text NOT LIKE ${`${UNO_WORK_NOTE_PREFIX}%`}
   `;
 
   const indexedHits = (match: string) => sql<HitRow>`
@@ -205,6 +207,7 @@ const make = Effect.gen(function* () {
         ${joined}
         WHERE messages.thread_id = ${input.threadId}
           AND messages.role IN ('user', 'assistant')
+          AND messages.text NOT LIKE ${`${UNO_WORK_NOTE_PREFIX}%`}
           ${indexed}
         ORDER BY messages.created_at ASC, messages.message_id ASC
       `;

@@ -18,6 +18,12 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
+  OrchestrationSetThreadGoalInput,
+  OrchestrationStopThreadGoalInput,
+  OrchestrationStopThreadGoalResult,
+  ThreadGoalState,
+} from "./threadGoal.ts";
+import {
   OrchestrationFindInThreadInput,
   OrchestrationFindInThreadResult,
   OrchestrationSearchThreadsInput,
@@ -45,6 +51,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getThreadTranscript: "orchestration.getThreadTranscript",
   searchThreads: "orchestration.searchThreads",
   findInThread: "orchestration.findInThread",
+  setThreadGoal: "orchestration.setThreadGoal",
+  stopThreadGoal: "orchestration.stopThreadGoal",
   replayEvents: "orchestration.replayEvents",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2041,6 +2049,14 @@ export const OrchestrationRpcSchemas = {
   findInThread: {
     input: OrchestrationFindInThreadInput,
     output: OrchestrationFindInThreadResult,
+  },
+  setThreadGoal: {
+    input: OrchestrationSetThreadGoalInput,
+    output: ThreadGoalState,
+  },
+  stopThreadGoal: {
+    input: OrchestrationStopThreadGoalInput,
+    output: OrchestrationStopThreadGoalResult,
   },
   replayEvents: {
     input: OrchestrationReplayEventsInput,

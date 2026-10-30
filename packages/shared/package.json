@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./threadGoal": {
+      "types": "./src/threadGoal.ts",
+      "import": "./src/threadGoal.ts"
+    },
     "./threadSearch": {
       "types": "./src/threadSearch.ts",
       "import": "./src/threadSearch.ts"

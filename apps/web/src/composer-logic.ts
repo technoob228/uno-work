@@ -28,7 +28,7 @@ export function resolveComposerSubmissionIntent(input: {
     : "foreground";
 }
 
-export type ComposerSlashCommand = "model" | "plan" | "default" | "limits";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "limits" | "goal";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;

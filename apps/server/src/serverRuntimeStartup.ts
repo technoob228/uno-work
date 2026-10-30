@@ -52,6 +52,7 @@ import {
 } from "./provider/autoBootstrapModelSelection.ts";
 import { awaitUsableBootDefault, bootProbesFinished } from "./provider/awaitUsableBootDefault.ts";
 import { PlanResume } from "./planResume/PlanResumeService.ts";
+import { ThreadGoal } from "./goal/ThreadGoalService.ts";
 import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { ThreadPullRequests } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { ReminderScheduler } from "./reminders/Services/ReminderScheduler.ts";
@@ -448,6 +449,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
   const reminderScheduler = yield* ReminderScheduler;
   const planResume = yield* PlanResume;
   const threadSearch = yield* ThreadSearch;
+  const threadGoal = yield* ThreadGoal;
   const threadPullRequests = yield* ThreadPullRequests;
   const pluginRegistry = yield* PluginRegistry;
   const pluginRuntime = yield* PluginRuntime;
@@ -516,6 +518,7 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope));
         yield* reminderScheduler.start().pipe(Scope.provide(reactorScope));
         yield* planResume.start().pipe(Scope.provide(reactorScope));
+        yield* threadGoal.start().pipe(Scope.provide(reactorScope));
         // Messages from before the search index, once startup has settled.
         yield* Effect.sleep(BACKFILL_START_DELAY).pipe(
           Effect.andThen(threadSearch.backfill),

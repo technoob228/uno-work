@@ -230,6 +230,11 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  OrchestrationSetThreadGoalInput,
+  OrchestrationStopThreadGoalInput,
+  OrchestrationThreadGoalError,
+} from "./threadGoal.ts";
+import {
   OrchestrationFindInThreadError,
   OrchestrationFindInThreadInput,
   OrchestrationSearchThreadsError,
@@ -1394,6 +1399,18 @@ export const WsOrchestrationFindInThreadRpc = Rpc.make(ORCHESTRATION_WS_METHODS.
   payload: OrchestrationFindInThreadInput,
   success: OrchestrationRpcSchemas.findInThread.output,
   error: OrchestrationFindInThreadError,
+});
+
+export const WsOrchestrationSetThreadGoalRpc = Rpc.make(ORCHESTRATION_WS_METHODS.setThreadGoal, {
+  payload: OrchestrationSetThreadGoalInput,
+  success: OrchestrationRpcSchemas.setThreadGoal.output,
+  error: OrchestrationThreadGoalError,
+});
+
+export const WsOrchestrationStopThreadGoalRpc = Rpc.make(ORCHESTRATION_WS_METHODS.stopThreadGoal, {
+  payload: OrchestrationStopThreadGoalInput,
+  success: OrchestrationRpcSchemas.stopThreadGoal.output,
+  error: OrchestrationThreadGoalError,
 });
 
 export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTurnDiff, {
@@ -2610,6 +2627,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetThreadTranscriptRpc,
   WsOrchestrationSearchThreadsRpc,
   WsOrchestrationFindInThreadRpc,
+  WsOrchestrationSetThreadGoalRpc,
+  WsOrchestrationStopThreadGoalRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,

@@ -22,6 +22,7 @@ import {
   OrchestrationFindInThreadError,
   OrchestrationGetThreadTranscriptError,
   OrchestrationSearchThreadsError,
+  OrchestrationThreadGoalError,
   OrchestrationGetTurnDiffError,
   OrchestrationRegenerateThreadTitleError,
   ORCHESTRATION_WS_METHODS,
@@ -82,6 +83,7 @@ import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { buildThreadTranscript, threadTitleSource } from "./orchestration/threadTranscript.ts";
+import { ThreadGoal } from "./goal/ThreadGoalService.ts";
 import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import {
@@ -284,6 +286,7 @@ const makeWsRpcLayer = (
       const linkRequests = yield* LinkRequestService;
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
       const threadSearch = yield* ThreadSearch;
+      const threadGoal = yield* ThreadGoal;
       const orchestrationEngine = yield* OrchestrationEngineService;
       const checkpointDiffQuery = yield* CheckpointDiffQuery;
       const keybindings = yield* Keybindings;
@@ -1273,6 +1276,24 @@ const makeWsRpcLayer = (
                   }),
               ),
             ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.setThreadGoal]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.setThreadGoal,
+            threadGoal
+              .set(input)
+              .pipe(
+                Effect.mapError(
+                  (refused) => new OrchestrationThreadGoalError({ message: refused.message }),
+                ),
+              ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.stopThreadGoal]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.stopThreadGoal,
+            threadGoal.stop(input.threadId),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getThreadTranscript]: (input) =>

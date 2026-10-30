@@ -69,6 +69,7 @@ import Migration0053 from "./Migrations/053_ThreadOwner.ts";
 import Migration0054 from "./Migrations/054_PlanResumes.ts";
 import Migration0055 from "./Migrations/055_ThreadPullRequests.ts";
 import Migration0056 from "./Migrations/056_MessageSearchIndex.ts";
+import Migration0057 from "./Migrations/057_ThreadGoals.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -139,6 +140,7 @@ export const migrationEntries = [
   [54, "PlanResumes", Migration0054],
   [55, "ThreadPullRequests", Migration0055],
   [56, "MessageSearchIndex", Migration0056],
+  [57, "ThreadGoals", Migration0057],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

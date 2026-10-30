@@ -78,6 +78,7 @@ import { MachineAppsServiceLive } from "./machineApps/MachineAppsService.ts";
 import { AppSdkServiceLive } from "./appSdk/AppSdkService.ts";
 import { PlanLimitsServiceLive } from "./planLimits/PlanLimitsService.ts";
 import { PlanResumeLive } from "./planResume/PlanResumeService.ts";
+import { ThreadGoalLive } from "./goal/ThreadGoalService.ts";
 import { ThreadSearchLive } from "./search/ThreadSearch.ts";
 import { ThreadPullRequestsLive } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
@@ -493,6 +494,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // engine and plan limits provided further down this pipe.
       PlanResumeLive,
       ThreadSearchLive,
+      // `/goal`: turns on until the goal is met; needs the engine and providers.
+      ThreadGoalLive,
       // Dev mode: a chat's PR row and auto-settle after the merge; reads
       // through the source-control providers provided further down this pipe.
       ThreadPullRequestsLive,

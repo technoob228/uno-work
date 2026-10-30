@@ -7,6 +7,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   ProviderDriverKind,
+  THREAD_GOAL_ACTIVITY_KIND,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -600,6 +601,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started")
     .filter((activity) => activity.kind !== "context-window.updated")
+    .filter((activity) => activity.kind !== THREAD_GOAL_ACTIVITY_KIND)
     .filter((activity) => !activity.kind.startsWith("plan-limit."))
     .filter((activity) => activity.kind !== HTML_RENDER_ACTIVITY_KIND)
     .filter((activity) => activity.kind !== AGENT_SWITCH_ACTIVITY_KIND)
