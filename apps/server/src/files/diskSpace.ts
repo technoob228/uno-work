@@ -1,8 +1,9 @@
 /**
  * "Will this fit?" before writing a lot onto the computer's disk (copies from
- * the cloud): a full disk breaks apps, installs and the computer itself, so a
- * download that would leave less than {@link reserveBytes} free is refused
- * before the first byte lands (small ones only need to fit).
+ * the cloud, uploads from the browser): a full disk breaks apps, installs and
+ * the computer itself, so a transfer that would leave less than
+ * {@link reserveBytes} free is refused before the first byte lands (small
+ * ones only need to fit).
  *
  * @module files/diskSpace
  */
@@ -70,10 +71,15 @@ export function fitsOnDisk(needBytes: number, space: DiskSpace): boolean {
 export class NotEnoughSpaceError extends FilesPathError {
   readonly needBytes: number;
   readonly freeBytes: number;
-  constructor(needBytes: number, freeBytes: number) {
+  /** `reserve`: what must stay free, named when the bytes alone would fit. */
+  constructor(needBytes: number, freeBytes: number, reserve = 0) {
+    const need =
+      needBytes <= freeBytes && reserve > 0
+        ? `needs ${formatBytes(needBytes)} and ${formatBytes(reserve)} left for the computer itself`
+        : `needs ${formatBytes(needBytes)}`;
     super(
       "forbidden",
-      `Not enough space on this computer: needs ${formatBytes(needBytes)}, ${formatBytes(freeBytes)} free. Free up space or pick fewer files.`,
+      `Not enough space on this computer: ${need}, ${formatBytes(freeBytes)} free. Free up space or pick fewer files.`,
     );
     this.name = "NotEnoughSpaceError";
     this.needBytes = needBytes;
@@ -92,8 +98,37 @@ export async function ensureDiskSpace(
 ): Promise<void> {
   const space = await measure(path);
   if (space && !fitsOnDisk(needBytes, space)) {
-    throw new NotEnoughSpaceError(needBytes, space.freeBytes);
+    throw new NotEnoughSpaceError(needBytes, space.freeBytes, reserveBytes(space.totalBytes));
   }
+}
+
+/** Where a space check looks: `~` is the Files root, anything unclear too. */
+export function spaceCheckPath(root: string, path: string): string {
+  if (path.startsWith("~/")) return nodePath.join(root, path.slice(2));
+  return nodePath.isAbsolute(path) ? path : root;
+}
+
+/** What a write that ran out of disk on the way tells the person. */
+export const DISK_FULL_MESSAGE =
+  "Not enough space on this computer. Free up space or pick fewer files.";
+
+/** The disk filled up under a write (somewhere in the error's chain of causes). */
+export function isDiskFullError(cause: unknown): boolean {
+  for (let current = cause, depth = 0; current && depth < 8; depth += 1) {
+    const {
+      code,
+      message,
+      cause: next,
+    } = current as {
+      readonly code?: unknown;
+      readonly message?: unknown;
+      readonly cause?: unknown;
+    };
+    if (code === "ENOSPC" || code === "EDQUOT") return true;
+    if (typeof message === "string" && /\b(ENOSPC|EDQUOT)\b/.test(message)) return true;
+    current = next;
+  }
+  return false;
 }
 
 /** The same refusal worded for an agent, which has a tool to free space. */

@@ -284,6 +284,8 @@ export const ASKS_FIRST_CATEGORIES: ReadonlyArray<AsksFirstCategory> = [
 const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
   mail_send: "email",
   site_publish: "sites",
+  report_publish: "sites",
+  site_open_link: "sites",
   site_unpublish: "sites",
   site_set_password: "sites",
   site_forms_set: "sites",

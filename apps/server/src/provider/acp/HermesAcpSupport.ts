@@ -467,7 +467,8 @@ export const HERMES_DISPATCHER_DISABLED_TOOLSETS: ReadonlyArray<string> = [
  * The MCP tools the Uno dispatcher gets (`mcp_servers.<name>.tools.include`)
  * — of ~90 (≈ 75k characters of schemas, ~20k tokens in every request) the
  * dozen a dispatcher uses: hand off, status, steer, notes, reminders,
- * automations, its setup, send a file. Everything else is a chat's job.
+ * automations, its setup, send a file, a report's link. Everything else is a
+ * chat's job.
  */
 export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<string>>> = {
   "uno-manager": [
@@ -502,6 +503,9 @@ export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<
     "messenger_send",
     "settings_read",
     "github_pr_comment",
+    "report_publish",
+    "site_open_link",
+    "sites_list",
   ],
 };
 

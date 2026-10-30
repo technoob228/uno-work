@@ -11,14 +11,14 @@
  *
  * @module files/cloudVersions
  */
+import { CLOUD_VERSION_MAX_BYTES } from "@t3tools/contracts";
 import { DRIVE_GIT_ROOT } from "@t3tools/shared/unoDrive";
 
 /** The hidden folder next to a file that holds its older copies. */
 export const CLOUD_VERSIONS_FOLDER = ".versions";
 /** Older copies kept per file; the oldest go first. */
 export const CLOUD_KEEP_VERSIONS = 10;
-/** A replaced file bigger than this isn't kept (one copy of a video would eat the space). */
-export const CLOUD_VERSION_MAX_BYTES = 200 * 1024 * 1024;
+export { CLOUD_VERSION_MAX_BYTES };
 /**
  * Replaced files kept per copy to the cloud: re-uploading a whole project
  * folder shouldn't double its traffic and space; the rest is replaced as is.

@@ -210,7 +210,6 @@ import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../projec
 
 const ANSWER_IS_THE_FILES = "See the attached files.";
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
-const VIDEO_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_VIDEO_BYTES / (1024 * 1024 * 1024))}GB`;
 const VIDEO_MIME_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
 const VIDEO_JOB_POLL_INTERVAL_MS = 2_000;
 
@@ -2756,10 +2755,6 @@ export const ChatComposer = memo(
           error = `Unsupported file type for '${file.name}'. Attach MP4, MOV, or WebM video.`;
           continue;
         }
-        if (file.size > PROVIDER_SEND_TURN_MAX_VIDEO_BYTES) {
-          error = `'${file.name}' exceeds the ${VIDEO_SIZE_LIMIT_LABEL} video limit.`;
-          continue;
-        }
         if (nextAttachmentCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
           error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
           break;
@@ -2902,7 +2897,9 @@ export const ChatComposer = memo(
         return;
       }
       const routed = routeComposerFiles(files, {
-        isVideo: (file) => inferVideoMimeType(file) !== null,
+        // Bigger than the video service takes: it still comes, as a plain file.
+        isVideo: (file) =>
+          inferVideoMimeType(file) !== null && file.size <= PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
         imagesSupported: imageAttachmentSupport !== "unsupported",
         inlineImages: {
           count: composerImagesRef.current.length,

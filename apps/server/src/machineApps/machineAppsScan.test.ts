@@ -318,6 +318,13 @@ describe("publication", () => {
     });
   });
 
+  it("prefers the app's https address, which a webhook can use", () => {
+    const https = "https://port-3000-my-computer.app.uno4.dev";
+    expect(publicationFor(tcp(3000), forwards, "my-computer.u85.uno4.me", https)?.url).toBe(https);
+    expect(publicationFor(tcp(5000), forwards, "h", https)?.url).toBe(https);
+    expect(publicationFor(tcp(4000), forwards, "h", https)).toBeNull();
+  });
+
   it("never treats SSH or the computer's own address as an app's publication", () => {
     expect(publicationFor(tcp(22), forwards, "h")).toBeNull();
     expect(publicationFor(tcp(80), forwards, "h")).toBeNull();

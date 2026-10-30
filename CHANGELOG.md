@@ -8,6 +8,23 @@
 
 ---
 
+## v0.0.170 — 2026-10-30
+
+- Files of any size into Cloud storage: big files from the browser go straight to storage, with a progress bar and a clear result. Chat attachments and Files take up to 100 GB and check there is room on the computer first.
+- Project materials no longer have a size limit. A zip over 1 GB stays a zip instead of being unpacked.
+- An app shown on the internet now displays its https address, and a public address is no longer labelled "Only you get in".
+
+---
+
+## v0.0.169 — 2026-10-30
+
+- Long results from Uno now come as a link: a short message in Telegram or Slack with a clickable report that opens at once on a phone, without a password. Uno no longer names files you can't see, and it can make a fresh link when one expires.
+- Files of any size, both ways: a file too big for the messenger arrives as a download link instead of a refusal, and a file too big for Telegram to pass to a bot gets a clear one-line answer. Uno also finds files made by the chats it started. Slack now takes and sends files the way Telegram does.
+- A site with a password can be opened by a link, so the password doesn't have to go through a chat.
+- No more false "Could not verify Claude" warning on a busy computer.
+
+---
+
 ## v0.0.168 — 2026-10-30
 
 - Uno no longer says «запустил» for a chat that didn't start. Every "launched" in Uno's answer now stands for a chat that really exists; if none was started, Uno says so at once — in the app, in Telegram and in Slack.

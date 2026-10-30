@@ -64,6 +64,7 @@ import {
 import { assistantProjectOfCaller } from "../../assistants/schedules.ts";
 import { owningAssistant, readStartedChats } from "../../assistants/localAssistantStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { withAssistantChatRule } from "../../agentThreads/logic.ts";
 import { isAssistantConversationThread } from "../assistantPush.ts";
 import { AssistantPushService } from "../Services/AssistantPush.ts";
 import {
@@ -713,7 +714,7 @@ const makeManagerToolService = Effect.gen(function* () {
       const started = yield* remoteComputers
         .startChat({
           target,
-          text: input.prompt,
+          text: withAssistantChatRule(input.prompt),
           title: input.title,
           ...(Option.isSome(local)
             ? { cwd: portableFolder(local.value.workspaceRoot, os.homedir()) }

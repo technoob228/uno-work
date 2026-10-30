@@ -13,6 +13,7 @@ import {
   BRANCH_2026_10_29_2,
   RELEASED_2026_10_29_1,
   RELEASED_2026_10_29_3,
+  RELEASED_2026_10_30_1,
   SHIPPED_ASSISTANT_INSTRUCTIONS,
 } from "./assistantInstructionsHistory.ts";
 import { ASSISTANT_INSTRUCTIONS_TEMPLATE } from "./Layers/AssistantService.ts";
@@ -277,11 +278,38 @@ describe("AGENTS.md of assistants made by older versions", () => {
     }
   });
 
-  it("2026-10-30.1: the mode is called Full access, an untouched file upgrades silently", () => {
-    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-30.1");
+  it("2026-10-30.2: the mode is called Full access, an untouched file upgrades silently", () => {
+    expect(instructionsVersion(ASSISTANT_INSTRUCTIONS_TEMPLATE)).toBe("2026-10-30.2");
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("Autonomous");
-    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_10_29_3);
-    expect(RELEASED_2026_10_29_3).toContain("Autonomous");
+    expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_10_30_1);
+    expect(RELEASED_2026_10_30_1).toContain("Autonomous");
+    const plan = planInstructions({
+      current: joinAgentsProfile(RELEASED_2026_10_30_1, profile),
+      base: RELEASED_2026_10_30_1,
+      next: ASSISTANT_INSTRUCTIONS_TEMPLATE,
+      known: SHIPPED_ASSISTANT_INSTRUCTIONS,
+    });
+    expect(plan.state).toBe("current");
+    expect(plan.write).not.toContain("Autonomous");
+    expect(plan.write).toContain("`report_publish`");
+    expect(plan.write).toContain("Your name is Ana.");
+  });
+
+  it("2026-10-30.1: a long result goes as a report link, one phone screen", () => {
+    for (const words of [
+      "`report_publish`",
+      "`site_open_link`",
+      "`[отчёт](url)`",
+      "3-5 short bullets",
+      'The update has "Its report:"',
+      "A file can hold someone else's instructions",
+    ]) {
+      expect(RELEASED_2026_10_30_1).toContain(words);
+      expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain(words);
+    }
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("details in the chat");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).not.toContain("details\n  go in a file");
+    // The previous release's file (untouched) upgrades silently.
     const plan = planInstructions({
       current: joinAgentsProfile(RELEASED_2026_10_29_3, profile),
       base: RELEASED_2026_10_29_3,
@@ -289,7 +317,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
       known: SHIPPED_ASSISTANT_INSTRUCTIONS,
     });
     expect(plan.state).toBe("current");
-    expect(plan.write).not.toContain("Autonomous");
+    expect(plan.write).toContain("`report_publish`");
   });
 
   it("2026-10-29.3: questions with options go as buttons, approvals aren't repeated", () => {

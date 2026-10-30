@@ -10,6 +10,7 @@ import {
   cloudDelete,
   cloudList,
   cloudState,
+  cloudUploadStep,
   copyToCloud,
   copyToComputer,
   normalizeCloudPrefix,
@@ -239,6 +240,85 @@ describe("saving over a cloud file", () => {
     expect([...objects.keys()].filter((key) => key.startsWith("a/"))).toEqual([]);
     expect(await cloudDelete(deps, 7, "b/")).toBe(2);
     expect([...objects.keys()]).toEqual([]);
+  });
+});
+
+describe("a browser upload's steps through the daemon", () => {
+  const presigns = (calls: ReadonlyArray<string>) =>
+    calls.filter((call) => call.endsWith("/presign"));
+
+  it("signs for the browser and hands back the console's answer", async () => {
+    const { deps } = fakeCloud();
+    const result = await cloudUploadStep(deps, {
+      bucketId: 7,
+      key: "work/film.mov",
+      method: "put",
+      size: 300,
+    });
+    expect(result.refusal).toBeUndefined();
+    expect(result.answer).toEqual({ url: "https://s3.test/put/work%2Ffilm.mov" });
+  });
+
+  it("keeps the small file a big one replaces, as the computer's way does", async () => {
+    const { deps, objects } = fakeCloud();
+    objects.set("work/film.mov", new TextEncoder().encode("the old cut"));
+    await cloudUploadStep(deps, {
+      bucketId: 7,
+      key: "work/film.mov",
+      method: "put",
+      size: 300 * 1024 * 1024,
+    });
+    const versions = versionsOf(objects, "work/film.mov");
+    expect(versions).toHaveLength(1);
+    expect(text(objects.get(versions[0]!))).toBe("the old cut");
+  });
+
+  it("touches nothing on later steps of the same upload", async () => {
+    const { deps, objects, calls } = fakeCloud();
+    objects.set("work/film.mov", new TextEncoder().encode("the old cut"));
+    await cloudUploadStep(deps, {
+      bucketId: 7,
+      key: "work/film.mov",
+      method: "put",
+      upload_id: "u1",
+      first: 65,
+      last: 128,
+    });
+    await cloudUploadStep(deps, { bucketId: 7, key: "work/film.mov", method: "complete" });
+    expect(versionsOf(objects, "work/film.mov")).toEqual([]);
+    expect(presigns(calls)).toHaveLength(2);
+  });
+
+  it("says why the console refused, and makes no copy", async () => {
+    const { deps, objects } = fakeCloud();
+    objects.set("work/film.mov", new TextEncoder().encode("the old cut"));
+    const fetchJson: typeof deps.fetchJson = async (token, path, init) => {
+      if (path.endsWith("/presign")) {
+        throw new ControlPlaneHttpError(402, "402: storage quota exceeded");
+      }
+      return deps.fetchJson!(token, path, init);
+    };
+    const result = await cloudUploadStep(
+      { ...deps, fetchJson },
+      { bucketId: 7, key: "work/film.mov", method: "put", size: 300 },
+    );
+    expect(result.answer).toBeUndefined();
+    expect(result.refusal?.status).toBe(402);
+    expect(result.refusal?.detail).toBe("402: storage quota exceeded");
+    expect(result.refusal?.message).toMatch(/full|quota|plan/i);
+    expect(versionsOf(objects, "work/film.mov")).toEqual([]);
+  });
+
+  it("has no status to give when the console can't be reached", async () => {
+    const { deps } = fakeCloud();
+    const fetchJson: typeof deps.fetchJson = async () => {
+      throw new Error("fetch failed");
+    };
+    const result = await cloudUploadStep(
+      { ...deps, fetchJson },
+      { bucketId: 7, key: "a", method: "abort", upload_id: "u1" },
+    );
+    expect(result.refusal?.status).toBeNull();
   });
 });
 

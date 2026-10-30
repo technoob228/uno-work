@@ -589,6 +589,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
       ),
     "The site password wasn't changed",
   ],
+  site_open_link: [
+    "Making a link to the site…",
+    (c) => named("Made a link to site", text(c.args, "slug"), "Made a link to the site"),
+    "The link to the site wasn't made",
+  ],
+  report_publish: [
+    "Publishing the report…",
+    (c) => named("Published report", text(c.args, "title"), "Published the report"),
+    "The report wasn't published",
+  ],
   site_forms_get: [
     "Checking the site's forms…",
     (c) => named("Checked the forms of site", text(c.args, "slug"), "Checked the site's forms"),

@@ -691,7 +691,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "send_file",
     description:
-      "Send a file of this computer to the Telegram or Slack chat the person writes from now (photos as photos, voice as voice, the rest as documents) — with your answer of this turn. Any file of the projects and the person's folders (projects, Documents, Uploads, Downloads, Desktop) you may reach; hidden files and keys never go. Telegram takes up to 50 MB. In the app (no Telegram/Slack): give the path instead.",
+      "Send a file of this computer to the Telegram or Slack chat the person writes from now (photos as photos, voice as voice, the rest as documents) — with your answer of this turn. Any file of the projects and the person's folders (projects, Documents, Uploads, Downloads, Desktop) you may reach; hidden files and keys never go. A relative path also looks in the chats you started. A file too big for the chat goes as a download link by itself. In the app (no Telegram/Slack): give the path instead.",
     inputSchema: {
       type: "object",
       properties: {

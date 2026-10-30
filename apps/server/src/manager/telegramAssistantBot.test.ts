@@ -260,7 +260,7 @@ it.live("a 34 MB video: refused in the chat with its size, never downloaded, no 
     );
     expect(yield* waitUntil(() => sentTexts().length > 0)).toBe(true);
     expect(sentTexts()).toEqual([
-      "This file is 34 MB — Telegram lets bots download up to 20 MB. Send a shorter clip or a link.",
+      "This file is 34 MB: Telegram gives bots only up to 20 MB. Upload it to Uno Work or Uno Drive and tell me here: https://app.uno4.work",
     ]);
     yield* Effect.sleep("300 millis");
     expect(calls.some((call) => call.url.includes("/getFile"))).toBe(false);

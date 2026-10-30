@@ -162,7 +162,8 @@ import { readNewChatDefaults } from "../newChatDefaults";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
-import { saveFilesToUploads, stageChatFileUpload } from "../chatUploads";
+import { saveFilesToUploads } from "../chatUploads";
+import { stageChatFileWithToast } from "../chatUploadToast";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
@@ -3597,7 +3598,7 @@ export default function ChatView(props: ChatViewProps) {
         name: video.name,
       })),
       // Staged on the chat's computer; the server files them in ~/Uploads.
-      ...composerFilesSnapshot.map((file) => stageChatFileUpload(environmentId, file)),
+      ...composerFilesSnapshot.map((file) => stageChatFileWithToast(environmentId, file)),
     ]);
     const optimisticImageAttachments = [
       ...composerImagesSnapshot.map((image) => ({

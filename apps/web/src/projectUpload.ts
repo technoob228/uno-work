@@ -8,11 +8,19 @@
  * целевая папка — любая директория проекта, не обязательно его корень.
  */
 
+import type { EnvironmentApi } from "@t3tools/contracts";
+
 import { planUpload, type UploadPlan, type UploadPlanLimits } from "./firstProject";
 import { readFileAsBase64 } from "./firstProjectFiles";
 
-export const PROJECT_UPLOAD_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GiB
-export const PROJECT_UPLOAD_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB
+/**
+ * Bytes go in chunks and nothing holds a whole file, so these only guard
+ * against a mistake: what really limits an upload is the computer's free
+ * space, checked before the first chunk (`ensureSpace`).
+ */
+export const PROJECT_UPLOAD_MAX_FILE_BYTES = 100 * 1024 ** 3; // 100 GiB
+export const PROJECT_UPLOAD_MAX_TOTAL_BYTES = 100 * 1024 ** 3; // 100 GiB
+export const PROJECT_UPLOAD_SIZE_LIMIT_LABEL = "100 GB";
 export const PROJECT_UPLOAD_MAX_FILE_COUNT = 20_000;
 
 /** Бинарный размер чанка; в base64 он превращается в ~4 МБ на WS-сообщение. */
@@ -64,8 +72,38 @@ export interface ProjectUploadWriteInput {
 
 export interface ProjectUploadDeps {
   readonly writeFile: (input: ProjectUploadWriteInput) => Promise<unknown>;
+  /**
+   * Refuses when `bytes` won't fit on the computer holding `targetDir`. Asked
+   * once before the first chunk, so a full disk is said at once and not after
+   * gigabytes of upload.
+   */
+  readonly ensureSpace?: (targetDir: string, bytes: number) => Promise<unknown>;
   /** Подменяется в тестах, чтобы не зависеть от FileReader/arrayBuffer. */
   readonly readChunkBase64?: (chunk: Blob) => Promise<string>;
+}
+
+/** The computer said its disk can't take this (before the upload or during it). */
+export function isNotEnoughSpaceError(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith("Not enough space");
+}
+
+/**
+ * Uploads onto a connected computer. Only a real "no room" stops the upload
+ * here: a computer on an older version doesn't know `ensureSpace` yet.
+ */
+export function computerUploadDeps(
+  api: Pick<EnvironmentApi, "projects" | "files">,
+): ProjectUploadDeps {
+  return {
+    writeFile: (write) => api.projects.writeFile(write),
+    ensureSpace: async (path, bytes) => {
+      try {
+        await api.files.ensureSpace({ path, bytes });
+      } catch (error) {
+        if (isNotEnoughSpaceError(error)) throw error;
+      }
+    },
+  };
 }
 
 export interface ProjectUploadProgress {
@@ -217,6 +255,11 @@ export async function uploadFilesIntoDirectory(
       }
     }
   };
+  const remainingBytes = queue.reduce((sum, entry) => sum + entry.size, 0);
+  if (remainingBytes > 0) {
+    throwIfAborted(input.signal);
+    await deps.ensureSpace?.(input.targetDir, remainingBytes);
+  }
   const workers = Math.max(1, Math.min(input.concurrency ?? 1, queue.length));
   await Promise.all(Array.from({ length: workers }, () => worker()));
   if (firstError !== null) throw firstError;

@@ -186,9 +186,10 @@ export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
  * A non-image file attached to a message (pdf, docx, xlsx, zip…). It is not
  * sent to the model as a part: it lands in the person's `~/Uploads/YYYY-MM/`
  * on the chat's computer and the turn tells the model where. Same ceiling as
- * an upload into Files.
+ * an upload into Files: bytes go in chunks and nothing holds the whole file,
+ * so the real limit is the free space on the computer.
  */
-export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 1024 * 1024 * 1024;
+export const PROVIDER_SEND_TURN_MAX_FILE_BYTES = 100 * 1024 ** 3;
 /** Folder (inside the home / Files root) where chat attachments are saved. */
 export const CHAT_UPLOADS_FOLDER = "Uploads";
 /**

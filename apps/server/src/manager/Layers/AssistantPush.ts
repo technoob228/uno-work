@@ -32,7 +32,10 @@ import {
 import { Clock, Duration, Effect, Layer, Option, Ref, Semaphore, Stream } from "effect";
 import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
+import * as os from "node:os";
 import * as nodePath from "node:path";
+
+import { readReports, reportOfThread } from "../../sites/reports.ts";
 
 import { ServerConfig } from "../../config.ts";
 import { systemCommandOrigin } from "../../orchestration/commandOrigin.ts";
@@ -603,6 +606,14 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
                   Effect.map((value) => (Option.isSome(value) ? value.value.title : null)),
                   Effect.orElseSucceed(() => null),
                 );
+          const report = yield* Effect.promise(() => readReports(os.homedir())).pipe(
+            Effect.map((reports) =>
+              reportOfThread(reports, watch.threadId, {
+                sinceMs: Date.parse(watch.since) || 0,
+                nowMs,
+              }),
+            ),
+          );
           const result = noticeFromProbe({
             watch,
             probe: settled,
@@ -610,6 +621,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
             project,
             sentKeys,
             nowMs,
+            report: report === null ? undefined : { title: report.title, url: report.url },
           });
           if (result === null) continue;
           sentKeys.add(result.notice.key);

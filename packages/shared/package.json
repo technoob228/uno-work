@@ -164,6 +164,10 @@
       "types": "./src/unoCloud.ts",
       "import": "./src/unoCloud.ts"
     },
+    "./cloudUpload": {
+      "types": "./src/cloudUpload.ts",
+      "import": "./src/cloudUpload.ts"
+    },
     "./unoBoxProvision": {
       "types": "./src/unoBoxProvision.ts",
       "import": "./src/unoBoxProvision.ts"

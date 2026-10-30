@@ -131,6 +131,7 @@ import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { WorktreeCleanup } from "./worktreeCleanup/WorktreeCleanup.ts";
 import { EconomyPresence } from "./economy/EconomyPresence.ts";
 import { PRESENCE_OFF } from "./economy/economyReport.ts";
+import { DISK_FULL_MESSAGE, isDiskFullError } from "./files/diskSpace.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { FilesRecentService } from "./files/FilesRecentService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
@@ -1902,6 +1903,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.filesCloudCopyToCloud, files.cloudCopyToCloud(input), {
             "rpc.aggregate": "files",
           }),
+        [WS_METHODS.filesCloudUploadStep]: (input) =>
+          observeRpcEffect(WS_METHODS.filesCloudUploadStep, files.cloudUploadStep(input), {
+            "rpc.aggregate": "files",
+          }),
+        [WS_METHODS.filesEnsureSpace]: (input) =>
+          observeRpcEffect(WS_METHODS.filesEnsureSpace, files.ensureSpace(input), {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.filesCloudCopyToComputer]: (input) =>
           observeRpcEffect(WS_METHODS.filesCloudCopyToComputer, files.cloudCopyToComputer(input), {
             "rpc.aggregate": "files",
@@ -2378,7 +2387,9 @@ const makeWsRpcLayer = (
               Effect.mapError((cause) => {
                 const message = Schema.is(WorkspacePathOutsideRootError)(cause)
                   ? "Workspace file path must stay within the project root."
-                  : "Failed to write workspace file";
+                  : isDiskFullError(cause)
+                    ? DISK_FULL_MESSAGE
+                    : "Failed to write workspace file";
                 return new ProjectWriteFileError({
                   message,
                   cause,

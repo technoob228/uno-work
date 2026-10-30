@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 
 import {
+  fitReplyToScreen,
   detectReplyLanguage,
   progressNoteDueAfterMs,
   progressNoteText,
@@ -81,5 +82,31 @@ describe("progress notes", () => {
   it("spaces notes out ever more", () => {
     const due = [0, 1, 2, 3, 4, 5].map(progressNoteDueAfterMs);
     expect(due).toEqual([180_000, 900_000, 2_700_000, 7_200_000, 14_400_000, 21_600_000]);
+  });
+});
+
+describe("fitReplyToScreen with a link", () => {
+  const input = { language: "ru" as const, moreUrl: "https://app.uno4.work" };
+  const url = `https://r-0123456789.uno4.me/?k=${"a".repeat(600)}`;
+  const line = "Строка про то, что сделано сегодня в отчёте.\n";
+
+  it("counts a link by what the person sees: a long key is no wall of text", () => {
+    const text = `Готово.\n\n- раз\n- два\n\n[отчёт](${url})`;
+    expect(fitReplyToScreen(text, input)).toEqual({ text, cut: false });
+  });
+
+  it("never cuts inside a link", () => {
+    const long = `${line.repeat(12)}[отчёт](${url}) ${line.repeat(40)}`;
+    const { text, cut } = fitReplyToScreen(long, input);
+    expect(cut).toBe(true);
+    expect(text).toContain(`[отчёт](${url})`);
+    expect(text.match(/\[отчёт\]/g)).toHaveLength(1);
+  });
+
+  it("keeps a link past the cut, it replaces the pointer to Uno Work", () => {
+    const { text, cut } = fitReplyToScreen(`${line.repeat(60)}\n[отчёт](${url})`, input);
+    expect(cut).toBe(true);
+    expect(text).toContain(`[отчёт](${url})`);
+    expect(text).not.toContain(input.moreUrl);
   });
 });

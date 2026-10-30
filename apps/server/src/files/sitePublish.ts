@@ -243,6 +243,34 @@ interface DeployJobResponse {
 /** Uno Hosting restarted mid-publish: the files never went live, publish again. */
 const INTERRUPTED = "INTERRUPTED";
 
+/** The account's site or storage limit: republishing an existing site doesn't count. */
+export class SiteHostingLimitError extends FilesPathError {
+  constructor(message: string) {
+    super("forbidden", message);
+    this.name = "SiteHostingLimitError";
+  }
+}
+
+/** Mints a link that opens a protected site without its password. */
+export const siteOpenLinkPath = (slug: string): string =>
+  `/api/v1/deploys/${encodeURIComponent(slug)}/open-link`;
+
+/** A link for one day: enough to read a report later, then the Uno sign-in takes over. */
+export const SITE_OPEN_LINK_TTL_SECONDS = 24 * 60 * 60;
+
+/** The console's `{url, expires_at}` (unix seconds, null: no expiry); null when malformed. */
+export function parseSiteOpenLink(
+  body: unknown,
+): { readonly url: string; readonly expiresAtMs: number | null } | null {
+  if (typeof body !== "object" || body === null) return null;
+  const { url, expires_at: expiresAt } = body as { url?: unknown; expires_at?: unknown };
+  if (typeof url !== "string" || !url.startsWith("https://")) return null;
+  return {
+    url,
+    expiresAtMs: typeof expiresAt === "number" && expiresAt > 0 ? expiresAt * 1_000 : null,
+  };
+}
+
 function deployErrorMessage(status: number, body: DeployResponse | null): string {
   const code = body?.error ?? "";
   if (status === 401 || code === "INVALID_API_KEY") {
@@ -505,7 +533,10 @@ export async function publishToUnoHosting(input: {
     outcome = await deploy();
   }
   if (outcome.kind === "failed") {
-    throw new FilesPathError("forbidden", deployErrorMessage(outcome.status, outcome.body));
+    const message = deployErrorMessage(outcome.status, outcome.body);
+    throw outcome.status === 402 || outcome.status === 429
+      ? new SiteHostingLimitError(message)
+      : new FilesPathError("forbidden", message);
   }
   const body = outcome.body;
   const publishedSlug = body?.slug ?? slug;

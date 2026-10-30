@@ -59,7 +59,24 @@ import {
 } from "../assistants/imageGenerate.ts";
 import { uploadsMonthDir } from "../files/chatUploads.ts";
 import { agentDiskSpaceMessage } from "../files/diskSpace.ts";
-import { liveSiteUrl } from "../files/sitePublish.ts";
+import {
+  liveSiteUrl,
+  parseSiteOpenLink,
+  SITE_OPEN_LINK_TTL_SECONDS,
+  siteOpenLinkPath,
+} from "../files/sitePublish.ts";
+import type { ConnectorOutgoingFile } from "../manager/connectorOutgoingFiles.ts";
+import {
+  buildReportPage,
+  isReportSlug,
+  isReportSource,
+  newReportPassword,
+  pickReportSlug,
+  readReports,
+  recordReport,
+  refreshReportLink,
+  REPORT_MAX_BYTES,
+} from "../sites/reports.ts";
 import {
   APP_TYPE_TELEGRAM_BOT,
   envFileHasValue,
@@ -434,6 +451,17 @@ export interface UnoWorkToolDeps {
    */
   readonly console?: {
     readonly request: (input: ConsoleRequest) => Effect.Effect<ConsoleReply, UnoWorkToolError>;
+  };
+  /** `report_publish`. Absent (tests, older wiring): it says reports aren't available. */
+  readonly reports?: {
+    /** The file by the same rule as send_file (the chat's roots, no hidden files or keys). */
+    readonly resolveFile: (path: string) => Effect.Effect<ConnectorOutgoingFile>;
+    readonly publish: (input: {
+      readonly html: string;
+      readonly slug: string;
+      readonly password: string;
+      readonly fallbackSlug?: string;
+    }) => Effect.Effect<FilesPublishSiteResult, { readonly message: string }>;
   };
   /**
    * The assistant whose chat calls the mail tools, with its own mail rules
@@ -814,6 +842,9 @@ const waitForAppRunning = (deps: UnoWorkToolDeps, app: UnoMachineApp) =>
     return current;
   });
 
+const PUBLISH_HTTPS_PENDING_NOTE =
+  "This is the plain http address. The https one usually appears within a minute: check apps_list, and give webhooks only the https address.";
+
 const appAction = (
   deps: UnoWorkToolDeps,
   args: Record<string, unknown>,
@@ -834,7 +865,9 @@ const appAction = (
       app: after ? compactApp(after) : { id: app.id, removed: action === "remove" },
       ...(action === "publish" && result.publishBlockedReason
         ? { note: result.publishBlockedReason }
-        : {}),
+        : action === "publish" && after?.publication?.url?.startsWith("http:")
+          ? { note: PUBLISH_HTTPS_PENDING_NOTE }
+          : {}),
     };
   });
 
@@ -1180,7 +1213,96 @@ const siteIsListed = (
   slug: string,
 ): Effect.Effect<boolean, UnoWorkToolError> =>
   callConsole(deps, { method: "GET", path: WORK_SITES_PATH }, "list the sites").pipe(
-    Effect.map((body) => parseWorkSites(body).sites.some((site) => site.slug === slug)),
+    Effect.map((body) =>
+      parseWorkSites(body, { withReports: true }).sites.some((site) => site.slug === slug),
+    ),
+  );
+
+/** site_open_link: at most 30 days, what hosting takes. */
+const SITE_OPEN_LINK_MAX_HOURS = 720;
+const REPORTS_LISTED = 10;
+const REPORTS_SUGGESTED = 5;
+
+const tryFile = <A>(read: () => Promise<A>): Effect.Effect<A, UnoWorkToolError> =>
+  Effect.tryPromise({
+    try: read,
+    catch: () => toolError("Couldn't read this file."),
+  });
+
+/** A link that opens a protected site without its password. */
+const openSiteLink = (
+  deps: UnoWorkToolDeps,
+  slug: string,
+  ttlSeconds: number,
+): Effect.Effect<{ readonly url: string; readonly expiresAtMs: number | null }, UnoWorkToolError> =>
+  Effect.gen(function* () {
+    if (!deps.console) return yield* toolError(NOT_LINKED_MESSAGE);
+    const reply = yield* deps.console.request({
+      method: "POST",
+      path: siteOpenLinkPath(slug),
+      body: { ttl_seconds: ttlSeconds },
+    });
+    if (reply.status === 404) {
+      // Saves a step: the person's "link expired" rarely comes with the name.
+      const latest = (yield* Effect.promise(() => readReports(deps.home)))
+        .slice(-REPORTS_SUGGESTED)
+        .toReversed()
+        .map((report) => `${report.slug} (${report.title})`);
+      return yield* toolError(
+        `There is no site “${slug}” on this account (see sites_list).${
+          latest.length > 0 ? ` Latest reports: ${latest.join(", ")}.` : ""
+        }`,
+      );
+    }
+    if (reply.status === 409) {
+      return yield* toolError(
+        `Site “${slug}” has no password, so it needs no link: anyone can open ${siteUrl(slug)}.`,
+      );
+    }
+    const body = yield* consoleOk(reply, `make a link to site “${slug}”`);
+    const link = parseSiteOpenLink(body);
+    if (link === null) return yield* toolError("Uno Hosting didn't give a link. Try again.");
+    return link;
+  });
+
+const linkExpiry = (expiresAtMs: number | null): string | null =>
+  expiresAtMs === null ? null : new Date(expiresAtMs).toISOString();
+
+/** How a site that just got a password opens: by the link, or by the password. */
+interface SiteAccess {
+  readonly openUrl?: string;
+  readonly expiresAt?: string | null;
+  readonly note?: string;
+  readonly password?: string;
+  readonly passwordNote?: string;
+}
+
+/** Goes with a key link: the agent must not put a site's password into a chat. */
+const OPEN_LINK_NOTE =
+  "Give the person openUrl: it opens the site at once, nobody types a password. Don't write the password in the chat.";
+
+/** `openUrl` for a site that just got a password; without one, the result as it was. */
+const withOpenLink = <A extends { readonly slug: string }>(
+  deps: UnoWorkToolDeps,
+  site: A,
+  password: string,
+): Effect.Effect<A & SiteAccess> =>
+  openSiteLink(deps, site.slug, SITE_OPEN_LINK_TTL_SECONDS).pipe(
+    Effect.map(
+      (link): SiteAccess => ({
+        openUrl: link.url,
+        expiresAt: linkExpiry(link.expiresAtMs),
+        note: OPEN_LINK_NOTE,
+      }),
+    ),
+    // No link (an older console): the person still needs a way in.
+    Effect.orElseSucceed(
+      (): SiteAccess => ({
+        password,
+        passwordNote: "Tell the person this password; visitors type it to open the site.",
+      }),
+    ),
+    Effect.map((access) => ({ ...site, ...access })),
   );
 
 /** A password a person can read out: `maple-river-4821-cloud`. */
@@ -1607,7 +1729,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_show_on_internet",
     group: "computer",
     description:
-      'The explicit outside mode: give a running web app a PUBLIC address (http://<computer>:<port>/ — plain http, no sign-in) for other people, another device or a webhook (the "Show on the internet" button). Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
+      'The explicit outside mode: give a running web app a PUBLIC address, no sign-in, for other people, another device or a webhook (the "Show on the internet" button). It answers on http://<computer>:<port>/ at once and on https://<app>-<computer>.app.uno4.dev within a minute; once that is ready `onInternet.url` is the https one in apps_list. Webhooks such as Telegram need the https address. Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -3350,7 +3472,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "site_publish",
     group: "sites",
     description:
-      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site. A page that is personal by nature (a schedule, notes, family or client details) is the one case to ask first, once: open to everyone or only with a password; for a password, pass `password` (or `protect: true` to generate a readable one) right here, so the site is protected from its first second — not site_set_password afterwards. A landing page, a business site or a menu goes up open without the question, and a password is never set silently. A big site can take a few minutes: the call waits until it is live. After publishing a site with a form, say that new entries arrive at the person's email and give them `entriesUrl` from the result.",
+      "Publish a static website from a folder (with index.html) or a single HTML file (published with its folder) to a public https address on Uno. Anyone can open it. It runs without asking — just do it when the person wants a site (they can Unpublish it in Apps & sites; you can with site_unpublish). Only built pages go up (a dist/ or public/ folder of a project; keys and .env never do); the result lists files that were left out — tell the person in one line which stayed on the computer, and stop there: never suggest a way to get a key or secret file published (renaming, moving, packing it). Only if the person says on their own that such a file holds no secrets, help with it. Republishing the same slug updates the site. A page that is personal by nature (a schedule, notes, family or client details) is the one case to ask first, once: open to everyone or only with a password; for a password, pass `password` (or `protect: true` to generate one) right here, so the site is protected from its first second — not site_set_password afterwards. The result's `openUrl` opens a protected site without typing the password: give the person that link and don't write the password in the chat. A landing page, a business site or a menu goes up open without the question, and a password is never set silently. A big site can take a few minutes: the call waits until it is live. After publishing a site with a form, say that new entries arrive at the person's email and give them `entriesUrl` from the result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3407,15 +3529,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           ...(ipAllowlist && ipAllowlist.length > 0 ? { ipAllowlist } : {}),
         }),
       ).pipe(
-        // The password goes back to the agent: the person needs it to open the site.
-        Effect.map((site) =>
+        // The agent gets a link that opens the site, so no password lands in a chat.
+        Effect.flatMap((site) =>
           password
-            ? {
-                ...site,
-                password,
-                passwordNote: "Tell the person this password; visitors type it to open the site.",
-              }
-            : site,
+            ? withOpenLink(deps, site, password)
+            : Effect.succeed<typeof site & SiteAccess>(site),
         ),
         // The moment the agent decides what to say about the files left out.
         Effect.map((site) =>
@@ -3508,12 +3626,18 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "sites_list",
     group: "sites",
     description:
-      "The person's published websites on Uno: name (slug), address, whether a password protects it, size. Use it to find the slug for site_set_password, site_forms_set and site_unpublish.",
+      "The person's published websites on Uno: name (slug), address, whether a password protects it, size. Use it to find the slug for site_set_password, site_open_link, site_forms_set and site_unpublish. `reports` are the latest reports of this computer (report_publish): for an expired one, site_open_link makes a new link.",
     inputSchema: noArgs,
     level: "safe",
     run: (deps) =>
-      callConsole(deps, { method: "GET", path: WORK_SITES_PATH }, "list the sites").pipe(
-        Effect.map((body) => ({
+      Effect.gen(function* () {
+        const body = yield* callConsole(
+          deps,
+          { method: "GET", path: WORK_SITES_PATH },
+          "list the sites",
+        );
+        const reports = yield* Effect.promise(() => readReports(deps.home));
+        return {
           sites: parseWorkSites(body).sites.map((site) => ({
             slug: site.slug,
             url: site.url,
@@ -3522,14 +3646,22 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             sizeBytes: site.sizeBytes,
             updatedAt: site.updatedAt,
           })),
-        })),
-      ),
+          reports: reports
+            .slice(-REPORTS_LISTED)
+            .toReversed()
+            .map((report) => ({
+              slug: report.slug,
+              title: report.title,
+              expiresAt: linkExpiry(report.expiresAtMs),
+            })),
+        };
+      }),
   },
   {
     name: "site_set_password",
     group: "sites",
     description:
-      "Protect an already published site with a password, or remove the password (remove: true; then anyone can open it). For a site you are publishing now, pass `password` to site_publish instead: it is protected from its first second. Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has the password: tell the person, visitors need it. Setting a password runs right away; removing one waits for the person's Allow.",
+      "Protect an already published site with a password, or remove the password (remove: true; then anyone can open it). For a site you are publishing now, pass `password` to site_publish instead: it is protected from its first second. Do this yourself when the person wants a private site; never tell them to do it by hand. Without a password a readable one is generated. The result has `openUrl`, which opens the site without typing the password: give the person that link, and the password only when they ask for one. Setting a password runs right away; removing one waits for the person's Allow.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3583,13 +3715,146 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               hasPassword: false,
               note: "Anyone can open the site now.",
             }
-          : {
-              slug,
-              url: siteUrl(slug),
-              hasPassword: true,
-              password,
-              note: "Tell the person this password; visitors type it to open the site.",
-            };
+          : yield* withOpenLink(deps, { slug, url: siteUrl(slug), hasPassword: true }, password);
+      }),
+  },
+  {
+    name: "site_open_link",
+    group: "sites",
+    description:
+      "A fresh link that opens a password-protected site or a report at once, without typing a password. Use it when the person says a link expired or asks for the link again; `sites_list` has the slugs of sites and recent reports. Give it as a word inside your text: [отчёт](url).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: siteSlugArg,
+        ttl: {
+          type: "integer",
+          minimum: 1,
+          maximum: SITE_OPEN_LINK_MAX_HOURS,
+          description: "Hours the link works. Default 24.",
+        },
+      },
+      required: ["slug"],
+      additionalProperties: false,
+    },
+    level: "safe",
+    approvalTitle: (args) => `Make a link to site “${str(args, "slug")}”`,
+    approvalDetail: (args) => siteUrl(str(args, "slug") ?? ""),
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const slug = str(args, "slug")!;
+        const ttl = args["ttl"];
+        const link = yield* openSiteLink(
+          deps,
+          slug,
+          typeof ttl === "number" ? ttl * 3_600 : SITE_OPEN_LINK_TTL_SECONDS,
+        );
+        yield* Effect.promise(() => refreshReportLink(deps.home, slug, link));
+        return { slug, url: link.url, expiresAt: linkExpiry(link.expiresAtMs) };
+      }),
+  },
+  {
+    name: "report_publish",
+    group: "sites",
+    description:
+      "Publish a Markdown or HTML file as a private page made for a phone, for anything longer than one phone screen: write the result to a .md file, call this, and give the link as a word inside your text: [отчёт](url). The link opens at once, without a password, for 24 hours; after that the person signs in with their Uno account or site_open_link makes a new one. Never name the file or its path to the person. Takes the files send_file may send; the same file from the same chat updates its report. For any other file use send_file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          minLength: 1,
+          description: "The .md or .html file, absolute or from this chat's folder.",
+        },
+        title: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+          description: "Page title. Default: the file's first heading.",
+        },
+      },
+      required: ["path"],
+      additionalProperties: false,
+    },
+    // Like a plain site: a private page goes up without an Allow. A Cautious
+    // assistant asks (`asksFirstCategory`); an Observer changes nothing.
+    level: "safe",
+    approvalTitle: (args) => `Publish a report: “${str(args, "title") ?? str(args, "path")}”`,
+    approvalDetail: () => "A private page; the link opens it without a password for a day.",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const refusal = deps.presetRefusal ? yield* deps.presetRefusal : null;
+        if (refusal !== null) return yield* toolError(refusal);
+        const reports = deps.reports;
+        if (reports === undefined) {
+          return yield* toolError("Reports aren't available here: use send_file.");
+        }
+        const resolved = yield* reports.resolveFile(str(args, "path")!);
+        if (!resolved.ok) return yield* toolError(`Not published: ${resolved.reason}.`);
+        const file = resolved.path;
+        if (!isReportSource(file)) {
+          return yield* toolError(
+            "report_publish takes Markdown or HTML (.md, .html, .txt). Send other files with send_file.",
+          );
+        }
+        const { size } = yield* tryFile(() => fsp.stat(file));
+        if (size > REPORT_MAX_BYTES) {
+          return yield* toolError(
+            "This report is bigger than 2 MB: too long to read as a page. Shorten it, or send it with send_file.",
+          );
+        }
+        const page = yield* tryFile(() =>
+          buildReportPage({
+            file,
+            title: str(args, "title"),
+            resolve: (image) =>
+              Effect.runPromise(
+                reports
+                  .resolveFile(image)
+                  .pipe(Effect.map((found) => (found.ok ? found.path : null))),
+              ),
+          }),
+        );
+        const nowMs = Date.now();
+        const threadId = deps.caller.threadId;
+        const entries = yield* Effect.promise(() => readReports(deps.home));
+        const { slug, fallbackSlug } = pickReportSlug(entries, { threadId, source: file, nowMs });
+        const site = yield* asToolError(
+          reports.publish({
+            html: page.html,
+            slug,
+            password: newReportPassword(),
+            ...(fallbackSlug !== undefined ? { fallbackSlug } : {}),
+          }),
+        );
+        const entry = { slug: site.slug, threadId, title: page.title, source: file };
+        const link = yield* openSiteLink(deps, site.slug, SITE_OPEN_LINK_TTL_SECONDS).pipe(
+          // Up, but nobody can open it: its slug goes first to the next report.
+          Effect.tapError(() =>
+            Effect.promise(() =>
+              recordReport(deps.home, {
+                ...entry,
+                url: "",
+                expiresAtMs: nowMs,
+                createdAtMs: nowMs,
+              }),
+            ),
+          ),
+          Effect.mapError((cause) =>
+            toolError(
+              `The report went up, but no link came back (${cause.message}) Use send_file.`,
+            ),
+          ),
+        );
+        yield* Effect.promise(() =>
+          recordReport(deps.home, { ...entry, ...link, createdAtMs: nowMs }),
+        );
+        return {
+          url: link.url,
+          expiresAt: linkExpiry(link.expiresAtMs),
+          slug: site.slug,
+          title: page.title,
+        };
       }),
   },
   {

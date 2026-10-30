@@ -659,17 +659,18 @@ export function ProgramDialog({
               {publication?.url ? (
                 <>
                   <AddressRow label="On the internet" url={publication.url} />
-                  {publication.url.startsWith("http:") ? (
-                    <p
-                      className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-relaxed"
-                      data-testid="program-public-http-warning"
-                    >
-                      <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
-                      Anyone with this address can open it — no sign-in, and the connection isn't
-                      encrypted. You don't need it to use the app yourself: a click on the app opens
-                      it in Uno Work. Hide it when nobody else needs it.
-                    </p>
-                  ) : null}
+                  <p
+                    className="flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-xs leading-relaxed"
+                    data-testid="program-public-warning"
+                  >
+                    <TriangleAlertIcon className="mt-0.5 size-3.5 shrink-0 text-warning" />
+                    Anyone with this address can open it — no sign-in
+                    {publication.url.startsWith("http:")
+                      ? ", and the connection isn't encrypted"
+                      : ""}
+                    . You don't need it to use the app yourself: a click on the app opens it in Uno
+                    Work. Hide it when nobody else needs it.
+                  </p>
                 </>
               ) : null}
               {tile.storeApp ? (

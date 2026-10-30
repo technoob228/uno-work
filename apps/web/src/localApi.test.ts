@@ -231,6 +231,8 @@ const rpcClientMock = {
     cloudDelete: vi.fn(),
     cloudDownloadUrl: vi.fn(),
     cloudCopyToCloud: vi.fn(),
+    cloudUploadStep: vi.fn(),
+    ensureSpace: vi.fn(),
     cloudCopyToComputer: vi.fn(),
   },
 };

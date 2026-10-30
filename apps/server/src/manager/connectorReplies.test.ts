@@ -4,8 +4,11 @@ import { MessageId, TurnId } from "@t3tools/contracts";
 import { ORPHANED_PROVIDER_SESSION_ERROR } from "../orchestration/orphanedSession.ts";
 import {
   decidePendingReply,
+  failedText,
+  isThreadBusyForNewTurn,
   LOST_TURN_MS,
   NO_TEXT_GRACE_MS,
+  readableFailure,
   replyPauseMs,
   SETTLE_QUIET_MS,
   type ReplyProbe,
@@ -387,6 +390,24 @@ describe("decidePendingReply", () => {
     ).toEqual({ kind: "failed", turnId: null, reason: "No AI provider is signed in." });
   });
 
+  it("runs a turn again when its session went away under the start", () => {
+    const detail = "ProviderAdapterSessionNotFoundError: Unknown hermes adapter thread: 8914";
+    expect(
+      decidePendingReply(
+        probe({
+          activities: [
+            {
+              kind: "provider.turn.start.failed",
+              turnId: null,
+              createdAt: at(1),
+              payload: { detail },
+            },
+          ],
+        }),
+      ),
+    ).toEqual({ kind: "lost", turnId: null, reason: detail });
+  });
+
   it("ignores everything from before the request", () => {
     expect(
       decidePendingReply(
@@ -399,5 +420,51 @@ describe("decidePendingReply", () => {
         }),
       ).kind,
     ).toBe("wait");
+  });
+});
+
+describe("failedText", () => {
+  const stack =
+    "ProviderAdapterSessionNotFoundError: Unknown hermes adapter thread: 8914 at requireSession (file:///opt/uno-work/app/dist/bin.mjs:87643:48)";
+
+  it("never shows a stack or a class name", () => {
+    expect(readableFailure(stack)).toBeNull();
+    expect(failedText("ru", stack)).toBe(
+      "Не получилось ответить на это сообщение.\nНапишите ещё раз — попробую снова.",
+    );
+    expect(failedText("en", `TypeError: x\n  at y (file:///a.mjs:1:1)`)).not.toContain("TypeError");
+  });
+
+  it("keeps a reason a person can act on", () => {
+    expect(failedText("en", "No AI provider is signed in.")).toContain(
+      "No AI provider is signed in.",
+    );
+    expect(readableFailure("Лимит исчерпан\n  at y (file:///a.mjs:1:1)")).toBe("Лимит исчерпан");
+    expect(readableFailure("Error: out of credits")).toBe("Error: out of credits");
+  });
+});
+
+describe("isThreadBusyForNewTurn", () => {
+  const input = {
+    rows: [],
+    selfRowId: null,
+    selfCreatedAt: null,
+    session: null,
+    turns: [{ turnId: null, state: "pending", requestedAt: at(0) }],
+    nowMs: T0 + 10_000,
+  } as const;
+
+  it("waits for a turn that is starting", () => {
+    expect(isThreadBusyForNewTurn(input).busy).toBe(true);
+  });
+
+  it("doesn't wait for one whose start failed", () => {
+    const failed = { kind: "provider.turn.start.failed", createdAt: at(0) };
+    expect(isThreadBusyForNewTurn({ ...input, activities: [failed] }).busy).toBe(false);
+  });
+
+  it("still waits for a turn sent after an older failure", () => {
+    const failed = { kind: "provider.turn.start.failed", createdAt: at(-5) };
+    expect(isThreadBusyForNewTurn({ ...input, activities: [failed] }).busy).toBe(true);
   });
 });

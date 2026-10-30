@@ -132,7 +132,10 @@ import {
   type SendOutcome,
   type SystemTurnInput,
 } from "../connectorReplies.ts";
-import { detectReplyLanguage } from "../connectorReplyText.ts";
+import { detectReplyLanguage, type ReplyLanguage } from "../connectorReplyText.ts";
+import { fileRefusedText } from "../connectorReplies.ts";
+import { UNO_WORK_OPEN_URL } from "../taskDoneNotify.ts";
+import { currentWorkAddress } from "../../workAddress.ts";
 import {
   buildMediaFailureNote,
   buildMediaNote,
@@ -153,7 +156,11 @@ import {
   type TelegramIncomingMessage,
   type TelegramMediaDescriptor,
 } from "../telegramMedia.ts";
-import { renderTelegramHtml } from "../telegramMarkdown.ts";
+import {
+  markdownLinksAsText,
+  renderTelegramHtml,
+  telegramTextFields,
+} from "../telegramMarkdown.ts";
 import {
   matchesTelegramPairing,
   newTelegramPairing,
@@ -936,7 +943,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             chat_id: chatId,
-            ...(html ? { text: renderTelegramHtml(text), parse_mode: "HTML" } : { text }),
+            ...telegramTextFields(text, html),
             ...(replyTo !== null && /^\d+$/.test(replyTo)
               ? {
                   reply_parameters: {
@@ -1239,7 +1246,11 @@ const makeTelegramConnector = Effect.gen(function* () {
     botToken: string,
     chatId: string,
     filePath: string,
-    options: { readonly caption?: string; readonly replyMarkup?: unknown } = {},
+    options: {
+      readonly caption?: string;
+      readonly replyMarkup?: unknown;
+      readonly language?: ReplyLanguage;
+    } = {},
   ) =>
     Effect.gen(function* () {
       const outcome = yield* Effect.tryPromise({
@@ -1270,7 +1281,10 @@ const makeTelegramConnector = Effect.gen(function* () {
             form.append("chat_id", chatId);
             form.append(field, new Blob([new Uint8Array(bytes)]), fileName);
             if (caption.length > 0) {
-              form.append("caption", html ? renderTelegramHtml(caption) : caption);
+              form.append(
+                "caption",
+                html ? renderTelegramHtml(caption) : markdownLinksAsText(caption),
+              );
               if (html) form.append("parse_mode", "HTML");
             }
             if (options.replyMarkup !== undefined) {
@@ -1314,7 +1328,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           projectId,
           botToken,
           chatId,
-          `Could not send ${nodePath.basename(filePath)}: ${outcome.error}`,
+          fileRefusedText(options.language ?? "en", nodePath.basename(filePath), outcome.error),
         );
       }
       return outcome;
@@ -1332,6 +1346,7 @@ const makeTelegramConnector = Effect.gen(function* () {
   const replies = yield* makeConnectorReplies({
     kind: "telegram",
     limit: TELEGRAM_MESSAGE_LIMIT,
+    fileLimitBytes: TELEGRAM_BOT_UPLOAD_LIMIT_BYTES,
     logPrefix: "telegram",
     typing: (row) =>
       Effect.gen(function* () {
@@ -1356,7 +1371,9 @@ const makeTelegramConnector = Effect.gen(function* () {
       Effect.gen(function* () {
         const botToken = yield* botTokenOf(row.connectorProjectId);
         if (botToken === null) return "retry";
-        yield* sendTelegramFile(row.connectorProjectId, botToken, row.chatId, path);
+        yield* sendTelegramFile(row.connectorProjectId, botToken, row.chatId, path, {
+          language: row.language,
+        });
         return "ok";
       }),
     onSettled: (row, delivered) => {
@@ -2139,13 +2156,19 @@ const makeTelegramConnector = Effect.gen(function* () {
       const replyTo = message.message_id === undefined ? null : String(message.message_id);
       const takenMedia: Array<TelegramMediaDescriptor> = [];
       const refusedNotes: Array<string> = [];
+      const limitReply = {
+        language: detectReplyLanguage(text, message.from?.language_code),
+        moreUrl: currentWorkAddress() ?? UNO_WORK_OPEN_URL,
+      };
       for (const descriptor of media) {
-        const refusal = mediaLimitReply(descriptor);
+        const refusal = mediaLimitReply(descriptor, limitReply);
         if (refusal === null) {
           takenMedia.push(descriptor);
           continue;
         }
-        refusedNotes.push(`[Not passed to you: ${refusal} The user was told so.]`);
+        refusedNotes.push(
+          `[Not passed to you: ${refusal} The person already got exactly this line: don't repeat it. If the message asks nothing else, answer exactly NO_REPLY.]`,
+        );
         yield* sendTelegramText(projectId, config.botToken, chatId, refusal, { replyTo });
       }
       if (

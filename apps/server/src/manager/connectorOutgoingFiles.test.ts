@@ -59,6 +59,20 @@ describe("resolveConnectorOutgoingFile", () => {
     });
   });
 
+  it("finds a relative path in the chats the assistant started", async () => {
+    const own = path.join(dir, "assistant");
+    await fs.mkdir(own, { recursive: true });
+    const real = await fs.realpath(path.join(dir, "report.txt"));
+    expect(await resolveConnectorOutgoingFile("report.txt", [own, dir])).toEqual({
+      ok: true,
+      path: real,
+    });
+    expect((await resolveConnectorOutgoingFile("missing.txt", [own, dir])).ok).toBe(false);
+    // A key is refused even when a later root has a sendable file of that name.
+    await fs.writeFile(path.join(own, "id_rsa"), "key");
+    expect((await resolveConnectorOutgoingFile("id_rsa", [own, dir])).ok).toBe(false);
+  });
+
   it("refuses symlinks that escape, outside paths and missing roots", async () => {
     expect((await resolveConnectorOutgoingFile(path.join(dir, "link.txt"), [dir])).ok).toBe(false);
     expect((await resolveConnectorOutgoingFile(path.join(outside, "secret.txt"), [dir])).ok).toBe(
@@ -103,6 +117,18 @@ describe("sendableRoots", () => {
     ]) {
       expect(isSendableConnectorPath(file, roots)).toBe(false);
     }
+  });
+
+  it("adds the folders of the chats it started, for a chat outside the projects", () => {
+    const roots = sendableRoots({
+      threadRoot: "/home/me/.uno/assistants/ana",
+      childRoots: ["/srv/worktree-of-a-chat"],
+      home,
+      reach: [],
+      allProjectRoots: projects,
+    });
+    expect(isSendableConnectorPath("/srv/worktree-of-a-chat/docs/report.md", roots)).toBe(true);
+    expect(isSendableConnectorPath("/srv/site/out/report.pdf", roots)).toBe(false);
   });
 
   it("only selected projects: those folders and the chat's own, nothing else", () => {

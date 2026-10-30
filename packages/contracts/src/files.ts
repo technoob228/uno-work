@@ -300,6 +300,14 @@ export const FilesPublishSiteResult = Schema.Struct({
 });
 export type FilesPublishSiteResult = typeof FilesPublishSiteResult.Type;
 
+/** "Will `bytes` more fit on the disk of `path`?" before an upload starts. */
+export const FilesEnsureSpaceInput = Schema.Struct({
+  /** Where the bytes will land: absolute, or `~`-relative; may not exist yet. */
+  path: FilesPath,
+  bytes: NonNegativeInt,
+});
+export type FilesEnsureSpaceInput = typeof FilesEnsureSpaceInput.Type;
+
 export class FilesError extends Schema.TaggedErrorClass<FilesError>()("FilesError", {
   message: TrimmedNonEmptyString,
   cause: Schema.optional(Schema.Defect),
@@ -336,6 +344,9 @@ export const FilesCloudState = Schema.Struct({
   buckets: Schema.Array(FilesCloudBucket),
 });
 export type FilesCloudState = typeof FilesCloudState.Type;
+
+/** A replaced cloud file bigger than this isn't kept (one copy of a video would eat the space). */
+export const CLOUD_VERSION_MAX_BYTES = 200 * 1024 * 1024;
 
 const CloudKey = TrimmedNonEmptyString.check(Schema.isMaxLength(1024));
 /** A folder inside a bucket: "" (root) or a path ending in "/". */
@@ -399,6 +410,43 @@ export const FilesCloudCopyToCloudInput = Schema.Struct({
   removeSource: Schema.optional(Schema.Boolean),
 });
 export type FilesCloudCopyToCloudInput = typeof FilesCloudCopyToCloudInput.Type;
+
+/**
+ * One step of an upload the browser sends straight to storage: what it would
+ * ask the console's `POST /buckets/{id}/presign` (hence the console's own
+ * field names), asked through the daemon because only the daemon holds the
+ * token. `put` starts an upload (`size`) or signs part links again
+ * (`upload_id`, `first`, `last`); `complete` and `abort` finish one in parts.
+ */
+export const FilesCloudUploadStepInput = Schema.Struct({
+  bucketId: Schema.Number,
+  key: CloudKey,
+  method: Schema.Literals(["put", "complete", "abort"]),
+  size: Schema.optional(NonNegativeInt),
+  ttl: Schema.optional(PositiveInt),
+  upload_id: Schema.optional(TrimmedNonEmptyString),
+  first: Schema.optional(PositiveInt),
+  last: Schema.optional(PositiveInt),
+});
+export type FilesCloudUploadStepInput = typeof FilesCloudUploadStepInput.Type;
+
+export const FilesCloudUploadStepResult = Schema.Struct({
+  /** The console's answer, as it came (`@t3tools/shared/cloudUpload` reads it). */
+  answer: Schema.optional(Schema.Unknown),
+  /**
+   * The console said no, or didn't answer (`status` null). `message` is for
+   * the person; `detail` is the console's own words, which name the parts it
+   * still misses. An answer rather than a `FilesError`, which has neither.
+   */
+  refusal: Schema.optional(
+    Schema.Struct({
+      status: Schema.NullOr(Schema.Number),
+      message: TrimmedNonEmptyString,
+      detail: Schema.String,
+    }),
+  ),
+});
+export type FilesCloudUploadStepResult = typeof FilesCloudUploadStepResult.Type;
 
 export const FilesCloudCopyToComputerInput = Schema.Struct({
   bucketId: Schema.Number,

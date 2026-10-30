@@ -423,6 +423,8 @@ export interface WsRpcClient {
     readonly cloudDelete: RpcUnaryMethod<typeof WS_METHODS.filesCloudDelete>;
     readonly cloudDownloadUrl: RpcUnaryMethod<typeof WS_METHODS.filesCloudDownloadUrl>;
     readonly cloudCopyToCloud: RpcUnaryMethod<typeof WS_METHODS.filesCloudCopyToCloud>;
+    readonly cloudUploadStep: RpcUnaryMethod<typeof WS_METHODS.filesCloudUploadStep>;
+    readonly ensureSpace: RpcUnaryMethod<typeof WS_METHODS.filesEnsureSpace>;
     readonly cloudCopyToComputer: RpcUnaryMethod<typeof WS_METHODS.filesCloudCopyToComputer>;
     readonly cloudOfficeOpen: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeOpen>;
     readonly cloudOfficeSave: RpcUnaryMethod<typeof WS_METHODS.filesCloudOfficeSave>;
@@ -943,6 +945,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.filesCloudDownloadUrl](input)),
       cloudCopyToCloud: (input) =>
         transport.request((client) => client[WS_METHODS.filesCloudCopyToCloud](input)),
+      cloudUploadStep: (input) =>
+        transport.request((client) => client[WS_METHODS.filesCloudUploadStep](input)),
+      ensureSpace: (input) =>
+        transport.request((client) => client[WS_METHODS.filesEnsureSpace](input)),
       cloudCopyToComputer: (input) =>
         transport.request((client) => client[WS_METHODS.filesCloudCopyToComputer](input)),
       cloudOfficeOpen: (input) =>

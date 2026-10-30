@@ -13,9 +13,19 @@
 
 const FENCE_LINE = /^```[^`]*$/;
 
-/** Where to cut `text` so the head is at most `limit` chars, preferring natural breaks. */
-const findCut = (text: string, limit: number): number => {
-  if (text.length <= limit) return text.length;
+const MARKDOWN_LINK = /\[[^\]\n]+]\(https?:\/\/[^\s)]+\)/g;
+
+/** The link `cut` falls inside moves whole to the next part. */
+const cutOutsideLink = (text: string, cut: number): number => {
+  for (const match of text.matchAll(MARKDOWN_LINK)) {
+    if (match.index >= cut) break;
+    const end = match.index + match[0].length;
+    if (cut < end) return match.index > 0 ? match.index : cut;
+  }
+  return cut;
+};
+
+const findBreak = (text: string, limit: number): number => {
   const window = text.slice(0, limit);
   // Never cut so early that the part is mostly empty.
   const floor = Math.floor(limit * 0.5);
@@ -27,6 +37,10 @@ const findCut = (text: string, limit: number): number => {
   const code = text.charCodeAt(limit - 1);
   return code >= 0xd800 && code <= 0xdbff ? limit - 1 : limit;
 };
+
+/** Where to cut `text` so the head is at most `limit` chars, preferring natural breaks. */
+const findCut = (text: string, limit: number): number =>
+  text.length <= limit ? text.length : cutOutsideLink(text, findBreak(text, limit));
 
 /** The fence opener line still open at the end of `text`, or null. */
 const openFenceAtEnd = (text: string): string | null => {
@@ -86,26 +100,47 @@ export type ReplyLanguage = "ru" | "en";
 export const SCREEN_MAX_CHARS = 1_100;
 export const SCREEN_CUT_CHARS = 900;
 
+/** What a phone shows: a Markdown link is its label, however long the address. */
+const visibleLength = (text: string): number =>
+  text.replace(MARKDOWN_LINK, (link) => link.slice(1, link.indexOf("]("))).length;
+
+/** The raw length that shows as `visible` characters. */
+const rawLimitFor = (text: string, visible: number): number => {
+  let raw = visible;
+  for (const match of text.matchAll(MARKDOWN_LINK)) {
+    if (match.index >= raw) break;
+    raw += match[0].length - match[0].indexOf("](") + 1;
+  }
+  return raw;
+};
+
 /**
  * `text` as it goes to a phone: unchanged when it fits one screen, else its
- * head (cut at a paragraph / line / sentence) and one line saying where the
- * rest is — the Uno chat in Uno Work (`moreUrl`, the person's own address
- * when known).
+ * head (cut at a paragraph / line / sentence, never inside a link) and one
+ * line saying where the rest is: a link past the cut when there is one, else
+ * the Uno chat in Uno Work (`moreUrl`, the person's own address when known).
  */
 export const fitReplyToScreen = (
   text: string,
   input: { readonly language: ReplyLanguage; readonly moreUrl: string },
 ): { readonly text: string; readonly cut: boolean } => {
   const trimmed = text.trim();
-  if (trimmed.length <= SCREEN_MAX_CHARS) return { text: trimmed, cut: false };
-  let head = trimmed.slice(0, findCut(trimmed, SCREEN_CUT_CHARS)).trimEnd();
+  if (visibleLength(trimmed) <= SCREEN_MAX_CHARS) return { text: trimmed, cut: false };
+  const cut = findCut(trimmed, rawLimitFor(trimmed, SCREEN_CUT_CHARS));
+  let head = trimmed.slice(0, cut).trimEnd();
   // A half table or list heading at the cut reads as noise: drop a dangling header line.
   head = head.replace(/\n[^\n]{0,40}:\s*$/, "").trimEnd();
   if (openFenceAtEnd(head) !== null) head = `${head}\n\`\`\``;
+  // A link past the cut is what the person came for: it goes instead of the pointer.
+  const link = trimmed.slice(cut).match(MARKDOWN_LINK)?.[0] ?? null;
   const more =
-    input.language === "ru"
-      ? `…дальше — в чате Uno в Uno Work: ${input.moreUrl}`
-      : `…the rest is in the Uno chat in Uno Work: ${input.moreUrl}`;
+    link !== null
+      ? input.language === "ru"
+        ? `…полностью: ${link}`
+        : `…in full: ${link}`
+      : input.language === "ru"
+        ? `…дальше — в чате Uno в Uno Work: ${input.moreUrl}`
+        : `…the rest is in the Uno chat in Uno Work: ${input.moreUrl}`;
   return { text: `${head}\n\n${more}`, cut: true };
 };
 

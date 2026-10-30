@@ -622,16 +622,17 @@ export function parsePortForwards(raw: unknown): PortForward[] {
 }
 
 /**
- * The public forwards of an app's ports, and the address they give. The
- * control plane builds `http://<computer's name>:<external port>` for a
- * hand-published port (the `https://<app>-<computer>` names are for App Store
- * installs). UDP ports (a VPN tunnel) count too: they have no web address, but
- * "Hide" must take them down with the rest.
+ * The public forwards of an app's ports, and the address they give: the
+ * app's `httpsUrl` (`https://<app>-<computer>`) once the control plane has it
+ * ready, until then `http://<computer's name>:<external port>`. UDP ports (a
+ * VPN tunnel) count too: they have no web address, but "Hide" must take them
+ * down with the rest.
  */
 export function publicationFor(
   app: { readonly port: number | null; readonly udpPorts: ReadonlyArray<number> },
   forwards: ReadonlyArray<PortForward>,
   hostname: string | null,
+  httpsUrl: string | null = null,
 ): UnoMachineAppPublication | null {
   const live = (f: PortForward) =>
     f.visibility === "public" && f.state !== "deleting" && f.state !== "failed";
@@ -652,10 +653,12 @@ export function publicationFor(
   return {
     forwardId: main?.id ?? null,
     externalPort: main?.externalPort ?? null,
-    url:
-      main && host && main.externalPort !== null && main.state !== "pending"
-        ? `http://${host}:${main.externalPort}/`
-        : null,
+    url: !main
+      ? null
+      : (httpsUrl ??
+        (host && main.externalPort !== null && main.state !== "pending"
+          ? `http://${host}:${main.externalPort}/`
+          : null)),
     host,
     state: all.some((f) => f.state === "pending") ? "pending" : (all[0]?.state ?? "applied"),
     forwards: all.map((f) => ({
