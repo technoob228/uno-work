@@ -224,8 +224,7 @@ describe("sanitizeFileName", () => {
   });
 
   it("keeps Russian names and a name without an extension", () => {
-    expect(sanitizeFileName("Договор №5 от мая.pdf", "x")).toContain("Договор");
-    expect(sanitizeFileName("Договор №5 от мая.pdf", "x").endsWith(".pdf")).toBe(true);
+    expect(sanitizeFileName("Договор №5 от мая.pdf", "x")).toBe("Договор №5 от мая.pdf");
     expect(sanitizeFileName("README", "x")).toBe("README");
   });
 

@@ -287,6 +287,10 @@ describe("buildHermesConfigYaml for the Uno dispatcher", () => {
       /"uno-manager":\n[\s\S]*?include: \["work_status"[^\]]*"notes_append"[^\]]*"send_file"/,
     );
     expect(yaml).toMatch(/"uno-work":\n[\s\S]*?include: \["chat_create"/);
+    // Reports are Uno's own: no chat needed for a link.
+    for (const tool of ["report_publish", "site_open_link", "sites_list"]) {
+      expect(yaml).toContain(`"${tool}"`);
+    }
     expect(yaml).not.toMatch(/include: \[[^\]]*"site_publish"/);
   });
 

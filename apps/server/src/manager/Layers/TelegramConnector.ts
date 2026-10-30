@@ -2166,7 +2166,9 @@ const makeTelegramConnector = Effect.gen(function* () {
           takenMedia.push(descriptor);
           continue;
         }
-        refusedNotes.push(`[Not passed to you: ${refusal} The user was told so.]`);
+        refusedNotes.push(
+          `[Not passed to you: ${refusal} The person already got exactly this line: don't repeat it. If the message asks nothing else, answer exactly NO_REPLY.]`,
+        );
         yield* sendTelegramText(projectId, config.botToken, chatId, refusal, { replyTo });
       }
       if (

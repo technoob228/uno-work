@@ -262,7 +262,7 @@ const FILE_NAME_MAX_CHARS = 120;
 export function sanitizeFileName(name: string, fallback: string): string {
   const base = name
     .replace(/[/\\]+/g, "_")
-    .replace(/[^\p{L}\p{N}._ -]+/gu, "_")
+    .replace(/[^\p{L}\p{N}№._ -]+/gu, "_")
     .replace(/\s+/g, " ")
     .replace(/^\.+/, "")
     .trim();
