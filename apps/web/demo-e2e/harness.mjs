@@ -59,6 +59,8 @@ export function serve(dir = DIST, port = 0) {
 }
 
 function cachedChromium() {
+  // A cloud machine: the Chromium Playwright installed, there is no Chrome.
+  if (process.env.DEMO_CHROME) return process.env.DEMO_CHROME;
   const root = process.env.PLAYWRIGHT_BROWSERS_PATH;
   if (!root) return null;
   const app = join(root, "chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app");

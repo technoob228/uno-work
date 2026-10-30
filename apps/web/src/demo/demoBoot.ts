@@ -336,6 +336,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     }
     case WS_METHODS.projectsSearchEntries:
       return { entries: [], truncated: false };
+    case WS_METHODS.projectsWriteFile:
+      // Attached files: nothing is stored in the demo, the upload just succeeds.
+      return { relativePath: body.relativePath };
     case WS_METHODS.vcsListRefs:
       return { isRepo: false, hasPrimaryRemote: false, nextCursor: null, totalCount: 0, refs: [] };
     case WS_METHODS.serverDiscoverSourceControl:
