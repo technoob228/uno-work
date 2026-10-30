@@ -79,6 +79,8 @@ export function useOpenAssistantSettings() {
 export function TeamPresetEditor(props: {
   readonly member: TeamMember;
   readonly nameOf: (projectId: string) => string;
+  /** Its projects alone; its permission level has its own switch on the page (29.10). */
+  readonly projectsOnly?: boolean;
 }) {
   const { member } = props;
   const actions = useTeamActions();
@@ -109,7 +111,9 @@ export function TeamPresetEditor(props: {
       const losses = daemonLossLine(result.losses ?? [], props.nameOf);
       toastManager.add({
         type: "success",
-        title: `${name} is ${ASSISTANT_PRESET_COPY[form.preset].name} now`,
+        title: props.projectsOnly
+          ? `${name}: where it can look is saved`
+          : `${name} is ${ASSISTANT_PRESET_COPY[form.preset].name} now`,
         description: losses
           ? `${losses}. It's in Needs you too.`
           : "It follows this from its next step.",
@@ -134,6 +138,7 @@ export function TeamPresetEditor(props: {
         onChange={setDraft}
         projects={projects.data ?? []}
         disabled={saving || member.revoked}
+        projectsOnly={props.projectsOnly ?? false}
         testId="assistant-profile-preset"
       />
       {dirty ? (

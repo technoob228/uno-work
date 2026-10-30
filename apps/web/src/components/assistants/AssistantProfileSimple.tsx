@@ -7,11 +7,12 @@
  * - the one next step: Connect Telegram (@BotFather, paste the token, then
  *   Start in Telegram) until a bot is linked; Slack and its email are small
  *   rows under it;
- * - its permission level, where it can look, where it works, the apps it
+ * - its permission level (one switch), where it can look (its projects,
+ *   changed right there), where it works, the apps it
  *   may open and the AI (one per computer) — in plain sight (29.10);
  * - its chats and what is on it now, its memory and instructions (edited
  *   right on the page);
- * - Advanced, folded: projects by name, its email rules, role, routines,
+ * - Advanced, folded: its email rules, role, routines,
  *   the team and "Set up again";
  * - its automations (28.10): what it does on a schedule or on an event.
  *
@@ -21,12 +22,10 @@
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
+import { useCanGoBack, useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
-  ChevronRightIcon,
   LoaderCircleIcon,
-  LockIcon,
   MailIcon,
   MessageCircleIcon,
   PencilIcon,
@@ -57,10 +56,16 @@ import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
 import { MemoryBlock } from "./AssistantMemoryModels";
+import {
+  ASSISTANT_PROFILE_TABS,
+  type AssistantProfileTab,
+  assistantProfileTab,
+  assistantSettingsSearch,
+} from "./assistantSettingsNav.logic";
 import { AssistantModeSwitch } from "./PersonaMode";
 import { AutomationsSection } from "../automations/AutomationsSection";
 import { JoinCallsSection } from "./JoinCallsSection";
-import { ChatLine, MemoryFile, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
+import { ChatLine, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
 import { TeamConnectors, TeamPresetEditor, TeamRoutines, TeamRunsOn } from "./AssistantProfileReal";
 import { ACTIVITY_LABEL, buildAssistantTree, descendantKeys } from "./assistantTeam.logic";
 import { setupProgressLine } from "./teamFromDaemon.logic";
@@ -246,25 +251,43 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
   );
 }
 
-// ── Advanced ──────────────────────────────────────────────────────────────
+// ── Tabs ──────────────────────────────────────────────────────────────────
 
-function Advanced(props: { readonly children: ReactNode }) {
-  const [open, setOpen] = useState(false);
+/** Underlined tabs like Apps & sites; a phone scrolls them sideways. */
+function ProfileTabs(props: {
+  readonly tab: AssistantProfileTab;
+  readonly onTab: (tab: AssistantProfileTab) => void;
+}) {
   return (
-    <section className="flex flex-col gap-4" data-testid="assistant-advanced">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="flex w-fit cursor-pointer items-center gap-1 px-1 text-[13px] font-medium text-muted-foreground hover:text-foreground"
-        data-testid="assistant-advanced-toggle"
+    <div
+      className="-mt-2 -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0"
+      data-testid="assistant-profile-tabs"
+    >
+      <div
+        className="flex min-w-max gap-1 border-b border-border"
+        role="tablist"
+        aria-label="Its settings"
       >
-        <ChevronRightIcon className={cn("size-4 transition-transform", open && "rotate-90")} />
-        Advanced
-        <span className="font-normal">· projects by name, its email, role and routines, team</span>
-      </button>
-      {open ? props.children : null}
-    </section>
+        {ASSISTANT_PROFILE_TABS.map((entry) => (
+          <button
+            key={entry.id}
+            type="button"
+            role="tab"
+            aria-selected={props.tab === entry.id}
+            onClick={() => props.onTab(entry.id)}
+            data-testid={`assistant-profile-tab-${entry.id}`}
+            className={cn(
+              "-mb-px cursor-pointer border-b-2 px-3 pb-2 text-sm whitespace-nowrap transition-colors",
+              props.tab === entry.id
+                ? "border-foreground font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {entry.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -289,7 +312,16 @@ export function AssistantProfileSimple(props: {
   const [changingBrain, setChangingBrain] = useState(false);
   const [faceOpen, setFaceOpen] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
-  const [editingMemory, setEditingMemory] = useState(false);
+  // The tab lives in the address (?tab=…): Settings in its chat and links open
+  // the right one; switching replaces the entry, so Back goes back to the chat.
+  const search = useSearch({ strict: false }) as { tab?: string };
+  const tab = assistantProfileTab(search.tab);
+  const setTab = (next: AssistantProfileTab) =>
+    void navigate({
+      to: "/assistants",
+      search: assistantSettingsSearch(props, next),
+      replace: true,
+    });
   const [busy, setBusy] = useState(false);
 
   // Back where the person came from (its chat, the sidebar, the list); a page
@@ -323,7 +355,6 @@ export function AssistantProfileSimple(props: {
 
   const { profile } = member;
   const name = profile.name;
-  const uno = team.find((item) => item.isUno) ?? null;
   const telegramLinked = member.summary?.telegram.configured === true;
   const openThread = (thread: SidebarThreadSummary) =>
     void navigate({
@@ -528,281 +559,287 @@ export function AssistantProfileSimple(props: {
               />
             ) : null}
 
-            {/* The one next step, then the other ways to reach it. */}
-            {!member.revoked && !telegramLinked && member.isUno ? (
-              <ConnectTelegramCard member={member} />
-            ) : null}
-            <WhereYouTalk member={member} />
-            {!member.revoked ? (
-              <JoinCallsSection
-                environmentId={member.environmentId}
-                projectId={member.projectId}
-                name={name}
-              />
-            ) : null}
-            {/* What it does by itself: on a schedule or when something happens (28.10). */}
-            <AutomationsSection member={member} />
-
-            {/* Variant D: its mode and where it looks, in plain sight. */}
-            <Section title="Permission level" testId="assistant-profile-mode">
-              <div className="p-2">
-                <AssistantModeSwitch member={member} />
-              </div>
-            </Section>
-            <Section title="Where it can look" testId="assistant-profile-where">
-              <div className="flex flex-col gap-1 px-3 py-2.5 text-sm">
-                {profile.projects === "all" ? (
-                  <span>All your projects, new ones too — like Uno.</span>
-                ) : (
-                  <>
-                    <span>Only: {profile.projects.join(", ") || "its own folder"}</span>
-                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <LockIcon className="size-3 text-success" /> Locked by a sandbox on{" "}
-                      {member.computerLabel || "its computer"}. On your other computers it's a note,
-                      not a lock.
-                    </span>
-                  </>
-                )}
-              </div>
-            </Section>
-
-            {/* Its computer, apps and AI in plain sight (29.10: they were under Advanced). */}
-            <Section title="Where it works" testId="assistant-profile-works-on-section">
-              <TeamWorksOn member={member} />
-            </Section>
-
-            <Section
-              title="Apps it can open"
-              testId="assistant-profile-can-use"
-              action={
-                <button
-                  type="button"
-                  onClick={() => void navigate({ to: "/settings/connectors" })}
-                  className="cursor-pointer text-xs text-primary hover:underline"
-                >
-                  Connectors in Settings
-                </button>
-              }
-            >
-              <TeamConnectors member={member} place={place} nameOf={nameOf} />
-            </Section>
-
-            <Section
-              title="The AI it runs on"
-              action={
-                member.revoked ? null : (
-                  <button
-                    type="button"
-                    onClick={() => setChangingBrain((value) => !value)}
-                    className="cursor-pointer text-xs text-primary hover:underline"
-                  >
-                    {changingBrain ? "Done" : "Change"}
-                  </button>
-                )
-              }
-            >
-              <TeamRunsOn member={member} changing={changingBrain} />
-            </Section>
-
-            <div className="grid gap-6 md:grid-cols-2">
-              <Section title={`Chats · ${member.chats.conversations.length}`}>
-                {member.chats.conversations.length > 0 ? (
-                  member.chats.conversations
-                    .slice(0, 6)
-                    .map((thread) => (
-                      <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
-                    ))
-                ) : (
-                  <p className="px-3 py-2 text-sm text-muted-foreground">
-                    No chats yet — say hi with New chat.
-                  </p>
-                )}
-              </Section>
-              <Section title="Tasks" testId="assistant-profile-tasks">
-                <TeamDuties member={member} />
-                <p className="border-t border-border/70 px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                  Running now
-                </p>
-                {running.length > 0 ? (
-                  running
-                    .slice(0, 4)
-                    .map((thread) => (
-                      <ChatLine key={thread.id} thread={thread} onOpen={() => openThread(thread)} />
-                    ))
-                ) : (
-                  <p className="px-3 pt-0 pb-2 text-xs text-muted-foreground">Nothing running.</p>
-                )}
-              </Section>
-            </div>
-
-            <Section
-              title={
-                member.isUno ? "Memory · shared with your helpers" : "Memory · shared with Uno"
-              }
-              action={
-                <button
-                  type="button"
-                  onClick={() => setEditingMemory((value) => !value)}
-                  className="cursor-pointer text-xs text-primary hover:underline"
-                  data-testid="assistant-profile-memory-edit"
-                >
-                  {editingMemory ? "Done" : "Edit memory and instructions"}
-                </button>
-              }
-            >
-              {/* Edited right here (29.10): "Edit" used to open an older page of it. */}
-              {editingMemory ? (
-                <div className="px-3 py-2" data-testid="assistant-profile-memory-editor">
-                  <MemoryBlock
-                    name={name}
-                    environmentId={member.environmentId as EnvironmentId}
-                    projectId={member.projectId}
-                    waking={false}
-                    onWake={() => undefined}
-                  />
-                </div>
-              ) : (
-                <>
-                  <MemoryFile
-                    member={uno ?? member}
-                    name="NOTES.md"
-                    what="what Uno and helpers learned"
-                  />
-                  <MemoryFile member={member} name="AGENTS.md" what="its instructions" last />
-                </>
-              )}
-            </Section>
-
-            {/* Variant D: removing a persona is a visible, plain action. */}
-            {member.isUno || member.revoked ? null : (
+            {/* Its settings by tabs (Misha 29.10: "a lot to scroll"); the tab is in the address. */}
+            <ProfileTabs tab={tab} onTab={setTab} />
+            {tab === "general" ? (
               <div
-                className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5"
-                data-testid="assistant-profile-remove-box"
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-general"
               >
-                {confirmRevoke ? (
-                  <>
-                    <span className="text-sm">
-                      {running.length > 0
-                        ? `${name} is working on “${running[0]!.title}” right now. Remove anyway? That task stops; ${name}'s chats stay.`
-                        : `Remove ${name}? ${name} stops working and leaves the sidebar; its chats stay. You can bring it back.`}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <Button
-                        size="xs"
-                        variant="destructive"
-                        onClick={doRevoke}
-                        data-testid="assistant-profile-remove-confirm"
-                      >
-                        Remove {name}
-                      </Button>
-                      <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
-                        Keep
-                      </Button>
-                    </span>
-                  </>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => setConfirmRevoke(true)}
-                    className="inline-flex w-fit cursor-pointer items-center gap-1.5 text-sm text-destructive hover:underline"
-                    data-testid="assistant-profile-remove"
-                  >
-                    <UserRoundXIcon className="size-3.5" />
-                    Remove {name}
-                  </button>
-                )}
-              </div>
-            )}
+                <Section title="Permission level" testId="assistant-profile-mode">
+                  <div className="p-2">
+                    <AssistantModeSwitch member={member} />
+                  </div>
+                </Section>
+                <Section title="Role and routines">
+                  <Row label="Role">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {profile.roles.length > 0 ? (
+                        profile.roles.map((role) => <Pill key={role}>{role}</Pill>)
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                      {profile.character ? <Pill muted>{profile.character}</Pill> : null}
+                      {member.revoked ? null : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingWho(true)}
+                          className="ml-1 cursor-pointer text-xs text-primary hover:underline"
+                        >
+                          Edit
+                        </button>
+                      )}
+                    </div>
+                  </Row>
+                  <TeamRoutines member={member} machine={homeMachine} />
+                </Section>
 
-            <Advanced>
-              <Section title="What it may do" testId="assistant-profile-access">
-                <div className="px-3 py-2">
-                  <TeamPresetEditor member={member} nameOf={nameOf} />
-                </div>
-              </Section>
-
-              <TeamMail
-                member={member}
-                section={(body) => (
-                  <Section title="Its email" testId="assistant-profile-mail">
-                    {body}
-                  </Section>
-                )}
-              />
-
-              <Section title="Role and routines">
-                <Row label="Role">
-                  <div className="flex flex-wrap items-center gap-1">
-                    {profile.roles.length > 0 ? (
-                      profile.roles.map((role) => <Pill key={role}>{role}</Pill>)
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
-                    {profile.character ? <Pill muted>{profile.character}</Pill> : null}
+                <Section
+                  title="Team"
+                  testId="assistant-profile-team"
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => void navigate({ to: "/assistants", search: { view: "new" } })}
+                      disabled={quick.creating}
+                      className="cursor-pointer text-xs text-primary hover:underline"
+                      data-testid="assistant-profile-new-assistant"
+                    >
+                      New assistant
+                    </button>
+                  }
+                >
+                  <div className="flex flex-col gap-0.5 p-1.5">
+                    {tree.map((node) => (
+                      <TreeBranch
+                        key={node.item.key}
+                        node={node}
+                        current={member.key}
+                        onOpen={(other) =>
+                          void navigate({
+                            to: "/assistants",
+                            search: {
+                              view: "profile",
+                              env: other.environmentId,
+                              project: other.projectId,
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-col items-start gap-1.5 border-t border-border/70 px-3 py-2.5 text-xs text-muted-foreground">
+                    <p>{parent ? `Set up by ${parent.profile.name}.` : "Set up by you."}</p>
                     {member.revoked ? null : (
                       <button
                         type="button"
-                        onClick={() => setEditingWho(true)}
-                        className="ml-1 cursor-pointer text-xs text-primary hover:underline"
+                        onClick={setUpAgain}
+                        disabled={busy}
+                        className="cursor-pointer text-foreground hover:underline"
+                        data-testid="assistant-profile-setup-again"
                       >
-                        Edit
+                        Set up again in a chat — it asks about its job, apps and routines
                       </button>
                     )}
                   </div>
-                </Row>
-                <TeamRoutines member={member} machine={homeMachine} />
-              </Section>
-
-              <Section
-                title="Team"
-                testId="assistant-profile-team"
-                action={
-                  <button
-                    type="button"
-                    onClick={() => void navigate({ to: "/assistants", search: { view: "new" } })}
-                    disabled={quick.creating}
-                    className="cursor-pointer text-xs text-primary hover:underline"
-                    data-testid="assistant-profile-new-assistant"
+                </Section>
+                {/* Variant D: removing a persona is a visible, plain action. */}
+                {member.isUno || member.revoked ? null : (
+                  <div
+                    className="flex flex-col gap-2 rounded-xl border border-border px-3 py-2.5"
+                    data-testid="assistant-profile-remove-box"
                   >
-                    New assistant
-                  </button>
-                }
+                    {confirmRevoke ? (
+                      <>
+                        <span className="text-sm">
+                          {running.length > 0
+                            ? `${name} is working on “${running[0]!.title}” right now. Remove anyway? That task stops; ${name}'s chats stay.`
+                            : `Remove ${name}? ${name} stops working and leaves the sidebar; its chats stay. You can bring it back.`}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Button
+                            size="xs"
+                            variant="destructive"
+                            onClick={doRevoke}
+                            data-testid="assistant-profile-remove-confirm"
+                          >
+                            Remove {name}
+                          </Button>
+                          <Button size="xs" variant="ghost" onClick={() => setConfirmRevoke(false)}>
+                            Keep
+                          </Button>
+                        </span>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmRevoke(true)}
+                        className="inline-flex w-fit cursor-pointer items-center gap-1.5 text-sm text-destructive hover:underline"
+                        data-testid="assistant-profile-remove"
+                      >
+                        <UserRoundXIcon className="size-3.5" />
+                        Remove {name}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : null}
+            {tab === "where" ? (
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-where"
               >
-                <div className="flex flex-col gap-0.5 p-1.5">
-                  {tree.map((node) => (
-                    <TreeBranch
-                      key={node.item.key}
-                      node={node}
-                      current={member.key}
-                      onOpen={(other) =>
-                        void navigate({
-                          to: "/assistants",
-                          search: {
-                            view: "profile",
-                            env: other.environmentId,
-                            project: other.projectId,
-                          },
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-                <div className="flex flex-col items-start gap-1.5 border-t border-border/70 px-3 py-2.5 text-xs text-muted-foreground">
-                  <p>{parent ? `Set up by ${parent.profile.name}.` : "Set up by you."}</p>
-                  {member.revoked ? null : (
+                <Section title="Where it works" testId="assistant-profile-works-on-section">
+                  <TeamWorksOn member={member} />
+                </Section>
+
+                {/* Its projects are changed right here; the level has its one switch above (29.10). */}
+                <Section title="Where it can look" testId="assistant-profile-where">
+                  <div className="px-3 py-2.5">
+                    <TeamPresetEditor member={member} nameOf={nameOf} projectsOnly />
+                  </div>
+                </Section>
+
+                <Section
+                  title="The AI it runs on"
+                  action={
+                    member.revoked ? null : (
+                      <button
+                        type="button"
+                        onClick={() => setChangingBrain((value) => !value)}
+                        className="cursor-pointer text-xs text-primary hover:underline"
+                      >
+                        {changingBrain ? "Done" : "Change"}
+                      </button>
+                    )
+                  }
+                >
+                  <TeamRunsOn member={member} changing={changingBrain} />
+                </Section>
+              </div>
+            ) : null}
+            {tab === "apps" ? (
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-apps"
+              >
+                {/* The one next step, then the other ways to reach it. */}
+                {!member.revoked && !telegramLinked && member.isUno ? (
+                  <ConnectTelegramCard member={member} />
+                ) : null}
+                <WhereYouTalk member={member} />
+                <Section
+                  title="Apps it can open"
+                  testId="assistant-profile-can-use"
+                  action={
                     <button
                       type="button"
-                      onClick={setUpAgain}
-                      disabled={busy}
-                      className="cursor-pointer text-foreground hover:underline"
-                      data-testid="assistant-profile-setup-again"
+                      onClick={() => void navigate({ to: "/settings/connectors" })}
+                      className="cursor-pointer text-xs text-primary hover:underline"
                     >
-                      Set up again in a chat — it asks about its job, apps and routines
+                      Connectors in Settings
                     </button>
+                  }
+                >
+                  <TeamConnectors member={member} place={place} nameOf={nameOf} />
+                </Section>
+
+                {!member.revoked ? (
+                  <JoinCallsSection
+                    environmentId={member.environmentId}
+                    projectId={member.projectId}
+                    name={name}
+                  />
+                ) : null}
+                <TeamMail
+                  member={member}
+                  section={(body) => (
+                    <Section title="Its email" testId="assistant-profile-mail">
+                      {body}
+                    </Section>
                   )}
+                />
+              </div>
+            ) : null}
+            {tab === "memory" ? (
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-memory"
+              >
+                <Section
+                  title={
+                    member.isUno ? "Memory · shared with your helpers" : "Memory · shared with Uno"
+                  }
+                >
+                  {/* Edited right here (29.10): "Edit" used to open an older page of it. */}
+                  <div className="px-3 py-2" data-testid="assistant-profile-memory-editor">
+                    <MemoryBlock
+                      name={name}
+                      environmentId={member.environmentId as EnvironmentId}
+                      projectId={member.projectId}
+                      waking={false}
+                      onWake={() => undefined}
+                    />
+                  </div>
+                </Section>
+              </div>
+            ) : null}
+            {tab === "tasks" ? (
+              <div
+                className="flex flex-col gap-6"
+                role="tabpanel"
+                data-testid="assistant-profile-panel-tasks"
+              >
+                {/* What it does by itself: on a schedule or when something happens (28.10). */}
+                <AutomationsSection member={member} />
+
+                <div className="grid gap-6 md:grid-cols-2">
+                  <Section title={`Chats · ${member.chats.conversations.length}`}>
+                    {member.chats.conversations.length > 0 ? (
+                      member.chats.conversations
+                        .slice(0, 6)
+                        .map((thread) => (
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
+                        ))
+                    ) : (
+                      <p className="px-3 py-2 text-sm text-muted-foreground">
+                        No chats yet — say hi with New chat.
+                      </p>
+                    )}
+                  </Section>
+                  <Section title="Tasks" testId="assistant-profile-tasks">
+                    <TeamDuties member={member} />
+                    <p className="border-t border-border/70 px-3 pt-2 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+                      Running now
+                    </p>
+                    {running.length > 0 ? (
+                      running
+                        .slice(0, 4)
+                        .map((thread) => (
+                          <ChatLine
+                            key={thread.id}
+                            thread={thread}
+                            onOpen={() => openThread(thread)}
+                          />
+                        ))
+                    ) : (
+                      <p className="px-3 pt-0 pb-2 text-xs text-muted-foreground">
+                        Nothing running.
+                      </p>
+                    )}
+                  </Section>
                 </div>
-              </Section>
-            </Advanced>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

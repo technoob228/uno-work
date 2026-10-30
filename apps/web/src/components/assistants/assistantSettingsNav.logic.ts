@@ -16,11 +16,33 @@ export interface SettingsMember {
   readonly revoked: boolean;
 }
 
-/** The search of an assistant's page. */
+/** The tabs of an assistant's page (Misha 29.10: "a lot to scroll — tabs"). */
+export const ASSISTANT_PROFILE_TABS = [
+  { id: "general", label: "General" },
+  { id: "where", label: "Where it works" },
+  { id: "apps", label: "Apps & Telegram" },
+  { id: "memory", label: "Memory & instructions" },
+  { id: "tasks", label: "Tasks & automations" },
+] as const;
+
+export type AssistantProfileTab = (typeof ASSISTANT_PROFILE_TABS)[number]["id"];
+
+/** The tab an address asks for; anything else is General. */
+export function assistantProfileTab(value: unknown): AssistantProfileTab {
+  return ASSISTANT_PROFILE_TABS.find((entry) => entry.id === value)?.id ?? "general";
+}
+
+/** The search of an assistant's page, on a tab (General by default). */
 export function assistantSettingsSearch(
   member: Pick<SettingsMember, "environmentId" | "projectId">,
+  tab?: AssistantProfileTab,
 ) {
-  return { view: "profile" as const, env: member.environmentId, project: member.projectId };
+  return {
+    view: "profile" as const,
+    env: member.environmentId,
+    project: member.projectId,
+    ...(tab && tab !== "general" ? { tab } : {}),
+  };
 }
 
 /**

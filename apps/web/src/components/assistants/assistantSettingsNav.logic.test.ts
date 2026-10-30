@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assistantProfileTab,
   assistantSettingsSearch,
   memberOfLegacyView,
   settingsListOrder,
@@ -29,6 +30,19 @@ describe("one page for an assistant's settings", () => {
       env: "env-cloud",
       project: "assistant-mia",
     });
+  });
+
+  it("opens a tab by the address; General when none or unknown", () => {
+    expect(assistantSettingsSearch(mia, "memory")).toEqual({
+      view: "profile",
+      env: "env-cloud",
+      project: "assistant-mia",
+      tab: "memory",
+    });
+    expect(assistantSettingsSearch(mia, "general")).not.toHaveProperty("tab");
+    expect(assistantProfileTab("apps")).toBe("apps");
+    expect(assistantProfileTab("nope")).toBe("general");
+    expect(assistantProfileTab(undefined)).toBe("general");
   });
 
   it("an old Uno card link opens the active computer's Uno, else any Uno", () => {
