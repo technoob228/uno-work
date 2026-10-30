@@ -50,9 +50,9 @@ const UNAVAILABLE =
 const TRIGGER_SCHEMA = {
   type: "object",
   description:
-    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (day of week 0 = Sunday; at most every 15 minutes: "*/30 * * * *" = every 30 minutes, "0 9 * * 1,3,5" = Mon, Wed, Fri at 9), the person\'s IANA time zone (ask if unknown) and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}.',
+    'When it runs. On a schedule: {"kind":"schedule","cron":"0 9 * * 1-5","timezone":"Europe/Berlin","label":"Weekdays at 09:00"} — a five-field cron (day of week 0 = Sunday; at most every 15 minutes: "*/30 * * * *" = every 30 minutes, "0 9 * * 1,3,5" = Mon, Wed, Fri at 9), the person\'s IANA time zone (ask if unknown) and the same in words. When a pull request opens or updates in a GitHub repository: {"kind":"github.pull_request","repo":"owner/name"}. When another service calls a secret URL: {"kind":"webhook"} (the person copies the URL from the Automations page; you never see it).',
   properties: {
-    kind: { type: "string", enum: ["schedule", "github.pull_request"] },
+    kind: { type: "string", enum: ["schedule", "github.pull_request", "webhook"] },
     cron: { type: "string" },
     timezone: { type: "string" },
     label: { type: "string" },
@@ -76,8 +76,19 @@ function triggerWords(args: Record<string, unknown>): string {
   if (t["kind"] === "github.pull_request" && typeof t["repo"] === "string") {
     return describeAutomationTrigger({ kind: "github.pull_request", repo: t["repo"] });
   }
+  if (t["kind"] === "webhook") return describeAutomationTrigger({ kind: "webhook" });
   return "";
 }
+
+/** A public URL that starts work here: the person allows it, whatever the mode. */
+const triggerLevel = (args: Record<string, unknown>) => {
+  const trigger = args["trigger"];
+  return typeof trigger === "object" &&
+    trigger !== null &&
+    (trigger as Record<string, unknown>)["kind"] === "webhook"
+    ? ("sensitive" as const)
+    : ("change" as const);
+};
 
 /** The tool definitions; `kit.fail` makes `uno-work`'s own tool error. */
 export function automationChatTools<E>(kit: AutomationChatToolKit<E>) {
@@ -95,6 +106,7 @@ export function automationChatTools<E>(kit: AutomationChatToolKit<E>) {
       group: "chats" as const,
       description:
         'Set up an automation: work that repeats on a schedule ("every weekday at 9 …", "every 30 minutes …", "Mon, Wed, Fri …") or every time a pull request opens or updates in a GitHub repository. Use it — never cron, systemd timers, `sleep` loops or a background script — whenever the person asks for something regular. ' +
+        "A form on a site that should start work: site_forms_set {chat}, not this. " +
         "By default THIS chat runs it: each run arrives here as a new message (with this chat's context) and you do the work; runIn: \"new_chat\" opens a fresh chat in this project for every run instead. Uno keeps it and wakes this cloud computer when it's due. " +
         "Write `instruction` self-contained: what to do each time. Returns `tell`: say it to the person in one line.",
       inputSchema: {
@@ -122,7 +134,7 @@ export function automationChatTools<E>(kit: AutomationChatToolKit<E>) {
         required: ["instruction", "trigger"],
         additionalProperties: false,
       } satisfies ObjectSchema,
-      level: "change" as const,
+      level: triggerLevel,
       approvalTitle: (args: Record<string, unknown>) => {
         const when = triggerWords(args);
         return `Set up an automation${when ? ` — ${when}` : ""}: “${(str(args, "name") || str(args, "instruction")).slice(0, 80)}”`;
@@ -161,7 +173,7 @@ export function automationChatTools<E>(kit: AutomationChatToolKit<E>) {
         required: ["id"],
         additionalProperties: false,
       } satisfies ObjectSchema,
-      level: "change" as const,
+      level: triggerLevel,
       approvalTitle: (args: Record<string, unknown>) =>
         args["enabled"] === false
           ? `Pause automation ${String(args["id"])}`

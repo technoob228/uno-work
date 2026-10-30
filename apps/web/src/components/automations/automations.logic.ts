@@ -46,7 +46,9 @@ export function runLine(run: AutomationRun, computer: string): RunLine {
       return {
         text:
           run.reason === "limit"
-            ? "Skipped — too many runs this hour (12 at most)"
+            ? run.kind === "webhook" || run.kind === "site.form"
+              ? "Skipped — too many in a row. It takes the next one after a pause."
+              : "Skipped — too many runs this hour (12 at most)"
             : `Skipped${run.reason ? ` — ${run.reason}` : ""}`,
         tone: "muted",
       };
@@ -119,6 +121,13 @@ export function emptyHint(name: string): string {
   return `Ask ${name} in the chat: “every time a PR comes to owner/repo, review it”.`;
 }
 
+/** How a webhook or a form works in a chat, on its card and in the dialog. */
+export function askLine(ask: boolean): string {
+  return ask
+    ? "Ask mode: it reads and answers in the chat, anything else waits for your Allow"
+    : "Works without asking, in the chat's own mode";
+}
+
 /** The assistant's mode for this automation, said plainly. */
 export function modeLine(
   name: string,
@@ -136,7 +145,7 @@ export function modeLine(
     : `Autonomous — ${name} acts and tells you after`;
 }
 
-export type EventSource = "github" | "call" | "gmail";
+export type EventSource = "github" | "call" | "gmail" | "webhook" | "form";
 
 export function suggestionsFor(
   when: "schedule" | "event",
@@ -147,6 +156,12 @@ export function suggestionsFor(
   }
   if (source === "call") {
     return ["Draft the follow-up email", "Put the action items in my notes"];
+  }
+  if (source === "webhook") {
+    return ["Tell me what happened and what to do", "Look into the failure and find the cause"];
+  }
+  if (source === "form") {
+    return ["Read the note and propose the change", "Answer the question from the project's files"];
   }
   return ["Review the PR and leave a comment", "Check it builds and the tests pass"];
 }
@@ -166,6 +181,12 @@ export interface AutomationDraft {
   readonly everyMinutes: number;
   readonly source: EventSource;
   readonly repo: string;
+  /** A form: the site's name. */
+  readonly slug: string;
+  /** A webhook or a form in a chat: Ask mode. On unless the person turns it off. */
+  readonly ask: boolean;
+  /** A webhook: refuse a request without a valid signature. */
+  readonly requireSignature: boolean;
   readonly instruction: string;
   /** Empty: made from the trigger and the instruction. */
   readonly name: string;
@@ -180,6 +201,9 @@ export const EMPTY_DRAFT: AutomationDraft = {
   everyMinutes: 60,
   source: "github",
   repo: "",
+  slug: "",
+  ask: true,
+  requireSignature: false,
   instruction: "",
   name: "",
 };
@@ -199,6 +223,22 @@ export function isRepoName(value: string): boolean {
   return REPO_PATTERN.test(normalizeRepo(value));
 }
 
+const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+/** `https://report.uno4.me/`, ` Report ` → `report`. */
+export function normalizeSlug(value: string): string {
+  const host = value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[/?#].*$/, "");
+  return host.split(".")[0] ?? "";
+}
+
+export function isSlug(value: string): boolean {
+  return SLUG_PATTERN.test(normalizeSlug(value));
+}
+
 /** The trigger of the draft (the browser's time zone for a schedule). */
 export function triggerOf(draft: AutomationDraft, timezone: string): AutomationTrigger {
   if (draft.when === "schedule") {
@@ -213,6 +253,12 @@ export function triggerOf(draft: AutomationDraft, timezone: string): AutomationT
   }
   if (draft.source === "call") return { kind: "call.ended" };
   if (draft.source === "gmail") return { kind: "gmail.message" };
+  if (draft.source === "webhook") {
+    return { kind: "webhook", ask: draft.ask, requireSignature: draft.requireSignature };
+  }
+  if (draft.source === "form") {
+    return { kind: "site.form", slug: normalizeSlug(draft.slug), ask: draft.ask };
+  }
   return {
     kind: "github.pull_request",
     repo: normalizeRepo(draft.repo),
@@ -229,6 +275,7 @@ export function draftProblem(draft: AutomationDraft): string | null {
   if (draft.when === "event") {
     if (draft.source === "gmail") return "Email triggers are coming soon.";
     if (draft.source === "github" && !isRepoName(draft.repo)) return "Pick a repository.";
+    if (draft.source === "form" && !isSlug(draft.slug)) return "Enter the site's name.";
   }
   if (draft.instruction.trim() === "") return "Say what to do.";
   return null;
@@ -247,8 +294,12 @@ export function autoName(draft: AutomationDraft): string {
       ? `Review PRs in ${repo}`
       : clip(`${clip(draft.instruction, 40)} · ${repo}`, AUTOMATION_NAME_MAX_CHARS);
   }
+  if (draft.when === "event" && draft.source === "form" && isSlug(draft.slug)) {
+    return `Form on ${normalizeSlug(draft.slug)}`;
+  }
   const first = clip(draft.instruction, 60).replace(/[.!]+$/, "");
   if (first) return first;
+  if (draft.when === "event" && draft.source === "webhook") return "Webhook";
   return draft.when === "event" && draft.source === "call" ? "After each call" : "Automation";
 }
 
@@ -278,6 +329,22 @@ export function draftOf(automation: Automation): AutomationDraft {
       return { ...base, when: "event", source: "call" };
     case "gmail.message":
       return { ...base, when: "event", source: "gmail" };
+    case "webhook":
+      return {
+        ...base,
+        when: "event",
+        source: "webhook",
+        ask: trigger.ask !== false,
+        requireSignature: trigger.requireSignature === true,
+      };
+    case "site.form":
+      return {
+        ...base,
+        when: "event",
+        source: "form",
+        slug: trigger.slug,
+        ask: trigger.ask !== false,
+      };
     case "schedule": {
       const cron = trigger.cron.trim();
       let match = CRON_WEEKDAYS.exec(cron);

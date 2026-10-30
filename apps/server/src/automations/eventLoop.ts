@@ -39,6 +39,7 @@ import { ServerConfig } from "../config.ts";
 import { readWorkMachineIdentity } from "../manager/workConsole.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { AutomationsService } from "./AutomationsService.ts";
+import { OutsideThreads } from "./outsideThreads.ts";
 import type {
   AutomationClientError,
   AutomationEvent,
@@ -50,7 +51,9 @@ import {
   automationEventPrompt,
   automationHeader,
   automationSummary,
+  isOutsideRun,
   oneLine,
+  outsideRunAsks,
 } from "./prompt.ts";
 
 export const AUTOMATION_SOURCE = "automation";
@@ -67,6 +70,8 @@ const FAST_EMPTY_MS = 1_000;
 const FAST_EMPTY_PAUSE_MS = 5_000;
 /** One automation turn at most; the console fails a run after 45 minutes. */
 const TURN_TIMEOUT_SEC = 30 * 60;
+/** A form or a webhook waits for a busy chat this long: the person is often in it. */
+const OUTSIDE_BUSY_WAIT_MS = 25 * 60_000;
 const RESULT_ATTEMPTS = 3;
 
 // ── Journal of processed events ────────────────────────────────────────
@@ -151,6 +156,8 @@ export interface AutomationEventLoopDeps {
   readonly runChatTurn?: (
     input: ChatTurnInput,
   ) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
+  /** Remembers a chat with a stranger's text (its tools ask from then on). */
+  readonly markOutside?: (threadId: string) => Effect.Effect<void>;
   readonly now?: () => number;
 }
 
@@ -331,6 +338,13 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
               prompt: automationChatPrompt(event),
               timeoutSec: TURN_TIMEOUT_SEC,
               reason: `automation ${event.automationId}`,
+              ...(isOutsideRun(event) ? { busyWaitMs: OUTSIDE_BUSY_WAIT_MS } : {}),
+              ...(outsideRunAsks(event)
+                ? {
+                    ask: true,
+                    ...(deps.markOutside ? { onThread: deps.markOutside } : {}),
+                  }
+                : {}),
             })
             .pipe(
               Effect.map((result) => ({ ok: true as const, result })),
@@ -456,6 +470,7 @@ export const AutomationEventLoopLive = Layer.effectDiscard(
     const automations = yield* AutomationsService;
     const turns = yield* Effect.serviceOption(AssistantScheduledTurns);
     if (Option.isNone(turns)) return;
+    const outside = yield* Effect.serviceOption(OutsideThreads);
     const journal = yield* makeFileJournal(path.join(config.stateDir, PROCESSED_FILE));
     const loop = yield* makeAutomationEventLoop({
       client: automations.client,
@@ -467,6 +482,7 @@ export const AutomationEventLoopLive = Layer.effectDiscard(
       assistantName: automations.assistantName,
       runTurn: turns.value.runEvent,
       ...(turns.value.runInChat ? { runChatTurn: turns.value.runInChat } : {}),
+      ...(Option.isSome(outside) ? { markOutside: outside.value.mark } : {}),
     });
     yield* Effect.forkScoped(
       loop.run.pipe(

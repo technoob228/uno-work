@@ -231,6 +231,14 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - Ответ: `ReplySelectionToolbar.tsx` + `lib/selectionActions.ts` (T3 как есть). Панель: сообщение `selection` в `pageToolsScript.ts` и в прелоаде десктопа, `SelectionQuote` в `CommentLayer.tsx`. Выделение внутри полей не передаётся (там может быть пароль). Браузер компьютера спрашивает выделение один раз после отпускания мыши, скрипт в страницу агента не ставится, правило Миши 28.10 (DevTools выключены) не нарушено.
 - На сайтах Uno в вебе скрипт раздаёт консоль (`site_page_tools.js` в fishcode, `bun scripts/print-site-page-tools.ts`): пока он не перегенерирован, кнопки Quote там нет.
 
+**Вебхук и форма сайта запускают чат (волна T3, 30.10):** новые триггеры автоматизаций `webhook` (свой секретный URL, `Copy URL`, `Copy signing secret`, `New URL`) и `site.form` (форма сайта → этот чат или новый). Очередь, пробуждение и журнал те же, что у остальных автоматизаций; всё держится за флагом консоли `WORK_HOOKS` (`hooks_enabled` в списке).
+
+- **Текст снаружи - данные, не инструкции.** `automations/prompt.ts`: блок `<outside_input_<nonce>>`, слово в теге случайное на каждый запуск, `$skill`, `@file`, `/command` разбиты невидимым символом (приём T3).
+- **Режим Ask.** `scheduledTurn.ts` (`ask`): запуск снаружи ставит чату `approval-required`, чат остаётся в нём и после хода. Открывает только явное `ask: false` от консоли, неизвестная форма спрашивает. Агент отключить Ask не может: `agentTrigger` принудительно ставит `ask: true`, форму инструментами `automation_*` не создать.
+- **Метка чата.** `automations/outsideThreads.ts`: файл с чатами, в которые попал текст снаружи. В них `uno-work` тулы (`outsideTextAsks`, `unoWork/policy.ts`) спрашивают человека, кроме короткого списка `OUTSIDE_TEXT_FREE_TOOLS`: уровни `safe` тут мало, через `site_publish` и `open_in_panel` данные могут уйти наружу.
+- **Куда идёт форма** задаёт только владелец: `site_forms_set {chat: this_chat|new_chat|off}`. Посетитель адрес не выбирает; ассистенту форма не отдаётся.
+- Подробности и лимиты: `back/knowledge/automations.md` в fishcode.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

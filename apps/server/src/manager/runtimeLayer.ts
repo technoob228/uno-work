@@ -3,6 +3,7 @@ import { Layer } from "effect";
 import { AssistantScheduledTurnsLive } from "../assistants/scheduledTurn.ts";
 import { AssistantSchedulesLive } from "../assistants/schedules.ts";
 import { AutomationsServiceLive } from "../automations/AutomationsService.ts";
+import { OutsideThreadsLive } from "../automations/outsideThreads.ts";
 import { ManagerActionProposalRepositoryLive } from "../persistence/Layers/ManagerActionProposals.ts";
 import { ManagerCapabilityTokenRepositoryLive } from "../persistence/Layers/ManagerCapabilityTokens.ts";
 import { ManagerConnectorBindingRepositoryLive } from "../persistence/Layers/ManagerConnectorBindings.ts";
@@ -56,6 +57,8 @@ export const ManagerLayerLive = Layer.mergeAll(
   AssistantScheduledTurnsLive,
   // Automations (the console keeps them): the web routes, automation_* tools.
   AutomationsServiceLive,
+  // Chats holding a stranger's text (site forms, webhooks): their tools ask.
+  OutsideThreadsLive,
 ).pipe(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.
