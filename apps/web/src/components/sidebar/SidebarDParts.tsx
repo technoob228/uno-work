@@ -46,6 +46,7 @@ import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { toggleDevMode, useDevMode } from "../../devMode";
+import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
 import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
@@ -676,7 +677,14 @@ const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
  * assistants update (28.10), else the v0.0.156 rows.
  */
 export const SidebarDPlaces = memo(function SidebarDPlaces() {
-  return useTeamShown() ? <SidebarDPlaceIcons /> : <SidebarDPlaceRows />;
+  return useTeamShown() ? (
+    <>
+      <SidebarDPlaceIcons />
+      <SidebarPinRow />
+    </>
+  ) : (
+    <SidebarDPlaceRows />
+  );
 });
 
 function RailButton(props: {

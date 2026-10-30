@@ -6,8 +6,11 @@ import {
   linkTitle,
   normalizeLinkInput,
   pathTitle,
+  pinnedWidgetId,
   removePin,
   renamePin,
+  splitRowPins,
+  widgetPinTarget,
 } from "./pins";
 
 describe("pins", () => {
@@ -49,5 +52,30 @@ describe("titles", () => {
     expect(linkTitle("https://www.figma.com/file/x")).toBe("figma.com");
     expect(pathTitle("/home/unowork/Documents/")).toBe("Documents");
     expect(pathTitle("/home/unowork/Q3.docx")).toBe("Q3.docx");
+  });
+});
+
+describe("widget pins", () => {
+  it("stands for a Home widget without a new pin kind", () => {
+    const target = widgetPinTarget("plan-limits");
+    expect(pinnedWidgetId({ kind: "app", target })).toBe("plan-limits");
+    expect(pinnedWidgetId({ kind: "app", target: "https://a.example" })).toBeNull();
+    expect(pinnedWidgetId({ kind: "link", target })).toBeNull();
+  });
+});
+
+describe("splitRowPins", () => {
+  const pins = ["a", "b", "c", "d", "e", "f", "g", "h"];
+
+  it("shows every pin that fits", () => {
+    expect(splitRowPins(pins.slice(0, 7), 236)).toEqual({ shown: pins.slice(0, 7), rest: [] });
+  });
+
+  it("gives the last place to More when they don't fit", () => {
+    expect(splitRowPins(pins, 236)).toEqual({ shown: pins.slice(0, 6), rest: pins.slice(6) });
+  });
+
+  it("keeps More on a very narrow row", () => {
+    expect(splitRowPins(pins, 10)).toEqual({ shown: [], rest: pins });
   });
 });

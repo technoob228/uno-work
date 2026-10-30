@@ -303,6 +303,20 @@ export type HomeWidgetId = (typeof HOME_WIDGET_IDS)[number];
 
 export const DEFAULT_HOME_WIDGETS: ReadonlyArray<HomeWidgetId> = ["files", "apps"];
 
+/**
+ * Widgets that make sense on their own in the card a pin opens. The rest lean
+ * on Home's state, or repeat Files, Apps and Home in the row above.
+ */
+export const PINNABLE_HOME_WIDGETS = ["plan-limits", "ai-spend", "cloud", "sites"] as const;
+
+export type PinnableHomeWidgetId = (typeof PINNABLE_HOME_WIDGETS)[number];
+
+export function isPinnableHomeWidget(value: unknown): value is PinnableHomeWidgetId {
+  return (
+    typeof value === "string" && (PINNABLE_HOME_WIDGETS as ReadonlyArray<string>).includes(value)
+  );
+}
+
 export function isHomeWidgetId(value: unknown): value is HomeWidgetId {
   return typeof value === "string" && (HOME_WIDGET_IDS as ReadonlyArray<string>).includes(value);
 }
