@@ -1913,12 +1913,87 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
               if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
-              if (joined === "auth status")
+              if (joined === "auth status --json")
                 return {
                   stdout: '{"loggedIn":false}\n',
                   stderr: "",
                   code: 1,
                 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("stays ready on the signed-in plan when only the probe missed", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+          );
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "max");
+          assert.strictEqual(status.auth.label, "Claude Max Subscription");
+          assert.strictEqual(status.auth.email, "a@b.c");
+          assert.strictEqual(status.message, undefined);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.296\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return {
+                  stdout:
+                    '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max","email":"a@b.c"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("raises no alarm when neither the probe nor auth status can answer", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+          );
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "unknown");
+          assert.strictEqual(status.message, undefined);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.296\n", stderr: "", code: 0 };
+              if (joined === "auth status --json") return { stdout: "", stderr: "busy", code: 1 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("stays ready on Uno AI when the probe misses", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+            {},
+            { environment: () => ({ ANTHROPIC_BASE_URL: "https://gw" }), setMode: () => {} },
+          );
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "unoAi");
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.296\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return { stdout: '{"loggedIn":false}\n', stderr: "", code: 1 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
           ),
