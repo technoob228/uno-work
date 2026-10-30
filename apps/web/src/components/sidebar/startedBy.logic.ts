@@ -137,21 +137,6 @@ export function startedByLabel(startedBy: StartedBy): string {
 }
 
 /**
- * Whether a chat passes the "Assistants' chats" filter: shown — all; hidden —
- * only the person's own, plus the open chat and the pinned ones (the person
- * put them there).
- */
-export function passesAssistantChatsFilter(input: {
-  readonly hidden: boolean;
-  readonly startedByAssistant: boolean;
-  readonly isOpen: boolean;
-  readonly pinned: boolean;
-}): boolean {
-  if (!input.hidden || !input.startedByAssistant) return true;
-  return input.isOpen || input.pinned;
-}
-
-/**
  * Chats assistants started on the other computers, for a sidebar that lists
  * one computer only (the default): those still show, with their computer
  * (audit 27.10 line 9). With every computer in view there is nothing to add.

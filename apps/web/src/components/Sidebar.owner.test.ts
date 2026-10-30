@@ -9,7 +9,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary, ThreadSession } from "../types";
-import { isAgentStartedChat, threadOwner } from "./Sidebar.owner";
+import { isAgentStartedChat, threadOwner, threadOwnerWithStarter } from "./Sidebar.owner";
 
 const NOW = Date.parse("2026-10-28T12:00:00.000Z");
 const MINUTE_MS = 60 * 1_000;
@@ -129,5 +129,31 @@ describe("threadOwner", () => {
     const old = agentChat({ startedBy: undefined, latestPersonMessageAt: undefined });
     expect(threadOwner(old)).toBe("agent");
     expect(threadOwner({ ...old, controller: "human" })).toBe("you");
+  });
+});
+
+describe("threadOwnerWithStarter (Misha 29.10: assistants' chats under Only mine)", () => {
+  // A chat the chat itself says nothing about, that the sidebar knows an assistant started.
+  const quiet = agentChat({ startedBy: null, spawnedByThreadId: null });
+
+  it("an assistant's chat working on its own is not the person's", () => {
+    expect(threadOwner(quiet)).toBe("you");
+    expect(threadOwnerWithStarter(quiet, true)).toBe("agent");
+    expect(threadOwnerWithStarter(quiet, false)).toBe("you");
+  });
+
+  it("stays the person's while it waits for them", () => {
+    expect(threadOwnerWithStarter({ ...quiet, hasPendingApprovals: true }, true)).toBe("you");
+    expect(threadOwnerWithStarter({ ...quiet, personCalledAt: at(5) }, true)).toBe("you");
+  });
+
+  it("an older daemon (no startedBy): the chat is the person's once they took it over", () => {
+    const old = { ...quiet, startedBy: undefined };
+    expect(threadOwnerWithStarter(old, true)).toBe("agent");
+    expect(threadOwnerWithStarter({ ...old, controller: "human" as const }, true)).toBe("you");
+  });
+
+  it("the Uno chat itself is never hidden", () => {
+    expect(threadOwnerWithStarter({ ...quiet, assistantRole: "chat" }, true)).toBe("you");
   });
 });

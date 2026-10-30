@@ -179,7 +179,7 @@ import {
   resolveThreadActivityMs,
   type SidebarSection,
 } from "./Sidebar.sections";
-import { threadOwner } from "./Sidebar.owner";
+import { threadOwnerWithStarter } from "./Sidebar.owner";
 import { isYourTurn } from "./Sidebar.yourTurn";
 import { toSortableTimestamp } from "../lib/threadSort";
 import {
@@ -273,11 +273,7 @@ import { DEMO, demoHooks, useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import { SidebarAssistants } from "./sidebar/SidebarAssistants";
 import { StartedByFace, type StartedByView, useStartedBy } from "./sidebar/useStartedBy";
-import {
-  passesAssistantChatsFilter,
-  startedByElsewhere,
-  startedByKey,
-} from "./sidebar/startedBy.logic";
+import { startedByElsewhere, startedByKey } from "./sidebar/startedBy.logic";
 import { isTeamConversation } from "./assistants/assistantTeam.logic";
 import { useTeamShown } from "./assistants/useAssistantTeam";
 import {
@@ -572,7 +568,6 @@ const SIDEBAR_D_LIST_PREVIEW_LIMIT = 15;
 const SIDEBAR_D_PROJECT_FILTER_KEY = "uno-work:sidebar:project-filter";
 const SIDEBAR_D_COMPUTER_FILTER_KEY = "uno-work:sidebar:computer-filter";
 /** "Assistants' chats" off in the title menu (28.10): only the person's own chats. */
-const SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY = "uno-work:sidebar:hide-assistant-chats";
 /** "Only mine" in the title menu (28.10): hide the chats agents, Uno or apps run on their own. */
 const SIDEBAR_D_ONLY_MINE_KEY = "uno-work:sidebar:only-mine";
 
@@ -1860,11 +1855,6 @@ export default function Sidebar() {
       startedByOutOfView.length > 0 ? selectProjectsAcrossEnvironments(store) : NO_PROJECTS,
     ),
   );
-  const [dHideAssistantChats, setDHideAssistantChats] = useLocalStorage(
-    SIDEBAR_D_HIDE_ASSISTANT_CHATS_KEY,
-    false,
-    Schema.Boolean,
-  );
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const confirmThreadDelete = useSettings((s) => s.confirmThreadDelete);
@@ -2074,16 +2064,6 @@ export default function Sidebar() {
       if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
       const byAssistant =
         dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
-      if (
-        !passesAssistantChatsFilter({
-          hidden: dStartedByInList && dHideAssistantChats,
-          startedByAssistant: byAssistant,
-          isOpen: threadKeyOf(thread) === routeThreadKey,
-          pinned: thread.pinnedAt != null,
-        })
-      ) {
-        return false;
-      }
       // The Uno chat is pinned on top of the sidebar, never in the list.
       if (assistantChatId !== null && thread.id === assistantChatId) return false;
       const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
@@ -2114,7 +2094,6 @@ export default function Sidebar() {
     };
   }, [
     assistantChatId,
-    dHideAssistantChats,
     dStartedByInList,
     isHelperScope,
     now,
@@ -2384,7 +2363,9 @@ export default function Sidebar() {
     ReadonlyArray<string> | null,
     ReadonlyArray<string> | null
   >(SIDEBAR_D_COMPUTER_FILTER_KEY, null, Schema.NullOr(Schema.Array(Schema.String)));
-  // Only mine (Misha 28.10): hide the chats agents, Uno or apps run on their own.
+  // Only mine (Misha 28.10): hide the chats agents, Uno, assistants or apps run
+  // on their own — the one filter of its kind (29.10: 0.0.161's "Chats
+  // assistants started" switch went into it).
   const [dOnlyMine, setDOnlyMine] = useLocalStorage<boolean, boolean>(
     SIDEBAR_D_ONLY_MINE_KEY,
     false,
@@ -2442,12 +2423,23 @@ export default function Sidebar() {
     if (!dOnlyMine) return { dShownChats: placed, dHiddenAgentChats: 0 };
     const mine = placed.filter(
       (thread) =>
-        threadOwner(thread) === "you" ||
+        threadOwnerWithStarter(
+          thread,
+          startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
+        ) === "you" ||
         thread.pinnedAt !== null ||
         threadKeyOf(thread) === routeThreadKey,
     );
     return { dShownChats: mine, dHiddenAgentChats: placed.length - mine.length };
-  }, [dComputerPicks, dGroupOf, dLiveChats, dOnlyMine, dProjectPicks, routeThreadKey]);
+  }, [
+    dComputerPicks,
+    dGroupOf,
+    dLiveChats,
+    dOnlyMine,
+    dProjectPicks,
+    routeThreadKey,
+    startedBy.byKey,
+  ]);
   // The groups, in the order picked; null — one list, newest first.
   const dTree = useMemo(
     () =>
@@ -4362,7 +4354,6 @@ export default function Sidebar() {
                 title={sidebarDTitle({
                   projectNames: dPickedProjectNames,
                   computerNames: dPickedComputerNames,
-                  assistantChatsHidden: dStartedByInList && dHideAssistantChats,
                   onlyMine: dOnlyMine,
                 })}
                 groupInHeader={dGroupInHeader}
@@ -4386,14 +4377,8 @@ export default function Sidebar() {
                 onClearFilters={() => {
                   setDProjectPicks(null);
                   setDComputerPicks(null);
-                  setDHideAssistantChats(false);
                   setDOnlyMine(false);
                 }}
-                assistantChatsFilter={
-                  dStartedByInList
-                    ? { hidden: dHideAssistantChats, onChange: setDHideAssistantChats }
-                    : null
-                }
                 onNewChat={handleNewThreadClick}
                 newChatShortcutLabel={newChatShortcutLabel}
                 onAddProject={handleAddProject}

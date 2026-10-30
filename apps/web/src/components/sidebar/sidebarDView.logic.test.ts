@@ -75,14 +75,6 @@ describe("title, presets, place", () => {
       "Chats · 2 projects · MacBook",
     );
   });
-  it("says so when the chats assistants started are hidden (28.10)", () => {
-    expect(
-      sidebarDTitle({ projectNames: null, computerNames: null, assistantChatsHidden: true }),
-    ).toBe("Your chats");
-    expect(
-      sidebarDTitle({ projectNames: ["landing"], computerNames: null, assistantChatsHidden: true }),
-    ).toBe("Your chats · landing");
-  });
   it("says My chats while Only mine is on, and how many agent chats it hides", () => {
     expect(sidebarDTitle({ projectNames: null, computerNames: null, onlyMine: true })).toBe(
       "My chats",
@@ -92,14 +84,6 @@ describe("title, presets, place", () => {
     );
     expect(hiddenAgentChatsLabel(1)).toBe("1 agent chat hidden");
     expect(hiddenAgentChatsLabel(4)).toBe("4 agent chats hidden");
-    expect(
-      sidebarDTitle({
-        projectNames: null,
-        computerNames: null,
-        assistantChatsHidden: true,
-        onlyMine: true,
-      }),
-    ).toBe("My chats");
   });
   it("knows the four ready ways, anything else is custom", () => {
     expect(headerPresetOf([])).toBe("list");

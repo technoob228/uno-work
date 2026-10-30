@@ -89,6 +89,26 @@ function personDoneWithAnswer(thread: ThreadOwnerInput): boolean {
   return thread.settledOverride === "settled" && ms(thread.settledAt) >= completedMs;
 }
 
+/**
+ * `threadOwner` for a chat the sidebar knows an assistant started
+ * (`useStartedBy`), even where the chat itself doesn't say so (Misha 29.10:
+ * one Only mine, the assistants' chats with it).
+ */
+export function threadOwnerWithStarter(
+  thread: ThreadOwnerInput,
+  startedByAssistant: boolean,
+): ThreadOwner {
+  if (!startedByAssistant || thread.assistantRole === "chat" || isAgentStartedChat(thread)) {
+    return threadOwner(thread);
+  }
+  // A daemon from before 28.10 says nothing (`undefined`): keep its fallback.
+  return threadOwner(
+    thread.startedBy === undefined
+      ? { ...thread, assistantRole: "spawned" }
+      : { ...thread, startedBy: "assistant" },
+  );
+}
+
 export function threadOwner(thread: ThreadOwnerInput): ThreadOwner {
   if (!isAgentStartedChat(thread)) return "you";
   if (threadNeedsUser(thread)) return "you";
