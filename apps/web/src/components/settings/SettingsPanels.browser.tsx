@@ -423,6 +423,7 @@ const createDesktopBridgeStub = (overrides?: {
     revealBrowserCredentialPassword: vi.fn().mockResolvedValue(null),
     clearBrowserData: vi.fn().mockResolvedValue(undefined),
     onBrowserOpenUrlRequest: () => () => {},
+    onPromptLink: () => () => {},
   };
 };
 

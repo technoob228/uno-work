@@ -696,6 +696,11 @@ export interface DesktopBridge {
   clearBrowserData: (input: BrowserClearDataInput) => Promise<void>;
   /** Fired when a page inside the embedded browser asks to open a new window. */
   onBrowserOpenUrlRequest: (listener: (url: string) => void) => () => void;
+  /**
+   * `uno-work://new?prompt=…` opened from outside: the app path to go to. The
+   * listener also gets a link that arrived before the window was ready.
+   */
+  onPromptLink: (listener: (appPath: string) => void) => () => void;
 }
 
 export type UnoCodeInstallPhase =

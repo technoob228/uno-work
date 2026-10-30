@@ -1,4 +1,4 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
@@ -128,9 +128,21 @@ function ChatRouteLayout() {
   return (
     <>
       <ChatRouteGlobalShortcuts />
+      <PromptLinkBridge />
       <Outlet />
     </>
   );
+}
+
+/** `uno-work://new?prompt=…` opened from outside the desktop app. */
+function PromptLinkBridge() {
+  const router = useRouter();
+  useEffect(() => {
+    return window.desktopBridge?.onPromptLink?.((appPath) => {
+      void router.navigate({ href: appPath });
+    });
+  }, [router]);
+  return null;
 }
 
 export const Route = createFileRoute("/_chat")({
@@ -144,9 +156,10 @@ export const Route = createFileRoute("/_chat")({
       context.authGateState.status !== "authenticated" &&
       context.authGateState.status !== "hosted-static"
     ) {
-      // A standalone Office tab comes back to its document after signing in
+      // A standalone Office tab comes back to its document after signing in,
+      // a prompt link to its prompt
       // (the pair page validates the path, unoSignIn.ts safeReturnPath).
-      if (location.pathname === "/office") {
+      if (location.pathname === "/office" || location.pathname === "/new") {
         throw redirect({
           href: `/pair?return=${encodeURIComponent(location.href)}`,
           replace: true,

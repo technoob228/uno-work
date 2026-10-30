@@ -183,6 +183,10 @@
     "./planLimitRules": {
       "types": "./src/planLimitRules.ts",
       "import": "./src/planLimitRules.ts"
+    },
+    "./promptLinks": {
+      "types": "./src/promptLinks.ts",
+      "import": "./src/promptLinks.ts"
     }
   },
   "scripts": {
