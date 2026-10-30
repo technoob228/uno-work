@@ -16,6 +16,7 @@ import {
   ThreadAssistantRole,
   ThreadController,
   ThreadId,
+  ThreadPullRequest,
   ThreadStartedBy,
   TurnId,
 } from "@t3tools/contracts";
@@ -45,6 +46,9 @@ export const ProjectionThread = Schema.Struct({
   // Manual settle lifecycle (migration 045). Optional for the same reason.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Dev mode's PR link (migration 055). Optional for the same reason.
+  pullRequests: Schema.optional(Schema.NullOr(Schema.Array(ThreadPullRequest))),
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Read watermark (migration 052). Optional for the same reason.
   lastVisitedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   readAt: Schema.optional(Schema.NullOr(IsoDateTime)),

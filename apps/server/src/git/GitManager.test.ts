@@ -515,6 +515,7 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
   return {
     service: {
       execute,
+      readPullRequestStatuses: () => Effect.die("not used by GitManager"),
       listOpenPullRequests: (input) =>
         execute({
           cwd: input.cwd,

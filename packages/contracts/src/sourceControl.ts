@@ -36,6 +36,36 @@ export const ChangeRequest = Schema.Struct({
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
+export const ChangeRequestChecksState = Schema.Literals(["passing", "failing", "pending", "none"]);
+export type ChangeRequestChecksState = typeof ChangeRequestChecksState.Type;
+
+export const ChangeRequestReviewState = Schema.Literals([
+  "approved",
+  "changes_requested",
+  "review_required",
+  "none",
+]);
+export type ChangeRequestReviewState = typeof ChangeRequestReviewState.Type;
+
+/** What a thread's PR row shows; read in batches by `readChangeRequestStatuses`. */
+export const ChangeRequestStatus = Schema.Struct({
+  number: PositiveInt,
+  title: TrimmedNonEmptyString,
+  url: Schema.String,
+  state: ChangeRequestState,
+  isDraft: Schema.Boolean,
+  headRefName: TrimmedNonEmptyString,
+  baseRefName: TrimmedNonEmptyString,
+  /** Comes from another repository (a fork), so its branch name proves nothing. */
+  isCrossRepository: Schema.Boolean,
+  updatedAt: Schema.NullOr(Schema.String),
+  mergedAt: Schema.NullOr(Schema.String),
+  closedAt: Schema.NullOr(Schema.String),
+  checks: ChangeRequestChecksState,
+  review: ChangeRequestReviewState,
+});
+export type ChangeRequestStatus = typeof ChangeRequestStatus.Type;
+
 export const SourceControlRepositoryCloneUrls = Schema.Struct({
   nameWithOwner: TrimmedNonEmptyString,
   url: TrimmedNonEmptyString,

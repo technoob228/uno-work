@@ -1,5 +1,10 @@
 import { Cause, DateTime, Exit, Option, Result, Schema } from "effect";
-import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
+import {
+  type ChangeRequestChecksState,
+  type ChangeRequestStatus,
+  PositiveInt,
+  TrimmedNonEmptyString,
+} from "@t3tools/contracts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 
 export interface NormalizedGitLabMergeRequestRecord {
@@ -145,4 +150,70 @@ export function decodeGitLabMergeRequestJson(
     return Result.succeed(normalizeGitLabMergeRequestRecord(result.success));
   }
   return Result.fail(result.failure);
+}
+
+const GitLabMergeRequestStatusSchema = Schema.Struct({
+  iid: PositiveInt,
+  title: TrimmedNonEmptyString,
+  web_url: TrimmedNonEmptyString,
+  source_branch: TrimmedNonEmptyString,
+  target_branch: TrimmedNonEmptyString,
+  state: Schema.optional(Schema.NullOr(Schema.String)),
+  draft: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  work_in_progress: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  updated_at: Schema.optional(Schema.NullOr(Schema.String)),
+  merged_at: Schema.optional(Schema.NullOr(Schema.String)),
+  closed_at: Schema.optional(Schema.NullOr(Schema.String)),
+  source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
+  target_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
+  detailed_merge_status: Schema.optional(Schema.NullOr(Schema.String)),
+  head_pipeline: Schema.optional(
+    Schema.NullOr(Schema.Struct({ status: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
+  pipeline: Schema.optional(
+    Schema.NullOr(Schema.Struct({ status: Schema.optional(Schema.NullOr(Schema.String)) })),
+  ),
+});
+const decodeGitLabMergeRequestStatusEntry = Schema.decodeUnknownExit(GitLabMergeRequestStatusSchema);
+
+function gitLabChecks(status: string | null | undefined): ChangeRequestChecksState {
+  switch (status) {
+    case "success":
+      return "passing";
+    case "failed":
+    case "canceled":
+      return "failing";
+    case undefined:
+    case null:
+    case "":
+    case "skipped":
+      return "none";
+    default:
+      return "pending";
+  }
+}
+
+/** One merge request as a PR row shows it; null when GitLab's answer doesn't fit. */
+export function decodeGitLabMergeRequestStatus(entry: unknown): ChangeRequestStatus | null {
+  const decoded = decodeGitLabMergeRequestStatusEntry(entry);
+  if (Exit.isFailure(decoded)) return null;
+  const raw = decoded.value;
+  return {
+    number: raw.iid,
+    title: raw.title,
+    url: raw.web_url,
+    state: normalizeGitLabMergeRequestState(raw.state),
+    isDraft: raw.draft === true || raw.work_in_progress === true,
+    headRefName: raw.source_branch,
+    baseRefName: raw.target_branch,
+    isCrossRepository:
+      typeof raw.source_project_id === "number" &&
+      typeof raw.target_project_id === "number" &&
+      raw.source_project_id !== raw.target_project_id,
+    updatedAt: raw.updated_at ?? null,
+    mergedAt: raw.merged_at ?? null,
+    closedAt: raw.closed_at ?? null,
+    checks: gitLabChecks(raw.head_pipeline?.status ?? raw.pipeline?.status),
+    review: raw.detailed_merge_status === "not_approved" ? "review_required" : "none",
+  };
 }

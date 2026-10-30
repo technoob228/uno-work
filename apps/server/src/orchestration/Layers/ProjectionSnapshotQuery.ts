@@ -23,6 +23,7 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  ThreadPullRequest,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -74,6 +75,9 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    pullRequests: Schema.optional(
+      Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
+    ),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -425,6 +429,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           snoozed_at AS "snoozedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
+          pull_requests_json AS "pullRequests",
+          auto_settle_disabled_at AS "autoSettleDisabledAt",
           last_visited_at AS "lastVisitedAt",
           read_at AS "readAt",
           read_state_updated_at AS "readStateUpdatedAt",
@@ -727,6 +733,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           snoozed_at AS "snoozedAt",
           settled_override AS "settledOverride",
           settled_at AS "settledAt",
+          pull_requests_json AS "pullRequests",
+          auto_settle_disabled_at AS "autoSettleDisabledAt",
           last_visited_at AS "lastVisitedAt",
           read_at AS "readAt",
           read_state_updated_at AS "readStateUpdatedAt",
@@ -1147,6 +1155,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snoozedAt: row.snoozedAt ?? null,
                 settledOverride: row.settledOverride ?? null,
                 settledAt: row.settledAt ?? null,
+                pullRequests: row.pullRequests ?? [],
+                autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
                 lastVisitedAt: row.lastVisitedAt ?? null,
                 readAt: row.readAt ?? null,
                 readStateUpdatedAt: row.readStateUpdatedAt ?? null,
@@ -1363,6 +1373,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   snoozedAt: row.snoozedAt ?? null,
                   settledOverride: row.settledOverride ?? null,
                   settledAt: row.settledAt ?? null,
+                  pullRequests: row.pullRequests ?? [],
+                  autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
                   lastVisitedAt: row.lastVisitedAt ?? null,
                   readAt: row.readAt ?? null,
                   readStateUpdatedAt: row.readStateUpdatedAt ?? null,
@@ -1509,6 +1521,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     snoozedAt: row.snoozedAt ?? null,
                     settledOverride: row.settledOverride ?? null,
                     settledAt: row.settledAt ?? null,
+                    pullRequests: row.pullRequests ?? [],
+                    autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
                     lastVisitedAt: row.lastVisitedAt ?? null,
                     readAt: row.readAt ?? null,
                     readStateUpdatedAt: row.readStateUpdatedAt ?? null,
@@ -1740,6 +1754,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         snoozedAt: threadRow.value.snoozedAt ?? null,
         settledOverride: threadRow.value.settledOverride ?? null,
         settledAt: threadRow.value.settledAt ?? null,
+        pullRequests: threadRow.value.pullRequests ?? [],
+        autoSettleDisabledAt: threadRow.value.autoSettleDisabledAt ?? null,
         lastVisitedAt: threadRow.value.lastVisitedAt ?? null,
         readAt: threadRow.value.readAt ?? null,
         readStateUpdatedAt: threadRow.value.readStateUpdatedAt ?? null,
@@ -1852,6 +1868,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         snoozedAt: threadRow.value.snoozedAt ?? null,
         settledOverride: threadRow.value.settledOverride ?? null,
         settledAt: threadRow.value.settledAt ?? null,
+        pullRequests: threadRow.value.pullRequests ?? [],
+        autoSettleDisabledAt: threadRow.value.autoSettleDisabledAt ?? null,
         lastVisitedAt: threadRow.value.lastVisitedAt ?? null,
         readAt: threadRow.value.readAt ?? null,
         readStateUpdatedAt: threadRow.value.readStateUpdatedAt ?? null,

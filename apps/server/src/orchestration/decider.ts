@@ -842,6 +842,48 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.pull-requests.sync": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.pull-requests-updated",
+        payload: {
+          threadId: command.threadId,
+          pullRequests: command.pullRequests,
+        },
+      };
+    }
+
+    case "thread.auto-settle.set": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (command.disabled === (thread.autoSettleDisabledAt != null)) {
+        return [];
+      }
+      const occurredAt = nowIso();
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.auto-settle-updated",
+        payload: {
+          threadId: command.threadId,
+          autoSettleDisabledAt: command.disabled ? occurredAt : null,
+        },
+      };
+    }
+
     case "thread.mark-unread": {
       const thread = yield* requireThread({
         readModel,

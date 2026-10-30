@@ -2,6 +2,7 @@ import { Context, Effect } from "effect";
 import type {
   ChangeRequest,
   ChangeRequestState,
+  ChangeRequestStatus,
   SourceControlProviderError,
   SourceControlProviderInfo,
   SourceControlProviderKind,
@@ -48,6 +49,29 @@ export function sourceControlRefFromInput(input: {
   return input.source ?? parseSourceControlOwnerRef(input.headSelector);
 }
 
+/** The numbers and branches of one repository, read together to spare the host's limits. */
+export interface ChangeRequestStatusQuery {
+  readonly cwd: string;
+  readonly context?: SourceControlProviderContext;
+  /** `owner/name`, or `group/sub/name` on GitLab. */
+  readonly repository: string;
+  readonly numbers: ReadonlyArray<number>;
+  readonly branches: ReadonlyArray<string>;
+}
+
+export interface ChangeRequestStatusRead {
+  readonly byNumber: ReadonlyMap<number, ChangeRequestStatus>;
+  /** A branch nobody opened a change request from is here with an empty list. */
+  readonly byBranch: ReadonlyMap<string, ReadonlyArray<ChangeRequestStatus>>;
+  /** What is left of the hourly limit, when the host says. */
+  readonly budget: {
+    readonly remaining: number;
+    readonly limit: number;
+    readonly cost: number;
+    readonly resetAt: string | null;
+  } | null;
+}
+
 export interface SourceControlProviderShape {
   readonly kind: SourceControlProviderKind;
   readonly listChangeRequests: (input: {
@@ -63,6 +87,10 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly reference: string;
   }) => Effect.Effect<ChangeRequest, SourceControlProviderError>;
+  /** Thread PR rows (Dev mode). GitHub and GitLab only for now. */
+  readonly readChangeRequestStatuses?: (
+    input: ChangeRequestStatusQuery,
+  ) => Effect.Effect<ChangeRequestStatusRead, SourceControlProviderError>;
   readonly createChangeRequest: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;

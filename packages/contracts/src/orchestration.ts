@@ -14,8 +14,15 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
+  PositiveInt,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  ChangeRequestChecksState,
+  ChangeRequestReviewState,
+  ChangeRequestState,
+  SourceControlProviderKind,
+} from "./sourceControl.ts";
 import {
   PROVIDER_SEND_TURN_MAX_VIDEO_BYTES,
   PROVIDER_SEND_TURN_MAX_VIDEO_DURATION_MS,
@@ -487,6 +494,36 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+/**
+ * A pull request tied to a thread. Dev mode only: found by the thread's branch
+ * or read from `gh pr create` in its output. `snapshot` is the host's last
+ * answer, null until the first read.
+ */
+export const ThreadPullRequest = Schema.Struct({
+  provider: SourceControlProviderKind,
+  repository: TrimmedNonEmptyString,
+  number: PositiveInt,
+  url: Schema.String,
+  source: Schema.Literals(["branch", "created"]),
+  linkedAt: IsoDateTime,
+  snapshot: Schema.NullOr(
+    Schema.Struct({
+      title: TrimmedNonEmptyString,
+      state: ChangeRequestState,
+      isDraft: Schema.Boolean,
+      headBranch: TrimmedNonEmptyString,
+      baseBranch: TrimmedNonEmptyString,
+      updatedAt: Schema.NullOr(Schema.String),
+      mergedAt: Schema.NullOr(Schema.String),
+      closedAt: Schema.NullOr(Schema.String),
+      checks: ChangeRequestChecksState,
+      review: ChangeRequestReviewState,
+      syncedAt: IsoDateTime,
+    }),
+  ),
+});
+export type ThreadPullRequest = typeof ThreadPullRequest.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -521,6 +558,10 @@ export const OrchestrationThread = Schema.Struct({
   // Optional so payloads from pre-settle servers still decode.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Dev mode (migration 055): the thread's pull requests, see ThreadPullRequest.
+  pullRequests: Schema.optional(Schema.Array(ThreadPullRequest)),
+  // The person keeps this thread from settling by itself when its PR merges.
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Read watermark (migration 052): the last time the person opened this chat
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
@@ -605,6 +646,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.settledOverride.
   settledOverride: Schema.optional(Schema.NullOr(Schema.Literals(["settled", "active"]))),
   settledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // Dev mode (migration 055): the thread's pull requests, see ThreadPullRequest.
+  pullRequests: Schema.optional(Schema.Array(ThreadPullRequest)),
+  // The person keeps this thread from settling by itself when its PR merges.
+  autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Read watermark (migration 052): the last time the person opened this chat
   // on any client (web Work or the T3 phone app). Null: never visited, or
   // marked unread. Optional so payloads from older servers still decode.
@@ -844,6 +889,14 @@ const ThreadUnsettleCommand = Schema.Struct({
 // Read state, wire-compatible with upstream T3 Code's thread.visit /
 // thread.mark-unread. visit moves the watermark forward only (an older
 // visitedAt is a no-op); mark-unread clears it.
+// Dev mode: "Settle when its PR merges" for this thread.
+const ThreadAutoSettleSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-settle.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  disabled: Schema.Boolean,
+});
+
 const ThreadVisitCommand = Schema.Struct({
   type: Schema.Literal("thread.visit"),
   commandId: CommandId,
@@ -1013,6 +1066,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadAutoSettleSetCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
@@ -1042,6 +1096,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
   ThreadUnsettleCommand,
+  ThreadAutoSettleSetCommand,
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
@@ -1160,8 +1215,17 @@ const ThreadPersonReleaseCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadPullRequestsSyncCommand = Schema.Struct({
+  type: Schema.Literal("thread.pull-requests.sync"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  pullRequests: Schema.Array(ThreadPullRequest),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadPersonCallCommand,
+  ThreadPullRequestsSyncCommand,
   ThreadPersonReleaseCommand,
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1193,6 +1257,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.unsnoozed",
   "thread.settled",
   "thread.unsettled",
+  "thread.pull-requests-updated",
+  "thread.auto-settle-updated",
   "thread.visited",
   "thread.marked-unread",
   "thread.read",
@@ -1324,6 +1390,17 @@ export const ThreadUnsettledPayload = Schema.Struct({
   // request) and the decider reset the override to neutral.
   reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
+});
+
+// Neither touches updatedAt: a PR moving along doesn't reorder the sidebar.
+export const ThreadPullRequestsUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  pullRequests: Schema.Array(ThreadPullRequest),
+});
+
+export const ThreadAutoSettleUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  autoSettleDisabledAt: Schema.NullOr(IsoDateTime),
 });
 
 export const ThreadVisitedPayload = Schema.Struct({
@@ -1659,6 +1736,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unsettled"),
     payload: ThreadUnsettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.pull-requests-updated"),
+    payload: ThreadPullRequestsUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.auto-settle-updated"),
+    payload: ThreadAutoSettleUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

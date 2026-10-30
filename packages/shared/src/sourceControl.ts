@@ -221,3 +221,47 @@ export function detectSourceControlProviderFromRemoteUrl(
     baseUrl: toBaseUrl(host),
   };
 }
+
+/** `owner/name` (GitLab: `group/sub/name`) out of a git remote URL. */
+export function parseRemoteRepositoryPath(remoteUrl: string): string | null {
+  const trimmed = remoteUrl.trim();
+  let path = /^(?:[^@/\s]+@)?[^:/\s]+:(?!\/\/|:)(.+)$/u.exec(trimmed)?.[1] ?? null;
+  if (path === null) {
+    if (!/^(?:https?|ssh|git):\/\//u.test(trimmed)) return null;
+    try {
+      path = new URL(trimmed).pathname;
+    } catch {
+      return null;
+    }
+  }
+  const repository = path.replace(/^\/+|\/+$/gu, "").replace(/\.git$/u, "");
+  return repository.includes("/") ? repository : null;
+}
+
+export interface ParsedChangeRequestUrl {
+  readonly provider: "github" | "gitlab";
+  readonly host: string;
+  readonly repository: string;
+  readonly number: number;
+  readonly url: string;
+}
+
+const GITHUB_PULL_URL = /^https?:\/\/([^/\s]+)\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)\/?$/u;
+const GITLAB_MERGE_URL = /^https?:\/\/([^/\s]+)\/(\S+?)\/-\/merge_requests\/(\d+)\/?$/u;
+
+/** A GitHub pull request or GitLab merge request URL, as `gh`/`glab` print them. */
+export function parseChangeRequestUrl(url: string): ParsedChangeRequestUrl | null {
+  const github = GITHUB_PULL_URL.exec(url);
+  const gitlab = github === null ? GITLAB_MERGE_URL.exec(url) : null;
+  const match = github ?? gitlab;
+  if (match === null) return null;
+  const number = Number(match[3]);
+  if (!Number.isSafeInteger(number) || number < 1) return null;
+  return {
+    provider: github !== null ? "github" : "gitlab",
+    host: match[1]!.toLowerCase(),
+    repository: match[2]!,
+    number,
+    url,
+  };
+}

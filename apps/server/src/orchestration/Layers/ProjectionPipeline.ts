@@ -773,6 +773,24 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.pull-requests-updated":
+        case "thread.auto-settle-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // updatedAt stays: a PR moving along never reorders the sidebar.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            ...(event.type === "thread.pull-requests-updated"
+              ? { pullRequests: event.payload.pullRequests }
+              : { autoSettleDisabledAt: event.payload.autoSettleDisabledAt }),
+          });
+          return;
+        }
+
         case "thread.control-changed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

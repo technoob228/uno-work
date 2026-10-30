@@ -842,6 +842,16 @@ export const ServerSettings = Schema.Struct({
   // machine, not in the browser: one computer is opened from app.uno4.work,
   // its own address and a phone, and each has its own localStorage.
   machineOnboarded: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Dev mode (Settings → Developer). Kept on every computer of the person, the
+  // newest change wins (apps/web/src/devMode.logic.ts): turning it on once is
+  // enough for all of them, and the daemon knows it may spend GitHub's limits.
+  devMode: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  devModeChangedAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  // Dev mode: a chat settles by itself when its PR merges after the person's
+  // last message. Field name as upstream T3 Code; a closed PR settles anyway.
+  sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Sidebar pins (apps, files, folders, links) — see `UnoPin`.
   pins: Schema.Array(UnoPin).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Guided setup progress — see `UnoSetupProgress`.
@@ -1011,6 +1021,9 @@ export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   machineOnboarded: Schema.optionalKey(Schema.Boolean),
+  devMode: Schema.optionalKey(Schema.Boolean),
+  devModeChangedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   pins: Schema.optionalKey(Schema.Array(UnoPin)),
   // Both replaced whole (see applyServerSettingsPatch).
   setup: Schema.optionalKey(UnoSetupProgress),
