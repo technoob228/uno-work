@@ -140,14 +140,30 @@ async function newChat(page) {
   await context.close();
 }
 
-// ── Switch by itself ──
+// ── Switch by itself (picked in Settings → AI, as a person would) ──
 {
-  const { page, context } = await open({ newChatModelSelection: CLAUDE, planLimitSwitch: "auto" });
+  const { page, context } = await open({ newChatModelSelection: CLAUDE });
+  await step("Settings → AI: When a plan is at its limit → Switch by itself", async () => {
+    await page.evaluate(() => {
+      location.hash = "#/settings/ai";
+    });
+    await page.getByTestId("settings-plan-limit-switch").click();
+    await page.getByRole("option", { name: "Switch by itself" }).click();
+    await page.waitForTimeout(800);
+    await page.getByTestId("settings-plan-limit-switch").scrollIntoViewIfNeeded();
+    await shot(page, "07-settings-switch-by-itself");
+    log.push(
+      `  setting: ${(await page.getByTestId("settings-plan-limit-switch").innerText()).trim()}`,
+    );
+  });
   await step("Switch by itself: Home's box moves to the MacBook and says so", async () => {
+    await page.evaluate(() => {
+      location.hash = "#/computer";
+    });
     await page.getByTestId("home-plan-room-switched").waitFor({ timeout: 20_000 });
     await page.getByTestId("home-composer").scrollIntoViewIfNeeded();
     await page.waitForTimeout(600);
-    await shot(page, "07a-auto-home-switched");
+    await shot(page, "08-auto-home-switched");
     log.push(`  home: ${await text(page, "home-plan-room-switched")}`);
   });
   await step("Switch by itself: a new chat starts on the MacBook and says so", async () => {
@@ -159,7 +175,7 @@ async function newChat(page) {
       .click();
     await page.getByTestId("plan-room-started-on").waitFor({ timeout: 25_000 });
     await page.waitForTimeout(1500);
-    await shot(page, "07b-auto-new-chat-started-on-macbook");
+    await shot(page, "09-auto-new-chat-started-on-macbook");
     log.push(`  note: ${await text(page, "plan-room-started-on")}`);
   });
   await context.close();
