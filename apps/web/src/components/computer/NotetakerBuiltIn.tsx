@@ -64,6 +64,7 @@ export function useNotetakerApp(input: {
     starting: installs.starting,
     confirm: asked ? installs.confirm : null,
     startError: asked ? installs.startError : null,
+    asked,
   });
   const template =
     state.kind === "add" || state.kind === "confirm" || state.kind === "failed"

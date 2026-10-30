@@ -71,17 +71,22 @@ export interface NotetakerTileInput {
   /** Only when the tile asked: the store's own confirm / error stays the store's. */
   readonly confirm: { readonly templateId: string; readonly message: string } | null;
   readonly startError: string | null;
+  /** The person pressed Add or Retry in this window. */
+  readonly asked: boolean;
 }
 
 export function notetakerTileState(input: NotetakerTileInput): NotetakerTileState {
-  const tile = input.tiles.find(isNotetakerTile) ?? null;
+  const tiles = input.tiles.filter(isNotetakerTile);
+  const working = tiles.find((tile) => tile.status !== "failed" && tile.status !== "installing");
+  // Already here (also one registered by hand on a Mac): it opens like any app,
+  // whatever an old install attempt left in the list next to it.
+  if (working) return { kind: "installed", tile: working };
+  const tile = tiles[0] ?? null;
   const install =
     input.installs.findLast((candidate) => candidate.templateId === NOTETAKER_APP_ID) ?? null;
   if (install?.state === "installing" || tile?.status === "installing") {
     return { kind: "installing" };
   }
-  // Already here (also one registered by hand on a Mac): it opens like any app.
-  if (tile && tile.status !== "failed") return { kind: "installed", tile };
   if (input.loading) return { kind: "loading" };
   if (!input.linked) return { kind: "elsewhere", hint: "Needs your Uno account" };
   if (!input.hasBox) return { kind: "elsewhere", hint: "On Uno computers" };
@@ -93,7 +98,10 @@ export function notetakerTileState(input: NotetakerTileInput): NotetakerTileStat
   if (input.confirm?.templateId === NOTETAKER_APP_ID && template) {
     return { kind: "confirm", template, message: input.confirm.message };
   }
-  if (install?.state === "failed" || tile?.status === "failed" || input.startError !== null) {
+  // Red only for what the person asked for here. An attempt from before stays
+  // quiet: this app is built in, they may never have heard of it.
+  const attemptFailed = install?.state === "failed" || tile?.status === "failed";
+  if (input.startError !== null || (attemptFailed && input.asked)) {
     return { kind: "failed", template, message: input.startError };
   }
   if (input.templates === undefined) return { kind: "loading" };

@@ -66,6 +66,7 @@ const base: NotetakerTileInput = {
   starting: null,
   confirm: null,
   startError: null,
+  asked: false,
 };
 
 const kind = (patch: Partial<NotetakerTileInput>) => notetakerTileState({ ...base, ...patch }).kind;
@@ -112,15 +113,34 @@ describe("the Notetaker tile", () => {
   });
 
   it("failed: Retry with the same template", () => {
-    const state = notetakerTileState({ ...base, installs: [install("failed")] });
+    const state = notetakerTileState({ ...base, asked: true, installs: [install("failed")] });
     expect(state).toEqual({ kind: "failed", template, message: null });
     expect(notetakerTileView(state)).toMatchObject({
       caption: "Didn't install",
       problem: true,
       chip: { label: "Retry" },
     });
-    expect(kind({ tiles: [tile("failed")] })).toBe("failed");
+    expect(kind({ asked: true, tiles: [tile("failed")] })).toBe("failed");
     expect(kind({ startError: "No room" })).toBe("failed");
+  });
+
+  it("an old failed attempt nobody asked for here: a calm Add, no red", () => {
+    const state = notetakerTileState({ ...base, installs: [install("failed")] });
+    expect(state).toEqual({ kind: "add", template });
+    expect(notetakerTileView(state)).toMatchObject({ problem: false, chip: { label: "Add" } });
+  });
+
+  it("works next to a failed attempt: the app opens, no Didn't install and no Retry", () => {
+    const leftover = { ...tile("failed"), key: "install:7" };
+    const state = notetakerTileState({
+      ...base,
+      asked: true,
+      tiles: [leftover, tile("running")],
+      installs: [install("failed")],
+    });
+    expect(state).toMatchObject({ kind: "installed", tile: { key: "store:notetaker" } });
+    // A Retry pressed before this fix may still say "installing" for ever.
+    expect(kind({ tiles: [tile("running")], installs: [install("installing")] })).toBe("installed");
   });
 
   it("low memory: the tile's own confirm, never the store's", () => {
