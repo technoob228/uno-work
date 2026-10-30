@@ -85,6 +85,11 @@ import { type DictationDraft, resolveDictationInsert } from "../../../hooks/dict
 import { isDictationSupported, useDictation } from "../../../hooks/useDictation";
 import { type TeamMember, useStartableAssistants } from "../../assistants/useAssistantTeam";
 import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
+import {
+  useNameAmongComputers,
+  useSwitcherMachines,
+} from "../../computerSwitcher/useComputerSwitcher";
+import { useStore } from "../../../store";
 import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
@@ -241,13 +246,19 @@ export function HomeComposer({
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // "on [computer ▾]": the task can start on another connected computer
-  // without leaving this Home. Null = Home's own computer.
-  const [pickedEnvironmentId, setPickedEnvironmentId] = useState<EnvironmentId | null>(null);
-  const targetEnvironmentId =
-    pickedEnvironmentId !== null && pickedEnvironmentId !== environmentId
-      ? pickedEnvironmentId
-      : environmentId;
+  // "on [computer ▾]" picks Home's computer: outside a chat there is one, and the
+  // new chat, Terminal, Files and Apps all go to it until another one is picked.
+  const targetEnvironmentId = environmentId;
+  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  const pickComputer = (next: EnvironmentId) => {
+    setActiveEnvironmentId(next);
+    // Folders belong to a computer: a new one starts in its home folder.
+    setFolder(null);
+  };
+  const severalComputers = useSwitcherMachines().length > 1;
+  const assistantComputer = useNameAmongComputers(
+    (assistant?.environmentId as EnvironmentId | undefined) ?? null,
+  );
   const picker = useHomeModelPicker(targetEnvironmentId, { ownAgentStart: true });
   // The computer hasn't sent its config yet: the model chip is not known, so a
   // placeholder of its size holds the row (else it appears late and pushes
@@ -521,14 +532,22 @@ export function HomeComposer({
               className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
-              {minimal || assistant ? null : (
+              {assistant ? (
+                // An assistant's chat runs on its own computer, nothing to pick.
+                assistantComputer ? (
+                  <span
+                    className="shrink-0 px-2 text-xs text-muted-foreground"
+                    data-testid="home-assistant-computer"
+                  >
+                    {assistantComputer}
+                  </span>
+                ) : null
+              ) : minimal && !severalComputers ? null : (
                 <NewChatComputerPicker
                   variant="chip"
                   environmentId={targetEnvironmentId}
                   onPick={(next) => {
-                    // Folders belong to a computer: a new one starts in its home folder.
-                    setPickedEnvironmentId(next);
-                    setFolder(null);
+                    pickComputer(next);
                     ref.current?.focus();
                   }}
                   testId="home-computer-chip"
@@ -704,10 +723,7 @@ export function HomeComposer({
         <HomePlanRoomLine
           environmentId={targetEnvironmentId}
           driver={selectedEntry?.driverKind ?? null}
-          onPickComputer={(next) => {
-            setPickedEnvironmentId(next);
-            setFolder(null);
-          }}
+          onPickComputer={pickComputer}
         />
       )}
       {starters.length > 0 || onUploadProject || (recordingSupported && recordingKey) ? (

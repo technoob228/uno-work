@@ -12,7 +12,6 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "~/lib/utils";
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
 import type { getRouter } from "../../router";
-import { useActiveFollowsOpenChat } from "../DemoPanel";
 import { assistDemo } from "../demoBoot";
 import type { MachineKey } from "../heavyFixtures";
 import { demoReady, listScenes, play } from "./engine";
@@ -160,7 +159,6 @@ export async function runScene(
 }
 
 export default function AssistPanel({ router }: { router: DemoRouter }) {
-  useActiveFollowsOpenChat(router);
   const [open, setOpen] = useState(() =>
     typeof window === "undefined"
       ? true

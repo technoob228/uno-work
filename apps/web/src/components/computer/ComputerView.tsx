@@ -69,6 +69,7 @@ import {
 import { ProgramDialog, type ProgramRemoveControls } from "./ProgramDialog";
 import { openAppSignedIn } from "./openSignedIn";
 import { ComputerPill } from "./home/ComputerPill";
+import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
 import { useComputerLinkDown } from "./home/useComputerConnection";
 import { useHomeComputer } from "./home/useHomeComputer";
 import { HomeStart, useHomeLayout } from "./home/HomeStart";
@@ -167,6 +168,7 @@ export function ComputerView() {
     inFlight: appsQuery.data?.installed.apps ?? [],
   });
   const launchers = useHomeLaunchers(environmentId);
+  const terminalComputer = useNameAmongComputers(environmentId);
   // The console's first message / a Uno AI chat moving to this computer.
   useUnoAiArrivals(thisMachine ? environmentId : null, launchers.startTask);
   const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
@@ -438,12 +440,21 @@ export function ComputerView() {
                     size="xs"
                     variant="ghost"
                     onClick={() => void launchers.openTerminal()}
-                    aria-label="Terminal"
-                    title="Open a terminal on this computer"
+                    disabled={linkDown}
+                    aria-label={terminalComputer ? `Terminal on ${terminalComputer}` : "Terminal"}
+                    title={
+                      linkDown
+                        ? `${terminalComputer ?? "This computer"} is offline`
+                        : terminalComputer
+                          ? `Open a terminal on ${terminalComputer}`
+                          : "Open a terminal on this computer"
+                    }
                     data-testid="home-terminal"
                   >
                     <TerminalIcon className="size-3.5" />
-                    <span className="hidden sm:inline">Terminal</span>
+                    <span className="hidden sm:inline">
+                      {terminalComputer ? `Terminal · ${terminalComputer}` : "Terminal"}
+                    </span>
                   </Button>
                   {pill}
                 </div>

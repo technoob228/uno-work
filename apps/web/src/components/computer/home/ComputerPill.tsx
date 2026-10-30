@@ -170,6 +170,8 @@ interface ComputerPillProps {
    * Left out, the chip says nothing about the connection.
    */
   environmentId?: EnvironmentId | null;
+  /** Several computers: even a narrow chat header says which one the chat runs on. */
+  namesChatComputer?: boolean;
   /** A fixed connection instead of the live one (tests, previews). */
   connection?: ComputerConnection | null;
 }
@@ -191,9 +193,14 @@ function ComputerPillView({
   loading,
   fit = "home",
   connection,
+  environmentId,
+  namesChatComputer = false,
 }: ComputerPillProps & { connection: ComputerConnection | null }) {
   const [open, setOpen] = useState(false);
-  const switcher = useComputerSwitcher(() => setOpen(false));
+  const switcher = useComputerSwitcher(
+    () => setOpen(false),
+    fit === "chat" ? environmentId : undefined,
+  );
   const look = FIT[fit];
   // 01.10: on the start screen the pill is the name, on/asleep and "Details";
   // the meters, boost and economy marks are for Dev mode (all of it is in the menu).
@@ -268,7 +275,15 @@ function ComputerPillView({
               type="button"
               data-testid={fit === "home" ? "home-computer-pill" : "chat-computer-chip"}
               aria-label={`${name} — ${said ? `${said}, ` : ""}computer menu`}
-              title={fit === "chat" ? (talking ? `${name} · ${talking.line}` : name) : undefined}
+              title={
+                fit === "chat"
+                  ? talking
+                    ? `${name} · ${talking.line}`
+                    : namesChatComputer
+                      ? `This chat runs on ${name}`
+                      : name
+                  : undefined
+              }
               className={cn(
                 "flex min-w-0 shrink-0 items-center rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
                 look.button,
@@ -291,7 +306,7 @@ function ComputerPillView({
                 className={cn(
                   "truncate font-medium",
                   fit === "home" ? "max-w-40" : "max-w-32",
-                  look.detail,
+                  namesChatComputer ? undefined : look.detail,
                 )}
               >
                 {name}
