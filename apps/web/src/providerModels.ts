@@ -252,6 +252,19 @@ export function pickUsableDefaultModelSelection(
   return model ? { instanceId: winner.instanceId, model } : null;
 }
 
+/**
+ * The same pick for one harness ("Claude on the MacBook" when the plan here
+ * is at its limit): its usable instance and canonical default model, or null.
+ */
+export function pickUsableModelSelectionForDriver(
+  providers: ReadonlyArray<ServerProvider>,
+  driver: string,
+): { readonly instanceId: ProviderInstanceId; readonly model: string } | null {
+  return pickUsableDefaultModelSelection(
+    providers.filter((candidate) => candidate.driver === driver),
+  );
+}
+
 function defaultThreadPreferenceRank(driver: ProviderDriverKind): number {
   const index = DEFAULT_THREAD_DRIVER_PREFERENCE.indexOf(driver);
   return index === -1 ? DEFAULT_THREAD_DRIVER_PREFERENCE.length : index;

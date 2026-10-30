@@ -69,6 +69,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { AiProviderKeysSection } from "./AiProviderKeysSection";
+import { AiPlansSection } from "./AiPlansSection";
 import { AppsAiDefaultRows } from "./AppsAiSettingsPanel";
 import { HarnessesSettingsPanel } from "./HarnessesSettingsPanel";
 import { ChatCopiesCleanupSection } from "./ChatCopiesCleanup";
@@ -468,6 +469,8 @@ export function AiSettings() {
           />
         ) : null}
       </SettingsSection>
+
+      <AiPlansSection />
 
       {environmentId ? <DefaultAiSection environmentId={environmentId} /> : null}
 

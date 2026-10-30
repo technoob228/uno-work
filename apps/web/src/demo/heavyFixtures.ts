@@ -24,6 +24,7 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 import { DEMO_ASSIST } from "./demoFlag";
 import { timelineShowcaseThreads } from "./timelineShowcase";
+import { hasPlans, planProvidersFor } from "./assist/plans";
 
 // The computers run the same Work as the page (no "runs another version" banner).
 export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
@@ -154,6 +155,10 @@ function nextAt(hour: number, weekday?: number): string {
 
 const UNO = ProviderInstanceId.make("uno");
 const MODEL = { instanceId: UNO, model: "uno/smart" } as const;
+const CLAUDE_MODEL = {
+  instanceId: ProviderInstanceId.make("claudeAgent"),
+  model: "claude-sonnet-5",
+} as const;
 
 export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescriptor {
   return {
@@ -172,6 +177,8 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       assistantLlm: true,
       // Assistants D: a project limit is a sandbox lock on the cloud computers, a note on the Mac.
       assistantSandbox: machine.os !== "darwin",
+      // T3 port 30.10: the person's own plans (`plans=full`, assist/plans.ts).
+      ...(hasPlans(machine.key) ? { planLimits: true } : {}),
     },
     machineKind: machine.machineKind,
     ...(machine.boxId !== null ? { unoBoxId: machine.boxId } : {}),
@@ -209,6 +216,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
         slashCommands: [],
         skills: [],
       },
+      ...planProvidersFor(machine.key, new Date(NOW).toISOString(), DEMO_VERSION),
     ],
     // p8: "Open in Cursor" on the MacBook.
     availableEditors: machine.key === "mac" ? ["cursor", "vscode", "file-manager"] : [],
@@ -388,6 +396,8 @@ export interface ChatSpec {
   /** One line about what is going on now (Running, Done). */
   readonly now?: string;
   readonly pinned?: boolean;
+  /** Runs on the person's own Claude (T3 port 30.10, `plans=full`); Uno AI otherwise. */
+  readonly harness?: "claude";
   readonly messages: ReadonlyArray<readonly ["user" | "assistant", string]>;
 }
 
@@ -1104,7 +1114,7 @@ export function buildThread(chat: ChatSpec) {
     id: chat.id,
     projectId: chat.project,
     title: chat.title,
-    modelSelection: MODEL,
+    modelSelection: chat.harness === "claude" ? CLAUDE_MODEL : MODEL,
     interactionMode: "default",
     runtimeMode: "full-access",
     branch: null,
@@ -1146,8 +1156,8 @@ export function buildThread(chat: ChatSpec) {
     session: {
       threadId: chat.id,
       status: running ? "running" : failed ? "error" : "ready",
-      providerName: "uno",
-      providerInstanceId: UNO,
+      providerName: chat.harness === "claude" ? "claudeAgent" : "uno",
+      providerInstanceId: chat.harness === "claude" ? CLAUDE_MODEL.instanceId : UNO,
       runtimeMode: "full-access",
       activeTurnId: running ? turnId : null,
       lastError: failed ? (chat.error ?? "Stopped") : null,

@@ -45,6 +45,12 @@ export interface AssistWorld {
    * an account without it, Work looks as 0.0.156.
    */
   readonly assistants?: "on" | "off";
+  /**
+   * The person's own AI plans (T3 port 30.10): `none` — Uno AI only, as
+   * before; `full` — Claude signed in on uno-work (at its 5-hour limit) and
+   * on the MacBook (another account, with room) + ChatGPT on the MacBook.
+   */
+  readonly plans?: "none" | "full";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -123,6 +129,7 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     automations: take("automations", ["none", "some"] as const) ?? start.automations,
     gh: take("gh", ["ok", "norepo", "noperm", "off"] as const) ?? start.gh,
     assistants: take("assistants", ["on", "off"] as const) ?? start.assistants ?? "on",
+    plans: take("plans", ["none", "full"] as const) ?? start.plans ?? "none",
   };
   return touched ? next : null;
 }
