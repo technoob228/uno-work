@@ -65,6 +65,7 @@ const MESSAGES: Readonly<Record<string, string>> = {
   INVITE_EMAIL_MISMATCH: "This invitation is for another email address.",
   INVITE_EXPIRED: "This invitation has expired. Ask for a new one.",
   INVITE_NOT_PENDING: "This invitation is no longer open.",
+  INVITE_RATE_LIMITED: "You've sent a lot of invites. Try again later.",
   OWNER_ONLY: "Only the project's owner can do that.",
   STORAGE_QUOTA_EXCEEDED: "The project owner's Uno cloud is full.",
   TEAM_LIMIT: "A project can have up to 20 people, invitations included.",
