@@ -63,8 +63,21 @@ export default flow("auto-create-schedule", async ({ page, url, step, shot }) =>
       }),
     );
     if (new Set(tops).size !== 1) throw new Error(`not in one row: ${tops}`);
-    await page.getByTestId("sidebar-nav-automations").hover();
-    await tooltip(page).filter({ hasText: "Automations" }).waitFor({ timeout: 5_000 });
+    // Its name grows out of the icon when the row has room (Misha 29.10), else a tooltip.
+    const automations = page.getByTestId("sidebar-nav-automations");
+    await automations.hover();
+    if ((await automations.getAttribute("data-name-fits")) === "true") {
+      await page.waitForFunction(
+        () =>
+          (document
+            .querySelector('[data-testid="sidebar-nav-automations"]')
+            ?.getBoundingClientRect().width ?? 0) > 60,
+        null,
+        { timeout: 5_000 },
+      );
+    } else {
+      await tooltip(page).filter({ hasText: "Automations" }).waitFor({ timeout: 5_000 });
+    }
   });
   await shot("icon-hover");
   await step("the screen lists them by assistant, every computer", async () => {

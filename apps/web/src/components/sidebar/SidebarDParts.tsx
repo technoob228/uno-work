@@ -34,7 +34,7 @@ import {
   SquarePenIcon,
   WorkflowIcon,
 } from "lucide-react";
-import { memo, useState, type ReactNode } from "react";
+import { memo, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 
 import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
@@ -62,7 +62,7 @@ import {
   openExternal,
   useAccountWho,
 } from "./SidebarDAccountButton";
-import { accountMenuLines, isHomePath, needsYouPlace } from "./sidebarD.logic";
+import { accountMenuLines, isHomePath, needsYouPlace, placeNamesThatFit } from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
@@ -293,15 +293,18 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
  * & sites — icons in one line, the name on hover; they shouldn't get in the
  * way"). The active one is lit. On hover (or keyboard focus) its name grows
  * out of the icon and the icons to its right move over (Misha 29.10, the
- * prototype's "expand"); a narrow sidebar cuts the name (…) before it would
- * push an icon out of the row.
+ * prototype's "expand") — when the row has room for it; when it hasn't
+ * (Automations, Dev mode beside Needs you), a tooltip names it instead of a
+ * cut "Fil…".
  */
 function PlaceIcon(props: {
   icon: ReactNode;
-  /** For the screen reader, and shown when `name` isn't given. */
+  /** For the screen reader and the tooltip, and shown when `name` isn't given. */
   label: string;
   /** The name on hover, when the row has no room for `label` ("Apps"). */
   name?: string;
+  /** The row has room for the name (`usePlaceNamesFit`); else a tooltip. */
+  nameFits: boolean;
   active: boolean;
   onClick: () => void;
   testId: string;
@@ -316,26 +319,94 @@ function PlaceIcon(props: {
       ? PLACE_ICON_ACTIVE
       : PLACE_ICON_IDLE;
   return (
-    <button
-      type="button"
-      aria-label={props.label}
-      aria-pressed={props.pressed}
-      onClick={props.onClick}
-      data-testid={props.testId}
-      data-tour={props.tour}
-      aria-current={props.active ? "page" : undefined}
-      className={cn(PLACE_PILL_CLASS, lit, props.className)}
-    >
-      {props.icon}
-      <span aria-hidden className={PLACE_NAME_CLASS}>
-        <span className="overflow-hidden">
-          <span className="block truncate pr-0.5 pl-1 text-[13px] font-medium">
-            {props.name ?? props.label}
+    <Tooltip disabled={props.nameFits}>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={props.label}
+            aria-pressed={props.pressed}
+            onClick={props.onClick}
+            data-testid={props.testId}
+            data-tour={props.tour}
+            data-name-fits={props.nameFits ? "true" : "false"}
+            aria-current={props.active ? "page" : undefined}
+            className={cn(PLACE_PILL_CLASS, lit, props.className)}
+          />
+        }
+      >
+        {props.icon}
+        <span
+          aria-hidden
+          data-place-name=""
+          className={cn(PLACE_NAME_CLASS, props.nameFits && PLACE_NAME_GROWS)}
+        >
+          <span className="overflow-hidden">
+            <span className="block overflow-hidden pr-0.5 pl-1 text-[13px] font-medium whitespace-nowrap">
+              {props.name ?? props.label}
+            </span>
           </span>
         </span>
-      </span>
-    </button>
+      </TooltipTrigger>
+      <TooltipPopup side="bottom">{props.label}</TooltipPopup>
+    </Tooltip>
   );
+}
+
+/**
+ * Which names in the row fit (`placeNamesThatFit`), by test id: measured
+ * before paint and again when the sidebar is resized, a place comes or goes
+ * (`items`) or the font arrives — known before the pointer gets there, so the
+ * tooltip of a name that doesn't fit is ready on the first hover.
+ */
+function usePlaceNamesFit(
+  row: RefObject<HTMLElement | null>,
+  items: string,
+): (testId: string) => boolean {
+  const [fitting, setFitting] = useState<string>("");
+  useLayoutEffect(() => {
+    const nav = row.current;
+    if (!nav) return;
+    let live = true;
+    const update = () => {
+      if (live) setFitting(placeNamesFittingIn(nav));
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(nav);
+    void document.fonts?.ready.then(update);
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
+  }, [row, items]);
+  return (testId) => fitting.split(" ").includes(testId);
+}
+
+/** The row's test ids whose names fit, space-separated (a string: no new state when nothing changed). */
+function placeNamesFittingIn(nav: HTMLElement): string {
+  const style = getComputedStyle(nav);
+  const width =
+    nav.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+  const children = [...nav.children].filter(
+    (child): child is HTMLElement => child instanceof HTMLElement,
+  );
+  const items = children.map((child) => {
+    const name = child.querySelector<HTMLElement>("[data-place-name]");
+    const full = child.getBoundingClientRect().width;
+    if (!name) return { rest: full, name: null };
+    // At rest without the name, whether or not it shows right now; the name's own width.
+    const text = name.firstElementChild?.firstElementChild;
+    return {
+      rest: full - name.getBoundingClientRect().width,
+      name: text instanceof HTMLElement ? text.scrollWidth : null,
+    };
+  });
+  const fits = placeNamesThatFit({ width, gap: parseFloat(style.columnGap) || 0, items });
+  return children
+    .filter((child, index) => fits[index] && child.dataset.testid)
+    .map((child) => child.dataset.testid)
+    .join(" ");
 }
 
 /**
@@ -343,12 +414,13 @@ function PlaceIcon(props: {
  * Revert and the context meter in chats. Lit while on; Settings keeps its
  * own switch.
  */
-function DevModePlace() {
+function DevModePlace(props: { nameFits: boolean }) {
   const devMode = useDevMode();
   return (
     <PlaceIcon
       icon={<CodeXmlIcon />}
       label="Dev mode"
+      nameFits={props.nameFits}
       active={false}
       pressed={devMode}
       onClick={toggleDevMode}
@@ -386,14 +458,17 @@ function PlaceRow(props: {
   );
 }
 
+/** Needs you in the row: 28 px wide like the places at rest. */
 const PLACE_ICON_CLASS =
-  "relative grid size-8 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
-/** `PlaceIcon`: an icon that grows its name — 32 px square until then. */
+  "relative grid h-8 w-7 shrink-0 cursor-pointer place-items-center rounded-lg outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+/** `PlaceIcon`: an icon that grows its name — 28 px wide until then (Misha 29.10: denser). */
 const PLACE_PILL_CLASS =
-  "group/place relative inline-flex h-8 min-w-8 shrink cursor-pointer items-center justify-center rounded-lg px-2 outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
-/** The name in it: no width until hover or focus, then its own (or what the row has left). */
+  "group/place relative inline-flex h-8 min-w-7 shrink cursor-pointer items-center justify-center rounded-lg px-1.5 outline-hidden ring-ring transition-colors focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0";
+/** The name in it: no width until hover or focus, then its own — only when it fits (`PLACE_NAME_GROWS`). */
 const PLACE_NAME_CLASS =
-  "grid min-w-0 grid-cols-[0fr] transition-[grid-template-columns] duration-200 ease-out group-hover/place:grid-cols-[1fr] group-focus-visible/place:grid-cols-[1fr] motion-reduce:transition-none";
+  "grid min-w-0 grid-cols-[0fr] transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none";
+const PLACE_NAME_GROWS =
+  "group-hover/place:grid-cols-[1fr] group-focus-visible/place:grid-cols-[1fr]";
 const PLACE_ICON_ACTIVE = "bg-sidebar-row-active text-foreground";
 const PLACE_ICON_PRESSED = "bg-primary/12 text-primary hover:bg-primary/18";
 const PLACE_ICON_IDLE =
@@ -456,10 +531,14 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
   const automations = useAutomationsShown();
+  const row = useRef<HTMLElement>(null);
+  const nameFits = usePlaceNamesFit(row, `${automations} ${shown}`);
   return (
     <nav
+      ref={row}
       aria-label="Uno Work"
-      className="flex min-w-0 items-center gap-0.5 px-0.5"
+      // The sidebar's width, not its icons': the names are measured against it.
+      className="flex w-full min-w-0 items-center gap-0.5 px-0.5"
       data-testid="sidebar-places"
     >
       <PlaceIcon
@@ -471,6 +550,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           goHome();
         }}
         testId="sidebar-nav-home"
+        nameFits={nameFits("sidebar-nav-home")}
         tour="home"
       />
       <PlaceIcon
@@ -479,6 +559,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
         active={pathname.startsWith("/files")}
         onClick={() => open("/files")}
         testId="sidebar-nav-files"
+        nameFits={nameFits("sidebar-nav-files")}
         tour="files"
       />
       <PlaceIcon
@@ -488,6 +569,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
         active={pathname.startsWith("/sites")}
         onClick={() => open("/sites")}
         testId="sidebar-nav-apps"
+        nameFits={nameFits("sidebar-nav-apps")}
         tour="apps"
       />
       {automations ? (
@@ -497,6 +579,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           active={pathname.startsWith("/automations")}
           onClick={() => open("/automations")}
           testId="sidebar-nav-automations"
+          nameFits={nameFits("sidebar-nav-automations")}
         />
       ) : null}
       {shown ? (
@@ -525,7 +608,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           )}
         />
       ) : null}
-      <DevModePlace />
+      <DevModePlace nameFits={nameFits("sidebar-nav-dev-mode")} />
     </nav>
   );
 });

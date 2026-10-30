@@ -13,6 +13,7 @@ import {
   isRunningStatus,
   needsYouPlace,
   parseFoldedProjects,
+  placeNamesThatFit,
   previewDGroup,
   SIDEBAR_D_GROUP_PREVIEW_LIMIT,
   sidebarDRailShown,
@@ -326,5 +327,36 @@ describe("sidebar D: a folded project stays folded (Misha 16.10)", () => {
       isOpen: (chat) => chat === "c2",
     });
     expect(kept).toBeNull();
+  });
+});
+
+const icon = (name: number | null) => ({ rest: 28, name });
+
+describe('placeNamesThatFit (Misha 29.10: no "Fil…", a tooltip instead)', () => {
+  it("lets a name grow when the row has room for it beside the rest", () => {
+    // 3 icons, 2 gaps: 88 at rest, 151 left.
+    expect(
+      placeNamesThatFit({ width: 239, gap: 2, items: [icon(40), icon(34), icon(150)] }),
+    ).toEqual([true, true, true]);
+  });
+
+  it("keeps a name that doesn't fit folded (a tooltip shows instead)", () => {
+    // Six items, Needs you without a name: 178 at rest, 61 left.
+    const items = [icon(42), icon(34), icon(37), icon(86), icon(null), icon(62)];
+    expect(placeNamesThatFit({ width: 239, gap: 2, items })).toEqual([
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("a row with no width yet (the sidebar folded) grows no names", () => {
+    expect(placeNamesThatFit({ width: 0, gap: 2, items: [icon(10), icon(null)] })).toEqual([
+      false,
+      false,
+    ]);
   });
 });
