@@ -25,7 +25,7 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 import { DEMO_ASSIST } from "./demoFlag";
 import { timelineShowcaseThreads } from "./timelineShowcase";
-import { hasPlans, planProvidersFor } from "./assist/plans";
+import { DEMO_ACCOUNTS, demoPlanSettings, hasPlans, planProvidersFor } from "./assist/plans";
 
 // The computers run the same Work as the page (no "runs another version" banner).
 export const DEMO_VERSION = import.meta.env.APP_VERSION || "0.0.147";
@@ -180,6 +180,9 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       assistantSandbox: machine.os !== "darwin",
       // T3 port 30.10: the person's own plans (`plans=full`, assist/plans.ts).
       ...(hasPlans(machine.key) ? { planLimits: true } : {}),
+      ...(hasPlans(machine.key) && DEMO_ACCOUNTS
+        ? { planResume: true, providerAccounts: true }
+        : {}),
     },
     machineKind: machine.machineKind,
     ...(machine.boxId !== null ? { unoBoxId: machine.boxId } : {}),
@@ -243,6 +246,7 @@ export function serverConfigFor(machine: DemoMachine): ServerConfig {
       ...DEFAULT_CLIENT_SETTINGS,
       // p9: a tool server of Misha's own in Settings → Connectors.
       mcpServers: [{ name: "context7", url: "https://mcp.context7.com/mcp", enabled: true }],
+      ...demoPlanSettings(),
     },
   } as unknown as ServerConfig;
 }
