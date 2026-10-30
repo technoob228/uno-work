@@ -121,14 +121,14 @@ for (const theme of themes) {
   await step("chat", async () => {
     // A chat the agent finished ("Ready") has a whole turn in it.
     const ready = page.locator("[data-testid=sidebar-row-d]", { hasText: "Ready" }).first();
-    const row = (await ready.count())
-      ? ready
-      : page.locator("[data-testid=sidebar-row-d]").first();
+    const row = (await ready.count()) ? ready : page.locator("[data-testid=sidebar-row-d]").first();
     await row.click();
     await page.waitForTimeout(2500);
     await shot("03-chat");
     const turns = await page.locator("[data-timeline-root] *").count();
-    log.push(`${theme}   chat: ${new URL(page.url()).hash || new URL(page.url()).pathname} (${turns} nodes)`);
+    log.push(
+      `${theme}   chat: ${new URL(page.url()).hash || new URL(page.url()).pathname} (${turns} nodes)`,
+    );
   });
 
   await step("menu", async () => {
@@ -138,7 +138,12 @@ for (const theme of themes) {
       page.getByTestId("sidebar-account"),
     ];
     for (const trigger of triggers) {
-      if (await trigger.first().isVisible().catch(() => false)) {
+      if (
+        await trigger
+          .first()
+          .isVisible()
+          .catch(() => false)
+      ) {
         await trigger.first().click();
         break;
       }
