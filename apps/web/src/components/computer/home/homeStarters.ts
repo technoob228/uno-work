@@ -216,12 +216,16 @@ function workStarters(context: StarterContext, max: number): HomeStarter[] {
     siteStarters(context.sites),
   ];
   const out: HomeStarter[] = [];
+  // Three alerts of one assistant read the same on a pill: one is enough.
+  const labels = new Set<string>();
   for (let round = 0; out.length < max; round += 1) {
     let added = false;
     for (const pool of pools) {
       const next = pool[round];
       if (!next) continue;
       added = true;
+      if (labels.has(next.label)) continue;
+      labels.add(next.label);
       out.push(next);
       if (out.length >= max) break;
     }

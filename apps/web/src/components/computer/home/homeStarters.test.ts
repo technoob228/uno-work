@@ -131,6 +131,22 @@ describe("notification starters", () => {
   });
 });
 
+describe("duplicate starters", () => {
+  it("shows one pill for several alerts of the same source", () => {
+    const starters = homeStarters({
+      ...EMPTY,
+      notifications: [
+        { id: "n1", source: "Ada", title: "Disk almost full", body: null },
+        { id: "n2", source: "Ada", title: "Backup failed", body: null },
+        { id: "n3", source: "Ada", title: "Site is down", body: null },
+        { id: "n4", source: "Shop", title: "Payment failed", body: null },
+      ],
+    });
+    expect(starters.map((s) => s.label)).toEqual(["Look at Ada alert", "Look at Shop alert"]);
+    expect(starters[0]!.prompt).toContain("Disk almost full");
+  });
+});
+
 describe("shortName", () => {
   it("keeps short names and cuts long ones at a word", () => {
     expect(shortName("Notes")).toBe("Notes");
