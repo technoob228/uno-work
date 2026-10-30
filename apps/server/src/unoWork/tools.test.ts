@@ -1953,12 +1953,14 @@ describe("image_generate", () => {
   it("saves the picture in the chat's folder, shows it and returns the path", async () => {
     const { deps, recorded, home } = makeDeps();
     const prompts: string[] = [];
+    const models: (string | undefined)[] = [];
     const withImages: UnoWorkToolDeps = {
       ...deps,
       images: {
-        generate: ({ prompt }) =>
+        generate: ({ prompt, model }) =>
           Effect.sync(() => {
             prompts.push(prompt);
+            models.push(model);
             return { bytes: PNG, model: "img-model", costUsd: 0.05 };
           }),
       },
@@ -1972,11 +1974,16 @@ describe("image_generate", () => {
     expect(value.costUsd).toBe(0.05);
     expect(readFileSync(value.path)).toEqual(Buffer.from(PNG));
     expect(prompts).toEqual(["Red fox logo"]);
+    expect(models).toEqual(["design"]);
     expect(recorded.bridge.at(-1)).toMatchObject({
       method: "POST",
       path: "/api/browser/open",
       body: { file: value.path },
     });
+    await run("image_generate", withImages, { prompt: "Fox", model: "fast" });
+    const unknown = await run("image_generate", withImages, { prompt: "Fox", model: "sora" });
+    expect(unknown._tag).toBe("Failure");
+    expect(models).toEqual(["design", "fast"]);
   });
 
   it("asks in Ask mode (it spends money) and explains a missing gateway", async () => {

@@ -695,7 +695,7 @@ const makeDeps = (input: {
         ? {
             images: {
               available: assistantsEnabled,
-              generate: ({ prompt, size }) =>
+              generate: ({ prompt, size, model }) =>
                 gatewayKey.harnessKey().pipe(
                   Effect.flatMap((apiKey) =>
                     Effect.tryPromise({
@@ -705,6 +705,7 @@ const makeDeps = (input: {
                           apiKey,
                           prompt,
                           ...(size ? { size } : {}),
+                          ...(model ? { model } : {}),
                         }),
                       catch: (cause) =>
                         new UnoWorkToolError({

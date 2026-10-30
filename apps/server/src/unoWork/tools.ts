@@ -51,6 +51,8 @@ import { clampUnoAgentAccessLevel } from "@t3tools/contracts";
 import { Data, Duration, Effect } from "effect";
 
 import {
+  IMAGE_DEFAULT_MODEL,
+  IMAGE_MODELS,
   IMAGE_PROMPT_MAX_CHARS,
   IMAGE_SIZES,
   saveGeneratedImage,
@@ -429,6 +431,7 @@ export interface UnoWorkToolDeps {
     readonly generate: (input: {
       readonly prompt: string;
       readonly size?: string;
+      readonly model?: string;
     }) => Effect.Effect<GeneratedImage, UnoWorkToolError>;
   };
   /**
@@ -2899,7 +2902,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "image_generate",
     group: "files",
     description:
-      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Paid from the person's AI hours (or a few cents of balance when hours run out), up to 20 pictures a day: make one, look, then refine — no batches.",
+      "Make a picture from a text description with Uno AI (works in any chat). Saves it in the chat's folder under images/ and shows it in the right panel; returns the file path to use next (e.g. in a site, a document, a post). Paid from the person's AI hours (or some balance when hours run out), up to 20 pictures a day: make one, look, then refine — no batches. Pick `model` for the job: `design` (default, about 2 minutes) for posters, banners, logos and anything with text or layout; `photo` (about 30 seconds) for realistic photos; `standard` (under a minute) for everyday illustrations and pictures for a site or post; `fast` (seconds, cheapest) for drafts and quick variants. Past 5 `design` and `photo` pictures a day it makes `standard`; the answer's `model` shows which one ran.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2909,6 +2912,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           description: "What to draw: subject, style, colours, text on it (if any).",
         },
         size: { type: "string", enum: [...IMAGE_SIZES] },
+        model: {
+          type: "string",
+          enum: [...IMAGE_MODELS],
+          description: `Which picture model fits the job; ${IMAGE_DEFAULT_MODEL} when unsure.`,
+        },
       },
       required: ["prompt"],
       additionalProperties: false,
@@ -2930,7 +2938,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const prompt = (str(args, "prompt") ?? "").trim();
         if (prompt.length === 0) return yield* toolError("Describe the picture in prompt.");
         const size = str(args, "size");
-        const image = yield* deps.images.generate({ prompt, ...(size ? { size } : {}) });
+        const model = str(args, "model") ?? IMAGE_DEFAULT_MODEL;
+        const image = yield* deps.images.generate({ prompt, model, ...(size ? { size } : {}) });
         const folder = deps.caller.cwd ?? deps.home;
         const file = yield* Effect.tryPromise({
           try: () => saveGeneratedImage({ folder, prompt, image }),
