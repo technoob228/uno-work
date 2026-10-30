@@ -2812,6 +2812,11 @@ function createWindow(): BrowserWindow {
   });
   // Sub-frames of the app (previews, app widgets) may show web pages and blob
   // previews, never local files or privileged/script schemes.
+  // Pages in the chat live in this window and WebRTC is the one way out a page
+  // policy can't close. The app has no calls of its own; panel sites are guests
+  // with their own contents and keep it.
+  window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
+
   window.webContents.on("will-frame-navigate", (details) => {
     if (details.isMainFrame) return;
     if (!isAllowedAppSubframeUrl(details.url)) {

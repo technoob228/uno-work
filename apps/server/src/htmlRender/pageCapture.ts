@@ -78,7 +78,11 @@ function hostDocument(input: PageCaptureInput): string {
 }
 
 /** `Refused to load the image 'https://x/y.png' because…` → the address. */
-const blockedAddress = (text: string) => /^Refused to [^']*'([^']+)'/.exec(text)?.[1];
+/** Chrome words it per kind of request; the address always comes before the policy. */
+const blockedAddress = (text: string) =>
+  text.includes("Content Security Policy")
+    ? /\b(?:https?|wss?):\/\/[^\s'"]+/.exec(text)?.[0]
+    : undefined;
 
 export async function capturePage(
   browser: Browser,
@@ -87,6 +91,8 @@ export async function capturePage(
   const consoleMessages: Array<{ level: string; text: string }> = [];
   const blocked = new Set<string>();
   const note = (level: string, text: string) => {
+    // Our own policy names a directive Chrome doesn't know yet: not the page's fault.
+    if (text.startsWith("Unrecognized Content-Security-Policy directive")) return;
     const address = blockedAddress(text);
     if (address !== undefined && blocked.size < MAX_BLOCKED) blocked.add(address);
     if (consoleMessages.length < MAX_CONSOLE_MESSAGES) {

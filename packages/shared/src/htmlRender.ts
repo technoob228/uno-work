@@ -507,6 +507,16 @@ const escapeAttribute = (text: string) => text.replace(/&/g, "&amp;").replace(/"
 const FRAME_RELAY_SCRIPT = `(function(){var f=document.getElementById("page");window.addEventListener("message",function(e){if(e.source===f.contentWindow)window.parent.postMessage(e.data,"*");else if(e.source===window.parent&&f.contentWindow)f.contentWindow.postMessage(e.data,"*");});})();`;
 
 /**
+ * WebRTC is the one way out a page policy does not cover in Chrome, so it is
+ * taken away before the page's own code runs. A nested `srcdoc` frame is the
+ * only frame `frame-src` lets through and it would come with a fresh copy of
+ * WebRTC, so nested frames are removed before they load. A page built to dodge
+ * this through a closed shadow root still gets there in a plain browser; the
+ * desktop app turns such traffic off for the whole window.
+ */
+const PAGE_GUARD_SCRIPT = `(function(){["RTCPeerConnection","webkitRTCPeerConnection"].forEach(function(n){try{Object.defineProperty(window,n,{value:undefined,writable:false,configurable:false})}catch(e){}});var q="iframe,frame,object,embed";new MutationObserver(function(r){r.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.matches(q))n.remove();else n.querySelectorAll(q).forEach(function(c){c.remove()})})})}).observe(document,{childList:true,subtree:true});})();`;
+
+/**
  * The stored page with the reader's theme in place of the default one, so it
  * paints right the first time. Later changes arrive as messages.
  */
@@ -518,6 +528,9 @@ export function withHtmlRenderTheme(html: string, theme: HtmlRenderTheme): strin
   if (end === -1) return html;
   return `${html.slice(0, start + open.length)}${rootRule(theme)}${BASE_CSS}${html.slice(end)}`;
 }
+
+const guardedPage = (pageHtml: string) =>
+  `<!doctype html><script>${PAGE_GUARD_SCRIPT}</script>${pageHtml}`;
 
 /**
  * The document the app puts in its frame: a small outer page that sets the
@@ -534,7 +547,7 @@ export function htmlRenderFrameDocument(pageHtml: string): string {
     `<!doctype html><html><head><meta charset="utf-8">` +
     `<meta http-equiv="Content-Security-Policy" content="${escapeAttribute(HTML_RENDER_CSP)}">` +
     `<style>html,body,iframe{display:block;margin:0;padding:0;width:100%;height:100%;border:0;background:transparent;overflow:hidden}</style>` +
-    `</head><body><iframe id="page" sandbox="${HTML_RENDER_SANDBOX}" srcdoc="${escapeAttribute(pageHtml)}"></iframe>` +
+    `</head><body><iframe id="page" sandbox="${HTML_RENDER_SANDBOX}" srcdoc="${escapeAttribute(guardedPage(pageHtml))}"></iframe>` +
     `<script>${FRAME_RELAY_SCRIPT}</script></body></html>`
   );
 }

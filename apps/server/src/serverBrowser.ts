@@ -1138,7 +1138,11 @@ export const makeServerBrowser = Effect.gen(function* () {
         headless: true,
         ...(executablePath ? { executablePath } : {}),
         ...(channel ? { channel } : {}),
-        args: ["--dns-prefetch-disable", "--disable-background-networking"],
+        args: [
+          "--dns-prefetch-disable",
+          "--disable-background-networking",
+          "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        ],
       });
     if (executablePath) return launchWith(undefined);
     const missing = (cause: unknown) => /executable doesn't exist|is not found/i.test(String(cause));
