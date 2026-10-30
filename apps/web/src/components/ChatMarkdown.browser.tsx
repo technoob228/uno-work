@@ -37,10 +37,10 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
-vi.mock("../environmentApi", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../environmentApi")>()),
-  readEnvironmentApi: () => ({ files: { resolveMentions: resolveMentionsMock } }),
-}));
+vi.mock("../environmentApi", () => {
+  const api = { files: { resolveMentions: resolveMentionsMock } };
+  return { readEnvironmentApi: () => api, ensureEnvironmentApi: () => api };
+});
 
 // Only the panel hook is faked: ChatMarkdown also imports the module's pure
 // helpers (detectFileKind), which a bare mock would drop.
