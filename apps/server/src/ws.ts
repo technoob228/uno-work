@@ -1581,6 +1581,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.filesSearch, files.search(input), {
             "rpc.aggregate": "files",
           }),
+        [WS_METHODS.filesResolveMentions]: (input) =>
+          observeRpcEffect(WS_METHODS.filesResolveMentions, files.resolveMentions(input), {
+            "rpc.aggregate": "files",
+          }),
         [WS_METHODS.filesRecentList]: (input) =>
           observeRpcEffect(WS_METHODS.filesRecentList, filesRecent.list(input), {
             "rpc.aggregate": "files",

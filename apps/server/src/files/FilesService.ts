@@ -23,6 +23,8 @@ import {
   type FilesPublishSiteInput,
   type FilesPublishSiteResult,
   type FilesRenameInput,
+  type FilesResolveMentionsInput,
+  type FilesResolveMentionsResult,
   type FilesSearchInput,
   type FilesSearchResult,
   type FilesShare,
@@ -77,6 +79,7 @@ import {
   statPath,
   statResolved,
 } from "./fileManager.ts";
+import { resolveFileMentions } from "./fileMentions.ts";
 import {
   configuredFilesRoot,
   FilesPathError,
@@ -129,6 +132,9 @@ export interface FilesServiceShape {
   readonly move: (input: FilesMoveInput) => Effect.Effect<FilesMoveResult, FilesError>;
   readonly remove: (input: FilesDeleteInput) => Effect.Effect<FilesDeleteResult, FilesError>;
   readonly search: (input: FilesSearchInput) => Effect.Effect<FilesSearchResult, FilesError>;
+  readonly resolveMentions: (
+    input: FilesResolveMentionsInput,
+  ) => Effect.Effect<FilesResolveMentionsResult, FilesError>;
   readonly createShare: (input: FilesShareCreateInput) => Effect.Effect<FilesShare, FilesError>;
   readonly listShares: (
     input: FilesShareListInput,
@@ -310,6 +316,9 @@ export const makeFilesService = (
 
     const search: FilesServiceShape["search"] = (input) =>
       withRoot("Search didn't finish.", (root) => searchByName(root, input));
+
+    const resolveMentions: FilesServiceShape["resolveMentions"] = (input) =>
+      withRoot("Couldn't check these files.", (root) => resolveFileMentions(root, input));
 
     const createShare: FilesServiceShape["createShare"] = (input) =>
       Effect.gen(function* () {
@@ -675,6 +684,7 @@ export const makeFilesService = (
       move,
       remove,
       search,
+      resolveMentions,
       createShare,
       listShares,
       revokeShare,

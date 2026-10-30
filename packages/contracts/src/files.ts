@@ -129,6 +129,38 @@ export const FilesSearchResult = Schema.Struct({
 });
 export type FilesSearchResult = typeof FilesSearchResult.Type;
 
+/** Most mentions one call checks: a batch of a chat's answers. */
+export const FILES_MENTIONS_MAX = 64;
+
+/**
+ * What an agent's answer names as a file — `~/report.md`, `web/index.html`,
+ * `index.html` — turned into a real file of this computer, or nothing. Called
+ * in batches by the chat to decide what becomes a clickable chip.
+ */
+export const FilesResolveMentionsInput = Schema.Struct({
+  /** The chat's folder: relative mentions start here. The files root when absent. */
+  cwd: Schema.optional(FilesPath),
+  mentions: Schema.Array(FilesPath).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(FILES_MENTIONS_MAX),
+  ),
+});
+export type FilesResolveMentionsInput = typeof FilesResolveMentionsInput.Type;
+
+export const FilesResolvedMention = Schema.Struct({
+  /** The mention as it was asked for. */
+  mention: Schema.String,
+  /** Absolute path of what it names; null when there is no such file. */
+  path: Schema.NullOr(Schema.String),
+  kind: Schema.NullOr(FilesEntryKind),
+});
+export type FilesResolvedMention = typeof FilesResolvedMention.Type;
+
+export const FilesResolveMentionsResult = Schema.Struct({
+  results: Schema.Array(FilesResolvedMention),
+});
+export type FilesResolveMentionsResult = typeof FilesResolveMentionsResult.Type;
+
 /**
  * Recent files of this computer (Files → Recent): what the person opened in
  * Uno Work, and what agents changed in chats. Kept by the daemon (the opened

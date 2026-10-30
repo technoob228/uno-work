@@ -386,6 +386,7 @@ export interface WsRpcClient {
     readonly move: RpcUnaryMethod<typeof WS_METHODS.filesMove>;
     readonly delete: RpcUnaryMethod<typeof WS_METHODS.filesDelete>;
     readonly search: RpcUnaryMethod<typeof WS_METHODS.filesSearch>;
+    readonly resolveMentions: RpcUnaryMethod<typeof WS_METHODS.filesResolveMentions>;
     readonly recentList: RpcUnaryMethod<typeof WS_METHODS.filesRecentList>;
     readonly recentRecord: RpcUnaryMethod<typeof WS_METHODS.filesRecentRecord>;
     readonly createShare: RpcUnaryMethod<typeof WS_METHODS.filesShareCreate>;
@@ -858,6 +859,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       move: (input) => transport.request((client) => client[WS_METHODS.filesMove](input)),
       delete: (input) => transport.request((client) => client[WS_METHODS.filesDelete](input)),
       search: (input) => transport.request((client) => client[WS_METHODS.filesSearch](input)),
+      resolveMentions: (input) =>
+        transport.request((client) => client[WS_METHODS.filesResolveMentions](input)),
       recentList: (input) =>
         transport.request((client) => client[WS_METHODS.filesRecentList](input)),
       recentRecord: (input) =>
