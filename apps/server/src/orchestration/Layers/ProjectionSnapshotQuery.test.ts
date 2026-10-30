@@ -455,6 +455,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           personCalledAt: null,
           personCalledByThreadId: null,
           personCallReason: null,
+          pullRequests: [],
+          autoSettleDisabledAt: null,
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",
