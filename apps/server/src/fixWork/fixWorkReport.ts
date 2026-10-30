@@ -35,7 +35,10 @@ const RULES: ReadonlyArray<{
     keep: ([user = ""]) => `${user}${REDACTED}@`,
   },
   // JWT; cloud keys the token list doesn't name; a PEM block, whole.
-  { pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g, keep: () => REDACTED },
+  {
+    pattern: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{4,}/g,
+    keep: () => REDACTED,
+  },
   { pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, keep: () => REDACTED },
   { pattern: /\bxox[abprs]-[A-Za-z0-9-]{10,}/g, keep: () => REDACTED },
   { pattern: /\bAIza[A-Za-z0-9_-]{30,}/g, keep: () => REDACTED },

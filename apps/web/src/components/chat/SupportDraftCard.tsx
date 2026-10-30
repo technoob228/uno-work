@@ -49,9 +49,7 @@ export function SupportDraftCard({ draft }: { draft: SupportDraft }) {
         <Button
           size="sm"
           data-testid="support-draft-mail"
-          onClick={() =>
-            openExternal(supportDraftMailtoUrl({ subject: draft.subject, body }))
-          }
+          onClick={() => openExternal(supportDraftMailtoUrl({ subject: draft.subject, body }))}
         >
           <MailIcon />
           Open in mail
@@ -61,10 +59,7 @@ export function SupportDraftCard({ draft }: { draft: SupportDraft }) {
           variant="outline"
           data-testid="support-draft-copy"
           onClick={() =>
-            copyToClipboard(
-              `To: ${SUPPORT_EMAIL}\nSubject: ${draft.subject}\n\n${body}`,
-              undefined,
-            )
+            copyToClipboard(`To: ${SUPPORT_EMAIL}\nSubject: ${draft.subject}\n\n${body}`, undefined)
           }
         >
           {isCopied ? <CheckIcon /> : <CopyIcon />}

@@ -92,7 +92,8 @@ describe("latestNpmVersion", () => {
 });
 
 describe("the OpenCode pin", () => {
-  const read = (path: string) => readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
+  const read = (path: string) =>
+    readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 
   it("is the same in the image, the desktop app and the agent list", () => {
     expect(read("../../../deploy/install.sh")).toContain(

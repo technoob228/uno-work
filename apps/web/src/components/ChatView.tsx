@@ -1835,12 +1835,10 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(
-        timelineMessages,
-        activeThread?.proposedPlans ?? [],
-        workLogEntries,
-        [...deriveHtmlRenderEntries(threadActivities), ...deriveSupportDraftEntries(threadActivities)],
-      ),
+      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries, [
+        ...deriveHtmlRenderEntries(threadActivities),
+        ...deriveSupportDraftEntries(threadActivities),
+      ]),
     [activeThread?.proposedPlans, threadActivities, timelineMessages, workLogEntries],
   );
   // Фильтр видимости встроенного чата: применяем на выборке строк, а не в

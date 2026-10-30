@@ -96,11 +96,7 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
         title: COPY.availableTitle,
         description: view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner,
         actions: view.canUpdate ? (
-          <Button
-            size={size}
-            data-testid="self-update-button"
-            onClick={update.askToUpdate}
-          >
+          <Button size={size} data-testid="self-update-button" onClick={update.askToUpdate}>
             {COPY.update}
           </Button>
         ) : null,

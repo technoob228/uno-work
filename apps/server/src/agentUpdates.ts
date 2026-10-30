@@ -11,7 +11,11 @@
 import { realpathSync } from "node:fs";
 import nodePath from "node:path";
 
-import { compareCliVersions, extractNumericCliVersion, type ServerProvider } from "@t3tools/contracts";
+import {
+  compareCliVersions,
+  extractNumericCliVersion,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import {
   UNO_OPENCODE_VERSION,
   UPDATABLE_AGENTS,

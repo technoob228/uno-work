@@ -215,12 +215,8 @@ export const SELF_UPDATE_COPY = {
   notOwner: "The owner of this computer can update it from Uno Work.",
   update: "Update",
   later: "Later",
-  confirmTitle: (version: string) => `Update Uno Work to ${version}?`,
-  confirmBody:
-    "It takes about two minutes. Your chats and files stay as they are. Uno Work restarts once: anything an agent is doing right now stops, and you can continue it after the update.",
   confirmSafety:
     "If the new version doesn't start, this computer goes back to the current one by itself.",
-  confirm: "Update now",
   updatingTitle: (version: string | null) =>
     version ? `Updating Uno Work to ${version}…` : "Updating Uno Work…",
   updatingBody: (step: string) =>

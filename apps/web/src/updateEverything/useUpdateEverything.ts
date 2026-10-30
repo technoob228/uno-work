@@ -31,7 +31,12 @@ import {
 } from "../selfUpdate/selfUpdate";
 import { useStore } from "../store";
 import { connectUnoBoxById, isBoxDead } from "../unoBoxConnect";
-import { buildUpdatePlan, type PlanRow, type RunDeps, type UpdateTarget } from "./updateEverything.logic";
+import {
+  buildUpdatePlan,
+  type PlanRow,
+  type RunDeps,
+  type UpdateTarget,
+} from "./updateEverything.logic";
 
 const POLL_MS = 2_000;
 /** The updater's own limit is 30 min; two minutes is usual. */
@@ -142,8 +147,7 @@ export function useUpdateEverything() {
         agents: agents?.filter((agent) => agent.behind) ?? [],
       };
     },
-    updateAgent: (environmentId, agent) =>
-      waitForAgentJob(environmentId as EnvironmentId, agent),
+    updateAgent: (environmentId, agent) => waitForAgentJob(environmentId as EnvironmentId, agent),
     updateWork: (environmentId) => waitForWorkUpdate(environmentId as EnvironmentId),
   };
 

@@ -39,7 +39,8 @@ export const supportDraftTool = (fail: (message: string) => UnoWorkToolError): U
       }
       const subject = text(args, "subject").slice(0, SUPPORT_DRAFT_MAX_SUBJECT);
       const body = text(args, "body").slice(0, SUPPORT_DRAFT_MAX_BODY);
-      if (!subject || !body) return yield* Effect.fail(fail("Give the letter a subject and a body."));
+      if (!subject || !body)
+        return yield* Effect.fail(fail("Give the letter a subject and a body."));
       const { redactions } = yield* deps.supportDraft.publish({ subject, body });
       return {
         ok: true,

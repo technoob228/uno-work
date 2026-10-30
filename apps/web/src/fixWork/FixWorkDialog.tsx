@@ -19,7 +19,12 @@ import {
 } from "../components/ui/dialog";
 import { Textarea } from "../components/ui/textarea";
 import { useActiveMachine } from "../hooks/useActiveMachine";
-import { FIX_WORK_COPY as COPY, FIX_WORK_RUNTIME_MODE, fixWorkPrompt, prepareFixWork } from "./fixWork";
+import {
+  FIX_WORK_COPY as COPY,
+  FIX_WORK_RUNTIME_MODE,
+  fixWorkPrompt,
+  prepareFixWork,
+} from "./fixWork";
 
 function FixWorkForm(props: {
   readonly environmentId: EnvironmentId;
