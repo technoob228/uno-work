@@ -402,6 +402,29 @@ describe("ChatMarkdown", () => {
     }
   });
 
+  it("opens a folder the agent linked to in the panel's Files, not in a new tab", async () => {
+    const environmentId = freshEnvironment();
+    computerHas({ "docs/": { path: "/home/uno/x/docs", kind: "directory" } });
+    const screen = await render(
+      <ChatMarkdown
+        text="See the [docs folder](docs/)."
+        cwd="/home/uno/x"
+        environmentId={environmentId}
+      />,
+    );
+
+    try {
+      const chip = page.getByTestId("chat-file-chip");
+      await expect.element(chip).toHaveAttribute("data-file-kind", "directory");
+      await chip.click();
+      const tab = openFileMock.mock.calls[0]?.[0] as { id: string };
+      expect(usePanelFilesStore.getState().byTab[tab.id]).toEqual({ path: "/home/uno/x/docs" });
+      expect(openExternalMock).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
   it("keeps a link with no file look a link", async () => {
     const screen = await render(
       <ChatMarkdown

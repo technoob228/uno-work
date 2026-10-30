@@ -14,7 +14,10 @@ const api = vi.hoisted(() => ({
   removeAssistantMcp: vi.fn(),
 }));
 
-vi.mock("../../../lib/setupApi", () => api);
+vi.mock("../../../lib/setupApi", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  ...api,
+}));
 
 import { AssistantMcpForm } from "./ConnectorsStep";
 

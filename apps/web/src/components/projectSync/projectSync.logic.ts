@@ -132,12 +132,13 @@ export function groupVersions(
   return days;
 }
 
-/** "Misha on macbook · plan.md", or what the version says about itself. */
+/** "You on macbook · plan.md", or what the version says about itself. */
 export function versionLine(version: ProjectVersion): string {
+  const person = version.mine ? "You" : version.person;
   const who =
-    version.person && version.computer
-      ? `${version.person} on ${version.computer}`
-      : (version.person ?? version.computer ?? "Saved");
+    person && version.computer
+      ? `${person} on ${version.computer}`
+      : (person ?? version.computer ?? "Saved");
   const count = version.files.length + version.moreFiles;
   const what = count === 1 ? version.files[0]?.path : `${count} files`;
   return [version.note ?? who, count > 0 ? what : null].filter(Boolean).join(" · ");
@@ -147,6 +148,14 @@ export function versionLine(version: ProjectVersion): string {
 
 export function fileCount(count: number): string {
   return count === 1 ? "1 file" : `${count.toLocaleString("en-US")} files`;
+}
+
+/**
+ * The Keys row: the project's keys, then key files beyond them. `.env` is
+ * where those keys are, not one more.
+ */
+export function projectKeyCount(keys: number, keyFiles: ReadonlyArray<string>): number {
+  return keys + keyFiles.filter((file) => file !== ".env").length;
 }
 
 /** "a, b and 4 more": the names in the one question to older projects. */

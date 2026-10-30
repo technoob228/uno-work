@@ -132,6 +132,8 @@ export const ProjectVersion = Schema.Struct({
   at: Schema.String,
   person: Schema.NullOr(Schema.String),
   computer: Schema.NullOr(Schema.String),
+  /** The person looking at it saved it: shown as "You". Absent from older computers. */
+  mine: Schema.optional(Schema.Boolean),
   /** What it says about itself; null for a version saved by itself. */
   note: Schema.NullOr(Schema.String),
   files: Schema.Array(ProjectVersionFile),

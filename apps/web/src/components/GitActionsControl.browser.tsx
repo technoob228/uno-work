@@ -174,6 +174,7 @@ vi.mock("~/composerDraftStore", async () => {
 });
 
 vi.mock("~/store", () => ({
+  setThreadReadAtSink: vi.fn(),
   selectEnvironmentState: (
     state: { environmentStateById: Record<string, unknown> },
     environmentId: string | null,

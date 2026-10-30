@@ -113,7 +113,13 @@ import { untitledFileName } from "./untitledName";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
 import { FilesLocationSwitch } from "./FilesLocationSwitch";
-import { FilesSearchField, filesSearchScope, resultLocation, useFilesSearch } from "./FilesSearch";
+import {
+  FilesSearchField,
+  filesSearchScope,
+  focusFilesSearchOnFind,
+  resultLocation,
+  useFilesSearch,
+} from "./FilesSearch";
 import { folderTagOf, folderTags, type FolderTag } from "./folderTags";
 import { prewarmOfficeEngine, readUsedKinds } from "../office/officePrewarm";
 import { SidebarShowButton, SidebarShowButtonHidden } from "../sidebar/SidebarShowButton";
@@ -938,14 +944,7 @@ function FolderBrowser({
       className="relative flex h-full min-h-0 flex-col outline-none"
       // Clicking anywhere in Files puts the keyboard here, for ⌘F.
       tabIndex={-1}
-      onKeyDown={(event) => {
-        if (event.key !== "f" && event.key !== "F") return;
-        if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
-        event.preventDefault();
-        event.stopPropagation();
-        searchInput.current?.focus();
-        searchInput.current?.select();
-      }}
+      onKeyDown={(event) => focusFilesSearchOnFind(event, searchInput.current)}
       onDragEnter={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         dragDepth.current += 1;

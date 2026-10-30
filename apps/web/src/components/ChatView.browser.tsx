@@ -34,6 +34,7 @@ import { render } from "vitest-browser-react";
 import { writeBrowserClientSettings } from "../clientPersistenceStorage";
 import { setDevMode } from "../devMode";
 import { useCommandPaletteStore } from "../commandPaletteStore";
+import { resetHomeFolderCacheForTests } from "../hooks/useFolderChats";
 import { useComposerDraftStore, DraftId } from "../composerDraftStore";
 import {
   __resetEnvironmentApiOverridesForTests,
@@ -59,6 +60,7 @@ import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
+import { useSidebarDStore } from "./sidebar/sidebarDState";
 import { createAuthenticatedSessionHandlers } from "../../test/authHttpHandlers";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../../test/wsRpcHarness";
 
@@ -1519,8 +1521,14 @@ async function triggerChatNewShortcutUntilPath(
   throw new Error(`${errorMessage} Last path: ${pathname}`);
 }
 
+/** These tests' window is under 1000 px, where the sidebar stays a rail until opened by hand. */
+function showFullSidebar(): void {
+  useSidebarDStore.setState({ openedWhileNarrow: true });
+}
+
 async function openCommandPaletteFromTrigger(): Promise<void> {
-  const trigger = page.getByTestId("command-palette-trigger");
+  showFullSidebar();
+  const trigger = page.getByTestId("sidebar-search");
   await expect.element(trigger).toBeInTheDocument();
   await trigger.click();
   await waitForElement(
@@ -1530,19 +1538,21 @@ async function openCommandPaletteFromTrigger(): Promise<void> {
 }
 
 async function waitForNewThreadShortcutLabel(): Promise<void> {
-  const newThreadButton = page.getByTestId("new-thread-button");
+  showFullSidebar();
+  const newThreadButton = page.getByTestId("sidebar-d-new-chat");
   await expect.element(newThreadButton).toBeInTheDocument();
   await newThreadButton.hover();
   const shortcutLabel = isMacPlatform(navigator.platform)
-    ? "New chat (⇧⌘O)"
-    : "New chat (Ctrl+Shift+O)";
+    ? "New chat ⇧⌘O"
+    : "New chat Ctrl+Shift+O";
   await expect.element(page.getByText(shortcutLabel)).toBeInTheDocument();
 }
 
-async function waitForCommandPaletteShortcutLabel(): Promise<void> {
+async function waitForCommandPaletteTrigger(): Promise<void> {
+  showFullSidebar();
   await waitForElement(
-    () => document.querySelector('[data-testid="command-palette-trigger"] kbd'),
-    "Command palette shortcut label did not render.",
+    () => document.querySelector('[data-testid="sidebar-search"]'),
+    "Command palette trigger did not render.",
   );
 }
 
@@ -1683,6 +1693,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   beforeEach(async () => {
+    resetHomeFolderCacheForTests();
     await rpcHarness.reset({
       resolveUnary: resolveWsRpc,
       getInitialStreamValues: (request) => {
@@ -1736,6 +1747,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     document.body.innerHTML = "";
     wsRequests.length = 0;
     customWsRpcResolver = null;
+    useSidebarDStore.setState({ openedWhileNarrow: false, collapsedChoice: false });
     __resetEnvironmentApiOverridesForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
@@ -1787,12 +1799,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForElement(
         () =>
           Array.from(document.querySelectorAll<HTMLElement>("span")).find(
-            (element) => element.textContent?.trim() === "Local checkout",
+            (element) => element.textContent?.trim() === "Project folder",
           ) ?? null,
         "Unable to find static mobile workspace label.",
       );
 
-      expect(findButtonByText("Local checkout")).toBeNull();
+      expect(findButtonByText("Project folder")).toBeNull();
     } finally {
       await mounted.cleanup();
     }
@@ -1827,14 +1839,19 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("shows an explicit empty state for projects without threads in the sidebar", async () => {
+  it("keeps a project without chats in the sidebar", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createDraftOnlySnapshot(),
     });
 
     try {
-      await expect.element(page.getByText("No chats yet")).toBeInTheDocument();
+      showFullSidebar();
+      await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[aria-label="More for Project"]'),
+        "Unable to find the project without chats in the sidebar.",
+      );
+      expect(document.querySelector('[data-testid="sidebar-row-d"]')).toBeNull();
     } finally {
       await mounted.cleanup();
     }
@@ -2945,8 +2962,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
+          // Dev mode's own sync writes settings too: this one is the choice.
           const update = wsRequests.find(
-            (request) => request._tag === WS_METHODS.serverUpdateSettings,
+            (request) =>
+              request._tag === WS_METHODS.serverUpdateSettings &&
+              (request as { patch?: { harnessUnoCredits?: unknown } }).patch?.harnessUnoCredits,
           ) as { patch?: { harnessUnoCredits?: Record<string, boolean> } } | undefined;
           expect(update?.patch?.harnessUnoCredits).toEqual({ claudeAgent: true });
           expect(turnStartRequests()).toHaveLength(1);
@@ -3075,12 +3095,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      (await waitForButtonByText("Current checkout")).click();
-      await page.getByText("New worktree", { exact: true }).click();
+      (await waitForButtonByText("Project folder")).click();
+      await page.getByText("New separate copy", { exact: true }).click();
 
       await vi.waitFor(
         () => {
-          expect(findButtonByText("New worktree")).toBeTruthy();
+          expect(findButtonByText("New separate copy")).toBeTruthy();
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -3174,8 +3194,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      (await waitForButtonByText("Current checkout")).click();
-      await page.getByText("New worktree", { exact: true }).click();
+      (await waitForButtonByText("Project folder")).click();
+      await page.getByText("New separate copy", { exact: true }).click();
       await page.getByText("From main", { exact: true }).click();
       await page.getByText("release/next", { exact: true }).click();
 
@@ -3270,8 +3290,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      (await waitForButtonByText("Current checkout")).click();
-      await page.getByText("New worktree", { exact: true }).click();
+      (await waitForButtonByText("Project folder")).click();
+      await page.getByText("New separate copy", { exact: true }).click();
       await page.getByText("From main", { exact: true }).click();
       await page.getByText("release/next", { exact: true }).click();
 
@@ -3298,14 +3318,14 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(findButtonByText("Current checkout")).toBeTruthy();
+          expect(findButtonByText("Project folder")).toBeTruthy();
           expect(findButtonByText("From release/next")).toBeNull();
         },
         { timeout: 8_000, interval: 16 },
       );
 
-      (await waitForButtonByText("Current checkout")).click();
-      await page.getByText("New worktree", { exact: true }).click();
+      (await waitForButtonByText("Project folder")).click();
+      await page.getByText("New separate copy", { exact: true }).click();
 
       await vi.waitFor(
         () => {
@@ -3394,6 +3414,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("toggles plan mode with Shift+Tab only while the composer is focused", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
+      // Build/Plan is opt-in (Settings → Legacy «Plan mode (legacy)»).
+      clientSettings: { planModeEnabled: true },
       snapshot: createSnapshotForTargetUser({
         targetMessageId: "msg-user-target-hotkey" as MessageId,
         targetText: "hotkey target",
@@ -3429,9 +3451,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal build mode",
-          );
+          expect((await waitForInteractionModeButton("Plan")).title).toContain("return to build");
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -4071,74 +4091,45 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("hides the archive action when the pointer leaves a thread row", async () => {
+  it("hides a row's actions when the pointer leaves it", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
         targetMessageId: "msg-user-archive-hover-test" as MessageId,
         targetText: "archive hover target",
       }),
+      configureFixture: (nextFixture) => {
+        const { environment } = nextFixture.serverConfig;
+        const canSettle = {
+          ...environment,
+          capabilities: { ...environment.capabilities, threadSettlement: true },
+        };
+        nextFixture.serverConfig = { ...nextFixture.serverConfig, environment: canSettle };
+        nextFixture.welcome = { ...nextFixture.welcome, environment: canSettle };
+      },
     });
 
     try {
-      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
-
+      showFullSidebar();
+      const threadRow = page.getByTestId("sidebar-row-d").first();
       await expect.element(threadRow).toBeInTheDocument();
-      const archiveButton = await waitForElement(
-        () =>
-          document.querySelector<HTMLButtonElement>(`[data-testid="thread-archive-${THREAD_ID}"]`),
-        "Unable to find archive button.",
+      const actions = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="sidebar-row-actions"]'),
+        "Unable to find the row's actions.",
       );
-      const archiveAction = archiveButton.parentElement;
-      expect(
-        archiveAction,
-        "Archive button should render inside a visibility wrapper.",
-      ).not.toBeNull();
-      expect(getComputedStyle(archiveAction!).opacity).toBe("0");
+      expect(getComputedStyle(actions).opacity).toBe("0");
 
       await threadRow.hover();
-      await vi.waitFor(
-        () => {
-          expect(getComputedStyle(archiveAction!).opacity).toBe("1");
-        },
-        { timeout: 4_000, interval: 16 },
-      );
+      await vi.waitFor(() => expect(getComputedStyle(actions).opacity).toBe("1"), {
+        timeout: 4_000,
+        interval: 16,
+      });
 
       await page.getByTestId("composer-editor").hover();
-      await vi.waitFor(
-        () => {
-          expect(getComputedStyle(archiveAction!).opacity).toBe("0");
-        },
-        { timeout: 4_000, interval: 16 },
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("exposes the full thread title on the sidebar row tooltip", async () => {
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-thread-tooltip-target" as MessageId,
-        targetText: "thread tooltip target",
-      }),
-    });
-
-    try {
-      const threadTitle = page.getByTestId(`thread-title-${THREAD_ID}`);
-
-      await expect.element(threadTitle).toBeInTheDocument();
-      await threadTitle.hover();
-
-      await vi.waitFor(
-        () => {
-          const tooltip = document.querySelector<HTMLElement>('[data-slot="tooltip-popup"]');
-          expect(tooltip).not.toBeNull();
-          expect(tooltip?.textContent).toContain(THREAD_TITLE);
-        },
-        { timeout: 8_000, interval: 16 },
-      );
+      await vi.waitFor(() => expect(getComputedStyle(actions).opacity).toBe("0"), {
+        timeout: 4_000,
+        interval: 16,
+      });
     } finally {
       await mounted.cleanup();
     }
@@ -4188,42 +4179,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("shows the confirm archive action after clicking the archive button", async () => {
-    localStorage.setItem(
-      "t3code:client-settings:v1",
-      JSON.stringify({
-        ...DEFAULT_CLIENT_SETTINGS,
-        confirmThreadArchive: true,
-      }),
-    );
-
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-archive-confirm-test" as MessageId,
-        targetText: "archive confirm target",
-      }),
-    });
-
-    try {
-      const threadRow = page.getByTestId(`thread-row-${THREAD_ID}`);
-
-      await expect.element(threadRow).toBeInTheDocument();
-      await threadRow.hover();
-
-      const archiveButton = page.getByTestId(`thread-archive-${THREAD_ID}`);
-      await expect.element(archiveButton).toBeInTheDocument();
-      await archiveButton.click();
-
-      const confirmButton = page.getByTestId(`thread-archive-confirm-${THREAD_ID}`);
-      await expect.element(confirmButton).toBeInTheDocument();
-      await expect.element(confirmButton).toBeVisible();
-    } finally {
-      localStorage.removeItem("t3code:client-settings:v1");
-      await mounted.cleanup();
-    }
-  });
-
   it("canonicalizes promoted draft threads to the server thread route", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -4235,7 +4190,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       // Wait for the sidebar to render with the project.
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4295,7 +4251,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4327,7 +4284,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("creates a fresh worktree draft from an existing worktree thread when the default mode is worktree", async () => {
+  it("keeps the open chat's worktree on New chat when the default mode is worktree", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: {
@@ -4359,7 +4316,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4373,7 +4331,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       expect(useComposerDraftStore.getState().getDraftSession(newDraftId)).toMatchObject({
         envMode: "worktree",
-        worktreePath: null,
+        worktreePath: "/repo/.t3/worktrees/existing",
       });
     } finally {
       await mounted.cleanup();
@@ -4390,7 +4348,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4443,7 +4402,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4498,7 +4458,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4538,7 +4499,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4580,7 +4542,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
+      showFullSidebar();
+      const newThreadButton = page.getByTestId("sidebar-d-new-chat");
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
@@ -4705,10 +4668,19 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("does not consume chat.new when there is no project context", async () => {
+  it("makes a starter project on chat.new when there is no project", async () => {
+    // Answered after unmounting: there's no daemon here to bring the project in,
+    // and a chat opened on a project that never arrives would redirect forever.
+    let answerProjectCreate: (reply: unknown) => void = () => {};
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createProjectlessSnapshot(),
+      resolveRpc: (body) =>
+        body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand
+          ? new Promise((resolve) => {
+              answerProjectCreate = resolve;
+            })
+          : undefined,
       configureFixture: (nextFixture) => {
         nextFixture.serverConfig = {
           ...nextFixture.serverConfig,
@@ -4736,12 +4708,22 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForServerConfigToApply();
       dispatchChatNewShortcut();
-      await waitForLayout();
 
-      expect(mounted.router.state.location.pathname).toBe(serverThreadPath(THREAD_ID));
-      expect(Object.keys(useComposerDraftStore.getState().draftThreadsByThreadKey)).toHaveLength(0);
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+                request.type === "project.create",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
     } finally {
       await mounted.cleanup();
+      answerProjectCreate({ sequence: fixture.snapshot.snapshotSequence + 1 });
     }
   });
 
@@ -4777,7 +4759,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteShortcutLabel()]);
+      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteTrigger()]);
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
@@ -4829,12 +4811,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteShortcutLabel()]);
+      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteTrigger()]);
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await page.getByPlaceholder("Search commands, projects, and threads...").fill("settings");
+      await page.getByPlaceholder("Search commands, projects, and chats...").fill("settings");
       await expect.element(palette.getByText("Open settings", { exact: true })).toBeInTheDocument();
       await expect
         .element(palette.getByText("New chat in Project", { exact: true }))
@@ -4904,12 +4886,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteShortcutLabel()]);
+      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteTrigger()]);
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await palette.getByText("Add project", { exact: true }).click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
       await palette.getByText("Local folder", { exact: true }).click();
 
       const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
@@ -5024,12 +5006,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteShortcutLabel()]);
+      await Promise.all([waitForServerConfigToApply(), waitForCommandPaletteTrigger()]);
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await palette.getByText("Add project", { exact: true }).click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
       await palette.getByText("GitHub repository", { exact: true }).click();
 
       const repositoryInput = await waitForCommandPaletteInput(
@@ -5079,7 +5061,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("opens add project browse mode from the sidebar add button", async () => {
+  it("opens add project browse mode from the legacy add project flow", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotForTargetUser({
@@ -5103,7 +5085,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForServerConfigToApply();
 
-      await page.getByTestId("sidebar-add-project-trigger").click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
 
       const palette = page.getByTestId("command-palette");
       await expect.element(palette).toBeInTheDocument();
@@ -5174,7 +5156,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForServerConfigToApply();
 
-      await page.getByTestId("sidebar-add-project-trigger").click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
 
       const palette = page.getByTestId("command-palette");
       await expect.element(palette).toBeInTheDocument();
@@ -5237,7 +5219,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForServerConfigToApply();
       const palette = page.getByTestId("command-palette");
-      await page.getByTestId("sidebar-add-project-trigger").click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
 
       await expect.element(palette).toBeInTheDocument();
       await palette.getByText("Local folder", { exact: true }).click();
@@ -5325,7 +5307,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForServerConfigToApply();
       const palette = page.getByTestId("command-palette");
-      await page.getByTestId("sidebar-add-project-trigger").click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
 
       await expect.element(palette).toBeInTheDocument();
       await palette.getByText("Local folder", { exact: true }).click();
@@ -5456,7 +5438,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await palette.getByText("Add project", { exact: true }).click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
       await expect.element(palette.getByText("Environments", { exact: true })).toBeInTheDocument();
       await expect
         .element(palette.getByText("This device", { exact: true }).first())
@@ -5557,10 +5539,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForServerConfigToApply();
       window.desktopBridge = {
         pickFolder,
+        getLocalEnvironmentBootstrap: () => null,
         setTheme: vi.fn().mockResolvedValue(undefined),
       } as unknown as NonNullable<typeof window.desktopBridge>;
 
-      await page.getByTestId("sidebar-add-project-trigger").click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
 
       const palette = page.getByTestId("command-palette");
       await expect.element(palette).toBeInTheDocument();
@@ -5678,12 +5661,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForServerConfigToApply();
-      await waitForCommandPaletteShortcutLabel();
+      await waitForCommandPaletteTrigger();
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await palette.getByText("Add project", { exact: true }).click();
+      useCommandPaletteStore.getState().openLegacyAddProject();
       await palette.getByText("Local folder", { exact: true }).click();
 
       const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
@@ -5777,12 +5760,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForServerConfigToApply();
-      await waitForCommandPaletteShortcutLabel();
+      await waitForCommandPaletteTrigger();
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await page.getByPlaceholder("Search commands, projects, and threads...").fill("docs");
+      await page.getByPlaceholder("Search commands, projects, and chats...").fill("docs");
       await expect.element(palette.getByText("Docs Portal", { exact: true })).toBeInTheDocument();
       await expect
         .element(palette.getByText("Release checklist", { exact: true }))
@@ -5826,12 +5809,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForServerConfigToApply();
-      await waitForCommandPaletteShortcutLabel();
+      await waitForCommandPaletteTrigger();
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await page.getByPlaceholder("Search commands, projects, and threads...").fill("clients/docs");
+      await page.getByPlaceholder("Search commands, projects, and chats...").fill("clients/docs");
       await expect.element(palette.getByText("Docs Portal", { exact: true })).toBeInTheDocument();
       await expect
         .element(palette.getByText("/repo/clients/docs-portal", { exact: true }))
@@ -5888,12 +5871,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForServerConfigToApply();
-      await waitForCommandPaletteShortcutLabel();
+      await waitForCommandPaletteTrigger();
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await page.getByPlaceholder("Search commands, projects, and threads...").fill("clients/docs");
+      await page.getByPlaceholder("Search commands, projects, and chats...").fill("clients/docs");
       await expect.element(palette.getByText("Docs Portal", { exact: true })).toBeInTheDocument();
       await expect
         .element(palette.getByText("/repo/clients/docs-portal", { exact: true }))
@@ -5944,12 +5927,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForServerConfigToApply();
-      await waitForCommandPaletteShortcutLabel();
+      await waitForCommandPaletteTrigger();
       const palette = page.getByTestId("command-palette");
       await openCommandPaletteFromTrigger();
 
       await expect.element(palette).toBeInTheDocument();
-      await page.getByPlaceholder("Search commands, projects, and threads...").fill("docs-archive");
+      await page.getByPlaceholder("Search commands, projects, and chats...").fill("docs-archive");
       await expect
         .element(palette.getByText("Archived Docs Notes", { exact: true }))
         .not.toBeInTheDocument();
@@ -5990,12 +5973,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const newThreadButton = page.getByTestId("new-thread-button");
-      await expect.element(newThreadButton).toBeInTheDocument();
+      await waitForNewThreadShortcutLabel();
       await waitForServerConfigToApply();
-      await newThreadButton.click();
+      const composerBeforeDraft = await waitForComposerEditor();
+      composerBeforeDraft.focus();
+      await waitForLayout();
 
-      const promotedThreadPath = await waitForURL(
+      const promotedThreadPath = await triggerChatNewShortcutUntilPath(
         mounted.router,
         (path) => UUID_ROUTE_RE.test(path),
         "Route should have changed to a promoted draft thread UUID.",

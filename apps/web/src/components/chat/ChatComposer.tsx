@@ -126,11 +126,11 @@ import {
 import {
   loadComposerStash,
   registerStashTarget,
+  setAsideOrBringBack,
   type StashedMessage,
-  useComposerStashStore,
 } from "../../composerStashStore";
 import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
-import { ComposerStashMenu } from "./ComposerStashMenu";
+import { ComposerStashMenu, toastSetAside } from "./ComposerStashMenu";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
 import { useSettings } from "../../hooks/useSettings";
@@ -2951,7 +2951,7 @@ export const ChatComposer = memo(
         composerTerminalContextsRef.current,
       );
       const quotes = useComposerQuotesStore.getState().items[activeThreadId] ?? [];
-      const entry = useComposerStashStore.getState().stash({
+      const result = setAsideOrBringBack({
         text,
         files: [
           ...composerImagesRef.current.map((image) => image.file),
@@ -2959,40 +2959,22 @@ export const ChatComposer = memo(
         ],
         quotes,
       });
-      if (!entry) {
-        const { entries } = useComposerStashStore.getState();
-        const only = entries.length === 1 ? entries[0] : undefined;
-        if (only) {
-          const taken = useComposerStashStore.getState().take(only.id);
-          if (taken) restoreStashedEntry(taken);
-        } else if (entries.length > 1) {
-          setIsStashMenuOpen(true);
-        }
-        return;
-      }
+      if (result.kind === "back") restoreStashedEntry(result.entry);
+      if (result.kind === "pick") setIsStashMenuOpen(true);
+      if (result.kind !== "aside") return;
       useComposerQuotesStore.getState().take(activeThreadId);
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       setComposerFilesState(() => []);
       setComposerCursor(0);
       setComposerTrigger(null);
-      const leftBehind =
-        composerVideosRef.current.length > 0 ||
-        useScreenRecordingStore.getState().items[activeThreadId] !== undefined;
-      toastManager.add({
-        type: "success",
-        title: "Set aside",
-        description: leftBehind
-          ? "Videos and recordings stay in this chat."
-          : "⌘S on an empty box brings it back, in any chat.",
-        timeout: 4_000,
-        actionProps: {
-          children: "Undo",
-          onClick: () => {
-            const taken = useComposerStashStore.getState().take(entry.id);
-            if (taken) restoreStashedEntryRef.current(taken);
-          },
-        },
+      toastSetAside(result.entry, {
+        leftBehind:
+          composerVideosRef.current.length > 0 ||
+          useScreenRecordingStore.getState().items[activeThreadId] !== undefined
+            ? "Videos and recordings stay in this chat."
+            : null,
+        onRestore: (entry) => restoreStashedEntryRef.current(entry),
       });
     };
 
