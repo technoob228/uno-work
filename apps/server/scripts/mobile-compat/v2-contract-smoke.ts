@@ -383,9 +383,12 @@ const program = Effect.gen(function* () {
     });
     if (!response.ok) fail("thread.read (Work)", `${response.status} ${await response.text()}`);
   });
+  // Upstream decodes times to DateTime objects: compare through their JSON.
+  const msOf = (value: unknown) =>
+    value == null ? Number.NaN : Date.parse(JSON.parse(JSON.stringify(value)) as string);
   yield* waitFor(
     "Read in Work → read on the phone",
-    () => Date.parse(shellThread(threadId)?.lastVisitedAt ?? "") >= Date.parse(readAt),
+    () => msOf(shellThread(threadId)?.lastVisitedAt) >= Date.parse(readAt),
   );
   const readRow = yield* Effect.promise(workRow);
   if (readRow?.readAt !== readAt) fail("Read in Work → read on the phone", { workReadAt: readRow?.readAt });
