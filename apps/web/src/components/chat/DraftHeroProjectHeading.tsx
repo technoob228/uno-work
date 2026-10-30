@@ -2,7 +2,8 @@
  * "What should we do in [folder] on [computer]?" — upstream T3 Code's
  * `DraftHeroProjectHeading` (one line when it fits, the question and the
  * pickers on two lines when it doesn't), with Uno Work's words and a second
- * picker for the computer.
+ * picker for the computer. With an assistant picked the question is shorter:
+ * "Ask [Ada]".
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
@@ -11,6 +12,7 @@ export function DraftHeroProjectHeading({
   computerPicker,
   folderName,
   computerName,
+  asksAssistant = false,
 }: {
   folderPicker: ReactNode;
   /** Null: the question is only about the folder. */
@@ -18,6 +20,8 @@ export function DraftHeroProjectHeading({
   /** Plain names, for measuring whether the sentence fits on one line. */
   folderName: string;
   computerName: string | null;
+  /** `folderPicker` names an assistant (it lives where the assistant does: no computer). */
+  asksAssistant?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const inlineRef = useRef<HTMLSpanElement>(null);
@@ -43,6 +47,18 @@ export function DraftHeroProjectHeading({
     observer.observe(inline);
     return () => observer.disconnect();
   }, []);
+
+  if (asksAssistant) {
+    return (
+      <h1
+        className="flex w-full items-baseline justify-center gap-2 text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
+        data-testid="draft-hero-heading"
+      >
+        <span className="shrink-0">Ask</span>
+        <span className="min-w-0">{folderPicker}</span>
+      </h1>
+    );
+  }
 
   return (
     <div ref={containerRef} className="group/draft-hero relative w-full" data-inline={fitsInline}>

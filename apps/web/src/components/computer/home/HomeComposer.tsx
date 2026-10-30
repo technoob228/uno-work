@@ -27,10 +27,13 @@ import {
   DEFAULT_RUNTIME_MODE,
   type EnvironmentId,
   type ModelSelection,
+  type ProjectId,
   type ProviderInstanceId,
   type ProviderOptionSelection,
   type RuntimeMode,
+  type ScopedProjectRef,
 } from "@t3tools/contracts";
+import { scopeProjectRef } from "@t3tools/client-runtime";
 import {
   ArrowUpIcon,
   FileIcon,
@@ -80,6 +83,7 @@ import {
 import { useScreenRecordingStore } from "../../../screenRecording/recordingStore";
 import { type DictationDraft, resolveDictationInsert } from "../../../hooks/dictationDraft";
 import { isDictationSupported, useDictation } from "../../../hooks/useDictation";
+import { type TeamMember, useStartableAssistants } from "../../assistants/useAssistantTeam";
 import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
 import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
@@ -110,6 +114,8 @@ export interface HomeStartOptions {
   readonly environmentId?: EnvironmentId | null;
   /** The folder to work in; null = the home folder. */
   readonly folder: string | null;
+  /** The chat starts with this assistant, in its folder and on its own model. */
+  readonly assistant?: ScopedProjectRef | null;
   /** Null = nothing usable to pick; the chat falls back to its own default. */
   readonly modelSelection: ModelSelection | null;
   readonly runtimeMode: RuntimeMode;
@@ -230,6 +236,8 @@ export function HomeComposer({
   const [handoff] = useState(() => useSetupHandoff.getState().take());
   const [text, setText] = useState(handoff?.text ?? "");
   const [folder, setFolder] = useState<PickedFolder | null>(handoff?.folder ?? defaultFolder);
+  const assistants = useStartableAssistants();
+  const [assistant, setAssistant] = useState<TeamMember | null>(null);
   const [starting, setStarting] = useState(false);
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(DEFAULT_RUNTIME_MODE);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -359,6 +367,14 @@ export function HomeComposer({
       await onStart(prompt, {
         environmentId: targetEnvironmentId,
         folder: folder?.cwd ?? null,
+        ...(assistant
+          ? {
+              assistant: scopeProjectRef(
+                assistant.environmentId as EnvironmentId,
+                assistant.projectId as ProjectId,
+              ),
+            }
+          : {}),
         modelSelection: picker.selection,
         runtimeMode,
         images,
@@ -485,7 +501,7 @@ export function HomeComposer({
             }
           }}
           rows={minimal ? 3 : 2}
-          placeholder={placeholder}
+          placeholder={assistant ? `Ask ${assistant.profile.name}...` : placeholder}
           aria-label={ariaLabel}
           data-testid="home-composer"
           className={cn(
@@ -505,7 +521,7 @@ export function HomeComposer({
               className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
-              {minimal ? null : (
+              {minimal || assistant ? null : (
                 <NewChatComputerPicker
                   variant="chip"
                   environmentId={targetEnvironmentId}
@@ -523,16 +539,23 @@ export function HomeComposer({
                   variant="chip"
                   environmentId={targetEnvironmentId}
                   folder={folder}
+                  assistants={assistants}
+                  assistant={assistant}
+                  onPickAssistant={(member) => {
+                    setAssistant(member);
+                    ref.current?.focus();
+                  }}
                   onPick={(next) => {
                     // A folder the picker just made is a project already; the
                     // chat finds it by path when the task starts.
                     setFolder(next);
+                    setAssistant(null);
                     ref.current?.focus();
                   }}
                   testId="home-folder-chip"
                 />
               )}
-              {picker.selection ? (
+              {picker.selection && !assistant ? (
                 <ProviderModelPicker
                   compact
                   activeInstanceId={picker.selection.instanceId}
@@ -556,7 +579,7 @@ export function HomeComposer({
                   data-testid="home-model-chip-pending"
                 />
               ) : null}
-              {picker.selection && selectedEntry ? (
+              {picker.selection && selectedEntry && !assistant ? (
                 <TraitsPicker
                   provider={selectedEntry.driverKind}
                   models={selectedEntry.models}
@@ -569,7 +592,7 @@ export function HomeComposer({
                   triggerClassName="h-7 rounded-full text-xs"
                 />
               ) : null}
-              {minimal ? null : (
+              {minimal || assistant ? null : (
                 <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
                   <SelectTrigger
                     variant="ghost"
