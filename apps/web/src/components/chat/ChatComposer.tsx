@@ -110,6 +110,7 @@ import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
+import { ComposerPlanLimits, useChatPlanLimits } from "./ComposerPlanLimits";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { useDevMode } from "../../devMode";
 import { useSettings } from "../../hooks/useSettings";
@@ -982,6 +983,11 @@ export const ChatComposer = memo(
       () => selectedProviderEntry?.models ?? [],
       [selectedProviderEntry],
     );
+    const chatPlanLimits = useChatPlanLimits({
+      environmentId,
+      driver: selectedProvider,
+      instanceId: selectedInstanceId,
+    });
 
     const composerProviderState = useMemo(
       () =>
@@ -1164,6 +1170,7 @@ export const ChatComposer = memo(
     const mobileComposerExpandFrameRef = useRef<number | null>(null);
     const mobileComposerExpandReleaseFrameRef = useRef<number | null>(null);
     const mobileComposerExpandInFlightRef = useRef(false);
+    const [isPlanLimitsOpen, setIsPlanLimitsOpen] = useState(false);
     const dragDepthRef = useRef(0);
     const pasteAsTextUntilRef = useRef(0);
     const videoAbortControllersRef = useRef<Map<string, AbortController>>(new Map());
@@ -1239,6 +1246,17 @@ export const ChatComposer = memo(
             label: "/model",
             description: "Switch the model for this chat",
           },
+          ...(chatPlanLimits.accounts.length > 0
+            ? ([
+                {
+                  id: "slash:limits",
+                  type: "slash-command",
+                  command: "limits",
+                  label: "/limits",
+                  description: "See how much of your AI plan is left",
+                },
+              ] as const)
+            : []),
           ...(planModeUiEnabled
             ? ([
                 {
@@ -1295,6 +1313,7 @@ export const ChatComposer = memo(
     }, [
       composerTrigger,
       planModeUiEnabled,
+      chatPlanLimits.accounts.length,
       selectedProvider,
       selectedProviderStatus,
       workspaceEntries,
@@ -2071,6 +2090,17 @@ export const ChatComposer = memo(
             if (applied) {
               setComposerHighlightedItemId(null);
               setIsComposerModelPickerOpen(true);
+            }
+            return;
+          }
+          if (item.command === "limits") {
+            const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+              focusEditorAfterReplace: false,
+            });
+            if (applied) {
+              setComposerHighlightedItemId(null);
+              setIsPlanLimitsOpen(true);
             }
             return;
           }
@@ -4004,6 +4034,12 @@ export const ChatComposer = memo(
                   }
                   className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                 >
+                  <ComposerPlanLimits
+                    limits={chatPlanLimits}
+                    compact={isComposerPrimaryActionsCompact}
+                    open={isPlanLimitsOpen}
+                    onOpenChange={setIsPlanLimitsOpen}
+                  />
                   <ComposerFooterPrimaryActions
                     compact={isComposerPrimaryActionsCompact}
                     activeContextWindow={activeContextWindow}
