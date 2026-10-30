@@ -83,7 +83,11 @@ export function useSetMode(member: TeamMember | null) {
 const ICON: Record<AssistantMode, typeof ZapIcon> = { itself: ZapIcon, "asks-first": HandIcon };
 
 /** The chip at the top of its chat: "✋ Cautious ▾". */
-export function AssistantModeChip(props: { readonly member: TeamMember }) {
+export function AssistantModeChip(props: {
+  readonly member: TeamMember;
+  /** A phone: the icon alone (the level is its hover text and its name). */
+  readonly compact?: boolean;
+}) {
   const { member } = props;
   const teamShown = useTeamShown();
   const mode = modeOf(member);
@@ -96,6 +100,8 @@ export function AssistantModeChip(props: { readonly member: TeamMember }) {
       <MenuTrigger
         data-testid="assistant-mode-chip"
         disabled={saving}
+        aria-label={`Permission level: ${MODE_COPY[mode].label}`}
+        title={`Permission level: ${MODE_COPY[mode].label}. ${MODE_COPY[mode].line} Click to change.`}
         className={cn(
           "inline-flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2 text-xs font-medium sm:h-6",
           mode === "asks-first"
@@ -104,8 +110,8 @@ export function AssistantModeChip(props: { readonly member: TeamMember }) {
         )}
       >
         <Icon className="size-3.5" />
-        {MODE_COPY[mode].label}
-        <ChevronDownIcon className="size-3 opacity-60" />
+        {props.compact ? null : MODE_COPY[mode].label}
+        {props.compact ? null : <ChevronDownIcon className="size-3 opacity-60" />}
       </MenuTrigger>
       <MenuPopup align="end" side="bottom" className="min-w-64">
         {(["itself", "asks-first"] as const).map((item) => {
@@ -136,13 +142,13 @@ export function AssistantModeChip(props: { readonly member: TeamMember }) {
 }
 
 /** Uno's chip, for Uno's own chats (it has one per account in variant D). */
-export function UnoModeChip(props: { readonly environmentId: string }) {
+export function UnoModeChip(props: { readonly environmentId: string; readonly compact?: boolean }) {
   const team = useAssistantTeam();
   const uno =
     team.find((member) => member.isUno && member.environmentId === props.environmentId) ??
     team.find((member) => member.isUno) ??
     null;
-  return uno ? <AssistantModeChip member={uno} /> : null;
+  return uno ? <AssistantModeChip member={uno} compact={props.compact ?? false} /> : null;
 }
 
 /** The two modes side by side on its page. */
