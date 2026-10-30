@@ -494,3 +494,52 @@ describe("Claude plan signed in here → new chats on Claude, none → Uno · Sm
     ).toEqual({ instanceId: "opencode", model: "uno/uno/smart" });
   });
 });
+
+describe("the model for new chats, by scope (Settings → the sentence)", () => {
+  const app = { instanceId: id("uno"), model: "uno/moonshotai/kimi-k2.7-code" };
+  const computer = { instanceId: id("claudeAgent"), model: "claude-sonnet-5" };
+  const project = { instanceId: id("claudeAgent"), model: "claude-opus-4-7" };
+  const settings = {
+    ...DEFAULT_UNIFIED_SETTINGS,
+    newChatModelSelection: app,
+    defaultModelSelection: computer,
+  };
+
+  it("takes the project's, then the computer's, then the app's", () => {
+    const providers = [uno, claude];
+    expect(newChatModelSelection({ providers, settings, projectChoice: project })?.model).toBe(
+      project.model,
+    );
+    expect(newChatModelSelection({ providers, settings })?.model).toBe(computer.model);
+    expect(
+      newChatModelSelection({
+        providers,
+        settings: { ...settings, defaultModelSelection: null },
+      })?.model,
+    ).toBe(app.model);
+  });
+
+  it("falls to the next one when a choice can't run here", () => {
+    expect(
+      newChatModelSelection({ providers: [uno], settings, projectChoice: project })?.model,
+    ).toBe(app.model);
+  });
+
+  it("beats the person's own agent and the Claude plan in a new chat", () => {
+    expect(
+      newThreadStartSelection({
+        stickyActiveProvider: null,
+        projectDefault: null,
+        projectChoice: project,
+        providers: [uno, claude],
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      })?.model,
+    ).toBe(project.model);
+  });
+
+  it("leaves new chats as they were when nothing is set", () => {
+    expect(
+      newChatModelSelection({ providers: [uno, claude], settings: DEFAULT_UNIFIED_SETTINGS }),
+    ).toBeNull();
+  });
+});

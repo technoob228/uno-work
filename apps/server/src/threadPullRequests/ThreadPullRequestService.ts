@@ -25,6 +25,7 @@ import {
 } from "@t3tools/contracts";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { parseRemoteRepositoryPath } from "@t3tools/shared/sourceControl";
 import type { Scope } from "effect";
 import { Cause, Context, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
@@ -140,10 +141,12 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     const readSettings = settings.getSettings.pipe(
       Effect.map((current) => ({
         devMode: current.devMode,
-        autoSettleOnMerge: current.sidebarAutoSettleOnMerge,
+        // The switch can differ per project (Settings → Source Control).
+        autoSettleOnMerge: (projectId: string) =>
+          resolveProjectSettings(current, projectId).settings.sidebarAutoSettleOnMerge,
       })),
       // A hiccup reading the settings must not spend the person's limits.
-      Effect.orElseSucceed(() => ({ devMode: false, autoSettleOnMerge: false })),
+      Effect.orElseSucceed(() => ({ devMode: false, autoSettleOnMerge: () => false })),
     );
 
     const anyClientConnected = sessions.listActive().pipe(
@@ -376,9 +379,18 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
       });
 
     /** Settled by hand or moving on: `thread.settle` refuses, and the next pass looks again. */
-    const settleFinished = (threads: ReadonlyArray<SweepThread>, autoSettleOnMerge: boolean) =>
+    const settleFinished = (
+      threads: ReadonlyArray<SweepThread>,
+      autoSettleOnMerge: (projectId: string) => boolean,
+    ) =>
       Effect.forEach(
-        threads.filter((thread) => shouldAutoSettle({ thread, autoSettleOnMerge, nowMs: nowMs() })),
+        threads.filter((thread) =>
+          shouldAutoSettle({
+            thread,
+            autoSettleOnMerge: autoSettleOnMerge(thread.projectId),
+            nowMs: nowMs(),
+          }),
+        ),
         (thread) =>
           Effect.gen(function* () {
             const threadId = ThreadId.make(thread.threadId);

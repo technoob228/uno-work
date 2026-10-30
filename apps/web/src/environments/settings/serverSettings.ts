@@ -150,8 +150,8 @@ export function useUpdateEnvironmentSettings(
 export async function updateEnvironmentSettings(
   environmentId: EnvironmentId,
   patch: ServerSettingsPatch,
-): Promise<void> {
-  if (Object.keys(patch).length === 0) return;
+): Promise<ServerSettings | undefined> {
+  if (Object.keys(patch).length === 0) return undefined;
 
   if (isPrimaryEnvironmentId(environmentId)) {
     // On a cold start the atom is still null until the RPC welcome lands;
@@ -160,12 +160,11 @@ export async function updateEnvironmentSettings(
     const previousSettings = currentConfig.settings;
     applySettingsUpdated(applyServerSettingsPatch(previousSettings, patch));
     try {
-      await ensureLocalApi().server.updateSettings(patch);
+      return await ensureLocalApi().server.updateSettings(patch);
     } catch (error) {
       applySettingsUpdated(previousSettings);
       throw error;
     }
-    return;
   }
 
   const connection = readEnvironmentConnection(environmentId);
@@ -188,7 +187,7 @@ export async function updateEnvironmentSettings(
   }
 
   try {
-    await connection.client.server.updateSettings(patch);
+    return await connection.client.server.updateSettings(patch);
   } catch (error) {
     if (previousConfig) {
       useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {

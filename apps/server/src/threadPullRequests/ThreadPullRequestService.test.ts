@@ -51,6 +51,7 @@ interface World {
   now: number;
   devMode: boolean;
   autoSettleOnMerge: boolean;
+  projectSettingsOverrides: Record<string, { sidebarAutoSettleOnMerge?: boolean }>;
   clients: boolean;
   shell: Partial<OrchestrationThreadShell>;
   reads: Array<ChangeRequestStatusQuery>;
@@ -64,6 +65,7 @@ const newWorld = (): World => ({
   now: START,
   devMode: true,
   autoSettleOnMerge: true,
+  projectSettingsOverrides: {},
   clients: true,
   shell: {
     session: null,
@@ -124,6 +126,7 @@ const serviceFor = (world: World) =>
             getSettings: Effect.sync(() => ({
               devMode: world.devMode,
               sidebarAutoSettleOnMerge: world.autoSettleOnMerge,
+              projectSettingsOverrides: world.projectSettingsOverrides,
             })) as never,
           }),
           Layer.mock(SessionCredentialService)({
@@ -390,6 +393,33 @@ layer("ThreadPullRequestService", (it) => {
   it.effect("settles after a merge later than the person's last message", () =>
     Effect.gen(function* () {
       const world = newWorld();
+      mergedAnswer(world, iso(START - 1_000));
+      yield* seed({ pullRequests: [openLink] });
+      const service = yield* serviceFor(world);
+      yield* service.tick;
+      yield* service.drain;
+      assert.equal(settles(world).length, 1);
+    }),
+  );
+
+  it.effect("a project can keep its chats when the computer settles them", () =>
+    Effect.gen(function* () {
+      const world = newWorld();
+      world.projectSettingsOverrides = { "project-1": { sidebarAutoSettleOnMerge: false } };
+      mergedAnswer(world, iso(START - 1_000));
+      yield* seed({ pullRequests: [openLink] });
+      const service = yield* serviceFor(world);
+      yield* service.tick;
+      yield* service.drain;
+      assert.equal(settles(world).length, 0);
+    }),
+  );
+
+  it.effect("a project can settle its chats when the computer doesn't", () =>
+    Effect.gen(function* () {
+      const world = newWorld();
+      world.autoSettleOnMerge = false;
+      world.projectSettingsOverrides = { "project-1": { sidebarAutoSettleOnMerge: true } };
       mergedAnswer(world, iso(START - 1_000));
       yield* seed({ pullRequests: [openLink] });
       const service = yield* serviceFor(world);

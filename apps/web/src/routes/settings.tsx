@@ -1,3 +1,4 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { RotateCcwIcon } from "lucide-react";
 import {
   Outlet,
@@ -7,11 +8,30 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
+import {
+  SettingsScopeProvider,
+  useSettingsScope,
+} from "../components/settings/SettingsScopeContext";
+import {
+  SettingsOwnerLine,
+  SettingsScopeSentence,
+} from "../components/settings/SettingsScopeSentence";
 import { SettingsScopeSwitcher } from "../components/settings/SettingsScopeSwitcher";
-import { settingsLandingPath } from "../components/settings/settingsScopeRoutes";
+import { settingsPageScope } from "../components/settings/settingsPageScope";
+import {
+  ALL_COMPUTERS_VALUE,
+  effectiveScopeSearch,
+  type SettingsScopeSearch,
+  validateSettingsScopeSearch,
+} from "../components/settings/settingsScope";
+import {
+  environmentSettingsPath,
+  settingsLandingPath,
+  type EnvironmentSettingsSection,
+} from "../components/settings/settingsScopeRoutes";
 import {
   SIMPLE_SETTINGS_LANDING,
   isSimpleSettingsPath,
@@ -25,7 +45,8 @@ import {
 import { Button } from "../components/ui/button";
 import { SidebarInset } from "../components/ui/sidebar";
 import { isElectron } from "../env";
-import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
+import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import { useActiveMachine } from "../hooks/useActiveMachine";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { useUiStateStore } from "../uiStateStore";
 import { LITE_HOME_PATH } from "../lite/webLite";
@@ -71,6 +92,37 @@ function ScopeSwitchNotice({ pathname }: { readonly pathname: string }) {
   );
 }
 
+/**
+ * The line under the title bar: the sentence where a page can be scoped, a
+ * plain statement of who owns it where it can't.
+ */
+function SettingsScopeLine({ pathname }: { readonly pathname: string }) {
+  const { environmentId: activeEnvironmentId } = useActiveMachine();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { allEnvironments } = useSettingsScope();
+  const pageScope = settingsPageScope(pathname);
+  if (pageScope === null) return null;
+  // Skills go to the computer serving this window; the other pages follow the active one.
+  const ownerComputerId =
+    pageScope.kind === "owned" && pageScope.owner === "skills"
+      ? primaryEnvironmentId
+      : activeEnvironmentId;
+  const ownerComputerLabel =
+    allEnvironments.find((entry) => entry.environmentId === ownerComputerId)?.label ??
+    "this computer";
+  return (
+    <div className="px-6 pt-5 sm:px-8">
+      <div className="mx-auto w-full max-w-3xl px-1">
+        {pageScope.kind === "owned" ? (
+          <SettingsOwnerLine owner={pageScope.owner} computerLabel={ownerComputerLabel} />
+        ) : (
+          <SettingsScopeSentence mode={pageScope.kind} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SettingsContentLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -82,8 +134,43 @@ function SettingsContentLayout() {
   // Dev mode.
   const devMode = useDevMode();
   const simplePage = isSimpleSettingsPath(location.pathname);
-  const showScope = devMode && !simplePage;
-  const badgeInfo = showScope ? settingsScopeBadgeInfo(scopeModel) : null;
+  const pageScope = settingsPageScope(location.pathname);
+  // Pages with the sentence or an owner line say it once, at the top.
+  const showScope =
+    devMode && !simplePage && pageScope?.kind !== "scoped" && pageScope?.kind !== "computer";
+  const badgeInfo = showScope && pageScope === null ? settingsScopeBadgeInfo(scopeModel) : null;
+  const rawSearch = Route.useSearch();
+  const pathEnvironmentId =
+    scopeModel.location.kind === "environment" ? scopeModel.location.environmentId : null;
+  const scopeSearch = useMemo<SettingsScopeSearch>(() => {
+    if (pageScope?.kind === "scoped") return effectiveScopeSearch(rawSearch, pathEnvironmentId);
+    return pathEnvironmentId === null ? {} : { machine: pathEnvironmentId };
+  }, [pageScope?.kind, pathEnvironmentId, rawSearch]);
+  const section = scopeModel.location.section;
+  const selectScope = useCallback(
+    (next: SettingsScopeSearch) => {
+      const project = next.project === undefined ? {} : { project: next.project };
+      const machine = next.machine;
+      // Machine pages keep their computer in the path, so a reload stays on it.
+      if (pathEnvironmentId !== null && machine !== undefined && machine !== ALL_COMPUTERS_VALUE) {
+        void navigate({
+          to: environmentSettingsPath(
+            machine as EnvironmentId,
+            (section ?? "general") as EnvironmentSettingsSection,
+          ),
+          search: project,
+          replace: true,
+        });
+        return;
+      }
+      void navigate({
+        to: location.pathname,
+        search: { ...project, ...(machine === undefined ? {} : { machine }) },
+        replace: true,
+      });
+    },
+    [location.pathname, navigate, pathEnvironmentId, section],
+  );
   // Restoring defaults only ever resets this device's own preferences, so it
   // is offered on the app scope's general page and nowhere else — a button
   // that could mean "reset a daemon" depending on the page would be worse
@@ -162,11 +249,14 @@ function SettingsContentLayout() {
 
         <ScopeSwitchNotice pathname={location.pathname} />
 
-        <SettingsScopeBadgeContext.Provider value={badgeInfo}>
-          <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-            <Outlet />
-          </div>
-        </SettingsScopeBadgeContext.Provider>
+        <SettingsScopeProvider search={scopeSearch} onChange={selectScope}>
+          <SettingsScopeLine pathname={location.pathname} />
+          <SettingsScopeBadgeContext.Provider value={badgeInfo}>
+            <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
+              <Outlet />
+            </div>
+          </SettingsScopeBadgeContext.Provider>
+        </SettingsScopeProvider>
       </div>
     </SidebarInset>
   );
@@ -177,6 +267,7 @@ function SettingsRouteLayout() {
 }
 
 export const Route = createFileRoute("/settings")({
+  validateSearch: validateSettingsScopeSearch,
   beforeLoad: async ({ context, location }) => {
     // Web lite: settings belong to a machine; the account lives in My Uno.
     if (context.authGateState.status === "account-only") {

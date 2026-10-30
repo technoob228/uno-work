@@ -30,7 +30,10 @@ export interface ChatThreadActionContext {
   readonly activeDraftThread: DraftThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
-  readonly defaultThreadEnvMode: DraftThreadEnvMode;
+  /** Per project and computer: a function reads it for the project the chat lands in. */
+  readonly defaultThreadEnvMode:
+    | DraftThreadEnvMode
+    | ((projectRef: ScopedProjectRef) => DraftThreadEnvMode);
   readonly handleNewThread: NewThreadHandler;
   readonly onMissingProject?: () => void;
   /**
@@ -109,9 +112,16 @@ function buildContextualThreadOptions(context: ChatThreadActionContext): NewThre
   };
 }
 
-function buildDefaultThreadOptions(context: ChatThreadActionContext): NewThreadOptions {
+function buildDefaultThreadOptions(
+  context: ChatThreadActionContext,
+  projectRef: ScopedProjectRef,
+): NewThreadOptions {
+  const { defaultThreadEnvMode } = context;
   return {
-    envMode: context.defaultThreadEnvMode,
+    envMode:
+      typeof defaultThreadEnvMode === "function"
+        ? defaultThreadEnvMode(projectRef)
+        : defaultThreadEnvMode,
   };
 }
 
@@ -144,6 +154,6 @@ export async function startNewLocalThreadFromContext(
     return false;
   }
 
-  await context.handleNewThread(projectRef, buildDefaultThreadOptions(context));
+  await context.handleNewThread(projectRef, buildDefaultThreadOptions(context, projectRef));
   return true;
 }

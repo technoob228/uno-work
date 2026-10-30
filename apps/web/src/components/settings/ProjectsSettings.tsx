@@ -1,33 +1,22 @@
 /**
- * Dev mode's Projects page: per project, the model new chats start with and
- * the actions (commands) with their automatic triggers.
+ * Dev mode's Projects page: per project, what new chats start with and the
+ * actions (commands) with their automatic triggers.
  *
- * Saved on the project itself, so it follows the project across its chats. The
- * chat header's actions menu edits the same list.
+ * Defaults follow the scope sentence, so a project on two computers can be set
+ * on both at once. Actions are saved on the project on one computer; the chat
+ * header's actions menu edits the same list.
  *
  * @module components/settings/ProjectsSettings
  */
-import { type EnvironmentId, type ModelSelection, type ProjectScript } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
+import { type EnvironmentId, type ProjectScript } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
-import { useMemo, useState } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { useState } from "react";
 
 import { readEnvironmentApi } from "~/environmentApi";
-import {
-  useEnvironmentProviders,
-  useEnvironmentSettings,
-} from "~/environments/settings/serverSettings";
-import { useSettings } from "~/hooks/useSettings";
 import { newCommandId } from "~/lib/utils";
-import { getCustomModelOptionsByInstance, resolveAppModelSelectionState } from "~/modelSelection";
 import { nextProjectScriptId, replaceProjectScript } from "~/projectScripts";
-import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
-import { selectProjectsForEnvironment, useStore } from "~/store";
 import type { Project } from "~/types";
 
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -45,16 +34,16 @@ import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import {
-  SettingResetButton,
-  SettingsPageContainer,
-  SettingsRow,
-  SettingsSection,
-} from "./settingsLayout";
+  NewChatAccessRow,
+  NewChatModelRow,
+  NewChatWorkspaceRow,
+  PerComputerNote,
+} from "./NewChatDefaultsRows";
+import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { SettingsScopeProvider, useSettingsScope } from "./SettingsScopeContext";
+import { projectsForComputer, type SettingsScopeSearch } from "./settingsScope";
 
-async function saveProject(
-  project: Project,
-  patch: { scripts: ProjectScript[] } | { defaultModelSelection: ModelSelection | null },
-) {
+async function saveProject(project: Project, patch: { scripts: ProjectScript[] }) {
   const api = readEnvironmentApi(project.environmentId);
   if (!api) return;
   try {
@@ -71,64 +60,6 @@ async function saveProject(
       description: error instanceof Error ? error.message : String(error),
     });
   }
-}
-
-function ProjectModelRow(props: { readonly project: Project }) {
-  const { project } = props;
-  const providers = useEnvironmentProviders(project.environmentId);
-  const clientSettings = useSettings();
-  const serverSettings = useEnvironmentSettings(project.environmentId) ?? DEFAULT_UNIFIED_SETTINGS;
-  const merged = useMemo(
-    () => ({
-      ...clientSettings,
-      ...serverSettings,
-      textGenerationModelSelection:
-        project.defaultModelSelection ?? serverSettings.textGenerationModelSelection,
-    }),
-    [clientSettings, serverSettings, project.defaultModelSelection],
-  );
-  const selection = resolveAppModelSelectionState(merged, providers);
-  const entries = sortProviderInstanceEntries(deriveProviderInstanceEntries(providers));
-  const options = getCustomModelOptionsByInstance(
-    merged,
-    providers,
-    selection.instanceId,
-    selection.model,
-  );
-  return (
-    <SettingsRow
-      title="Model for new chats"
-      description={
-        project.defaultModelSelection
-          ? "New chats in this project start with this model."
-          : "Not set: new chats start with your last model."
-      }
-      resetAction={
-        project.defaultModelSelection ? (
-          <SettingResetButton
-            label="project model"
-            onClick={() => void saveProject(project, { defaultModelSelection: null })}
-          />
-        ) : null
-      }
-      control={
-        <ProviderModelPicker
-          activeInstanceId={selection.instanceId}
-          model={selection.model}
-          lockedProvider={null}
-          instanceEntries={entries}
-          modelOptionsByInstance={options}
-          triggerVariant="outline"
-          triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-          onInstanceModelChange={(instanceId, model) =>
-            void saveProject(project, {
-              defaultModelSelection: createModelSelection(instanceId, model),
-            })
-          }
-        />
-      }
-    />
-  );
 }
 
 interface ActionDraft {
@@ -303,24 +234,74 @@ function ProjectActions(props: { readonly project: Project }) {
   );
 }
 
-export function ProjectsSettingsPanel(props: { readonly environmentId: EnvironmentId }) {
-  const projects = useStore(
-    useShallow((state) => selectProjectsForEnvironment(state, props.environmentId)),
+/** One project's rows, scoped to it: the same rows the sentence drives elsewhere. */
+function ProjectSection(props: {
+  readonly projectKey: string;
+  readonly title: string;
+  readonly environmentId: EnvironmentId;
+  readonly machine: string | undefined;
+  readonly actionsProject: Project | null;
+  readonly onSelectScope: (next: SettingsScopeSearch) => void;
+}) {
+  const search: SettingsScopeSearch = {
+    project: props.projectKey,
+    ...(props.machine === undefined ? {} : { machine: props.machine }),
+  };
+  return (
+    <SettingsScopeProvider search={search} onChange={props.onSelectScope}>
+      <SettingsSection title={props.title}>
+        <NewChatModelRow environmentId={props.environmentId} />
+        <NewChatAccessRow />
+        <NewChatWorkspaceRow />
+        {props.actionsProject ? <ProjectActions project={props.actionsProject} /> : null}
+      </SettingsSection>
+    </SettingsScopeProvider>
   );
+}
+
+export function ProjectsSettingsPanel(props: { readonly environmentId: EnvironmentId }) {
+  const { groups, search, scope, selectScope, singleComputer } = useSettingsScope();
+  const projects = projectsForComputer(groups, search.machine).filter(
+    (group) => search.project === undefined || group.projectKey === search.project,
+  );
+  const pickedComputer = search.machine ?? (singleComputer ? props.environmentId : null);
   return (
     <SettingsPageContainer>
       {projects.length === 0 ? (
         <SettingsSection title="Projects">
-          <SettingsRow title="No projects" description="Projects on this computer show up here." />
+          <SettingsRow
+            title="No projects"
+            description={
+              scope.kind === "unavailable"
+                ? scope.message
+                : "Projects on this computer show up here."
+            }
+          />
         </SettingsSection>
       ) : (
-        projects.map((project) => (
-          <SettingsSection key={project.id} title={project.name}>
-            <ProjectModelRow project={project} />
-            <ProjectActions project={project} />
-          </SettingsSection>
-        ))
+        projects.map((group) => {
+          const member =
+            pickedComputer === null
+              ? group.memberProjects.length === 1
+                ? group.memberProjects[0]
+                : null
+              : group.memberProjects.find((entry) => entry.environmentId === pickedComputer);
+          return (
+            <ProjectSection
+              key={group.projectKey}
+              projectKey={group.projectKey}
+              title={group.displayName}
+              environmentId={member?.environmentId ?? group.environmentId}
+              machine={search.machine}
+              actionsProject={member ?? null}
+              onSelectScope={selectScope}
+            />
+          );
+        })
       )}
+      {pickedComputer === null && projects.some((group) => group.memberProjects.length > 1) ? (
+        <PerComputerNote what="Actions" />
+      ) : null}
     </SettingsPageContainer>
   );
 }

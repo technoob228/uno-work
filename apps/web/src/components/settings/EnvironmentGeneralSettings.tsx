@@ -38,12 +38,15 @@ import { useServerAvailableEditors } from "~/rpc/serverState";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { Button } from "../ui/button";
-import { CHAT_WORKSPACE_MODE_EXPLANATIONS, CHAT_WORKSPACE_MODE_LABELS } from "../../plainLanguage";
-import { Explain } from "../Explain";
 import { DraftInput } from "../ui/draft-input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
+import {
+  NewChatAccessRow,
+  NewChatModelRow,
+  NewChatWorkspaceRow,
+  PerComputerNote,
+} from "./NewChatDefaultsRows";
 import {
   SettingResetButton,
   SettingsPageContainer,
@@ -51,6 +54,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
+import { useSettingsScope } from "./SettingsScopeContext";
 import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -69,6 +73,7 @@ export function EnvironmentGeneralSettings({
 }: {
   readonly environmentId: EnvironmentId;
 }) {
+  const { wideScope } = useSettingsScope();
   const config = useEnvironmentServerConfig(environmentId);
   const serverSettings = useEnvironmentSettings(environmentId);
   const providers = useEnvironmentProviders(environmentId);
@@ -153,6 +158,20 @@ export function EnvironmentGeneralSettings({
     const mode = observability?.localTracingEnabled ? "Local trace file" : "Terminal logs only";
     return exports.length > 0 ? `${mode}. OTLP exporting ${exports.join(" and ")}.` : `${mode}.`;
   })();
+
+  // For one project or all computers, only what follows that choice stays.
+  if (wideScope) {
+    return (
+      <SettingsPageContainer>
+        <SettingsSection title="Defaults for new work">
+          <NewChatModelRow environmentId={environmentId} />
+          <NewChatAccessRow />
+          <NewChatWorkspaceRow />
+        </SettingsSection>
+        <PerComputerNote what="The Uno account, files and other defaults" />
+      </SettingsPageContainer>
+    );
+  }
 
   return (
     <SettingsPageContainer>
@@ -292,60 +311,9 @@ export function EnvironmentGeneralSettings({
           }
         />
 
-        <SettingsRow
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              New chats
-              <Explain term="chat" technical />
-            </span>
-          }
-          description="Where a new chat works by default on this machine: straight in the project folder, or in a separate copy (a git worktree) so other chats are not disturbed."
-          resetAction={
-            settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode ? (
-              <SettingResetButton
-                label="new chats"
-                onClick={() =>
-                  save(
-                    { defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode },
-                    "Could not save the chat default",
-                  )
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.defaultThreadEnvMode}
-              onValueChange={(value) => {
-                if (value === "local" || value === "worktree") {
-                  save({ defaultThreadEnvMode: value }, "Could not save the chat default");
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-52" aria-label="Where new chats work">
-                <SelectValue>
-                  {CHAT_WORKSPACE_MODE_LABELS[settings.defaultThreadEnvMode]}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem
-                  hideIndicator
-                  value="local"
-                  title={CHAT_WORKSPACE_MODE_EXPLANATIONS.local}
-                >
-                  {CHAT_WORKSPACE_MODE_LABELS.local}
-                </SelectItem>
-                <SelectItem
-                  hideIndicator
-                  value="worktree"
-                  title={CHAT_WORKSPACE_MODE_EXPLANATIONS.worktree}
-                >
-                  {CHAT_WORKSPACE_MODE_LABELS.worktree}
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
+        <NewChatModelRow environmentId={environmentId} />
+        <NewChatAccessRow />
+        <NewChatWorkspaceRow />
 
         {supportsAgentThreads ? (
           <SettingsRow

@@ -22,6 +22,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 const WRITING_MODES: Record<
   SourceControlWritingStyleMode,
@@ -57,14 +58,15 @@ function useSave(environmentId: EnvironmentId) {
   );
 }
 
-export function PullRequestSettingsSection(props: { readonly environmentId: EnvironmentId }) {
-  const settings = useEnvironmentSettings(props.environmentId) ?? DEFAULT_UNIFIED_SETTINGS;
-  const save = useSave(props.environmentId);
+export function PullRequestSettingsSection() {
+  const settings = useScopedSettings();
+  const save = useUpdateScopedSettings();
   return (
     <SettingsSection title="Pull requests">
       <SettingsRow
         title="Move chats to Done after merge"
         description="A chat with a merged or closed PR moves to Done, unless you wrote in it afterwards. An open PR keeps the chat active."
+        settingKeys={["sidebarAutoSettleOnMerge"]}
         control={
           <Switch
             checked={settings.sidebarAutoSettleOnMerge}

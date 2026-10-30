@@ -40,7 +40,9 @@ import {
   type Icon,
 } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
+import { PerComputerNote } from "./NewChatDefaultsRows";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
+import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { PullRequestSettingsSection, WritingSettingsSection } from "./SourceControlWritingSettings";
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
@@ -336,6 +338,7 @@ export function SourceControlSettingsPanel({
 }) {
   const discovery = useSourceControlDiscovery({ environmentId });
   const devMode = useDevMode();
+  const wideScope = useOptionalSettingsScope()?.wideScope ?? false;
 
   const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
   const hasDiscoveryItems =
@@ -364,9 +367,19 @@ export function SourceControlSettingsPanel({
     </Tooltip>
   );
 
+  // For one project or all computers, only what follows that choice stays.
+  if (wideScope) {
+    return (
+      <SettingsPageContainer>
+        {devMode ? <PullRequestSettingsSection /> : null}
+        <PerComputerNote what="Commit style and Git accounts" />
+      </SettingsPageContainer>
+    );
+  }
+
   return (
     <SettingsPageContainer>
-      {devMode ? <PullRequestSettingsSection environmentId={environmentId} /> : null}
+      {devMode ? <PullRequestSettingsSection /> : null}
       {devMode ? <WritingSettingsSection environmentId={environmentId} /> : null}
       {isInitialScanPending ? (
         <>

@@ -23,7 +23,6 @@
  * template" is not offered: there are no project templates yet.)
  */
 import {
-  DEFAULT_RUNTIME_MODE,
   isAssistantProjectId,
   type FilesystemBrowseEntry,
   type ScopedProjectRef,
@@ -339,7 +338,7 @@ function useFinishNewProject() {
         const sent = await startTask(describedProjectPrompt({ name, folder, ...story }), {
           folder,
           modelSelection: null,
-          runtimeMode: DEFAULT_RUNTIME_MODE,
+          runtimeMode: null,
         }).then(
           () => true,
           () => false,

@@ -80,6 +80,10 @@
       "types": "./src/Struct.ts",
       "import": "./src/Struct.ts"
     },
+    "./projectSettings": {
+      "types": "./src/projectSettings.ts",
+      "import": "./src/projectSettings.ts"
+    },
     "./serverSettings": {
       "types": "./src/serverSettings.ts",
       "import": "./src/serverSettings.ts"

@@ -151,6 +151,7 @@ import {
   resolveSelectableProvider,
 } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
+import { readNewChatDefaults } from "../newChatDefaults";
 import { useFolderChats } from "../hooks/useFolderChats";
 import { openFolderForChat } from "../navigation/newProjectStore";
 import type { ProjectUploadFile } from "../projectUpload";
@@ -1271,7 +1272,7 @@ export default function ChatView(props: ChatViewProps) {
       setLogicalProjectDraftThreadId(logicalProjectKey, activeProjectRef, nextDraftId, {
         threadId: nextThreadId,
         createdAt: new Date().toISOString(),
-        runtimeMode: DEFAULT_RUNTIME_MODE,
+        runtimeMode: readNewChatDefaults(activeProjectRef).runtimeMode,
         interactionMode: DEFAULT_INTERACTION_MODE,
         ...input,
       });

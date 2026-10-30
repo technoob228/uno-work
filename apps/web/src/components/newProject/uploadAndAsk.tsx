@@ -3,7 +3,6 @@
  * New project → Upload; once the project is on the computer, a chat in it
  * sends Uno a first task — look at it and offer to put it online.
  */
-import { DEFAULT_RUNTIME_MODE } from "@t3tools/contracts";
 import { useEffect } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -33,7 +32,7 @@ export function openUploadAndAsk(
               // Part of the upload didn't fit: Uno says so first (Misha 20.10).
               ...(notUploaded && notUploaded.files > 0 ? [notUploadedLines(notUploaded)] : []),
             ].join("\n\n"),
-        { folder, modelSelection: null, runtimeMode: DEFAULT_RUNTIME_MODE },
+        { folder, modelSelection: null, runtimeMode: null },
       ),
   });
 }
