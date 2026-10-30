@@ -368,6 +368,8 @@ function mapThreadShell(
     personCalledAt: thread.personCalledAt ?? null,
     personCalledByThreadId: thread.personCalledByThreadId ?? null,
     personCallReason: thread.personCallReason ?? null,
+    pullRequests: thread.pullRequests ?? [],
+    autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
   };
   return {
     shell,
@@ -493,7 +495,9 @@ function sidebarThreadSummariesEqual(
     (left.latestPersonMessageAt ?? null) === (right.latestPersonMessageAt ?? null) &&
     (left.personCalledAt ?? null) === (right.personCalledAt ?? null) &&
     (left.personCalledByThreadId ?? null) === (right.personCalledByThreadId ?? null) &&
-    (left.personCallReason ?? null) === (right.personCallReason ?? null)
+    (left.personCallReason ?? null) === (right.personCallReason ?? null) &&
+    (left.autoSettleDisabledAt ?? null) === (right.autoSettleDisabledAt ?? null) &&
+    JSON.stringify(left.pullRequests ?? []) === JSON.stringify(right.pullRequests ?? [])
   );
 }
 

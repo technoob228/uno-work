@@ -27,6 +27,9 @@ export type EnvironmentSettingsSection =
   | "assistants"
   | "apps"
   | "source-control"
+  | "worktrees"
+  | "projects"
+  | "diagnostics"
   | "archived";
 
 export const APP_SETTINGS_SECTIONS: ReadonlyArray<AppSettingsSection> = [
@@ -44,6 +47,9 @@ export const ENVIRONMENT_SETTINGS_SECTIONS: ReadonlyArray<EnvironmentSettingsSec
   "assistants",
   "apps",
   "source-control",
+  "worktrees",
+  "projects",
+  "diagnostics",
   "archived",
 ];
 

@@ -13,6 +13,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
+  ActivityIcon,
   ShieldCheckIcon,
   ArchiveIcon,
   BlocksIcon,
@@ -20,6 +21,8 @@ import {
   BotIcon,
   CircleUserIcon,
   CodeIcon,
+  FolderKanbanIcon,
+  FolderTreeIcon,
   MonitorIcon,
   FlaskConicalIcon,
   GitBranchIcon,
@@ -76,6 +79,9 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "Assistant", section: "assistants", icon: BotIcon },
   { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
+  { label: "Worktrees", section: "worktrees", icon: FolderTreeIcon },
+  { label: "Projects", section: "projects", icon: FolderKanbanIcon },
+  { label: "Diagnostics", section: "diagnostics", icon: ActivityIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
 
@@ -91,6 +97,9 @@ const WEB_ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "Assistant", section: "assistants", icon: BotIcon },
   { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
+  { label: "Worktrees", section: "worktrees", icon: FolderTreeIcon },
+  { label: "Projects", section: "projects", icon: FolderKanbanIcon },
+  { label: "Diagnostics", section: "diagnostics", icon: ActivityIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
 

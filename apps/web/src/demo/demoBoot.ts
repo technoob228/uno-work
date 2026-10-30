@@ -22,6 +22,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
+import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
 import { addSecretRequest } from "../secretRequestStore";
 import {
   demoBrowserLiveInitial,
@@ -339,6 +340,8 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
       return { isRepo: false, hasPrimaryRemote: false, nextCursor: null, totalCount: 0, refs: [] };
     case WS_METHODS.serverDiscoverSourceControl:
       return { versionControlSystems: [], sourceControlProviders: [] };
+    case WS_METHODS.serverGetTraceDiagnostics:
+      return demoTraceDiagnostics();
     case WS_METHODS.unoComputerGetState:
       return computerStateFor(machine);
     case WS_METHODS.unoComputerLocalMetrics:

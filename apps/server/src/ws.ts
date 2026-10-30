@@ -111,6 +111,7 @@ import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspaceService } from "./workspaceRegistry/WorkspaceService.ts";
 import { UnoCloudService } from "./workspaceRegistry/UnoCloudService.ts";
@@ -287,6 +288,7 @@ const makeWsRpcLayer = (
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const traceDiagnostics = yield* TraceDiagnostics.make;
       // Skills: the catalog ships in the UI's own dist (`<static>/skills`).
       const skillsCatalogDir = yield* (
         config.staticDir
@@ -1400,6 +1402,15 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.serverGetTraceDiagnostics]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverGetTraceDiagnostics,
+            traceDiagnostics.read({
+              traceFilePath: config.serverTracePath,
+              maxFiles: config.traceMaxFiles,
+            }),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.vaultList]: (_input) =>
           observeRpcEffect(WS_METHODS.vaultList, credentialsVault.list, {

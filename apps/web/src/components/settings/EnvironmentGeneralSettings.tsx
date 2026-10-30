@@ -50,7 +50,6 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { ChatCopiesCleanupSection } from "./ChatCopiesCleanup";
 import { UnoGatewayBalance, useGatewayAiHours } from "./SettingsPanels";
 import { EconomyCard, useComputerEconomy } from "../computer/EconomyControl";
 
@@ -488,9 +487,6 @@ export function EnvironmentGeneralSettings({
           }
         />
       </SettingsSection>
-
-      {/* Dev mode reaches this page instead of Settings → Computer. */}
-      <ChatCopiesCleanupSection environmentId={environmentId} />
 
       <SettingsSection title="Files on this machine">
         <SettingsRow

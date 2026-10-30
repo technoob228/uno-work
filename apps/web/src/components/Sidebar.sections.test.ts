@@ -122,6 +122,37 @@ describe("resolveSidebarThreadSection", () => {
     expect(resolveSidebarThreadSection(thread, NOW)).toBe("pinned");
   });
 
+  it("keeps a quiet thread with an open PR active, until the link goes stale", () => {
+    const link = (syncedAt: string, state: "open" | "merged") =>
+      ({
+        provider: "github",
+        repository: "getuno/app",
+        number: 12,
+        url: "https://github.com/getuno/app/pull/12",
+        source: "branch",
+        linkedAt: ago(30 * DAY_MS),
+        snapshot: {
+          title: "Fix",
+          state,
+          isDraft: false,
+          headBranch: "fix",
+          baseBranch: "main",
+          updatedAt: syncedAt,
+          mergedAt: null,
+          closedAt: null,
+          checks: "none",
+          review: "none",
+          syncedAt,
+        },
+      }) as NonNullable<SidebarThreadSummary["pullRequests"]>[number];
+    const section = (pullRequests: SidebarThreadSummary["pullRequests"]) =>
+      resolveSidebarThreadSection(makeThread("pr", { ...idle(30), pullRequests }), NOW);
+    expect(section([link(ago(DAY_MS), "open")])).toBe("active");
+    expect(section([link(ago(DAY_MS), "merged")])).toBe("settled");
+    expect(section([link(ago(15 * DAY_MS), "open")])).toBe("settled");
+    expect(section([])).toBe("settled");
+  });
+
   it("keeps a thread that never ran a turn active", () => {
     const thread = makeThread("empty", { latestTurn: null, latestUserMessageAt: null });
     expect(isThreadSettled(thread, NOW)).toBe(false);
