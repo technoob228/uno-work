@@ -13,14 +13,25 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FAKE_STORAGE_ENV } from "./git-remote-uno.mjs";
 import {
   MAX_FILE_BYTES,
+  builtFolders,
   getProject,
   isKeyFile,
   listCloudProjects,
+  projectFiles,
+  projectHistory,
   resolveConflict,
+  restoreVersion,
+  safeRelative,
   safeRemoteUrl,
+  setLocalOnly,
   snapshotGitDir,
   syncProject,
+  versionAuthor,
 } from "./uno-sync.mjs";
+
+/** Obviously fake, and put together here so no scanner flags this test file. */
+const FAKE_KEY = ["sk-ant-", "FAKE".repeat(6)].join("");
+const FAKE_GITHUB = ["ghp_", "FAKE".repeat(6)].join("");
 
 let root = "";
 let cloud = "";
@@ -94,6 +105,7 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     write(path.join(notes, ".env.local"), "X=1\n");
     write(path.join(notes, "server.pem"), "-----BEGIN-----\n");
     write(path.join(notes, "node_modules", "x", "index.js"), "x\n");
+    write(path.join(notes, "package.json"), "{}\n");
     write(path.join(notes, "dist", "app.js"), "built\n");
 
     const saved = await sync(laptop, notes);
@@ -308,6 +320,277 @@ describe("a folder without git", { timeout: 60_000 }, () => {
     expect(read(path.join(got, "x.md"))).toBe("x\n");
   });
 
+  it("a file with a key waits on this computer; everything else goes; the value is never shown", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("held");
+    write(path.join(dir, "plan.md"), "plan\n");
+    write(path.join(dir, "config.json"), `{ "token": "${FAKE_KEY}" }\n`);
+    const first = await sync(a, dir, "held");
+    expect(first).toMatchObject({ ok: true, state: "synced", held: ["config.json"] });
+    expect(first.message).toContain("config.json");
+    expect(first.message).not.toContain(FAKE_KEY);
+    expect(JSON.stringify(first)).not.toContain(FAKE_KEY);
+
+    await getProject({ name: "held" }, b);
+    const there = path.join(b.home, "projects", "held");
+    expect(read(path.join(there, "plan.md"))).toBe("plan\n");
+    expect(exists(path.join(there, "config.json"))).toBe(false);
+    // Still in the person's folder, untouched.
+    expect(read(path.join(dir, "config.json"))).toContain(FAKE_KEY);
+
+    // The key moved out: the file syncs and the note is gone.
+    write(path.join(dir, "config.json"), `{ "token": "from-keys" }\n`);
+    expect(await sync(a, dir, "held")).toMatchObject({ state: "synced", held: [], pushed: true });
+    await sync(b, there, "held");
+    expect(read(path.join(there, "config.json"))).toContain("from-keys");
+  });
+
+  it("a synced file that gets a key keeps its last clean version in the cloud", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("edited");
+    write(path.join(dir, "notes.md"), "clean\n");
+    write(path.join(dir, "other.md"), "one\n");
+    await sync(a, dir, "edited");
+    await getProject({ name: "edited" }, b);
+
+    write(path.join(dir, "notes.md"), `clean\n${FAKE_GITHUB}\n`);
+    write(path.join(dir, "other.md"), "two\n");
+    expect(await sync(a, dir, "edited")).toMatchObject({ state: "synced", held: ["notes.md"] });
+    const there = path.join(b.home, "projects", "edited");
+    await sync(b, there, "edited");
+    expect(read(path.join(there, "notes.md"))).toBe("clean\n");
+    expect(read(path.join(there, "other.md"))).toBe("two\n");
+
+    // Editing the other computer's copy of a held file is said plainly, not retried for ever.
+    write(path.join(there, "notes.md"), "edited there\n");
+    await sync(b, there, "edited");
+    const clash = await sync(a, dir, "edited");
+    expect(clash).toMatchObject({ state: "blocked", held: ["notes.md"] });
+    expect(clash.message).toContain("Keys");
+  });
+
+  it("reads files of any size whole, a key across two reads included", async () => {
+    const a = computer("a");
+    const dir = a.folder("big");
+    // Around the pipe's 64 KB read, so a key sits on the seam whatever the first read took.
+    const dumps = Array.from({ length: 12 }, (_, index) => `dump-${index + 10}.txt`);
+    for (const [index, name] of dumps.entries()) {
+      const before = `${"x".repeat(64 * 1024 - 8 * index)}\n`;
+      write(path.join(dir, name), `${before}${FAKE_KEY}\n${"y".repeat(100_000)}`);
+    }
+    write(path.join(dir, "clean.txt"), "z".repeat(300_000));
+    write(path.join(dir, "image.bin"), "\u0000\u0001 binary");
+    const result = await sync(a, dir, "big");
+    expect(result).toMatchObject({ state: "synced", held: dumps });
+    expect(gitIn(dir, { ...a.env, GIT_DIR: snapshotGitDir(dir) }, "ls-files")).toBe(
+      "clean.txt\nimage.bin",
+    );
+  });
+
+  it("a folder with nothing but a held file says so, not that it's empty", async () => {
+    const a = computer("a");
+    const dir = a.folder("only-held");
+    write(path.join(dir, "keys.txt"), `${FAKE_KEY}\n`);
+    const result = await sync(a, dir, "only-held");
+    expect(result).toMatchObject({ state: "empty", held: ["keys.txt"] });
+    expect(result.message).toContain("keys.txt");
+  });
+
+  it("keeps saving after `git init` in the folder, and heals a folder that stopped", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("became-git");
+    write(path.join(dir, "plan.md"), "one\n");
+    await sync(a, dir, "became-git");
+
+    gitIn(dir, a.env, "init", "-q", "-b", "main");
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "their own git");
+    write(path.join(dir, "plan.md"), "two\n");
+    write(path.join(dir, "new.md"), "uncommitted, still saved\n");
+    expect(await sync(a, dir, "became-git")).toMatchObject({
+      ok: true,
+      state: "synced",
+      mode: "snapshot",
+      pushed: true,
+    });
+    await getProject({ name: "became-git" }, b);
+    const there = path.join(b.home, "projects", "became-git");
+    expect(read(path.join(there, "plan.md"))).toBe("two\n");
+    expect(read(path.join(there, "new.md"))).toContain("still saved");
+    // Their git doesn't pick up Uno's versions, and is left alone.
+    write(path.join(dir, "later.md"), "later\n");
+    gitIn(dir, a.env, "add", "-A");
+    expect(gitIn(dir, a.env, "status", "--porcelain")).not.toContain(".uno-git");
+    expect(gitIn(dir, a.env, "log", "--format=%s")).toBe("their own git");
+  });
+
+  it("signs versions with the person and the computer", async () => {
+    const a = { ...computer("a"), person: "Misha" };
+    const dir = a.folder("signed");
+    write(path.join(dir, "plan.md"), "one\n");
+    await sync(a, dir, "signed");
+    const log = gitIn(dir, { ...a.env, GIT_DIR: snapshotGitDir(dir) }, "log", "--format=%an|%s");
+    expect(log).toBe("Misha (a)|Saved on a");
+    expect(versionAuthor({ ...a, person: null })).toBe("Uno (a)");
+    expect(versionAuthor({ ...a, person: "A <b>\n(c)" })).toBe("A bc (a)");
+    const history = await projectHistory({ dir }, a);
+    expect(history.versions[0]).toMatchObject({ person: "Misha", computer: "a", note: null });
+  });
+
+  it("build folders travel unless a project file lies next to them", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("mixed");
+    write(path.join(dir, "out", "report.pdf"), "the person's own output\n");
+    write(path.join(dir, "build", "plan.md"), "building plan\n");
+    write(path.join(dir, "site", "package.json"), "{}\n");
+    write(path.join(dir, "site", "dist", "app.js"), "built\n");
+    write(path.join(dir, "site", "src", "app.ts"), "source\n");
+    await sync(a, dir, "mixed");
+    await getProject({ name: "mixed" }, b);
+    const there = path.join(b.home, "projects", "mixed");
+    expect(read(path.join(there, "out", "report.pdf"))).toContain("own output");
+    expect(read(path.join(there, "build", "plan.md"))).toContain("plan");
+    expect(read(path.join(there, "site", "src", "app.ts"))).toBe("source\n");
+    expect(exists(path.join(there, "site", "dist"))).toBe(false);
+  });
+
+  it("a folder saved under the old list picks up its build folders", async () => {
+    const a = computer("a");
+    const dir = a.folder("older");
+    write(path.join(dir, "plan.md"), "plan\n");
+    await sync(a, dir, "older");
+    const exclude = path.join(snapshotGitDir(dir), "info", "exclude");
+    fs.appendFileSync(exclude, "dist/\nbuild/\nout/\n");
+    write(path.join(dir, "out", "result.csv"), "1,2\n");
+    await sync(a, dir, "older");
+    const files = gitIn(dir, { ...a.env, GIT_DIR: snapshotGitDir(dir) }, "ls-files");
+    expect(files).toContain("out/result.csv");
+  });
+
+  it("goes back to an earlier version, and going back can be undone", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("timeline");
+    write(path.join(dir, "plan.md"), "yesterday\n");
+    write(path.join(dir, "keep.md"), "keep\n");
+    await sync(a, dir, "timeline");
+    await getProject({ name: "timeline" }, b);
+    write(path.join(dir, "plan.md"), "today\n");
+    write(path.join(dir, "new.md"), "added today\n");
+    await sync(a, dir, "timeline");
+    write(path.join(dir, "plan.md"), "unsaved edit\n");
+
+    const before = await projectHistory({ dir }, a);
+    const yesterday = before.versions.at(-1);
+    expect(before.versions.map((version) => version.note)).toEqual([null, null]);
+    expect(before.versions[0]?.files).toEqual(
+      expect.arrayContaining([
+        { path: "new.md", change: "added" },
+        { path: "plan.md", change: "changed" },
+      ]),
+    );
+
+    const back = await restoreVersion(
+      { dir, name: "timeline", version: yesterday?.id ?? "" },
+      a,
+    );
+    expect(back).toMatchObject({ ok: true, state: "synced", pushed: true });
+    expect(read(path.join(dir, "plan.md"))).toBe("yesterday\n");
+    expect(exists(path.join(dir, "new.md"))).toBe(false);
+
+    // On the other computer too.
+    const there = path.join(b.home, "projects", "timeline");
+    await sync(b, there, "timeline");
+    expect(read(path.join(there, "plan.md"))).toBe("yesterday\n");
+
+    // The unsaved edit was saved first, so it can be brought back.
+    const after = await projectHistory({ dir }, a);
+    expect(after.versions[0]?.note).toMatch(/^Went back to /);
+    const edited = after.versions[1];
+    expect(edited?.files).toEqual([{ path: "plan.md", change: "changed" }]);
+    await restoreVersion(
+      { dir, name: "timeline", version: edited?.id ?? "", files: ["plan.md"] },
+      a,
+    );
+    expect(read(path.join(dir, "plan.md"))).toBe("unsaved edit\n");
+    expect(exists(path.join(dir, "new.md"))).toBe(false);
+    expect((await projectHistory({ dir }, a)).versions[0]?.note).toMatch(/^Brought back plan\.md/);
+  });
+
+  it("won't go back to something that isn't a version of this project", async () => {
+    const a = computer("a");
+    const dir = a.folder("guarded");
+    write(path.join(dir, "plan.md"), "one\n");
+    await sync(a, dir, "guarded");
+    for (const version of ["--help", "HEAD", "f".repeat(40)]) {
+      const result = await restoreVersion({ dir, name: "guarded", version }, a);
+      expect(result).toMatchObject({ ok: false, state: "blocked" });
+    }
+    expect(read(path.join(dir, "plan.md"))).toBe("one\n");
+  });
+
+  it("pages the history", async () => {
+    const a = computer("a");
+    const dir = a.folder("paged");
+    for (const round of [1, 2, 3]) {
+      write(path.join(dir, "plan.md"), `${round}\n`);
+      await sync(a, dir, "paged");
+    }
+    const first = await projectHistory({ dir, limit: 2 }, a);
+    expect(first).toMatchObject({ more: true });
+    expect(first.versions).toHaveLength(2);
+    const rest = await projectHistory({ dir, limit: 2, skip: 2 }, a);
+    expect(rest).toMatchObject({ more: false });
+    expect(rest.versions).toHaveLength(1);
+    const empty = await projectHistory({ dir: a.folder("nothing-here") }, a);
+    expect(empty).toEqual({ mode: "snapshot", versions: [], more: false });
+  });
+
+  it("says what travels, what stays here, and lets the person choose", async () => {
+    const a = computer("a");
+    const b = computer("b");
+    const dir = a.folder("classes");
+    write(path.join(dir, "plan.md"), "plan\n");
+    write(path.join(dir, "videos", "demo.mov"), "big\n");
+    write(path.join(dir, ".env"), "API_KEY=x\n");
+    write(path.join(dir, "node_modules", "x", "index.js"), "x\n");
+    await sync(a, dir, "classes");
+    await getProject({ name: "classes" }, b);
+    const there = path.join(b.home, "projects", "classes");
+    expect(exists(path.join(there, "videos", "demo.mov"))).toBe(true);
+
+    let files = await projectFiles({ dir }, a);
+    expect(files).toMatchObject({
+      mode: "snapshot",
+      synced: 2,
+      keyFiles: [".env"],
+      localOnly: [{ path: "node_modules/", yours: false }],
+    });
+
+    await setLocalOnly({ dir, path: "videos/", localOnly: true }, a);
+    await sync(a, dir, "classes");
+    files = await projectFiles({ dir }, a);
+    expect(files.synced).toBe(1);
+    expect(files.localOnly[0]).toEqual({ path: "videos/", yours: true });
+    // Stays here, leaves the other computers.
+    expect(exists(path.join(dir, "videos", "demo.mov"))).toBe(true);
+    await sync(b, there, "classes");
+    expect(exists(path.join(there, "videos"))).toBe(false);
+
+    await setLocalOnly({ dir, path: "videos", localOnly: false }, a);
+    await sync(a, dir, "classes");
+    await sync(b, there, "classes");
+    expect(exists(path.join(there, "videos", "demo.mov"))).toBe(true);
+
+    await expect(setLocalOnly({ dir, path: "../up", localOnly: true }, a)).rejects.toThrow(
+      "isn't a file",
+    );
+  });
+
   it("says an empty folder has nothing to sync", async () => {
     const a = computer("a");
     const dir = a.folder("empty");
@@ -338,7 +621,7 @@ describe("a folder with its own git", { timeout: 60_000 }, () => {
 
     const saved = await sync(a, dir);
     expect(saved).toMatchObject({ ok: true, state: "synced", mode: "git", name: "api" });
-    expect(saved.message).toContain("aren't committed");
+    expect(saved.message).toContain("stay on this computer until");
     expect(gitIn(dir, a.env, "remote", "get-url", "uno")).toBe("uno::api");
 
     const got = await getProject({ name: "api" }, b);
@@ -373,6 +656,89 @@ describe("a folder with its own git", { timeout: 60_000 }, () => {
     expect(result.message).toContain(".env");
     expect(fs.readdirSync(cloud)).toEqual([]);
   });
+
+  it("a key in a commit waits with everything new; taking it out of the last commit isn't enough", async () => {
+    const a = computer("a");
+    const dir = repo(a, "history");
+    expect(await sync(a, dir, "history")).toMatchObject({ pushed: true, held: [] });
+
+    write(path.join(dir, "config.json"), `{ "token": "${FAKE_KEY}" }\n`);
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "add config");
+    write(path.join(dir, "config.json"), `{ "token": "gone" }\n`);
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "take the key out");
+
+    const result = await sync(a, dir, "history");
+    expect(result).toMatchObject({ ok: true, pushed: false, held: ["config.json"] });
+    expect(result.message).toContain("config.json");
+    expect(result.message).not.toContain(FAKE_KEY);
+    expect(result.message).not.toMatch(/\b(git|commit|branch)\b/i);
+
+    // The cloud is untouched: a second computer gets the clean first version only.
+    const b = computer("b");
+    await getProject({ name: "history" }, b);
+    const there = path.join(b.home, "projects", "history");
+    expect(exists(path.join(there, "config.json"))).toBe(false);
+
+    // Their changes still arrive while it waits.
+    write(path.join(there, "from-b.md"), "b\n");
+    gitIn(there, b.env, "add", "-A");
+    gitIn(there, b.env, "commit", "-q", "-m", "b");
+    await sync(b, there, "history");
+    expect(await sync(a, dir, "history")).toMatchObject({ pulled: true, pushed: false });
+    expect(read(path.join(dir, "from-b.md"))).toBe("b\n");
+
+    // History rewritten without it: it all goes.
+    gitIn(dir, a.env, "reset", "-q", "--soft", "uno/main");
+    gitIn(dir, a.env, "commit", "-q", "-m", "config without the key");
+    expect(await sync(a, dir, "history")).toMatchObject({ pushed: true, held: [] });
+  });
+
+  it("doesn't answer for what is already on another remote", async () => {
+    const a = computer("a");
+    const dir = repo(a, "cloned");
+    write(path.join(dir, "fixture.txt"), `${FAKE_GITHUB}\n`);
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "old fixture");
+    const origin = path.join(root, "origin.git");
+    gitIn(root, a.env, "init", "-q", "--bare", origin);
+    gitIn(dir, a.env, "remote", "add", "origin", origin);
+    gitIn(dir, a.env, "push", "-q", "origin", "main");
+    expect(await sync(a, dir, "cloned")).toMatchObject({ pushed: true, held: [] });
+  });
+
+  it("reads new commits only once while they wait", async () => {
+    const a = computer("a");
+    const dir = repo(a, "cached");
+    write(path.join(dir, "config.json"), `${FAKE_KEY}\n`);
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "key");
+    await sync(a, dir, "cached");
+    const file = path.join(dir, ".git", "uno-held.json");
+    const first = JSON.parse(read(file)) as { held: string[] };
+    expect(first.held).toEqual(["config.json"]);
+    fs.writeFileSync(file, JSON.stringify({ ...first, held: ["from-memory.txt"] }));
+    expect((await sync(a, dir, "cached")).held).toEqual(["from-memory.txt"]);
+  });
+
+  it("signs merges as the person when the repository has no author", async () => {
+    const a = { ...computer("a"), person: "Misha" };
+    const dir = repo(a, "authors");
+    await sync(a, dir, "authors");
+    const b = computer("b");
+    await getProject({ name: "authors" }, b);
+    const there = path.join(b.home, "projects", "authors");
+    write(path.join(there, "b.md"), "b\n");
+    gitIn(there, b.env, "add", "-A");
+    gitIn(there, b.env, "commit", "-q", "-m", "b");
+    await sync(b, there, "authors");
+    write(path.join(dir, "a.md"), "a\n");
+    gitIn(dir, a.env, "add", "-A");
+    gitIn(dir, a.env, "commit", "-q", "-m", "a");
+    expect(await sync(a, dir, "authors")).toMatchObject({ pulled: true, pushed: true });
+    expect(gitIn(dir, a.env, "log", "-1", "--merges", "--format=%an")).toBe("Misha (a)");
+  });
 });
 
 describe("rules", () => {
@@ -382,6 +748,33 @@ describe("rules", () => {
     }
     for (const file of [".env.example", "README.md", "src/env.ts", "keys.md"]) {
       expect(isKeyFile(file), file).toBe(false);
+    }
+  });
+
+  it("finds build folders only next to a project file", () => {
+    expect(
+      builtFolders([
+        "package.json",
+        "dist/app.js",
+        "dist/nested/out/x.js",
+        "src/dist/own.txt",
+        "docs/build/guide.md",
+        "svc/Cargo.toml",
+        "svc/out/a.bin",
+        "svc/src/main.rs",
+        "dotnet/App.csproj",
+        "dotnet/build/x",
+        "plain/out/report.pdf",
+      ]),
+    ).toEqual(["dist/", "dotnet/build/", "svc/out/"]);
+    expect(builtFolders(["out/report.pdf", "build/plan.md", "dist/x"])).toEqual([]);
+  });
+
+  it("takes only paths inside the folder", () => {
+    expect(safeRelative("./videos/")).toBe("videos");
+    expect(safeRelative("a/b.txt")).toBe("a/b.txt");
+    for (const bad of ["", "/etc/passwd", "../up", "a/../../b", ".git", ".uno-git/config", 3]) {
+      expect(safeRelative(bad), String(bad)).toBeNull();
     }
   });
 
