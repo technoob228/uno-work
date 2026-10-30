@@ -10,6 +10,7 @@ import { Effect, Layer, Option } from "effect";
 import { HttpServerRequest } from "effect/unstable/http";
 import { RpcServer } from "effect/unstable/rpc";
 
+// @effect-diagnostics-next-line anyUnknownInErrorContext:off
 import { makeV2HandlersLayer } from "./handlers.ts";
 import { WsRpcGroupV2 } from "./rpcGroup.ts";
 import { layerV2Serialization } from "./serialization.ts";
@@ -49,6 +50,7 @@ export const serveOrchestrationV2Socket = <E, R>(v1Handlers: Layer.Layer<any, E,
       },
     }).pipe(
       Effect.provide(
+        // @effect-diagnostics-next-line anyUnknownInErrorContext:off
         makeV2HandlersLayer.pipe(
           Layer.provide(v1Handlers),
           Layer.provideMerge(
