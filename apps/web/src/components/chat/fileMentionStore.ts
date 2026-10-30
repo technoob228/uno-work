@@ -11,7 +11,7 @@ import {
   type FilesResolveMentionsInput,
   type FilesResolveMentionsResult,
 } from "@t3tools/contracts";
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
 
@@ -163,10 +163,11 @@ export function useFileMention(
   mention: string,
   ask: boolean,
 ): FileMentionState | null {
-  const state = useSyncExternalStore(
-    (listener) => store.subscribe(environmentId, cwd, mention, listener),
-    () => store.get(environmentId, cwd, mention),
+  const subscribe = useCallback(
+    (listener: () => void) => store.subscribe(environmentId, cwd, mention, listener),
+    [cwd, environmentId, mention],
   );
+  const state = useSyncExternalStore(subscribe, () => store.get(environmentId, cwd, mention));
   useEffect(() => {
     if (ask && environmentId) store.request(environmentId, cwd, mention);
   }, [ask, cwd, environmentId, mention]);
