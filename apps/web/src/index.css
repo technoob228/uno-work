@@ -8,6 +8,18 @@
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
+  /* Visual polish (T3 port 30.10, upstream #24865 / index.css): two steps under
+     text-xs for dense metadata (11px / 10px), a near-white canvas step, the
+     press curve and the soft lifted shadow menus and dialogs use. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: calc(1 / 0.6875);
+  --text-3xs: 0.625rem;
+  --text-3xs--line-height: calc(0.875 / 0.625);
+  --color-zinc-25: oklch(99.2% 0 0);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --shadow-float: 0 16px 40px -18px rgb(0 0 0 / 45%);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-border: var(--sidebar-border);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-machine-1: var(--machine-1-base);
@@ -73,6 +85,64 @@
     @apply text-foreground relative;
     background-color: var(--app-chrome-background);
   }
+  /* Lighter default icon stroke (upstream #24865): any CSS beats lucide's
+     stroke-width="2" attribute, and stroke-* utilities still win over :where. */
+  :where(svg.lucide[stroke-width="2"]) {
+    stroke-width: 1.75;
+  }
+}
+
+/* Frosted menus, popovers and dialogs (upstream T3 Code dropdown-glass /
+   dialog-glass, 30.10): the surface lets a hint of the page through, with a
+   soft lifted shadow instead of a hard one. Solid where blur isn't supported. */
+:root {
+  --glass-blur: 12px;
+  --glass-opacity: 82%;
+  --glass-saturation: 1.14;
+
+  @variant dark {
+    --glass-blur: 16px;
+    --glass-saturation: 1.08;
+  }
+}
+
+@utility dropdown-glass {
+  background: color-mix(
+    in srgb,
+    var(--popover) 18%,
+    color-mix(in srgb, var(--popover) var(--glass-opacity), transparent)
+  );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow: 0 16px 40px -18px rgb(0 0 0 / 45%);
+
+  @variant dark {
+    box-shadow: 0 18px 44px -18px rgb(0 0 0 / 80%);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
+}
+
+@utility dialog-glass {
+  background: color-mix(in srgb, var(--popover) var(--glass-opacity), transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturation));
+  border-color: color-mix(in srgb, var(--foreground) 10%, transparent);
+  box-shadow: 0 24px 64px -24px rgb(0 0 0 / 50%);
+
+  @variant dark {
+    border-color: color-mix(in srgb, var(--color-white) 8%, transparent);
+    box-shadow:
+      inset 0 1px rgb(255 255 255 / 4%),
+      0 24px 72px -20px rgb(0 0 0 / 90%);
+  }
+
+  @supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    background: var(--popover) !important;
+  }
 }
 
 /* Safe-area inset utilities for surfaces that opt into edge-to-edge rendering.
@@ -102,25 +172,28 @@
 
 :root {
   color-scheme: light;
-  --radius: 0.625rem;
+  /* 0.5rem like upstream's redesign (was 0.625): every rounded-* steps down with it. */
+  --radius: 0.5rem;
+  --control-radius: 0.5rem;
   --background: var(--color-white);
   --app-chrome-background: var(--background);
-  --foreground: var(--color-neutral-800);
+  /* Text on the cool zinc scale, one step crisper (upstream #24865). */
+  --foreground: var(--color-zinc-900);
   --card: var(--color-white);
-  --card-foreground: var(--color-neutral-800);
+  --card-foreground: var(--color-zinc-900);
   --popover: var(--color-white);
-  --popover-foreground: var(--color-neutral-800);
+  --popover-foreground: var(--color-zinc-900);
   --primary: oklch(0.55 0.22 273);
   --primary-foreground: var(--color-white);
   --secondary: --alpha(var(--color-black) / 4%);
-  --secondary-foreground: var(--color-neutral-800);
+  --secondary-foreground: var(--color-zinc-800);
   --muted: --alpha(var(--color-black) / 4%);
-  --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
+  --muted-foreground: var(--color-zinc-500);
   --accent: --alpha(var(--color-black) / 4%);
-  --accent-foreground: var(--color-neutral-800);
+  --accent-foreground: var(--color-zinc-900);
   --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
+  --border: --alpha(var(--color-black) / 9%);
+  --input: --alpha(var(--color-black) / 12%);
   --ring: oklch(0.55 0.22 273);
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
@@ -140,6 +213,10 @@
   --sidebar-row-selected: --alpha(var(--color-black) / 5%);
   --sidebar-control-surface: --alpha(var(--color-black) / 4%);
   --sidebar-icon-color: var(--muted-foreground);
+  --sidebar: var(--background);
+  --sidebar-border: var(--border);
+  --app-scrollbar-thumb: rgb(0 0 0 / 14%);
+  --app-scrollbar-thumb-hover: rgb(0 0 0 / 24%);
 
   /* Machine identity hues.
    *
@@ -178,12 +255,14 @@
     --secondary: --alpha(var(--color-white) / 4%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 4%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
-    --accent: --alpha(var(--color-white) / 4%);
+    /* neutral-400: secondary text reads on the dark surface (upstream #24865). */
+    --muted-foreground: var(--color-neutral-400);
+    --accent: --alpha(var(--color-white) / 5%);
     --accent-foreground: var(--color-neutral-100);
     --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
+    /* Edges a step firmer, so cards and fields don't melt into the canvas. */
+    --border: --alpha(var(--color-white) / 8%);
+    --input: --alpha(var(--color-white) / 11%);
     --ring: oklch(0.588 0.217 264);
     --destructive-foreground: var(--color-red-400);
     --info: var(--color-blue-500);
@@ -196,6 +275,8 @@
     --sidebar-row-active: --alpha(var(--color-white) / 9%);
     --sidebar-row-selected: --alpha(var(--color-white) / 6%);
     --sidebar-control-surface: --alpha(var(--color-white) / 5%);
+    --app-scrollbar-thumb: rgb(255 255 255 / 9%);
+    --app-scrollbar-thumb-hover: rgb(255 255 255 / 16%);
     /* Own steps for the dark surface, validated as a set against it — not an
        automatic flip of the light values. */
     --machine-1-ink: var(--color-blue-400);
@@ -277,20 +358,16 @@ code {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--app-scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--app-scrollbar-thumb-hover);
 }
 
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 .turn-chip-strip {
@@ -600,13 +677,21 @@ label:has(> select#reasoning-effort) select {
   color: var(--muted-foreground);
 }
 
+/* Inline code: a quiet tinted pill sized to the text around it, no outline
+   (upstream #24865); it keeps its shape where it wraps (#12038). */
 .chat-markdown :not(pre) > code {
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: var(--muted);
-  padding: 0.1rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 0.25rem;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  padding: 0.1em 0.35em;
   color: var(--foreground);
-  font-size: 0.75rem;
+  font-size: 0.85em;
+}
+
+.chat-markdown strong {
+  font-weight: 600;
 }
 
 .chat-markdown-file-link {
@@ -654,7 +739,8 @@ label:has(> select#reasoning-effort) select {
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
+  scrollbar-width: thin;
   background: var(--muted);
   padding: 0.8rem 0.9rem;
 }
