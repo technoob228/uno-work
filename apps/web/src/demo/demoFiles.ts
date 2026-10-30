@@ -83,6 +83,30 @@ What nobody says: **what happens at night**. That's ours.
 `,
 };
 
+const DEMO_TEXT: Record<string, string> = {
+  "launch-report.md": `# Launch report
+
+Signups are up **18%** since the new form went live.
+
+| Week | Signups | Welcome emails |
+|---|---|---|
+| 1 | 412 | 0 |
+| 2 | 486 | 486 |
+
+Next: send the thank-you page live and watch the blog links.
+`,
+  "index.html": `<!doctype html>
+<html>
+  <head><title>Landing</title><link rel="stylesheet" href="styles.css" /></head>
+  <body><h1>One place to build and deploy with AI</h1><p>Start free</p></body>
+</html>
+`,
+  "mail.ts": `export async function sendWelcomeEmail(to: string, data: { name: string }) {
+  return mailer.send({ to, template: "welcome", data });
+}
+`,
+};
+
 const ASSETS: Record<string, string> = {
   "hero-variants.png": "image/png",
   "brand-guide.pdf": "application/pdf",
@@ -114,13 +138,102 @@ function readFile(path: string) {
   const name = baseName(path);
   const mime = ASSETS[name];
   if (mime) return readAsset(name, mime);
-  const text = TEXT[name] ?? `# ${name}\n\nA file of the mock.\n`;
+  const text = TEXT[name] ?? DEMO_TEXT[name] ?? `# ${name}\n\nA file of the mock.\n`;
   return {
     content: text,
     encoding: "utf8",
     size: text.length,
     truncated: false,
     mimeType: "text/markdown",
+  };
+}
+
+// ── The computer's files for the Files panel and the chat's file chips ──
+
+/** Relative to the home folder. */
+const DEMO_TREE = [
+  "UnoWork/Reports/launch-report.md",
+  "UnoWork/Reports/october-numbers.csv",
+  "Documents/brief.docx",
+  "Documents/meeting notes.md",
+  "Downloads/hero-variants.png",
+  "projects/landing/README.md",
+  "projects/landing/AGENTS.md",
+  "projects/landing/Dockerfile",
+  "projects/landing/package.json",
+  "projects/landing/pricing.md",
+  "projects/landing/hero.md",
+  "projects/landing/.env.example",
+  "projects/landing/app/signup/page.tsx",
+  "projects/landing/app/api/signup/route.ts",
+  "projects/landing/app/api/signup/route.test.ts",
+  "projects/landing/lib/mail.ts",
+  "projects/landing/docs/launch-plan.md",
+  "projects/landing/web/index.html",
+  "projects/landing/web/styles.css",
+];
+
+function demoEntries(machine: DemoMachine) {
+  const at = new Date(Date.now() - 3_600_000).toISOString();
+  const entry = (path: string, kind: "file" | "directory") => ({
+    name: baseName(path),
+    path,
+    kind,
+    size: kind === "file" ? 2048 : 0,
+    modifiedAt: at,
+    hidden: baseName(path).startsWith("."),
+    isSymlink: false,
+  });
+  const byPath = new Map<string, ReturnType<typeof entry>>();
+  for (const relative of DEMO_TREE) {
+    const parts = relative.split("/");
+    parts.forEach((_, index) => {
+      const path = `${machine.home}/${parts.slice(0, index + 1).join("/")}`;
+      byPath.set(path, entry(path, index === parts.length - 1 ? "file" : "directory"));
+    });
+  }
+  return [...byPath.values()];
+}
+
+/** What `files.list` shows for a folder of the tree; null for one it doesn't know. */
+export function demoFolderEntries(machine: DemoMachine, folder: string) {
+  const inside = demoEntries(machine).filter((entry) => {
+    const slash = entry.path.lastIndexOf("/");
+    return entry.path.slice(0, slash) === folder;
+  });
+  return inside.length > 0 ? inside : null;
+}
+
+function searchEntries(machine: DemoMachine, body: NormalizedWsRpcRequestBody) {
+  const under = typeof body.path === "string" ? body.path : machine.home;
+  const needle = String(body.query ?? "").toLowerCase();
+  const entries = demoEntries(machine).filter(
+    (entry) => entry.path.startsWith(`${under}/`) && entry.name.toLowerCase().includes(needle),
+  );
+  return { entries, truncated: false };
+}
+
+/** The computer's side of the chat's chips, as `fileMentions.ts` on the server decides. */
+function resolveMentions(machine: DemoMachine, body: NormalizedWsRpcRequestBody) {
+  const all = demoEntries(machine);
+  const cwd = typeof body.cwd === "string" ? body.cwd : machine.home;
+  const mentions = (body.mentions as string[] | undefined) ?? [];
+  const find = (mention: string) => {
+    const clean = mention.replace(/\/$/, "").replace(/^\.\//, "");
+    const asWritten = clean.startsWith("~/")
+      ? `${machine.home}/${clean.slice(2)}`
+      : clean.startsWith("/")
+        ? clean
+        : `${cwd}/${clean}`;
+    const direct = all.find((entry) => entry.path === asWritten);
+    if (direct || clean.startsWith("~/") || clean.startsWith("/")) return direct;
+    return all.find((entry) => entry.kind === "file" && entry.path.endsWith(`/${clean}`));
+  };
+  return {
+    results: mentions.map((mention) => {
+      const found = find(mention);
+      return { mention, path: found?.path ?? null, kind: found?.kind ?? null };
+    }),
   };
 }
 
@@ -139,6 +252,10 @@ export function answerFileRpc(machine: DemoMachine, body: NormalizedWsRpcRequest
   switch (body._tag) {
     case WS_METHODS.filesystemReadFile:
       return readFile(String(body.path ?? ""));
+    case WS_METHODS.filesSearch:
+      return searchEntries(machine, body);
+    case WS_METHODS.filesResolveMentions:
+      return resolveMentions(machine, body);
     case WS_METHODS.filesShareList: {
       const shares = sharesByEnv.get(machine.environmentId) ?? [];
       const path = typeof body.path === "string" ? body.path : null;

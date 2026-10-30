@@ -20,7 +20,7 @@ import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
-import { answerFileRpc } from "./demoFiles";
+import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { addSecretRequest } from "../secretRequestStore";
 import {
   demoBrowserLiveInitial,
@@ -556,11 +556,12 @@ function filesListFor(machine: DemoMachine, path: string | undefined) {
     (p) => p.workspaceRoot !== root && p.title !== "Uno",
   );
   const entries =
-    current === root
+    demoFolderEntries(machine, current) ??
+    (current === root
       ? [folder("projects", root), folder("Documents", root), folder("Downloads", root)]
       : current === `${root}/projects`
         ? projects.map((p) => folder(String(p.title), `${root}/projects`))
-        : [];
+        : []);
   return {
     path: current,
     rootPath: root,

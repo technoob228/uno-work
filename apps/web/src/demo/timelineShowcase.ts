@@ -147,6 +147,24 @@ return Response.json({ ok: true });
 
 All 14 tests pass. Try it on your site: sign up with your own address and the email should arrive within a minute.`;
 
+const FILES_ANSWER = `Done, the launch report is in \`~/UnoWork/Reports/launch-report.md\` and the numbers behind it in ~/UnoWork/Reports/october-numbers.csv.
+
+The page lives in \`/home/uno/projects/landing/web/index.html\`, and its styles are in web/styles.css. What changed:
+
+- **The form:** \`app/signup/page.tsx\` and app/api/signup/route.ts:12
+- **The mailer:** \`lib/mail.ts\`, its test is route.test.ts
+- **The plan:** docs/launch-plan.md, and everything for the launch is in \`docs/\`
+
+| File | What it is |
+|---|---|
+| \`README.md\` | How to run the site |
+| \`Dockerfile\` | The container |
+| \`.env.example\` | The settings it needs |
+
+Open \`index.html\` to see the page. Your notes are in \`~/Documents/meeting notes.md\`.
+
+These stay text: the \`/api/signup\` route, \`npm test\`, example.com, version 1.2.3, \`not-there.md\`, and/or, https://uno.place/developers, the signup 24/7.`;
+
 /** The showcase chats for the page's own computer, in `projectId`. */
 export function timelineShowcaseThreads(projectId: string, root: string) {
   const now = Date.now();
@@ -320,5 +338,35 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     updatedAt: at(t2, 14),
   });
 
-  return [running, finished, asking];
+  // ── An answer that names files every way an agent does (Misha 30.10) ──
+  const t3 = now - 12 * 60_000;
+  const files = "showcase-files";
+  const filesTurn = "turn-showcase-files-1";
+  const naming = thread({
+    id: files,
+    projectId,
+    title: "Launch report and the page",
+    messages: [
+      message(
+        `${files}-u1`,
+        "user",
+        "Put together the launch report and tell me where everything is.",
+        at(t3, 0),
+        null,
+      ),
+      message(`${files}-a1`, "assistant", FILES_ANSWER, at(t3, 79), filesTurn),
+    ],
+    activities: [
+      tool(`${files}-r1`, filesTurn, at(t3, 9), "read", "dynamic_tool_call", {
+        filePath: file("web/index.html"),
+      }),
+      tool(`${files}-w1`, filesTurn, at(t3, 40), "write", "file_change", {
+        filePath: "/home/uno/UnoWork/Reports/launch-report.md",
+      }),
+    ],
+    turn: { turnId: filesTurn, startedAt: at(t3, 0), completedAt: at(t3, 79), answerId: `${files}-a1` },
+    updatedAt: at(t3, 79),
+  });
+
+  return [running, finished, asking, naming];
 }
