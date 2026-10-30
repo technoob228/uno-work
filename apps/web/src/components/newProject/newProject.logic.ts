@@ -3,6 +3,9 @@
  * folder picker fenced to the home folder, names and GitHub addresses. No I/O
  * here — the dialog feeds these what the daemon answered.
  */
+import type { ProjectSyncHostProvider, SourceControlDiscoveryResult } from "@t3tools/contracts";
+import { Option } from "effect";
+
 import {
   expandGitRemoteUrl,
   inferProjectNameFromGitUrl,
@@ -198,6 +201,61 @@ export function checkNewFolderName(raw: string, taken: ReadonlySet<string>): Nam
     };
   }
   return { ok: true, name };
+}
+
+/**
+ * Where a new project syncs: `uno` (the person's Uno cloud, on all their
+ * computers), `host` (a private repository too), `here` (nowhere). A host is
+ * offered only when this computer is signed in to it: no empty choices.
+ */
+export type ProjectDestination =
+  | { readonly kind: "uno" }
+  | {
+      readonly kind: "host";
+      readonly provider: ProjectSyncHostProvider;
+      readonly label: string;
+      readonly owner: string | null;
+    }
+  | { readonly kind: "here" };
+
+const HOST_LABELS: ReadonlyArray<{
+  readonly provider: ProjectSyncHostProvider;
+  readonly label: string;
+}> = [
+  { provider: "github", label: "GitHub" },
+  { provider: "gitlab", label: "GitLab" },
+];
+
+export function destinationKey(destination: ProjectDestination): string {
+  return destination.kind === "host" ? destination.provider : destination.kind;
+}
+
+/**
+ * The choices, the default first. `unoCloud`: null while it isn't known yet
+ * (the usual answer is yes); false — this computer isn't signed in to Uno.
+ */
+export function projectDestinations(input: {
+  readonly discovery: SourceControlDiscoveryResult | null;
+  readonly unoCloud: boolean | null;
+}): ReadonlyArray<ProjectDestination> {
+  const hosts = HOST_LABELS.flatMap(({ provider, label }): ReadonlyArray<ProjectDestination> => {
+    const found = input.discovery?.sourceControlProviders.find((item) => item.kind === provider);
+    if (found?.status !== "available" || found.auth.status !== "authenticated") return [];
+    return [{ kind: "host", provider, label, owner: Option.getOrNull(found.auth.account) }];
+  });
+  return [
+    ...(input.unoCloud === false ? [] : [{ kind: "uno" } as const]),
+    ...hosts,
+    { kind: "here" },
+  ];
+}
+
+/** `owner/name` for the host, or `name` when the owner isn't known (the host's default). */
+export function destinationRepository(
+  destination: Extract<ProjectDestination, { kind: "host" }>,
+  name: string,
+): string {
+  return destination.owner ? `${destination.owner}/${name}` : name;
 }
 
 export type RepoCheck =

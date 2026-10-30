@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRoundIcon, RefreshCwIcon, TrashIcon } from "lucide-react";
 import { useState } from "react";
 
+import { useDevMode } from "../../devMode";
 import { readEnvironmentApi } from "../../environmentApi";
 import { Button } from "../ui/button";
 import {
@@ -34,7 +35,7 @@ import { toastManager } from "../ui/toast";
 import { ProjectFiles } from "./ProjectFiles";
 import { ProjectTeam } from "./ProjectTeam";
 import { ProjectVersions } from "./ProjectVersions";
-import { conflictLine, syncLabel } from "./projectSync.logic";
+import { conflictLine, hostLine, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
 
 export interface ProjectSettingsTarget {
@@ -75,6 +76,7 @@ const fail = (title: string, error: unknown) =>
 
 function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: () => void }) {
   const { target } = props;
+  const devMode = useDevMode();
   const api = readEnvironmentApi(target.environmentId);
   const refresh = useRefreshProjectSync();
   const queryClient = useQueryClient();
@@ -194,6 +196,11 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
                 Sync now
               </Button>
             </div>
+          ) : null}
+          {enabled && entry?.host ? (
+            <p className="text-xs break-all text-muted-foreground" data-testid="project-sync-host">
+              {hostLine(entry.host, devMode)}
+            </p>
           ) : null}
           {enabled && (entry?.held?.length ?? 0) > 0 && entry?.state === "conflict" ? (
             // In a conflict the status line says the conflict: the waiting files still need a word.

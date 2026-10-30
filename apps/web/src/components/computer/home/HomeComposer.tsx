@@ -522,7 +522,7 @@ export function HomeComposer({
                   setFolder({ cwd, name });
                   ref.current?.focus();
                 },
-                files,
+                { files, environmentId: targetEnvironmentId },
               );
             });
             return;

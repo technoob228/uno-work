@@ -46,8 +46,10 @@ export function chatProjectOffer(input: {
 export async function turnChatIntoProject(
   threadRef: ScopedThreadRef,
   folder: string,
+  /** The project's name; the folder's otherwise (a chat's folder is named by its date). */
+  title?: string,
 ): Promise<void> {
-  const projectRef = await ensureFolderProjectOn(threadRef.environmentId, folder);
+  const projectRef = await ensureFolderProjectOn(threadRef.environmentId, folder, title);
   await ensureEnvironmentApi(threadRef.environmentId).orchestration.dispatchCommand({
     type: "thread.project.adopt",
     commandId: newCommandId(),

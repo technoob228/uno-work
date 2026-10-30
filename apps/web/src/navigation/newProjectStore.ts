@@ -2,12 +2,12 @@
  * "New project" dialog state, shared by every way in: the sidebar's New ▾, the
  * command palette's "New project", empty states, the rail, the start screen
  * (its Upload a project / drop zone), the console's `?do=upload`, and the
- * "Home folder ▾" chip of a new chat (New folder… / Upload a folder… / Clone
+ * "Home folder ▾" chip of a new chat (New project… / Upload a folder… / Clone
  * from GitHub…, or a folder / .zip dropped on the chat box). The old T3 "Add
  * project" palette flow is no longer reachable from the main UI (the Labs
  * legacy sidebar keeps it).
  */
-import type { ScopedProjectRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import type {
@@ -55,6 +55,8 @@ export interface NewProjectExtras {
    */
   readonly onCreated?: (project: CreatedProject) => void;
   readonly wording?: NewProjectWording;
+  /** The computer it goes to: a chat's own; the one on screen when absent. */
+  readonly environmentId?: EnvironmentId | null;
 }
 
 interface NewProjectState {
@@ -64,6 +66,11 @@ interface NewProjectState {
   readonly afterCreate: NewProjectExtras["afterCreate"] | null;
   readonly onCreated: NewProjectExtras["onCreated"] | null;
   readonly wording: NewProjectWording;
+  readonly environmentId: EnvironmentId | null;
+  readonly setEnvironmentId: (environmentId: EnvironmentId) => void;
+  /** The name being typed: it stays while the dialog looks at another computer. */
+  readonly name: string;
+  readonly setName: (name: string) => void;
   readonly openNewProject: (step?: NewProjectStep, extras?: NewProjectExtras) => void;
   readonly setStep: (step: NewProjectStep) => void;
   /** The dropped files, once (the Upload step reads them when it mounts). */
@@ -78,6 +85,10 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
   afterCreate: null,
   onCreated: null,
   wording: "project",
+  environmentId: null,
+  setEnvironmentId: (environmentId) => set({ environmentId }),
+  name: "",
+  setName: (name) => set({ name }),
   openNewProject: (step = "choose", extras = {}) =>
     set({
       open: true,
@@ -86,6 +97,8 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
       afterCreate: extras.afterCreate ?? null,
       onCreated: extras.onCreated ?? null,
       wording: extras.wording ?? "project",
+      environmentId: extras.environmentId ?? null,
+      name: "",
     }),
   setStep: (step) => set({ step }),
   takeFiles: () => {
@@ -93,7 +106,8 @@ export const useNewProjectStore = create<NewProjectState>((set, get) => ({
     if (files) set({ files: null });
     return files;
   },
-  close: () => set({ open: false, files: null, afterCreate: null, onCreated: null }),
+  close: () =>
+    set({ open: false, files: null, afterCreate: null, onCreated: null, environmentId: null }),
 }));
 
 export function openNewProject(step?: NewProjectStep, extras?: NewProjectExtras): void {
@@ -106,16 +120,21 @@ export type ChatFolderSource = "empty" | "upload" | "github";
 /**
  * The folder chip of a new chat (Home's box or a new chat): make a folder in
  * `~/projects` — new, uploaded or cloned — and hand it to `onCreated` (the
- * chat moves there with what was typed) instead of opening another chat.
+ * chat moves there with what was typed) instead of opening another chat. An
+ * empty one is a New project, with its name, computer and where it syncs.
  */
 export function openFolderForChat(
   source: ChatFolderSource,
   onCreated: (project: CreatedProject) => Promise<void> | void,
-  files?: ReadonlyArray<ProjectUploadFile>,
+  options?: {
+    readonly files?: ReadonlyArray<ProjectUploadFile>;
+    readonly environmentId?: EnvironmentId | null;
+  },
 ): void {
   openNewProject(source, {
-    wording: "folder",
-    ...(files ? { files } : {}),
+    wording: source === "empty" ? "project" : "folder",
+    environmentId: options?.environmentId ?? null,
+    ...(options?.files ? { files: options.files } : {}),
     afterCreate: async (project) => {
       await onCreated(project);
     },

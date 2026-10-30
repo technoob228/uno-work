@@ -1,3 +1,4 @@
+import { Option } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -24,6 +25,9 @@ import {
   recentHomeFolders,
   tildePath,
   describedProjectPrompt,
+  destinationKey,
+  destinationRepository,
+  projectDestinations,
 } from "./newProject.logic";
 
 const HOME = "/home/uno";
@@ -304,5 +308,78 @@ describe("a failed clone in words for people (Misha 20.10)", () => {
         ),
       ),
     ).toBe(true);
+  });
+});
+
+describe("where a new project syncs", () => {
+  const provider = (
+    kind: "github" | "gitlab",
+    status: "authenticated" | "unauthenticated" | "unknown",
+    installed: "available" | "missing" = "available",
+  ) => ({
+    kind,
+    label: kind,
+    status: installed,
+    version: Option.none(),
+    installHint: "install it",
+    detail: Option.none(),
+    auth: {
+      status,
+      account: status === "authenticated" ? Option.some("misha") : Option.none(),
+      host: Option.none(),
+      detail: Option.none(),
+    },
+  });
+  const discovery = (...providers: ReadonlyArray<ReturnType<typeof provider>>) => ({
+    versionControlSystems: [],
+    sourceControlProviders: providers,
+  });
+  const keys = (input: Parameters<typeof projectDestinations>[0]) =>
+    projectDestinations(input).map(destinationKey);
+
+  it("Uno first, for everyone, with nothing connected", () => {
+    expect(keys({ discovery: null, unoCloud: null })).toEqual(["uno", "here"]);
+    expect(keys({ discovery: discovery(), unoCloud: true })).toEqual(["uno", "here"]);
+  });
+
+  it("offers a host only when this computer is signed in to it", () => {
+    expect(
+      keys({
+        discovery: discovery(
+          provider("github", "authenticated"),
+          provider("gitlab", "authenticated"),
+        ),
+        unoCloud: true,
+      }),
+    ).toEqual(["uno", "github", "gitlab", "here"]);
+    expect(
+      keys({
+        discovery: discovery(provider("github", "unauthenticated"), provider("gitlab", "unknown")),
+        unoCloud: true,
+      }),
+    ).toEqual(["uno", "here"]);
+    expect(
+      keys({
+        discovery: discovery(provider("github", "authenticated", "missing")),
+        unoCloud: true,
+      }),
+    ).toEqual(["uno", "here"]);
+  });
+
+  it("doesn't offer Uno on a computer that isn't signed in to it", () => {
+    expect(keys({ discovery: discovery(), unoCloud: false })).toEqual(["here"]);
+    expect(
+      keys({ discovery: discovery(provider("github", "authenticated")), unoCloud: false }),
+    ).toEqual(["github", "here"]);
+  });
+
+  it("names the repository under the account, when it's known", () => {
+    const [host] = projectDestinations({
+      discovery: discovery(provider("github", "authenticated")),
+      unoCloud: false,
+    });
+    if (host?.kind !== "host") throw new Error("expected a host");
+    expect(destinationRepository(host, "site")).toBe("misha/site");
+    expect(destinationRepository({ ...host, owner: null }, "site")).toBe("site");
   });
 });

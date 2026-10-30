@@ -10,7 +10,10 @@
  * - From Cloud storage (11.10): a folder of the account's cloud is copied to
  *   `~/projects/<name>`; the cloud copy stays where it is.
  * - From GitHub: clone a repository into `~/projects/<repo>`.
- * - Empty project: a new folder `~/projects/<name>`.
+ * - Empty project: a new folder `~/projects/<name>`, with the computer it goes
+ *   to and where it syncs (Misha 30.10: "a new project on any machine with any
+ *   idea"): the Uno cloud by default; GitHub or GitLab when this computer is
+ *   signed in to them, as a private repository; or nowhere.
  * - A folder on this computer: click through the home folder (recent folders
  *   first). No typed paths, nothing outside the home folder.
  *
@@ -25,6 +28,7 @@
 import {
   DEFAULT_RUNTIME_MODE,
   isAssistantProjectId,
+  type EnvironmentId,
   type FilesystemBrowseEntry,
   type ScopedProjectRef,
 } from "@t3tools/contracts";
@@ -93,7 +97,9 @@ import { cloudListQueryOptions, cloudStateQueryOptions, filesApi } from "../file
 import { isJunkPath, stripSharedTopFolder } from "../setup/goals";
 import { expandZips } from "../setup/siteUpload";
 import { GitHubIcon } from "../Icons";
+import { useDevMode } from "../../devMode";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
+import { useSourceControlDiscovery } from "../../lib/sourceControlDiscoveryState";
 import { folderDisplayName, useFolderChats, useHomeFolderPath } from "../../hooks/useFolderChats";
 import { cn } from "../../lib/utils";
 import {
@@ -102,6 +108,8 @@ import {
   useNewProjectStore,
 } from "../../navigation/newProjectStore";
 import { selectProjectsForEnvironment, useStore } from "../../store";
+import { NewChatComputerPicker } from "../chat/NewChatComputerPicker";
+import { projectSyncQueryKey } from "../projectSync/useProjectSync";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import {
@@ -114,7 +122,9 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Radio, RadioGroup } from "../ui/radio-group";
 import { Textarea } from "../ui/textarea";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Skeleton } from "../ui/skeleton";
 import { Spinner } from "../ui/spinner";
 import {
@@ -133,12 +143,16 @@ import {
   uploadedProjectPath,
   checkRepositoryInput,
   clampToHome,
+  destinationKey,
+  destinationRepository,
   homeCrumbs,
   isInsideHome,
   isPickableFolder,
   recentHomeFolders,
   tildePath,
   connectGithubPrompt,
+  projectDestinations,
+  type ProjectDestination,
 } from "./newProject.logic";
 import { RepoAccessNotice, useRepoClone } from "./repoAccess";
 
@@ -177,13 +191,20 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message ? cause.message : fallback;
 }
 
+/** The computer the project goes to: the opener's (a chat's own), or the one on screen. */
+function useNewProjectEnvironment() {
+  const chosen = useNewProjectStore((state) => state.environmentId);
+  const { environmentId } = useActiveMachine();
+  return chosen ?? environmentId;
+}
+
 export function NewProjectDialog() {
   const open = useNewProjectStore((state) => state.open);
   const step = useNewProjectStore((state) => state.step);
   const setStep = useNewProjectStore((state) => state.setStep);
   const close = useNewProjectStore((state) => state.close);
   const wording = useNewProjectStore((state) => state.wording);
-  const { environmentId } = useActiveMachine();
+  const environmentId = useNewProjectEnvironment();
   const home = useHomeFolderPath(environmentId);
   const machineLabel = useMachineLabel(environmentId);
   const copy = dialogCopy(wording, step);
@@ -194,13 +215,15 @@ export function NewProjectDialog() {
         <DialogHeader>
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription>{copy.description}</DialogDescription>
-          <p
-            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-            data-testid="new-project-machine"
-          >
-            <MonitorIcon className="size-3.5" />
-            On computer <b className="font-medium text-foreground">{machineLabel}</b>
-          </p>
+          {step === "empty" ? null : (
+            <p
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              data-testid="new-project-machine"
+            >
+              <MonitorIcon className="size-3.5" />
+              On computer <b className="font-medium text-foreground">{machineLabel}</b>
+            </p>
+          )}
         </DialogHeader>
         {step === "choose" ? (
           <DialogPanel>
@@ -257,7 +280,6 @@ export function NewProjectDialog() {
           <EmptyStep
             environmentId={environmentId}
             home={home}
-            wording={wording}
             onBack={() => setStep("choose")}
             onDone={close}
           />
@@ -286,13 +308,11 @@ function dialogCopy(
     };
   }
   const title =
-    step === "empty"
-      ? "New folder"
-      : step === "upload"
-        ? "Upload a folder"
-        : step === "github"
-          ? "Clone from GitHub"
-          : "Add a folder";
+    step === "upload"
+      ? "Upload a folder"
+      : step === "github"
+        ? "Clone from GitHub"
+        : "Add a folder";
   return { title, description: "Your chat will work in it. What you typed stays." };
 }
 
@@ -313,7 +333,7 @@ function useFinishNewProject() {
   const afterCreate = useNewProjectStore((state) => state.afterCreate);
   const onCreated = useNewProjectStore((state) => state.onCreated);
   const { handleNewThread } = useNewThreadHandler();
-  const { startTask } = useHomeLaunchers(useActiveMachine().environmentId);
+  const { startTask } = useHomeLaunchers(useNewProjectEnvironment());
   return useCallback(
     async (
       projectRef: ScopedProjectRef,
@@ -1578,20 +1598,177 @@ function FolderRow(props: { name: string; isProject: boolean; onClick: () => voi
   );
 }
 
-function EmptyStep({
-  environmentId,
-  home,
-  wording,
-  onBack,
-  onDone,
-}: StepProps & { readonly wording: NewProjectWording }) {
-  const [name, setName] = useState("");
+/** Where it syncs, in words for everyone; `detail` is what Dev Mode adds. */
+function destinationCopy(
+  destination: ProjectDestination,
+  name: string,
+  alsoOnUno: boolean,
+): { title: string; body: string; detail: string } {
+  const folder = name || "<name>";
+  switch (destination.kind) {
+    case "uno":
+      return {
+        title: "Uno",
+        body: "On all your computers. Nothing to set up.",
+        detail: `uno::${folder} · versions saved by themselves · keys in Uno`,
+      };
+    case "host":
+      return {
+        title: destination.label,
+        body: `A private copy in your ${destination.label} account${alsoOnUno ? ", and on all your computers" : ""}.`,
+        detail: `${destinationRepository(destination, folder)} · private · remote origin · push and pull by themselves, commits are yours · keys stay out`,
+      };
+    case "here":
+      return {
+        title: "Only on this computer",
+        body: "Nothing leaves it.",
+        detail: "no remote · turn sync on later in the project's settings",
+      };
+  }
+}
+
+function DestinationPicker(props: {
+  destinations: ReadonlyArray<ProjectDestination>;
+  value: ProjectDestination;
+  name: string;
+  onChange: (destination: ProjectDestination) => void;
+}) {
+  const devMode = useDevMode();
+  return (
+    <fieldset className="mt-2 flex flex-col gap-1.5" data-testid="new-project-destinations">
+      <legend className="mb-1.5 text-sm font-medium">Where it syncs</legend>
+      <RadioGroup
+        className="gap-1"
+        value={destinationKey(props.value)}
+        onValueChange={(key) => {
+          const next = props.destinations.find((item) => destinationKey(item) === key);
+          if (next) props.onChange(next);
+        }}
+      >
+        {props.destinations.map((destination) => {
+          const key = destinationKey(destination);
+          const copy = destinationCopy(
+            destination,
+            props.name,
+            props.destinations.some((item) => item.kind === "uno"),
+          );
+          return (
+            <label
+              key={key}
+              className={cn(
+                "flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 transition-colors hover:bg-accent/40",
+                key === destinationKey(props.value)
+                  ? "border-primary/40 bg-primary/[0.03]"
+                  : "border-border/70",
+              )}
+            >
+              <Radio
+                value={key}
+                className="mt-0.5"
+                data-testid={`new-project-destination-${key}`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-medium">
+                  {destination.kind === "host" && destination.provider === "github" ? (
+                    <GitHubIcon className="size-3.5" />
+                  ) : null}
+                  {copy.title}
+                </span>
+                <span className="block text-xs leading-snug text-muted-foreground">
+                  {copy.body}
+                </span>
+                {devMode ? (
+                  <span
+                    className="mt-0.5 block font-mono text-[11px] leading-snug break-all text-muted-foreground/80"
+                    data-testid={`new-project-destination-detail-${key}`}
+                  >
+                    {copy.detail}
+                  </span>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
+      </RadioGroup>
+      {props.value.kind === "host" && !devMode ? (
+        <p className="text-xs text-muted-foreground">
+          Saved versions go there by themselves. Keys stay out.
+        </p>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function useProjectDestinations(environmentId: EnvironmentId) {
+  const discovery = useSourceControlDiscovery({ environmentId });
+  const status = useQuery({
+    queryKey: projectSyncQueryKey(environmentId),
+    queryFn: () => ensureEnvironmentApi(environmentId).projectSync.status(),
+  });
+  return useMemo(
+    () =>
+      projectDestinations({
+        discovery: discovery.data,
+        unoCloud: status.data?.available ?? null,
+      }),
+    [discovery.data, status.data?.available],
+  );
+}
+
+/** Publish a new project in the background: the chat opens right away (as in T3 Code). */
+function connectProjectHost(input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ScopedProjectRef["projectId"];
+  readonly destination: Extract<ProjectDestination, { kind: "host" }>;
+  readonly name: string;
+}) {
+  const { destination } = input;
+  void ensureEnvironmentApi(input.environmentId)
+    .projectSync.connectHost({
+      projectId: input.projectId,
+      provider: destination.provider,
+      repository: destinationRepository(destination, input.name),
+    })
+    .then(
+      () => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "success",
+            title: `${input.name} is on ${destination.label}`,
+          }),
+        );
+      },
+      (cause: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: `Couldn't put ${input.name} on ${destination.label}`,
+            description: `${errorMessage(cause, "Try again.")} The project is safe on this computer.`,
+            actionProps: { children: "Try again", onClick: () => connectProjectHost(input) },
+          }),
+        );
+      },
+    );
+}
+
+function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
+  const name = useNewProjectStore((state) => state.name);
+  const setName = useNewProjectStore((state) => state.setName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [destinationChoice, setDestinationChoice] = useState<ProjectDestination | null>(null);
   const taken = useProjectsEntryNames(environmentId, home);
   const { ensureFolderProject } = useFolderChats(environmentId);
   const finish = useFinishNewProject();
   const check = checkNewFolderName(name, taken ?? new Set());
+  const destinations = useProjectDestinations(environmentId);
+  // A choice the next computer doesn't have falls back to its default.
+  const destination =
+    destinations.find(
+      (item) => destinationChoice && destinationKey(item) === destinationKey(destinationChoice),
+    ) ?? destinations[0]!;
+  const setEnvironmentId = useNewProjectStore((state) => state.setEnvironmentId);
+  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
 
   const submit = async () => {
     if (!check.ok) {
@@ -1602,16 +1779,29 @@ function EmptyStep({
     setError(null);
     try {
       const folder = uploadedProjectPath(home, check.name);
-      const projectRef = await ensureFolderProject(folder, check.name, { createFolder: true });
+      const api = ensureEnvironmentApi(environmentId);
+      // Its own git comes first: a folder sync saw without one stays without.
+      if (destination.kind === "host") {
+        await api.projectSync.startRepository({ folder, name: check.name });
+      }
+      const projectRef = await ensureFolderProject(folder, check.name, {
+        createFolder: destination.kind !== "host",
+      });
+      if (destination.kind === "here") {
+        await api.projectSync.setEnabled({ projectId: projectRef.projectId, enabled: false });
+      }
       await finish(projectRef, check.name, folder);
+      if (destination.kind === "host") {
+        connectProjectHost({
+          environmentId,
+          projectId: projectRef.projectId,
+          destination,
+          name: check.name,
+        });
+      }
       onDone();
     } catch (cause) {
-      setError(
-        errorMessage(
-          cause,
-          wording === "folder" ? "Couldn't create the folder." : "Couldn't create the project.",
-        ),
-      );
+      setError(errorMessage(cause, "Couldn't create the project."));
     } finally {
       setBusy(false);
     }
@@ -1627,7 +1817,7 @@ function EmptyStep({
         <Input
           id="new-project-name"
           autoFocus
-          placeholder={wording === "folder" ? "my-folder" : "my-project"}
+          placeholder="my-project"
           value={name}
           onChange={(event) => setName(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -1640,15 +1830,38 @@ function EmptyStep({
         <p className="text-xs text-muted-foreground">
           {check.ok
             ? `Creates ${tildePath(uploadedProjectPath(home, check.name), home)}`
-            : "Creates ~/projects/<name>"}{" "}
-          on this computer.
+            : "Creates ~/projects/<name>"}
         </p>
+        <div
+          className="mt-2 flex items-center justify-between gap-2"
+          data-testid="new-project-computer"
+        >
+          <span className="text-sm font-medium">Computer</span>
+          <NewChatComputerPicker
+            variant="chip"
+            environmentId={environmentId}
+            shortcut={false}
+            testId="new-project-computer-picker"
+            onPick={(next) => {
+              setEnvironmentId(next);
+              setActiveEnvironmentId(next);
+            }}
+          />
+        </div>
+        {destinations.length > 1 ? (
+          <DestinationPicker
+            destinations={destinations}
+            value={destination}
+            name={check.ok ? check.name : ""}
+            onChange={setDestinationChoice}
+          />
+        ) : null}
       </DialogPanel>
       <StepFooter
         error={error ?? (name.trim().length > 0 && !check.ok ? check.error : null)}
         busy={busy}
         disabled={!check.ok || taken === null}
-        label={wording === "folder" ? "Create folder" : "Create project"}
+        label="Create project"
         icon={<PlusIcon />}
         onSubmit={() => void submit()}
         onCancel={onDone}
