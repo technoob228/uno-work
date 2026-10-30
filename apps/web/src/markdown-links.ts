@@ -1,5 +1,4 @@
-import { formatWorkspaceRelativePath } from "./filePathDisplay";
-import { resolvePathLinkTarget, splitPathAndPosition } from "./terminal-links";
+import { resolvePathLinkTarget } from "./terminal-links";
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
@@ -21,15 +20,6 @@ const POSIX_FILE_ROOT_PREFIXES = [
   "/private/",
   "/root/",
 ] as const;
-
-export interface MarkdownFileLinkMeta {
-  filePath: string;
-  targetPath: string;
-  displayPath: string;
-  basename: string;
-  line?: number;
-  column?: number;
-}
 
 function safeDecode(value: string): string {
   try {
@@ -154,11 +144,6 @@ export function resolveMarkdownFileLinkTarget(
   return resolvePathLinkTarget(pathWithPosition, cwd);
 }
 
-function basenameOfPath(path: string): string {
-  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
-}
-
 /**
  * `24/7`, `1/2`, `50/50`, `10/03/2026`: numbers with slashes are words of an
  * answer, not a path to a file. Linked as a path, "the bot answers 24/7"
@@ -166,27 +151,4 @@ function basenameOfPath(path: string): string {
  */
 export function isNumberRatio(text: string): boolean {
   return /^\d+(?:\/\d+)+$/.test(text.trim());
-}
-
-export function resolveMarkdownFileLinkMeta(
-  href: string | undefined,
-  cwd?: string,
-): MarkdownFileLinkMeta | null {
-  const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
-  if (!targetPath) return null;
-
-  const { path, line, column } = splitPathAndPosition(targetPath);
-  const parsedLine = line ? Number.parseInt(line, 10) : Number.NaN;
-  const parsedColumn = column ? Number.parseInt(column, 10) : Number.NaN;
-  const lineNumber = Number.isFinite(parsedLine) ? parsedLine : undefined;
-  const columnNumber = Number.isFinite(parsedColumn) ? parsedColumn : undefined;
-
-  return {
-    filePath: path,
-    targetPath,
-    displayPath: formatWorkspaceRelativePath(targetPath, cwd),
-    basename: basenameOfPath(path),
-    ...(lineNumber !== undefined ? { line: lineNumber } : {}),
-    ...(columnNumber !== undefined ? { column: columnNumber } : {}),
-  };
 }

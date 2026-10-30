@@ -578,91 +578,93 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const canRevertAgentWork = devMode && typeof row.revertTurnCount === "number";
           const sentByThreadId = row.message.sentByThreadId ?? null;
           return (
-            <div className="flex justify-end">
-              <div className="group relative flex max-w-[80%] min-w-0 flex-col items-end">
+            <div className="group flex justify-end">
+              <div className="relative flex max-w-[80%] min-w-0 flex-col items-end">
                 <div
                   className={cn(
                     "w-full min-w-0 rounded-2xl px-3.5 py-2",
                     // Sent by another chat's agent: same side, but visibly not the human's own bubble.
-                    sentByThreadId ? "border border-dashed border-info/30 bg-info/4" : "bg-secondary",
+                    sentByThreadId
+                      ? "border border-dashed border-info/30 bg-info/4"
+                      : "bg-secondary",
                   )}
                   data-sent-by-agent={sentByThreadId ? "true" : undefined}
                 >
-                {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map((image) => (
-                      <div
-                        key={image.id}
-                        className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                      >
-                        {image.previewUrl ? (
-                          <UserImageThumb
-                            image={image}
-                            previewUrl={image.previewUrl}
-                            images={userImages}
-                          />
-                        ) : (
-                          <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                            {image.name}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {userVideos.length > 0 && (
-                  <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
-                    {userVideos.map((video) => (
-                      <div
-                        key={video.id}
-                        className="flex min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background/70 px-2.5 py-2 text-xs text-muted-foreground"
-                      >
-                        <FileVideoIcon className="size-4 shrink-0 text-foreground/70" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium text-foreground/80">
-                            {video.name}
-                          </div>
-                          <div className="truncate text-[11px]">
-                            {formatVideoDuration(video.durationMs)} · {video.frameCount} frames ·{" "}
-                            {video.transcriptSegmentCount} transcript segments
+                  {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
+                  {userImages.length > 0 && (
+                    <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
+                      {userImages.map((image) => (
+                        <div
+                          key={image.id}
+                          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                        >
+                          {image.previewUrl ? (
+                            <UserImageThumb
+                              image={image}
+                              previewUrl={image.previewUrl}
+                              images={userImages}
+                            />
+                          ) : (
+                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                              {image.name}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {userVideos.length > 0 && (
+                    <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
+                      {userVideos.map((video) => (
+                        <div
+                          key={video.id}
+                          className="flex min-w-0 items-center gap-2 rounded-lg border border-border/80 bg-background/70 px-2.5 py-2 text-xs text-muted-foreground"
+                        >
+                          <FileVideoIcon className="size-4 shrink-0 text-foreground/70" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium text-foreground/80">
+                              {video.name}
+                            </div>
+                            <div className="truncate text-[11px]">
+                              {formatVideoDuration(video.durationMs)} · {video.frameCount} frames ·{" "}
+                              {video.transcriptSegmentCount} transcript segments
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {recordingPart.recording ? (
-                  <RecordingMessageCard
-                    recording={recordingPart.recording}
-                    frames={recordingFrames.map((image) => ({
-                      id: image.id,
-                      name: image.name,
-                      previewUrl: image.previewUrl ?? null,
-                    }))}
-                    localUrl={localRecordingUrl(recordingPart.recording.name)}
-                  />
-                ) : null}
-                {userFiles.length > 0 && (
-                  <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
-                    {userFiles.map((file) => (
-                      <UserFileAttachmentChip key={file.id} file={file} />
-                    ))}
-                  </div>
-                )}
-                {isUnoAiHandoff(displayedUserMessage.visibleText) ? (
-                  <UnoAiHandoffCard text={displayedUserMessage.visibleText} />
-                ) : isHandoffSeed(displayedUserMessage.visibleText) ? (
-                  <HandoffSeedBody text={displayedUserMessage.visibleText} />
-                ) : (
-                  (displayedUserMessage.visibleText.trim().length > 0 ||
-                    terminalContexts.length > 0) && (
-                    <UserMessageBody
-                      text={displayedUserMessage.visibleText}
-                      terminalContexts={terminalContexts}
+                      ))}
+                    </div>
+                  )}
+                  {recordingPart.recording ? (
+                    <RecordingMessageCard
+                      recording={recordingPart.recording}
+                      frames={recordingFrames.map((image) => ({
+                        id: image.id,
+                        name: image.name,
+                        previewUrl: image.previewUrl ?? null,
+                      }))}
+                      localUrl={localRecordingUrl(recordingPart.recording.name)}
                     />
-                  )
-                )}
+                  ) : null}
+                  {userFiles.length > 0 && (
+                    <div className="mb-2 flex max-w-[420px] flex-col gap-1.5">
+                      {userFiles.map((file) => (
+                        <UserFileAttachmentChip key={file.id} file={file} />
+                      ))}
+                    </div>
+                  )}
+                  {isUnoAiHandoff(displayedUserMessage.visibleText) ? (
+                    <UnoAiHandoffCard text={displayedUserMessage.visibleText} />
+                  ) : isHandoffSeed(displayedUserMessage.visibleText) ? (
+                    <HandoffSeedBody text={displayedUserMessage.visibleText} />
+                  ) : (
+                    (displayedUserMessage.visibleText.trim().length > 0 ||
+                      terminalContexts.length > 0) && (
+                      <UserMessageBody
+                        text={displayedUserMessage.visibleText}
+                        terminalContexts={terminalContexts}
+                      />
+                    )
+                  )}
                 </div>
                 {/* Time and actions under the bubble, on hover (always on touch screens). */}
                 <div
@@ -1016,7 +1018,7 @@ const TurnFoldRow = memo(function TurnFoldRow(props: {
   const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   return (
     <div
-      className="group/timeline-row flex items-center gap-3 border-b border-border/60 pb-2"
+      className="group/timeline-row mx-1 flex items-center gap-3 border-b border-border/60 pb-2"
       data-testid="turn-fold"
     >
       <button

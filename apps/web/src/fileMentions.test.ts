@@ -192,6 +192,10 @@ describe("fileMentionInHref", () => {
     expect(fileMentionInHref("/home/uno/a.go#L1678")).toMatchObject({ line: 1678 });
   });
 
+  it("decodes the address", () => {
+    expect(fileMentionInHref("reports/my%20file.md")?.path).toBe("reports/my file.md");
+  });
+
   it("leaves web links", () => {
     expect(fileMentionInHref("https://uno.place/developers")).toBeNull();
     expect(fileMentionInHref("console.uno.place/docs")).toBeNull();

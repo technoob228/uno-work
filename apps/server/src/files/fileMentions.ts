@@ -166,9 +166,7 @@ export async function resolveFileMentions(
     if (tail) tails.add(tail);
   });
   const walked =
-    tails.size > 0
-      ? await findByTail(folders[0] ?? rootReal, tails)
-      : new Map<string, string>();
+    tails.size > 0 ? await findByTail(folders[0] ?? rootReal, tails) : new Map<string, string>();
 
   const byMention = new Map<string, FilesResolvedMention>();
   mentions.forEach((mention, index) => {

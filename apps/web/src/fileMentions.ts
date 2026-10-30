@@ -193,7 +193,7 @@ function normalizeRelative(path: string): string {
   return path.replace(/^(?:\.\/)+/, "./");
 }
 
-function mentionOf(raw: string, context: "code" | "text"): FileMention | null {
+function mentionOf(raw: string, context: "code" | "href" | "text"): FileMention | null {
   const value = raw.trim();
   if (value.length < 2 || value.length > MAX_MENTION_LENGTH) return null;
   if (URL_SCHEME.test(value) && !value.toLowerCase().startsWith("file://")) return null;
@@ -219,7 +219,10 @@ function mentionOf(raw: string, context: "code" | "text"): FileMention | null {
 
   const rooted = isRooted(path);
   const hasSpaces = /\s/.test(path);
-  if (hasSpaces && (context === "text" || !rooted || CLI_FLAG.test(path))) return null;
+  if (hasSpaces) {
+    if (context === "text") return null;
+    if (context === "code" && (!rooted || CLI_FLAG.test(path))) return null;
+  }
   if (!segmentsAreNames(path, hasSpaces ? SEGMENT_WITH_SPACES : SEGMENT)) return null;
 
   const name = lastSegment(path);
@@ -253,7 +256,13 @@ export function fileMentionInCode(code: string): FileMention | null {
 
 /** The address of a Markdown link, when it points at a file (`file://…` too). */
 export function fileMentionInHref(href: string): FileMention | null {
-  const mention = mentionOf(href, "code");
+  let decoded = href;
+  try {
+    decoded = decodeURIComponent(href);
+  } catch {
+    // Not encoded after all: take it as it is.
+  }
+  const mention = mentionOf(decoded, "href");
   return mention ? { ...mention, strong: true } : null;
 }
 

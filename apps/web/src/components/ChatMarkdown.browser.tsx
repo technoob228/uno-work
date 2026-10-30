@@ -4,20 +4,27 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-const { openInPreferredEditorMock, openUrlMock, readLocalApiMock, openFileMock, openExternalMock } =
-  vi.hoisted(() => {
-    const openExternalMock = vi.fn(async () => undefined);
-    return {
-      openInPreferredEditorMock: vi.fn(async () => "vscode"),
-      openUrlMock: vi.fn(),
-      openFileMock: vi.fn(),
-      openExternalMock,
-      readLocalApiMock: vi.fn(() => ({
-        server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
-        shell: { openInEditor: vi.fn(async () => undefined), openExternal: openExternalMock },
-      })),
-    };
-  });
+const {
+  openInPreferredEditorMock,
+  openUrlMock,
+  readLocalApiMock,
+  openFileMock,
+  openExternalMock,
+  resolveMentionsMock,
+} = vi.hoisted(() => {
+  const openExternalMock = vi.fn(async () => undefined);
+  return {
+    openInPreferredEditorMock: vi.fn(async () => "vscode"),
+    openUrlMock: vi.fn(),
+    openFileMock: vi.fn(),
+    openExternalMock,
+    resolveMentionsMock: vi.fn(),
+    readLocalApiMock: vi.fn(() => ({
+      server: { getConfig: vi.fn(async () => ({ availableEditors: ["vscode"] })) },
+      shell: { openInEditor: vi.fn(async () => undefined), openExternal: openExternalMock },
+    })),
+  };
+});
 
 vi.mock("../editorPreferences", () => ({
   openInPreferredEditor: openInPreferredEditorMock,
@@ -30,6 +37,11 @@ vi.mock("../localApi", () => ({
   readLocalApi: readLocalApiMock,
 }));
 
+vi.mock("../environmentApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../environmentApi")>()),
+  readEnvironmentApi: () => ({ files: { resolveMentions: resolveMentionsMock } }),
+}));
+
 // Only the panel hook is faked: ChatMarkdown also imports the module's pure
 // helpers (detectFileKind), which a bare mock would drop.
 vi.mock("./preview/PreviewPaneContext", async (importOriginal) => ({
@@ -37,13 +49,34 @@ vi.mock("./preview/PreviewPaneContext", async (importOriginal) => ({
   usePreviewPane: () => ({
     openUrl: openUrlMock,
     openFile: openFileMock,
+    currentChatEnvironmentId: null,
+    currentChatThreadId: "thread-1",
   }),
 }));
 
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import ChatMarkdown from "./ChatMarkdown";
+import { usePanelFilesStore } from "./files/filesPanelTab";
+
+/** What the computer has, by mention. */
+function computerHas(files: Record<string, { path: string; kind?: "file" | "directory" }>) {
+  resolveMentionsMock.mockImplementation(async ({ mentions }: { mentions: string[] }) => ({
+    results: mentions.map((mention) => ({
+      mention,
+      path: files[mention]?.path ?? null,
+      kind: files[mention] ? (files[mention].kind ?? "file") : null,
+    })),
+  }));
+}
+
+let environments = 0;
+/** Each test its own computer: answers are kept per computer between chats. */
+const freshEnvironment = () => `env-test-${(environments += 1)}` as EnvironmentId;
 
 describe("ChatMarkdown", () => {
   afterEach(() => {
+    resolveMentionsMock.mockReset();
     openInPreferredEditorMock.mockClear();
     openUrlMock.mockClear();
     openFileMock.mockClear();
@@ -87,13 +120,13 @@ describe("ChatMarkdown", () => {
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts · L1" });
       await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", `${filePath}#L1`);
+      await expect.element(link).toHaveAttribute("href", filePath);
 
       await link.click();
 
       await vi.waitFor(() => {
         expect(openFileMock).toHaveBeenCalledWith(
-          expect.objectContaining({ name: "PermissionRule.ts", path: `${filePath}:1` }),
+          expect.objectContaining({ name: "PermissionRule.ts", path: filePath }),
         );
       });
     } finally {
@@ -111,13 +144,13 @@ describe("ChatMarkdown", () => {
     try {
       const link = page.getByRole("link", { name: "PermissionRule.ts · L1:C7" });
       await expect.element(link).toBeInTheDocument();
-      await expect.element(link).toHaveAttribute("href", `${filePath}#L1C7`);
+      await expect.element(link).toHaveAttribute("href", filePath);
 
       await link.click();
 
       await vi.waitFor(() => {
         expect(openFileMock).toHaveBeenCalledWith(
-          expect.objectContaining({ name: "PermissionRule.ts", path: `${filePath}:1:7` }),
+          expect.objectContaining({ name: "PermissionRule.ts", path: filePath }),
         );
       });
     } finally {
@@ -200,22 +233,189 @@ describe("ChatMarkdown", () => {
     }
   });
 
-  it("autolinks plain file paths outside inline code", async () => {
+  it("turns every way of naming a file into a chip that opens it on the chat's computer", async () => {
+    const environmentId = freshEnvironment();
+    computerHas({
+      "~/UnoWork/report.md": { path: "/home/uno/UnoWork/report.md" },
+      "/home/uno/projects/x/index.html": { path: "/home/uno/projects/x/index.html" },
+      "reports/foo.md": { path: "/home/uno/projects/x/reports/foo.md" },
+      "README.md": { path: "/home/uno/projects/x/README.md" },
+      "app.ts": { path: "/home/uno/projects/x/src/app.ts" },
+    });
+    const text = [
+      "Report: `~/UnoWork/report.md`, page `/home/uno/projects/x/index.html`.",
+      "",
+      "- plain path reports/foo.md in a list",
+      "- **`README.md`** and app.ts:12",
+    ].join("\n");
+    const screen = await render(
+      <ChatMarkdown text={text} cwd="/home/uno/projects/x" environmentId={environmentId} />,
+    );
+
+    try {
+      for (const name of ["report.md", "index.html", "foo.md", "README.md", "app.ts · L12"]) {
+        await expect.element(page.getByRole("link", { name })).toBeInTheDocument();
+      }
+      await page.getByRole("link", { name: "report.md" }).click();
+      expect(openFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "/home/uno/UnoWork/report.md",
+          path: "/home/uno/UnoWork/report.md",
+          name: "report.md",
+          kind: "md",
+          environmentId,
+        }),
+      );
+      expect(resolveMentionsMock).toHaveBeenCalledTimes(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("leaves what the computer doesn't have as it was written", async () => {
+    computerHas({});
     const screen = await render(
       <ChatMarkdown
-        text="See /repo/project/src/App.tsx:12:3 and `/repo/project/src/Hidden.tsx:4`"
-        cwd="/repo/project"
+        text="Missing `not-there.md`, and `~/gone/old.md`."
+        cwd="/repo"
+        environmentId={freshEnvironment()}
       />,
     );
 
     try {
-      const link = page.getByRole("link", { name: "App.tsx · L12:C3" });
+      await vi.waitFor(() => expect(resolveMentionsMock).toHaveBeenCalled());
+      await expect.element(page.getByText("not-there.md")).toBeInTheDocument();
+      await vi.waitFor(() =>
+        expect(document.querySelectorAll('[data-testid="chat-file-chip"]')).toHaveLength(0),
+      );
+      await expect.element(page.getByText("~/gone/old.md")).toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("doesn't ask about commands, addresses, versions or code blocks", async () => {
+    computerHas({});
+    const text = [
+      "Run `npm test` and `cat foo.md`, see https://example.com/report.md and example.com, v1.2.3, 24/7.",
+      "",
+      "```",
+      "cat reports/in-a-block.md",
+      "```",
+    ].join("\n");
+    const screen = await render(
+      <ChatMarkdown text={text} cwd="/repo" environmentId={freshEnvironment()} />,
+    );
+
+    try {
+      await expect.element(page.getByText("npm test")).toBeInTheDocument();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(resolveMentionsMock).not.toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("asks once for all the answers on screen", async () => {
+    const environmentId = freshEnvironment();
+    computerHas({ "a.md": { path: "/repo/a.md" }, "b.md": { path: "/repo/b.md" } });
+    const screen = await render(
+      <>
+        <ChatMarkdown text="`a.md`" cwd="/repo" environmentId={environmentId} />
+        <ChatMarkdown text="`b.md` and `a.md`" cwd="/repo" environmentId={environmentId} />
+      </>,
+    );
+
+    try {
+      await expect.element(page.getByRole("link", { name: "b.md" })).toBeInTheDocument();
+      expect(resolveMentionsMock).toHaveBeenCalledTimes(1);
+      expect(resolveMentionsMock.mock.calls[0]?.[0]).toEqual({
+        cwd: "/repo",
+        mentions: ["a.md", "b.md"],
+      });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("waits for the answer to be written before asking", async () => {
+    computerHas({ "a.md": { path: "/repo/a.md" } });
+    const environmentId = freshEnvironment();
+    const screen = await render(
+      <ChatMarkdown text="`a.md`" cwd="/repo" environmentId={environmentId} isStreaming />,
+    );
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(resolveMentionsMock).not.toHaveBeenCalled();
+      await screen.rerender(
+        <ChatMarkdown text="`a.md`" cwd="/repo" environmentId={environmentId} />,
+      );
+      await expect.element(page.getByRole("link", { name: "a.md" })).toBeInTheDocument();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("draws a sure path before the answer comes, and a computer without the call keeps it", async () => {
+    resolveMentionsMock.mockRejectedValue(new Error("unknown method"));
+    const screen = await render(
+      <ChatMarkdown
+        text="`reports/q3.md` and `q3.md`"
+        cwd="/home/uno/x"
+        environmentId={freshEnvironment()}
+      />,
+    );
+
+    try {
+      const link = page.getByRole("link", { name: "q3.md" });
       await expect.element(link).toBeInTheDocument();
-      // A plain path is linked as written (`path:line:column`); the label carries the position.
-      await expect.element(link).toHaveAttribute("href", "/repo/project/src/App.tsx:12:3");
+      await vi.waitFor(() => expect(resolveMentionsMock).toHaveBeenCalled());
+      await link.click();
+      expect(openFileMock).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/home/uno/x/reports/q3.md" }),
+      );
+      expect(document.querySelectorAll('[data-testid="chat-file-chip"]')).toHaveLength(1);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("opens a folder in the panel's Files, at that folder", async () => {
+    const environmentId = freshEnvironment();
+    computerHas({ "docs/": { path: "/home/uno/x/docs", kind: "directory" } });
+    const screen = await render(
+      <ChatMarkdown
+        text="Everything is in `docs/`."
+        cwd="/home/uno/x"
+        environmentId={environmentId}
+      />,
+    );
+
+    try {
+      await page.getByRole("link", { name: "docs" }).click();
+      expect(openFileMock).toHaveBeenCalledWith(expect.objectContaining({ kind: "files" }));
+      const tab = openFileMock.mock.calls[0]?.[0] as { id: string };
+      expect(usePanelFilesStore.getState().byTab[tab.id]).toEqual({ path: "/home/uno/x/docs" });
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps a link with no file look a link", async () => {
+    const screen = await render(
+      <ChatMarkdown
+        text="[the pricing page](/pricing)"
+        cwd="/repo"
+        environmentId={freshEnvironment()}
+      />,
+    );
+
+    try {
       await expect
-        .element(page.getByRole("link", { name: "Hidden.tsx · L4" }))
-        .not.toBeInTheDocument();
+        .element(page.getByRole("link", { name: "the pricing page" }))
+        .toHaveAttribute("href", "/pricing");
+      expect(document.querySelectorAll('[data-testid="chat-file-chip"]')).toHaveLength(0);
     } finally {
       await screen.unmount();
     }

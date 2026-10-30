@@ -26,7 +26,7 @@ import { getCodeHighlighterPromise } from "../lib/codeHighlighter";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { fileMentionInHref, type FileMention as FileMentionValue } from "../fileMentions";
-import { rewriteMarkdownFileUriHref } from "../markdown-links";
+import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { chatLinkTarget, openUntrustedLinkExternally } from "../lib/externalLinks";
 import { usePreviewPane } from "./preview/PreviewPaneContext";
 
@@ -286,11 +286,13 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
     for (const href of extractMarkdownLinkHrefs(text)) {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (byHref.has(normalizedHref)) continue;
+      // An address with no file look (`/pricing`) stays a link.
+      if (!resolveMarkdownFileLinkTarget(normalizedHref, cwd ?? "/")) continue;
       const mention = fileMentionInHref(normalizedHref);
       if (mention) byHref.set(normalizedHref, mention);
     }
     return byHref;
-  }, [text]);
+  }, [cwd, text]);
   const fileLinkParentSuffixByPath = useMemo(
     () => fileLinkParentSuffixes([...fileLinkByHref.values()].map((mention) => mention.path)),
     [fileLinkByHref],
@@ -373,9 +375,10 @@ function ChatMarkdown({ text, cwd, isStreaming = false, environmentId }: ChatMar
       },
       // Not in `Components`: the element remarkFileMentions adds.
       ...({
-        "file-mention": ({ node: _node, ...props }: { node?: unknown } & Record<string, string>) => (
-          <FileMention {...props} />
-        ),
+        "file-mention": ({
+          node: _node,
+          ...props
+        }: { node?: unknown } & Record<string, string>) => <FileMention {...props} />,
       } as unknown as Components),
       pre({ node: _node, children, ...props }) {
         const codeBlock = extractCodeBlock(children);

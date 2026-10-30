@@ -95,7 +95,11 @@ for (const theme of themes) {
   });
 
   await step("open", async () => {
-    await page.getByTestId("chat-file-chip").filter({ hasText: "launch-report.md" }).first().click();
+    await page
+      .getByTestId("chat-file-chip")
+      .filter({ hasText: "launch-report.md" })
+      .first()
+      .click();
     await page.waitForTimeout(1500);
     await shot("02-file-open");
     await page.getByTestId("chat-file-chip").filter({ hasText: "docs" }).last().click();
@@ -121,10 +125,26 @@ for (const theme of themes) {
     await other.click();
     await page.waitForTimeout(2000);
     await shot("06-chat-other");
-    const message = page.locator("[data-message-role=user]").first();
-    await message.hover().catch(() => {});
+    const message = page.locator("[data-message-role=user]").last();
+    await message.hover({ timeout: 4000 }).catch(() => {});
     await page.waitForTimeout(400);
-    await shot("07-user-hover");
+    await page.screenshot({ path: join(out, `${theme}-07-user-hover.png`) });
+    log.push(`${theme} ok 07-user-hover`);
+  });
+
+  await step("feed-end", async () => {
+    // A short window: the feed scrolls, and dissolves into the composer.
+    await page.setViewportSize({ width: 1440, height: 640 });
+    await page.waitForTimeout(800);
+    await chat.click();
+    await page.waitForTimeout(1800);
+    await shot("08-feed-end");
+    const box = await page.locator("[data-timeline-root]").first().boundingBox();
+    await page.mouse.move(800, (box?.y ?? 100) + 120);
+    await page.mouse.wheel(0, -400);
+    await page.waitForTimeout(900);
+    await shot("09-scroll-to-end");
+    await page.setViewportSize({ width: 1440, height: 900 });
   });
 
   await context.close();

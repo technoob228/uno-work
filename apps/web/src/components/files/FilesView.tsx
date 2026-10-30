@@ -742,7 +742,13 @@ function FolderBrowser({
             : parentFolder,
         )
     : null;
-  const searchScope = filesSearchScope({ currentPath, rootPath, projectFolder });
+  // Nothing in the project: the person can widen the search to all their files.
+  const [searchEverywhere, setSearchEverywhere] = useState(false);
+  const searchScope = filesSearchScope({
+    currentPath,
+    rootPath,
+    projectFolder: searchEverywhere ? null : projectFolder,
+  });
   const search = useFilesSearch({
     environmentId,
     folderEntries: data?.entries,
@@ -779,6 +785,7 @@ function FolderBrowser({
   useEffect(() => {
     setSelected(new Set());
     setQuery("");
+    setSearchEverywhere(false);
   }, [currentPath]);
 
   const entries = useMemo(() => {
@@ -841,6 +848,89 @@ function FolderBrowser({
   };
 
   const createNew = onCreateFile;
+
+  const actions = (
+    <>
+      <Menu>
+        <MenuTrigger render={<Button size="sm" variant="outline" disabled={!currentPath} />}>
+          <PlusIcon />
+          <span className={narrow ? "sr-only" : "hidden sm:inline"}>New</span>
+        </MenuTrigger>
+        <MenuPopup align="end" className="w-52">
+          <MenuItem onClick={() => onDialog({ type: "newFolder" })}>
+            <FolderPlusIcon />
+            Folder
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem onClick={() => createNew("word")}>
+            <FileTextIcon />
+            Word document
+          </MenuItem>
+          <MenuItem onClick={() => createNew("spreadsheet")}>
+            <FileSpreadsheetIcon />
+            Spreadsheet
+          </MenuItem>
+          <MenuItem onClick={() => createNew("presentation")}>
+            <PresentationIcon />
+            Presentation
+          </MenuItem>
+          <MenuItem onClick={() => createNew("document")}>
+            <FileTextIcon />
+            Text (Markdown)
+          </MenuItem>
+          <MenuItem onClick={() => createNew("page")}>
+            <GlobeIcon />
+            Web page
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      <Menu>
+        <MenuTrigger render={<Button size="sm" disabled={!currentPath} />}>
+          <UploadIcon />
+          <span className={narrow ? "sr-only" : "hidden sm:inline"}>Upload</span>
+        </MenuTrigger>
+        <MenuPopup align="end" className="w-48">
+          <MenuItem onClick={() => pickFilesForProjectUpload((files) => upload(files))}>
+            <UploadIcon />
+            Files…
+          </MenuItem>
+          <MenuItem onClick={() => pickFolderForProjectUpload((files) => upload(files))}>
+            <FolderInputIcon />
+            Folder…
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+      <Menu>
+        <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="View options" />}>
+          <EllipsisIcon />
+        </MenuTrigger>
+        <MenuPopup align="end" className="w-52">
+          {narrow && currentPath ? (
+            <MenuItem onClick={() => startChatIn(currentPath)} data-testid="files-start-chat-here">
+              <MessageSquarePlusIcon />
+              Start chat here
+            </MenuItem>
+          ) : null}
+          {narrow ? (
+            <MenuItem onClick={() => onDialog({ type: "links" })}>
+              <LinkIcon />
+              Shared links
+            </MenuItem>
+          ) : null}
+          <MenuItem onClick={() => setShowHidden((value) => !value)}>
+            {showHidden ? <EyeOffIcon /> : <EyeIcon />}
+            {showHidden ? "Hide hidden files" : "Show hidden files"}
+          </MenuItem>
+          <MenuItem
+            onClick={() => void queryClient.invalidateQueries({ queryKey: filesQueryKeys.all })}
+          >
+            <RefreshCwIcon />
+            Refresh
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
+    </>
+  );
 
   return (
     <div
@@ -909,89 +999,7 @@ function FolderBrowser({
               </Button>
             </>
           )}
-          <Menu>
-            <MenuTrigger render={<Button size="sm" variant="outline" disabled={!currentPath} />}>
-              <PlusIcon />
-              <span className={narrow ? "sr-only" : "hidden sm:inline"}>New</span>
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-52">
-              <MenuItem onClick={() => onDialog({ type: "newFolder" })}>
-                <FolderPlusIcon />
-                Folder
-              </MenuItem>
-              <MenuSeparator />
-              <MenuItem onClick={() => createNew("word")}>
-                <FileTextIcon />
-                Word document
-              </MenuItem>
-              <MenuItem onClick={() => createNew("spreadsheet")}>
-                <FileSpreadsheetIcon />
-                Spreadsheet
-              </MenuItem>
-              <MenuItem onClick={() => createNew("presentation")}>
-                <PresentationIcon />
-                Presentation
-              </MenuItem>
-              <MenuItem onClick={() => createNew("document")}>
-                <FileTextIcon />
-                Text (Markdown)
-              </MenuItem>
-              <MenuItem onClick={() => createNew("page")}>
-                <GlobeIcon />
-                Web page
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-          <Menu>
-            <MenuTrigger render={<Button size="sm" disabled={!currentPath} />}>
-              <UploadIcon />
-              <span className={narrow ? "sr-only" : "hidden sm:inline"}>Upload</span>
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-48">
-              <MenuItem onClick={() => pickFilesForProjectUpload((files) => upload(files))}>
-                <UploadIcon />
-                Files…
-              </MenuItem>
-              <MenuItem onClick={() => pickFolderForProjectUpload((files) => upload(files))}>
-                <FolderInputIcon />
-                Folder…
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
-          <Menu>
-            <MenuTrigger
-              render={<Button size="icon-sm" variant="ghost" aria-label="View options" />}
-            >
-              <EllipsisIcon />
-            </MenuTrigger>
-            <MenuPopup align="end" className="w-52">
-              {narrow && currentPath ? (
-                <MenuItem
-                  onClick={() => startChatIn(currentPath)}
-                  data-testid="files-start-chat-here"
-                >
-                  <MessageSquarePlusIcon />
-                  Start chat here
-                </MenuItem>
-              ) : null}
-              {narrow ? (
-                <MenuItem onClick={() => onDialog({ type: "links" })}>
-                  <LinkIcon />
-                  Shared links
-                </MenuItem>
-              ) : null}
-              <MenuItem onClick={() => setShowHidden((value) => !value)}>
-                {showHidden ? <EyeOffIcon /> : <EyeIcon />}
-                {showHidden ? "Hide hidden files" : "Show hidden files"}
-              </MenuItem>
-              <MenuItem
-                onClick={() => void queryClient.invalidateQueries({ queryKey: filesQueryKeys.all })}
-              >
-                <RefreshCwIcon />
-                Refresh
-              </MenuItem>
-            </MenuPopup>
-          </Menu>
+          {narrow ? null : actions}
         </div>
         <div className="mt-1.5 flex items-center">
           <nav
@@ -1033,12 +1041,15 @@ function FolderBrowser({
           </nav>
         </div>
         {narrow ? (
-          <FilesSearchField
-            value={query}
-            onChange={setQuery}
-            inputRef={searchInput}
-            className="mt-2"
-          />
+          <div className="mt-2 flex items-center gap-1.5">
+            <FilesSearchField
+              value={query}
+              onChange={setQuery}
+              inputRef={searchInput}
+              className="min-w-0 flex-1"
+            />
+            {actions}
+          </div>
         ) : null}
       </header>
 
@@ -1110,9 +1121,16 @@ function FolderBrowser({
             <EmptyState
               title={`Nothing called “${trimmedQuery}” here`}
               detail={
-                searchScope === projectFolder
-                  ? "Search looks through this whole project."
-                  : "Search looks through all your files."
+                projectFolder && searchScope === projectFolder
+                  ? "Search looked through this whole project."
+                  : "Search looked through all your files."
+              }
+              action={
+                projectFolder && searchScope === projectFolder ? (
+                  <Button size="sm" variant="outline" onClick={() => setSearchEverywhere(true)}>
+                    Search all files
+                  </Button>
+                ) : undefined
               }
             />
           ) : (

@@ -27,7 +27,7 @@ Deploying to Uno / uno.place: use the uno-work tools (`uno_guide`) or read https
 
 ## Where things live
 
-- `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`. Projects go in `~/projects/<name>`.
+- `~` is the home folder, the "Files" the person sees: name paths from `~`, never `/home/…`; a path in your answer opens with a click, no link needed. Projects go in `~/projects/<name>`.
 - `~/.uno/apps/<id>.json` registers an app on Home; its log is `~/.uno/apps/<id>.log`. `~/.uno/sdk/` holds the Uno App SDK.
 - Its plan sets memory, cores and disk. Before installs, builds or big downloads check `computer_status`; a disk warning: `computer_cleanup`. What the person keeps goes to Uno Drive, not this disk; projects are git repositories: `uno_guide("computer")`.
 - The person's files: `~` and Uno Drive. What they attach to a chat is saved in `~/Uploads/YYYY-MM/` (the message says where). Uno's log: `~/UnoWork/Assistants/home/NOTES.md`.

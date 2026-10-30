@@ -364,7 +364,12 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
         filePath: "/home/uno/UnoWork/Reports/launch-report.md",
       }),
     ],
-    turn: { turnId: filesTurn, startedAt: at(t3, 0), completedAt: at(t3, 79), answerId: `${files}-a1` },
+    turn: {
+      turnId: filesTurn,
+      startedAt: at(t3, 0),
+      completedAt: at(t3, 79),
+      answerId: `${files}-a1`,
+    },
     updatedAt: at(t3, 79),
   });
 
