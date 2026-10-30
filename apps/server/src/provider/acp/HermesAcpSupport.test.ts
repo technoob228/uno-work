@@ -3,9 +3,14 @@ import { describe, expect, it } from "vitest";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
+  dispatcherPromptStamp,
+  resumableSessionId,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   buildHermesConfigYaml,
+  HERMES_DISPATCHER_COMPRESSION,
+  HERMES_DISPATCHER_DISABLED_TOOLSETS,
+  HERMES_DISPATCHER_MCP_TOOLS,
   applyHermesLlmRoute,
   applyHermesAcpModelSelection as applyModelSelectionForTest,
   hermesProviderIdOf,
@@ -262,6 +267,44 @@ describe("parseMcpJsonToAcpServers", () => {
   });
 });
 
+describe("buildHermesConfigYaml for the Uno dispatcher", () => {
+  const yaml = buildHermesConfigYaml({
+    model: "uno/glm-5.3-flash",
+    mcpServers: [
+      { type: "http", name: "uno-manager", url: "http://127.0.0.1:1/mcp", headers: [] },
+      { type: "http", name: "uno-work", url: "http://127.0.0.1:1/w", headers: [] },
+    ],
+    disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS,
+    mcpToolsInclude: HERMES_DISPATCHER_MCP_TOOLS,
+    compression: HERMES_DISPATCHER_COMPRESSION,
+  });
+
+  it("no terminal, files, browser or web; only the dispatcher's MCP tools", () => {
+    expect(yaml).toContain(
+      'disabled_toolsets: ["terminal", "file", "code_execution", "browser", "web"',
+    );
+    expect(yaml).toMatch(
+      /"uno-manager":\n[\s\S]*?include: \["work_status"[^\]]*"notes_append"[^\]]*"send_file"/,
+    );
+    expect(yaml).toMatch(/"uno-work":\n[\s\S]*?include: \["chat_create"/);
+    expect(yaml).not.toMatch(/include: \[[^\]]*"site_publish"/);
+  });
+
+  it("compacts its context early, by the same model", () => {
+    expect(yaml).toContain("compression:\n  enabled: true\n  threshold_tokens: 28000");
+    expect(yaml).toContain(
+      'auxiliary:\n  compression:\n    provider: "main"\n    model: "uno/glm-5.3-flash"',
+    );
+  });
+
+  it("other sessions get none of it", () => {
+    const plain = buildHermesConfigYaml({ model: "m", mcpServers: [] });
+    expect(plain).not.toContain("disabled_toolsets");
+    expect(plain).not.toContain("compression:");
+    expect(plain).not.toContain("include:");
+  });
+});
+
 describe("buildHermesConfigYaml skills", () => {
   it("points Hermes at the shared skill folders", () => {
     const yaml = buildHermesConfigYaml({
@@ -432,5 +475,25 @@ describe("hermes on the person's own subscription (14.10)", () => {
       }),
     );
     expect(calls).toEqual(["openai-codex:gpt-5.5"]);
+  });
+});
+
+describe("dispatcher session stamp", () => {
+  const v1 = "<!-- uno-instructions: 2026-10-29.1 -->\n# Uno";
+  const v2 = "<!-- uno-instructions: 2026-10-29.2 -->\n# Uno";
+
+  it("changes with the instructions version, not with the text around it", () => {
+    expect(dispatcherPromptStamp(v1)).not.toBe(dispatcherPromptStamp(v2));
+    expect(dispatcherPromptStamp(v2)).toBe(dispatcherPromptStamp(`${v2}\n\nmore`));
+    expect(dispatcherPromptStamp("# hand-written")).not.toBe(dispatcherPromptStamp("# other"));
+  });
+
+  it("resumes only a session built as now; other chats resume as before", () => {
+    const stamp = dispatcherPromptStamp(v2);
+    expect(resumableSessionId({ sessionId: "s1" }, stamp)).toBeUndefined();
+    expect(resumableSessionId({ sessionId: "s1", promptStamp: "old" }, stamp)).toBeUndefined();
+    expect(resumableSessionId({ sessionId: "s1", promptStamp: stamp }, stamp)).toBe("s1");
+    expect(resumableSessionId({ sessionId: "s1" }, undefined)).toBe("s1");
+    expect(resumableSessionId(undefined, stamp)).toBeUndefined();
   });
 });

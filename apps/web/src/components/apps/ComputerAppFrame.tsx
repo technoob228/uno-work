@@ -37,9 +37,12 @@ export function ComputerAppFrame({
   icon = null,
   reloadKey = 0,
   compact = false,
+  connectRequests = false,
   className,
 }: {
   environmentId: EnvironmentId | null;
+  /** The frame shows Uno Notetaker: its Connect may ask Uno Work (`appConnectBridge.ts`). */
+  connectRequests?: boolean;
   /** The app's local address on the computer, e.g. `http://localhost:8471/`. */
   url: string;
   name: string;
@@ -61,6 +64,7 @@ export function ComputerAppFrame({
         icon={icon}
         reloadKey={reloadKey}
         compact={compact}
+        connectRequests={connectRequests}
         {...(className ? { className } : {})}
       />
     );
@@ -78,6 +82,7 @@ export function ComputerAppFrame({
         reloadKey={reloadKey}
         compact={compact}
         portAddress
+        connectRequests={connectRequests}
         {...(className ? { className } : {})}
       />
     );

@@ -35,7 +35,7 @@ import { cn } from "../../lib/utils";
 import { ensureLocalApi } from "../../localApi";
 import { connectorItems, isSiteLogin, siteOf } from "../connectors/connectorsCatalog.logic";
 import { SETUP_SKILLS } from "../setup/setupSkills";
-import { PROVIDERS, useConnectorActions } from "../setup/steps/ConnectorsStep";
+import { shownProviders, useConnectorActions } from "../setup/steps/ConnectorsStep";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -73,7 +73,7 @@ export function useConnectorItems(on?: EnvironmentId | null) {
   const environmentId = on ?? primaryEnvironmentId;
   const actions = useConnectorActions(environmentId);
   const servers = useSettings((settings) => settings.mcpServers);
-  const apps = PROVIDERS.map((meta) => {
+  const apps = shownProviders(actions.connectors.data?.connectors).map((meta) => {
     const connector = actions.byProvider.get(meta.provider);
     return {
       provider: meta.provider,

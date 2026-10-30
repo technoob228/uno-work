@@ -13,6 +13,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
  * Nullable TEXT, guarded so re-running is a no-op. The first two are
  * backfilled from the event log with the projection's own rules; the person
  * call is new, nothing to backfill.
+ *
+ * Number 053, after 052 from release 0.0.167: the migrator never goes back to
+ * a lower id. Stage machines on 0.0.164-t3p.x already ran this as 51, so here
+ * it runs a second time: existing columns are skipped and the backfill only
+ * fills NULLs, so what they have is kept.
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

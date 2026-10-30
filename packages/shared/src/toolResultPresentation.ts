@@ -493,6 +493,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => named("Sent you a note:", text(c.args, "title"), "Sent you a note"),
     "Couldn't send the note",
   ],
+  messenger_send: [
+    "Writing to you in Telegram…",
+    (c) =>
+      text(c.result, "via") === "slack"
+        ? "Wrote to you in Slack"
+        : text(c.result, "via") === "uno-bot"
+          ? "Wrote to you through Uno's bot"
+          : "Wrote to you in Telegram",
+    "Couldn't write to your messenger",
+  ],
   open_in_panel: [
     "Opening it in the panel…",
     (c) =>

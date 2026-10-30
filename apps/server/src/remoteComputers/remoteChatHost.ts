@@ -50,6 +50,7 @@ import {
   normalizeWorkspacePath,
   resolveProviderModelSelection,
 } from "../agentThreads/logic.ts";
+import { makeRegisterFolder } from "../agentThreads/registerFolder.ts";
 import { owningAssistant } from "../assistants/localAssistantStore.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { isAssistantConversationThread } from "../manager/assistantPush.ts";
@@ -204,6 +205,14 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
     return fail(500, "internal_error", "This computer couldn't open its home folder.");
   });
 
+  const registerFolder = makeRegisterFolder({
+    engine: deps.engine,
+    projections: deps.projections,
+    defaultModelSelection: deps.getProviders.pipe(Effect.map(selectAutoBootstrapModelSelection)),
+    home,
+    nowMs,
+  });
+
   const resolveProject = (input: ManagerRemoteChatCreateInput) =>
     Effect.gen(function* () {
       if (input.projectId !== undefined && input.projectId.trim().length > 0) {
@@ -227,10 +236,15 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
       if (input.cwd !== undefined && input.cwd.trim().length > 0) {
         const root = normalizeWorkspacePath(expandHome(input.cwd.trim(), home));
         const found = yield* deps.projections.getActiveProjectByWorkspaceRoot(root);
-        // The folder is the caller's (its computer's project): not here. The
-        // chat starts in this computer's home folder — like New chat on a new
-        // machine — and can clone or create what it needs there.
-        if (Option.isNone(found) || isAssistantProjectId(found.value.id)) {
+        // The folder is here but no project yet: it becomes one (the
+        // person's ~/projects/<x> never added to Uno Work). Not here at all:
+        // the chat starts in this computer's home folder — like New chat on a
+        // new machine — and can clone or create what it needs there.
+        if (Option.isNone(found)) {
+          const registered = yield* registerFolder(root);
+          return registered ?? (yield* homeProject);
+        }
+        if (isAssistantProjectId(found.value.id)) {
           return yield* homeProject;
         }
         const shell = yield* deps.projections.getProjectShellById(found.value.id);

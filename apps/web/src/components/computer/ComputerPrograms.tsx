@@ -14,6 +14,7 @@
  */
 import type { UnoMachineApp, UnoMachineApps } from "@t3tools/contracts";
 import {
+  AudioLinesIcon,
   FolderIcon,
   FolderOpenIcon,
   GlobeIcon,
@@ -35,6 +36,8 @@ import { appPrimaryAction, type AppPrimaryAction } from "./appPrimaryAction";
 import { logoSources } from "./appStoreModel";
 import { useStartingAppId } from "./useAppPrimaryAction";
 import type { ProgramStatus, ProgramTile } from "./programModel";
+import { isNotetakerTile, NOTETAKER_NAME } from "./notetakerApp";
+import type { NotetakerBuiltIn } from "./NotetakerBuiltIn";
 
 /** A tile's tooltip: "Open Files & documents (Nextcloud)", "Fix Chat with Uno"… */
 export function primaryActionTitle(tile: ProgramTile, action: AppPrimaryAction): string {
@@ -212,6 +215,34 @@ export function ActionChip({
   );
 }
 
+/**
+ * A chip that isn't one of an app's primary actions — a built-in that installs
+ * from the store ("Add", "Installing…", "Retry", Uno Notetaker). Same look.
+ */
+export function TileChip({
+  label,
+  busy,
+  className,
+}: {
+  label: string;
+  busy: boolean;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[10.5px] leading-tight font-medium",
+        busy ? ACTION_CHIP.installing : ACTION_CHIP.open,
+        className,
+      )}
+      data-testid="program-tile-chip"
+    >
+      {busy ? <Spinner className="size-2.5 shrink-0" /> : null}
+      <span className="truncate">{label}</span>
+    </span>
+  );
+}
+
 export function TileShell({
   label,
   caption,
@@ -227,9 +258,15 @@ export function TileShell({
   small = false,
   action = null,
   actionBusy = false,
+  chip = null,
+  problem = false,
 }: {
   /** The app's one primary action: a chip under the name (except "Open"). */
   action?: AppPrimaryAction | null;
+  /** A built-in's own chip ("Add"), when it has no primary action of an app. */
+  chip?: { readonly label: string; readonly busy: boolean } | null;
+  /** The caption says something went wrong (red). */
+  problem?: boolean;
   /** Its action is under way (starting). */
   actionBusy?: boolean;
   /** "Anyone with the link can use this app's AI — add sign-in": an amber mark. */
@@ -299,7 +336,11 @@ export function TileShell({
           <span
             className={cn(
               "-mt-1.5 inline-flex w-full items-center justify-center gap-1 truncate text-[11px]",
-              note ? note.className : "text-muted-foreground",
+              note
+                ? note.className
+                : problem
+                  ? "text-destructive-foreground"
+                  : "text-muted-foreground",
             )}
             data-testid={online ? "program-online-badge" : undefined}
           >
@@ -308,6 +349,7 @@ export function TileShell({
           </span>
         ) : null}
         {action ? <ActionChip action={action} busy={actionBusy} className="-mt-0.5" /> : null}
+        {chip ? <TileChip label={chip.label} busy={chip.busy} className="-mt-0.5" /> : null}
       </button>
       {onDetails ? (
         <Button
@@ -348,6 +390,51 @@ export function BuiltInIcon({
   );
 }
 
+/** Uno Notetaker's icon among the built-ins (a sound wave, like a call). */
+export function NotetakerBuiltInIcon({ small = false }: { small?: boolean }) {
+  return (
+    <BuiltInIcon small={small} className="bg-gradient-to-br from-rose-400 to-orange-500">
+      <AudioLinesIcon />
+    </BuiltInIcon>
+  );
+}
+
+/** Uno Notetaker among the built-ins: Add, its progress, then the app itself. */
+export function NotetakerTile({
+  notetaker,
+  small = false,
+}: {
+  notetaker: NotetakerBuiltIn;
+  /** Home's Apps widget. */
+  small?: boolean;
+}) {
+  const { view } = notetaker;
+  const installed = notetaker.state.kind === "installed" ? notetaker.state.tile : null;
+  return (
+    <TileShell
+      small={small}
+      label={NOTETAKER_NAME}
+      caption={installed && installed.status !== "running" ? null : view.caption}
+      {...(installed ? { status: installed.status, online: installed.online } : {})}
+      problem={view.problem}
+      title={view.title}
+      disabled={view.disabled}
+      chip={view.chip}
+      icon={<NotetakerBuiltInIcon small={small} />}
+      onClick={notetaker.onClick}
+      {...(notetaker.onDetails ? { onDetails: notetaker.onDetails } : {})}
+    />
+  );
+}
+
+/** The computer's apps without the ones a built-in tile already stands for. */
+export function withoutBuiltInTiles(
+  tiles: ReadonlyArray<ProgramTile>,
+  builtIns: Pick<BuiltInPrograms, "notetaker">,
+): ReadonlyArray<ProgramTile> {
+  return builtIns.notetaker ? tiles.filter((tile) => !isNotetakerTile(tile)) : tiles;
+}
+
 export interface BuiltInPrograms {
   readonly onNewChat: () => void;
   readonly onChatInFolder: () => void;
@@ -355,6 +442,8 @@ export interface BuiltInPrograms {
   readonly onFiles: (() => void) | null;
   /** Uno Drive (Made by Uno); null when this computer isn't on an Uno account. */
   readonly onDrive?: (() => void) | null | undefined;
+  /** Uno Notetaker (Made by Uno, from the store); absent where it isn't offered. */
+  readonly notetaker?: NotetakerBuiltIn | undefined;
   readonly onTerminal: () => void;
   readonly onAppStore: (() => void) | null;
   readonly appStoreHint: string | null;
@@ -441,6 +530,7 @@ export function ComputerPrograms({
                 onClick={() => builtIns.onDrive?.()}
               />
             ) : null}
+            {builtIns.notetaker ? <NotetakerTile notetaker={builtIns.notetaker} /> : null}
             <TileShell
               label="Terminal"
               caption="Command line"
@@ -465,7 +555,7 @@ export function ComputerPrograms({
           </>
         ) : null}
 
-        {tiles.map((tile) => {
+        {(showBuiltIns ? withoutBuiltInTiles(tiles, builtIns) : tiles).map((tile) => {
           const action = appPrimaryAction(tile);
           return (
             <TileShell

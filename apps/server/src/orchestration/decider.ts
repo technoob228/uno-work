@@ -807,6 +807,102 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return companionEvents.length > 0 ? [settledEvent, ...companionEvents] : settledEvent;
     }
 
+    case "thread.visit": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // The watermark only moves forward: a late or duplicate visit (two
+      // clients, a retried write) is a silent no-op, so reading never flickers
+      // a chat back to unread.
+      const visitedAtMs = Date.parse(command.visitedAt);
+      if (!Number.isFinite(visitedAtMs)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' visit time ${command.visitedAt} is not a date.`,
+        });
+      }
+      const current = thread.lastVisitedAt == null ? Number.NaN : Date.parse(thread.lastVisitedAt);
+      if (Number.isFinite(current) && current >= visitedAtMs) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: nowIso(),
+          commandId: command.commandId,
+        }),
+        type: "thread.visited",
+        payload: {
+          threadId: command.threadId,
+          lastVisitedAt: new Date(visitedAtMs).toISOString(),
+        },
+      };
+    }
+
+    case "thread.mark-unread": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.lastVisitedAt == null && (thread.readAt ?? null) === null) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: nowIso(),
+          commandId: command.commandId,
+        }),
+        type: "thread.marked-unread",
+        payload: { threadId: command.threadId },
+      };
+    }
+
+    case "thread.read": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const readAtMs = Date.parse(command.readAt);
+      if (!Number.isFinite(readAtMs)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' read time ${command.readAt} is not a date.`,
+        });
+      }
+      // Forward only, like visit: a late or repeated Read is a no-op.
+      const currentRead = thread.readAt == null ? Number.NaN : Date.parse(thread.readAt);
+      const currentVisit =
+        thread.lastVisitedAt == null ? Number.NaN : Date.parse(thread.lastVisitedAt);
+      if (
+        Number.isFinite(currentRead) &&
+        currentRead >= readAtMs &&
+        Number.isFinite(currentVisit) &&
+        currentVisit >= readAtMs
+      ) {
+        return [];
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: nowIso(),
+          commandId: command.commandId,
+        }),
+        type: "thread.read",
+        payload: {
+          threadId: command.threadId,
+          readAt: new Date(readAtMs).toISOString(),
+        },
+      };
+    }
+
     case "thread.unsettle": {
       const thread = yield* requireThreadNotArchived({
         readModel,

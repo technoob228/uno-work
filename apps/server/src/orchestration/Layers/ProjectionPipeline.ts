@@ -39,6 +39,7 @@ import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/Projectio
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
 import { isPersonOrigin, startedByFromOrigin } from "../commandOrigin.ts";
+import { laterIso } from "../projector.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -602,6 +603,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             snoozedAt: null,
             settledOverride: null,
             settledAt: null,
+            lastVisitedAt: null,
+            readAt: null,
+            readStateUpdatedAt: null,
             spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
             controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
@@ -739,6 +743,32 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             settledOverride: event.payload.reason === "user" ? "active" : null,
             settledAt: null,
             updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.visited":
+        case "thread.marked-unread":
+        case "thread.read": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const row = existingRow.value;
+          // Read state only: updatedAt stays, so reading never reorders.
+          yield* projectionThreadRepository.upsert({
+            ...row,
+            ...(event.type === "thread.visited"
+              ? { lastVisitedAt: event.payload.lastVisitedAt }
+              : event.type === "thread.read"
+                ? {
+                    readAt: event.payload.readAt,
+                    lastVisitedAt: laterIso(row.lastVisitedAt ?? null, event.payload.readAt),
+                  }
+                : { lastVisitedAt: null, readAt: null }),
+            readStateUpdatedAt: event.occurredAt,
           });
           return;
         }
@@ -919,9 +949,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          // A late checkpoint of an older turn (it landed after the next turn
+          // started) keeps the newer turn as the latest — same rule as the
+          // in-memory projector.
+          const currentLatestTurnId = existingRow.value.latestTurnId;
+          const currentLatestTurn =
+            currentLatestTurnId !== null && currentLatestTurnId !== event.payload.turnId
+              ? yield* projectionTurnRepository.getByTurnId({
+                  threadId: event.payload.threadId,
+                  turnId: currentLatestTurnId,
+                })
+              : Option.none();
+          const newerTurnStarted =
+            Option.isSome(currentLatestTurn) &&
+            Date.parse(currentLatestTurn.value.requestedAt) > Date.parse(event.payload.completedAt);
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.turnId,
+            latestTurnId: newerTurnStarted ? currentLatestTurnId : event.payload.turnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);

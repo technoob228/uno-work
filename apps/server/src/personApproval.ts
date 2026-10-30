@@ -41,6 +41,8 @@ import {
   ConnectorNotifyService,
   type ConnectorNotifyServiceShape,
 } from "./manager/Services/ConnectorNotify.ts";
+import { toolApprovalButtons } from "./manager/connectorButtons.ts";
+import { detectReplyLanguage } from "./manager/connectorReplyText.ts";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 
@@ -77,6 +79,12 @@ export interface PersonApprovalInput {
 /** "Ada asks: Publish the site — open Uno Work to Allow." */
 export function approvalMessengerText(askerName: string, title: string): string {
   return `${askerName} asks: ${title} — open Uno Work to Allow or Decline (Inbox or the chat).`;
+}
+
+/** The Telegram message with Allow / Deny under it ("🔐 Publish the site"). */
+export function approvalButtonsText(title: string, detail: string | undefined): string {
+  const more = detail?.trim() ?? "";
+  return more.length > 0 ? `🔐 ${title}\n${more.slice(0, 600)}` : `🔐 ${title}`;
 }
 
 /** What the model reads when the call returned before the person answered. */
@@ -177,16 +185,35 @@ export const askPersonApproval = (
       return inbox!.update({ action: "read", ids: [item] }).pipe(Effect.ignore);
     });
 
-    // Nobody looking: say so where the person is (the assistant's chat).
-    if (!(yield* bridge.hasSubscribers) && notify !== null && input.threadId !== null) {
-      yield* notify
-        .notify({
-          text: approvalMessengerText(input.askerName, input.title),
-          threadId: ThreadId.make(input.threadId),
-          kind: "warning",
-        })
-        .pipe(Effect.ignore);
-    }
+    // Nobody looking: ask where the person is — Allow / Deny buttons in
+    // their Telegram (a plain "open Uno Work" line in Slack or Uno's bot).
+    // The buttons need the request id, so the message goes once it exists.
+    const askMessenger =
+      !(yield* bridge.hasSubscribers) && notify !== null && input.threadId !== null ? notify : null;
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
+    let requestIdSeen: string | null = null;
+    const retireButtons = Effect.suspend(() =>
+      askMessenger === null || requestIdSeen === null
+        ? Effect.void
+        : askMessenger.retireButtons(requestIdSeen),
+    );
+    const messageThePerson = (requestId: string) => {
+      if (askMessenger === null || input.threadId === null) return;
+      const language = detectReplyLanguage(`${input.title}\n${input.detail ?? ""}`, null);
+      runFork(
+        askMessenger
+          .sendToPerson({
+            threadId: ThreadId.make(input.threadId),
+            text: approvalButtonsText(input.title, input.detail),
+            textWithoutButtons: approvalMessengerText(input.askerName, input.title),
+            buttons: toolApprovalButtons(requestId, language),
+            buttonsTtlMs: APPROVAL_HOLD_MS,
+            language,
+            approval: true,
+          })
+          .pipe(Effect.ignore),
+      );
+    };
 
     const onLate = input.onLate;
     const outcome = yield* bridge.requestToolApproval(
@@ -198,6 +225,8 @@ export const askPersonApproval = (
         ...(input.clientAction ? { clientAction: input.clientAction } : {}),
         onRequestId: (requestId) => {
           if (item !== null) requestByInboxItem.set(item, requestId);
+          requestIdSeen = requestId;
+          messageThePerson(requestId);
         },
         ...(onLate === undefined
           ? { timeoutMs: APPROVAL_HOLD_MS }
@@ -205,13 +234,14 @@ export const askPersonApproval = (
               late: {
                 syncWaitMs: APPROVAL_SYNC_WAIT_MS,
                 holdMs: APPROVAL_HOLD_MS,
-                onLateOutcome: (late) => settleRow.pipe(Effect.andThen(onLate(late))),
+                onLateOutcome: (late) =>
+                  settleRow.pipe(Effect.andThen(retireButtons), Effect.andThen(onLate(late))),
               },
             }),
       },
       input.context,
     );
-    if (outcome !== "queued") yield* settleRow;
+    if (outcome !== "queued") yield* Effect.andThen(settleRow, retireButtons);
     return outcome;
   });
 

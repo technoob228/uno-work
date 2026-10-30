@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectorSignedIn, connectorsGate } from "./connectorSignIn.logic";
+import { connectorShown, connectorSignedIn, connectorsGate } from "./connectorSignIn.logic";
 
 describe("connectorSignedIn", () => {
   it("is not signed in before the first sign-in", () => {
@@ -39,5 +39,23 @@ describe("connectorsGate", () => {
     expect(connectorsGate({ available: false, reason: "console_unreachable" })).toBe("soon");
     expect(connectorsGate({ available: false, reason: "unavailable" })).toBe("soon");
     expect(connectorsGate(undefined)).toBe("soon");
+  });
+});
+
+describe("connectorShown", () => {
+  const row = (provider: string, available: boolean, connected = false) =>
+    ({ provider, available, connected }) as const;
+
+  it("the four apps always have a row", () => {
+    expect(connectorShown("gmail", [])).toBe(true);
+    expect(connectorShown("notion", [row("notion", false)])).toBe(true);
+  });
+
+  it("Outlook & Teams only when the console offers it", () => {
+    expect(connectorShown("microsoft", [])).toBe(false);
+    expect(connectorShown("microsoft", [row("microsoft", false)])).toBe(false);
+    expect(connectorShown("microsoft", [row("microsoft", true)])).toBe(true);
+    // Connected earlier, the console's config gone since: still there to disconnect.
+    expect(connectorShown("microsoft", [row("microsoft", false, true)])).toBe(true);
   });
 });

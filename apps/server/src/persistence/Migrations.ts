@@ -64,7 +64,8 @@ import Migration0047 from "./Migrations/047_FileShareAccess.ts";
 import Migration0048 from "./Migrations/048_ThreadAssistantRole.ts";
 import Migration0049 from "./Migrations/049_ThreadAgentsClosed.ts";
 import Migration0050 from "./Migrations/050_ManagerConnectorPendingReplies.ts";
-import Migration0051 from "./Migrations/051_ThreadOwner.ts";
+import Migration0052 from "./Migrations/052_ProjectionThreadsLastVisited.ts";
+import Migration0053 from "./Migrations/053_ThreadOwner.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -127,7 +128,11 @@ export const migrationEntries = [
   [48, "ThreadAssistantRole", Migration0048],
   [49, "ThreadAgentsClosed", Migration0049],
   [50, "ManagerConnectorPendingReplies", Migration0050],
-  [51, "ThreadOwner", Migration0051],
+  // 51 is skipped on purpose: the migrator only runs ids above the last applied one, and
+  // 0.0.167 shipped 52 first, so ThreadOwner ships as 53. Stage machines on 0.0.164-t3p.x
+  // recorded it as 51 and run it again as 53: it is written to be a no-op there.
+  [52, "ProjectionThreadsLastVisited", Migration0052],
+  [53, "ThreadOwner", Migration0053],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

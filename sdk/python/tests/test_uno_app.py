@@ -73,6 +73,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"app": {"id": "t", "name": "T"}})
         if path == "/v1/notify":
             return self._send(201, {"ok": True, "id": "inb_1"})
+        if path == "/v1/calendars":
+            return self._send(200, {"calendars": [{"provider": "gmail", "connected": True}]})
+        if path == "/v1/calendar/events":
+            return self._send(200, {"events": []})
         if path == "/v1/tasks" and self.command == "POST":
             STATE["polls"] = 0
             return self._send(202, {"id": "task_1", "threadId": "th_1", "status": "running",
@@ -186,6 +190,15 @@ class UnoAppTest(unittest.TestCase):
         self.assertEqual(SEEN[-1]["path"], "/v1/notify")
         self.assertEqual(json.loads(SEEN[-1]["body"]), {"title": "Backup finished", "body": "12 files",
                                                         "open": {"file": "~/b.zip"}, "group": "backup"})
+
+    def test_calendars(self):
+        self.assertEqual(self.c.calendars()["calendars"][0]["provider"], "gmail")
+        self.assertEqual(SEEN[-1]["path"], "/v1/calendars")
+        self.c.calendar_events("2026-10-29T00:00:00Z", provider="microsoft")
+        self.assertEqual(SEEN[-1]["path"],
+                         "/v1/calendar/events?from=2026-10-29T00%3A00%3A00Z&provider=microsoft")
+        self.c.calendar_events()
+        self.assertEqual(SEEN[-1]["path"], "/v1/calendar/events")
 
     def test_ask(self):
         self.assertEqual(self.c.ask("hi", system="brief", max_tokens=20, temperature=0), "echo:default")

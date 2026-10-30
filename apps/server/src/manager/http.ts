@@ -54,6 +54,10 @@ import {
 import { Data, Effect, Option, Schema } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import * as fsPromises from "node:fs/promises";
+import * as os from "node:os";
+import * as nodePath from "node:path";
+
 import { isDirectLocalRequest } from "../auth/loopbackPeer.ts";
 import { ServerAuth, AuthError } from "../auth/Services/ServerAuth.ts";
 import {
@@ -66,6 +70,13 @@ import { ManagerCapabilityTokenRepository } from "../persistence/Services/Manage
 import { ManagerConnectorBindingRepository } from "../persistence/Services/ManagerConnectorBindings.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
 import { bindingTargetLabel } from "./connectorBindings.ts";
+import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
+import { queueOutgoingFile } from "./outgoingFileQueue.ts";
+import { AssistantPushService } from "./Services/AssistantPush.ts";
+import { capToolResultBody } from "../mcp/capToolResult.ts";
+import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
+import { TELEGRAM_BOT_UPLOAD_LIMIT_BYTES } from "./telegramMedia.ts";
+import { assistantAccessDepsOption } from "../assistants/assistantAccess.ts";
 import { resolveNotifyThreadId } from "./connectorNotify.ts";
 import { ManagerAssistantError, ManagerAssistantService } from "./Services/AssistantService.ts";
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
@@ -251,6 +262,64 @@ export const managerMcpRouteLayer = HttpRouter.add(
       : true;
     const team = Option.getOrUndefined(yield* Effect.serviceOption(AssistantTeam));
     const automations = Option.getOrUndefined(yield* Effect.serviceOption(AutomationsService));
+    const projections = yield* ProjectionSnapshotQuery;
+    // The notes_* tools: the folder of the token's own assistant, never one
+    // the model names.
+    const assistantWorkspace = (who: ManagerCaller) => {
+      const projectId = assistantProjectOfCaller(who);
+      if (projectId === null) return Effect.succeed(null);
+      return projections.getProjectShellById(projectId).pipe(
+        Effect.map((shell) => (Option.isSome(shell) ? shell.value.workspaceRoot : null)),
+        Effect.orElseSucceed(() => null),
+      );
+    };
+    // send_file: to the Telegram / Slack chat the caller's current turn
+    // answers, from the folders that conversation may send from.
+    const push = Option.getOrUndefined(yield* Effect.serviceOption(AssistantPushService));
+    const sendableRootsOf = makeThreadSendableRoots({
+      projections,
+      home: os.homedir(),
+      access: yield* assistantAccessDepsOption,
+    });
+    const sendFile = (who: ManagerCaller, rawPath: string) =>
+      Effect.gen(function* () {
+        const conversation = who.callerThreadId;
+        if (conversation === undefined || push === undefined) {
+          return { ok: false as const, error: SEND_FILE_NO_CHAT };
+        }
+        const chat = yield* push.chatOf(ThreadId.make(conversation));
+        if (chat === null) return { ok: false as const, error: SEND_FILE_NO_CHAT };
+        const roots = yield* sendableRootsOf(ThreadId.make(conversation));
+        const resolved = yield* Effect.promise(() =>
+          resolveConnectorOutgoingFile(rawPath, roots, os.homedir()),
+        );
+        if (!resolved.ok) return { ok: false as const, error: `Not sent: ${resolved.reason}.` };
+        const size = yield* Effect.promise(() =>
+          fsPromises.stat(resolved.path).then(
+            (stat) => stat.size,
+            () => 0,
+          ),
+        );
+        const limit =
+          chat.kind === "telegram" ? TELEGRAM_BOT_UPLOAD_LIMIT_BYTES : SLACK_UPLOAD_LIMIT_BYTES;
+        if (size > limit) {
+          return {
+            ok: false as const,
+            error: `Not sent: ${Math.round(size / 1024 / 1024)} MB is over ${chat.kind === "telegram" ? "Telegram's 50 MB bot limit" : "the upload limit"} — give the person a link instead (file_share_link in a chat, or Uno Drive).`,
+          };
+        }
+        if (!queueOutgoingFile(conversation, resolved.path)) {
+          return { ok: false as const, error: "Not sent: too many files wait already." };
+        }
+        return {
+          ok: true as const,
+          value: {
+            queued: nodePath.basename(resolved.path),
+            to: chat.kind,
+            note: "It goes with your answer of this turn. Say in one short line what it is.",
+          },
+        };
+      });
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       callerWithThread,
@@ -259,15 +328,27 @@ export const managerMcpRouteLayer = HttpRouter.add(
         ...(schedules ? { schedules } : {}),
         ...(team ? { team } : {}),
         ...(automations ? { automations } : {}),
+        assistantWorkspace,
+        sendFile,
       },
       { assistantsEnabled },
     );
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
-    return HttpServerResponse.jsonUnsafe(outcome.body, { status: 200 });
+    // The Uno dispatcher keeps every result in its context: long ones cut.
+    const dispatcher = assistantProjectOfCaller(callerWithThread) === ASSISTANT_PROJECT_ID;
+    return HttpServerResponse.jsonUnsafe(
+      dispatcher ? capToolResultBody(outcome.body) : outcome.body,
+      { status: 200 },
+    );
   }),
 );
+
+const SEND_FILE_NO_CHAT =
+  "The person isn't writing from Telegram or Slack in this turn: give them the file's path (it opens in Uno Work) instead.";
+/** Slack's own cap is 1 GB; above this a link is kinder. */
+const SLACK_UPLOAD_LIMIT_BYTES = 100 * 1024 * 1024;
 
 /**
  * `uno-work assistant-turn` (the CLI a console schedule runs after waking the

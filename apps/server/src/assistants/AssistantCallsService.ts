@@ -26,7 +26,10 @@ import { ConnectorsService, ConnectorsServiceLive } from "../setupTools/Connecto
 import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
 import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import {
+  anyCalendarSignedIn,
   applyCallsEvent,
+  calendarFeedFailure,
+  calendarsBody,
   callsBusy,
   CALLS_SOURCE,
   CALLS_THREAD_TITLE,
@@ -158,11 +161,16 @@ export const makeAssistantCallsService = (options?: {
       return parseSettingsBoxId(current?.uno.boxId);
     };
 
-    const google = async (force = false) => {
+    const connectorRows = async (force = false) => {
       const list = await runPromise(
         connectors.list({ force }).pipe(Effect.orElseSucceed(() => null)),
       );
-      const gmail = list?.connectors.find((c) => c.provider === "gmail");
+      return list?.connectors ?? null;
+    };
+
+    const google = async (force = false) => {
+      const rows = await connectorRows(force);
+      const gmail = rows?.find((c) => c.provider === "gmail");
       return gmail
         ? {
             connected: gmail.connected,
@@ -230,8 +238,11 @@ export const makeAssistantCallsService = (options?: {
               "The notetaker runs on a cloud computer. Move this assistant to a cloud computer with 4 GB or more, then turn this on there.",
             );
           }
-          const g = await google(true);
-          if (!g || !g.connected || g.needsReconnect) {
+          // Any calendar of the account will do (Google or Outlook & Teams);
+          // with neither, the usual Connect is Google's.
+          const rows = await connectorRows(true);
+          if (!anyCalendarSignedIn(rows)) {
+            const g = rows?.find((c) => c.provider === "gmail");
             return fail(
               "google",
               g?.needsReconnect
@@ -344,6 +355,10 @@ export const makeAssistantCallsService = (options?: {
       caller.appId === NOTETAKER_TEMPLATE_ID
         ? null
         : appErr(403, "calls_not_allowed", "Join my calls is for the Uno Notetaker app.");
+    const onlyNotetakerCalendar = (caller: AppApiCaller) =>
+      caller.appId === NOTETAKER_TEMPLATE_ID
+        ? null
+        : appErr(403, "calendar_not_allowed", "Calendars are for the Uno Notetaker app.");
 
     // Economy mode sleeps an idle computer: wake it before a call, hold it during one.
     setCallsWake({
@@ -361,17 +376,30 @@ export const makeAssistantCallsService = (options?: {
         const g = await google();
         return reply(200, linkBody(state, { name: "", email: g?.account?.toLowerCase() ?? "" }));
       },
-      calendar: async (caller, range) => {
-        const denied = onlyNotetaker(caller);
+      // The person's calendars: no assistant needed (Notetaker on its own, 29.10).
+      calendars: async (caller) => {
+        const denied = onlyNotetakerCalendar(caller);
         if (denied) return denied;
-        if (!state.enabled) {
-          return appErr(409, "calls_off", "No assistant has Join my calls on on this computer.");
+        return reply(200, calendarsBody(await connectorRows()));
+      },
+      calendar: async (caller, range) => {
+        const denied = onlyNotetakerCalendar(caller);
+        if (denied) return denied;
+        const provider = range.provider;
+        const failed = (failure: Parameters<typeof calendarFeedFailure>[1]) => {
+          const f = calendarFeedFailure(provider, failure);
+          return appErr(f.status, f.code, f.message);
+        };
+        if (provider !== "gmail") {
+          // An account (or an older console) without it: say so before asking.
+          const row = (await connectorRows())?.find((c) => c.provider === provider);
+          if (!row?.connected) return failed({ kind: "answer", message: "not connected" });
         }
         const args: Record<string, unknown> = {};
         if (range.from) args["from"] = range.from;
         if (range.to) args["to"] = range.to;
         const result = await runPromise(
-          connectors.call({ provider: "gmail", tool: "calendar_feed", arguments: args }).pipe(
+          connectors.call({ provider, tool: "calendar_feed", arguments: args }).pipe(
             Effect.map((r) => ({ ok: true as const, r })),
             Effect.catch((error) =>
               Effect.succeed({ ok: false as const, status: error.status, message: error.message }),
@@ -379,28 +407,10 @@ export const makeAssistantCallsService = (options?: {
           ),
         );
         if (!result.ok) {
-          return result.status === 401 || result.status === 403 || result.status === 404
-            ? appErr(424, "google_reconnect", "Google Calendar needs signing in again in Uno Work.")
-            : appErr(502, "calendar_unavailable", result.message);
+          return failed({ kind: "call", status: result.status, message: result.message });
         }
         const parsed = parseCalendarFeed(result.r);
-        if (!parsed.ok) {
-          if (/not connected/i.test(parsed.message)) {
-            return appErr(
-              424,
-              "google_not_connected",
-              "Google Calendar isn't connected in Uno Work.",
-            );
-          }
-          if (/expired|revoked|reconnect/i.test(parsed.message)) {
-            return appErr(
-              424,
-              "google_reconnect",
-              "Google Calendar needs signing in again in Uno Work.",
-            );
-          }
-          return appErr(502, "calendar_unavailable", parsed.message);
-        }
+        if (!parsed.ok) return failed({ kind: "answer", message: parsed.message });
         return reply(200, parsed.feed);
       },
       event: (caller, body) =>

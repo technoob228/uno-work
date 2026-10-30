@@ -9,7 +9,8 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option, Ref, Schema } from "effect";
+import * as os from "node:os";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -19,7 +20,16 @@ import { ManagerConnectorBindingRepository } from "../../persistence/Services/Ma
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
 import { resolveNotifyChats, type NotifyConnector } from "../connectorBindings.ts";
 import { isRouteCredential } from "../channelRelay.ts";
-import { formatChannelNotifyText } from "../connectorNotify.ts";
+import {
+  admitPersonMessage,
+  formatChannelNotifyText,
+  pickPersonChats,
+} from "../connectorNotify.ts";
+import { buttonsAsText, chatHeaderLine } from "../connectorButtons.ts";
+import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
+import { detectReplyLanguage } from "../connectorReplyText.ts";
+import { makeThreadSendableRoots } from "../threadSendableRoots.ts";
+import { assistantAccessDepsOption } from "../../assistants/assistantAccess.ts";
 import {
   ConnectorNotifyService,
   type ConnectorNotifyServiceShape,
@@ -214,7 +224,153 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       return yield* sendToUnoBot(text);
     });
 
-  return { resolveChats, sendToChats, notify } satisfies ConnectorNotifyServiceShape;
+  // messenger_send: the folders a chat may send files from (as send_file).
+  const sendableRootsOf = makeThreadSendableRoots({
+    projections: projectionSnapshotQuery,
+    home: os.homedir(),
+    access: yield* assistantAccessDepsOption,
+  });
+  const personSentAtRef = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<number>>>(new Map());
+
+  const sendToPerson: ConnectorNotifyServiceShape["sendToPerson"] = (input) =>
+    Effect.gen(function* () {
+      const admitted =
+        input.approval === true ||
+        (yield* Ref.modify(personSentAtRef, (sentAt) => {
+          const verdict = admitPersonMessage(sentAt, input.threadId, Date.now());
+          return [verdict.admit, verdict.sentAt] as const;
+        }));
+      if (!admitted) {
+        return {
+          delivered: 0,
+          via: "none" as const,
+          note: "Not sent: this chat already wrote to the person many times in the last minutes. Wait, or put it all in one message.",
+        };
+      }
+      const shell = yield* projectionSnapshotQuery
+        .getThreadShellById(input.threadId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const projectId = Option.isSome(shell) ? shell.value.projectId : null;
+      const title = Option.isSome(shell) ? shell.value.title : "Chat";
+      // The assistant's own conversation speaks as itself; any other chat
+      // is named, and the person's reply goes back to it.
+      const fromAssistant = yield* isAssistantSubject(input.threadId, projectId);
+      const language = input.language ?? detectReplyLanguage(`${title}\n${input.text}`, null);
+      const body = input.text.trim();
+      const text = fromAssistant ? body : `${chatHeaderLine(title)}\n${body}`.trim();
+
+      let filePath: string | null = null;
+      let note: string | null = null;
+      if (input.file !== undefined && input.file !== null && input.file.trim().length > 0) {
+        const roots = yield* sendableRootsOf(input.threadId);
+        const resolved = yield* Effect.promise(() =>
+          resolveConnectorOutgoingFile(input.file!.trim(), roots, os.homedir()),
+        );
+        if (!resolved.ok) {
+          return { delivered: 0, via: "none" as const, note: `Not sent: ${resolved.reason}.` };
+        }
+        filePath = resolved.path;
+      }
+
+      const chats = pickPersonChats(
+        yield* resolveChats({
+          threadId: input.threadId,
+          projectId,
+          includeAssistantFallback: true,
+          includeSlack: true,
+        }),
+      );
+      const buttons = input.buttons ?? [];
+      const plainText =
+        input.textWithoutButtons === undefined
+          ? text
+          : fromAssistant
+            ? input.textWithoutButtons
+            : `${chatHeaderLine(title)}\n${input.textWithoutButtons}`;
+      let delivered = 0;
+      let via: "telegram" | "slack" | "none" = "none";
+      for (const chat of chats) {
+        if (chat.kind === "telegram") {
+          const sent = yield* telegram.sendRich({
+            projectId: chat.connectorProjectId,
+            chatId: chat.chatId,
+            text,
+            filePath,
+            buttons,
+            threadId: input.threadId,
+            routeReplies: !fromAssistant,
+            language,
+            ...(input.buttonsTtlMs !== undefined ? { buttonsTtlMs: input.buttonsTtlMs } : {}),
+          });
+          if (sent.ok) {
+            delivered += 1;
+            via = "telegram";
+          }
+          if (sent.error !== null) note = sent.error;
+          continue;
+        }
+        // Slack: text only from here — options as a line, the file by name.
+        const target = parseSlackChatKey(chat.chatId);
+        const slackText = [
+          plainText,
+          buttons.length > 0 && plainText === text ? buttonsAsText(buttons, language) : null,
+          filePath === null ? null : `📎 ${filePath}`,
+        ]
+          .filter((part): part is string => part !== null)
+          .join("\n\n");
+        const ok = yield* slack.sendText({
+          projectId: chat.connectorProjectId,
+          channelId: target.channelId,
+          text: slackText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
+          ...(projectId !== null && isAssistantProjectId(projectId)
+            ? { asAssistant: projectId }
+            : {}),
+          ...(target.threadTs !== null ? { threadTs: target.threadTs } : {}),
+        });
+        if (ok) {
+          delivered += 1;
+          if (via === "none") via = "slack";
+          if (buttons.length > 0 || filePath !== null) {
+            note = "Slack got the text only: buttons as a list of options, the file as its path.";
+          }
+        }
+      }
+      if (chats.length > 0) return { delivered, via, note };
+      // No Telegram / Slack linked to Uno Work: Uno's service bot, text only.
+      const service = yield* sendToUnoBot(plainText);
+      return service.delivered > 0
+        ? {
+            delivered: service.delivered,
+            via: "uno-bot" as const,
+            note:
+              buttons.length > 0 || filePath !== null
+                ? "Sent as text through Uno's bot: buttons and files need Telegram connected in Uno Work (Settings → Telegram)."
+                : null,
+          }
+        : {
+            delivered: 0,
+            via: "none" as const,
+            note: "The person has no Telegram or Slack connected to Uno Work. Use notify (Inbox) instead.",
+          };
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("message to the person failed").pipe(
+          Effect.annotateLogs({ threadId: input.threadId, cause }),
+          Effect.as({ delivered: 0, via: "none" as const, note: "Sending failed." }),
+        ),
+      ),
+    );
+
+  const retireButtons: ConnectorNotifyServiceShape["retireButtons"] = (requestId) =>
+    telegram.retireRequestButtons(requestId);
+
+  return {
+    resolveChats,
+    sendToChats,
+    sendToPerson,
+    retireButtons,
+    notify,
+  } satisfies ConnectorNotifyServiceShape;
 });
 
 export const ConnectorNotifyServiceLive = Layer.effect(

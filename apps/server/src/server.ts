@@ -168,6 +168,8 @@ import {
   oauthTokenRouteLayer,
   orchestrationShellRouteLayer,
   orchestrationThreadDetailRouteLayer,
+  orchestrationThreadBoundedRouteLayer,
+  orchestrationThreadHistoryRouteLayer,
 } from "./compat/mobileCompatRoutes.ts";
 import {
   channelsNotifyRouteLayer,
@@ -650,6 +652,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   oauthTokenRouteLayer,
   orchestrationShellRouteLayer,
   orchestrationThreadDetailRouteLayer,
+  orchestrationThreadBoundedRouteLayer,
+  orchestrationThreadHistoryRouteLayer,
   agentThreadsCreateRouteLayer,
   agentThreadsGetRouteLayer,
   agentThreadsListRouteLayer,
