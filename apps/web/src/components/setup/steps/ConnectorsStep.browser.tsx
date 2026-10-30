@@ -16,7 +16,10 @@ const api = vi.hoisted(() => ({
   probeMcpServer: vi.fn(),
 }));
 
-vi.mock("../../../lib/setupApi", () => api);
+vi.mock("../../../lib/setupApi", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  ...api,
+}));
 
 import { useConnectorActions } from "./ConnectorsStep";
 
