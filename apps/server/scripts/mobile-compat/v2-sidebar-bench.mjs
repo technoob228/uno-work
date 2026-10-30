@@ -72,7 +72,8 @@ async function shell(token) {
 }
 
 async function runTurn(token, threadId) {
-  const before = (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn?.completedAt ?? null;
+  const before =
+    (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn?.completedAt ?? null;
   await dispatch(token, {
     type: "thread.turn.start",
     threadId,
@@ -83,12 +84,15 @@ async function runTurn(token, threadId) {
   });
   const deadline = Date.now() + 60_000;
   for (;;) {
-    const completedAt = (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn?.completedAt;
+    const completedAt = (await shell(token)).threads.find((t) => t.id === threadId)?.latestTurn
+      ?.completedAt;
     if (completedAt && completedAt !== before) break;
     if (Date.now() > deadline) throw new Error(`turn in ${threadId} did not finish`);
     await sleep(250);
   }
-  await dispatch(token, { type: "thread.session.stop", threadId, createdAt: now() }).catch(() => {});
+  await dispatch(token, { type: "thread.session.stop", threadId, createdAt: now() }).catch(
+    () => {},
+  );
 }
 
 async function finishTurnsNow(pairToken, ids) {
@@ -191,7 +195,10 @@ async function phone(threadId) {
     console.log(`phone socket closed ${event.code}`);
     process.exit(1);
   };
-  const ping = setInterval(() => ws.readyState === 1 && ws.send(JSON.stringify({ _tag: "Ping" })), 10_000);
+  const ping = setInterval(
+    () => ws.readyState === 1 && ws.send(JSON.stringify({ _tag: "Ping" })),
+    10_000,
+  );
   const report = () => console.log(`phone frames: ${JSON.stringify(counts)}`);
   process.on("SIGTERM", () => {
     clearInterval(ping);
@@ -207,7 +214,9 @@ const median = (values) => {
 };
 const p95 = (values) => {
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)] : null;
+  return sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]
+    : null;
 };
 const mean = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
 
@@ -244,18 +253,22 @@ async function measure(label, idsFile, out) {
   const page = await context.newPage();
   await page.bringToFront();
   await page.goto(`${BASE}/pair#token=${PAIR}`);
-  await page.waitForFunction(() => document.querySelectorAll("[data-thread-item]").length >= 5, null, {
-    timeout: 120_000,
-  });
+  await page.waitForFunction(
+    () => document.querySelectorAll("[data-thread-item]").length >= 5,
+    null,
+    {
+      timeout: 120_000,
+    },
+  );
   await sleep(2_000);
   // Worst case: every "Show N more" opened, so all chats are rows in the DOM
   // (BENCH_EXPAND=0 keeps the default short list).
   if (process.env.BENCH_EXPAND !== "0") {
     for (let round = 0; round < 20; round += 1) {
       const opened = await page.evaluate(() => {
-        const buttons = [...document.querySelectorAll('[data-testid^="sidebar-d-show-more"]')].filter(
-          (button) => /^Show \d+ more/.test(button.textContent ?? ""),
-        );
+        const buttons = [
+          ...document.querySelectorAll('[data-testid^="sidebar-d-show-more"]'),
+        ].filter((button) => /^Show \d+ more/.test(button.textContent ?? ""));
         for (const button of buttons) button.click();
         return buttons.length;
       });
@@ -280,24 +293,38 @@ async function measure(label, idsFile, out) {
   for (const id of [...ids].reverse()) {
     const result = await page.evaluate(async (threadId) => {
       const rowOf = () =>
-        document.querySelector(`[data-testid="thread-title-${threadId}"]`)?.closest('[role="button"]');
+        document
+          .querySelector(`[data-testid="thread-title-${threadId}"]`)
+          ?.closest('[role="button"]');
       const row = rowOf();
       if (!row) return { threadId, missing: true };
       row.scrollIntoView({ block: "center" });
       await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 50)));
-      const sidebar = row.closest('[data-sidebar="content"]') ?? row.closest("ul")?.parentElement ?? document.body;
+      const sidebar =
+        row.closest('[data-sidebar="content"]') ??
+        row.closest("ul")?.parentElement ??
+        document.body;
       const unreadBefore = row.getAttribute("data-thread-mark");
       const beforeClass = row.className;
       let sidebarMutations = 0;
       const counter = new MutationObserver((records) => (sidebarMutations += records.length));
-      counter.observe(sidebar, { subtree: true, childList: true, attributes: true, characterData: true });
+      counter.observe(sidebar, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
       const c0 = window.__benchCommits;
       let tDom = null;
       const t0 = performance.now();
       const changed = new Promise((resolve) => {
         const check = () => {
           const current = rowOf();
-          if (location.pathname.includes(threadId) && current && current.className !== beforeClass) {
+          if (
+            location.pathname.includes(threadId) &&
+            current &&
+            current.className !== beforeClass
+          ) {
             tDom = performance.now() - t0;
             return true;
           }
@@ -319,7 +346,9 @@ async function measure(label, idsFile, out) {
       await changed;
       await new Promise((resolve) => requestAnimationFrame(() => resolve()));
       const tPaint = performance.now() - t0;
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, 300 - (performance.now() - t0))));
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.max(0, 300 - (performance.now() - t0))),
+      );
       const commitsEarly = window.__benchCommits - c0;
       const mutationsEarly = sidebarMutations;
       await new Promise((resolve) => setTimeout(resolve, 2_200));
