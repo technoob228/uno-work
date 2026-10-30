@@ -1,7 +1,8 @@
 /**
  * Project settings: "On all my computers" (the switch, the status, Keep mine
- * / Keep theirs after a conflict) and the project's keys — names only; a
- * value goes in once and never comes back to the screen.
+ * / Keep theirs after a conflict), the project's versions, what travels and
+ * what stays, and its keys — names only; a value goes in once and never comes
+ * back to the screen.
  *
  * @module projectSync/ProjectSettingsDialog
  */
@@ -30,6 +31,9 @@ import {
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
+import { ProjectFiles } from "./ProjectFiles";
+import { ProjectTeam } from "./ProjectTeam";
+import { ProjectVersions } from "./ProjectVersions";
 import { conflictLine, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
 
@@ -92,6 +96,7 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
   const [working, setWorking] = useState<string | null>(null);
   const [keyName, setKeyName] = useState("");
   const [keyValue, setKeyValue] = useState("");
+  const syncRefreshed = (next: ProjectSyncEntry) => refresh(target.environmentId, next);
 
   const entry: ProjectSyncEntry | null =
     status.data?.projects.find((item) => item.projectId === target.projectId) ?? null;
@@ -190,6 +195,12 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
               </Button>
             </div>
           ) : null}
+          {enabled && (entry?.held?.length ?? 0) > 0 && entry?.state === "conflict" ? (
+            // In a conflict the status line says the conflict: the waiting files still need a word.
+            <p className="text-xs text-muted-foreground" data-testid="project-sync-held">
+              {entry.held?.join(", ")} waiting here: it looks like there's a key inside.
+            </p>
+          ) : null}
           {entry?.state === "conflict" ? (
             <div
               className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/8 p-3 text-xs"
@@ -207,7 +218,7 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
                     )
                   }
                 >
-                  Keep mine
+                  {entry.conflict?.person ? "Bring mine back" : "Keep mine"}
                 </Button>
                 <Button
                   size="xs"
@@ -237,6 +248,14 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             </div>
           ) : null}
         </section>
+
+        {enabled ? (
+          <>
+            <ProjectVersions target={target} onRestored={syncRefreshed} />
+            <ProjectFiles target={target} keyCount={keys.data?.secrets.length ?? 0} />
+            {entry?.name ? <ProjectTeam syncName={entry.name} /> : null}
+          </>
+        ) : null}
 
         <section className="space-y-2" data-testid="project-keys">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">

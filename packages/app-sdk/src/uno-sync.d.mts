@@ -31,6 +31,8 @@ export interface ConflictRecord {
   mine: string;
   theirs: string;
   theirsFrom: string | null;
+  /** Someone else's name, when another person changed the file. */
+  theirsPerson?: string | null;
   at: string;
 }
 

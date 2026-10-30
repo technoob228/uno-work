@@ -276,6 +276,12 @@ export interface WsRpcClient {
     readonly resolve: RpcUnaryMethod<typeof WS_METHODS.projectSyncResolve>;
     readonly getHere: RpcUnaryMethod<typeof WS_METHODS.projectSyncGetHere>;
     readonly opened: RpcUnaryMethod<typeof WS_METHODS.projectSyncOpened>;
+    readonly history: RpcUnaryMethod<typeof WS_METHODS.projectSyncHistory>;
+    readonly restore: RpcUnaryMethod<typeof WS_METHODS.projectSyncRestore>;
+    readonly files: RpcUnaryMethod<typeof WS_METHODS.projectSyncFiles>;
+    readonly setLocalOnly: RpcUnaryMethod<typeof WS_METHODS.projectSyncSetLocalOnly>;
+    readonly introSeen: RpcUnaryNoArgMethod<typeof WS_METHODS.projectSyncIntroSeen>;
+    readonly answerOld: RpcUnaryMethod<typeof WS_METHODS.projectSyncAnswerOld>;
     readonly secretsList: RpcUnaryMethod<typeof WS_METHODS.projectSecretsList>;
     readonly secretsSet: RpcUnaryMethod<typeof WS_METHODS.projectSecretsSet>;
     readonly secretsRemove: RpcUnaryMethod<typeof WS_METHODS.projectSecretsRemove>;
@@ -722,6 +728,16 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       getHere: (input) =>
         transport.request((client) => client[WS_METHODS.projectSyncGetHere](input)),
       opened: (input) => transport.request((client) => client[WS_METHODS.projectSyncOpened](input)),
+      history: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncHistory](input)),
+      restore: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncRestore](input)),
+      files: (input) => transport.request((client) => client[WS_METHODS.projectSyncFiles](input)),
+      setLocalOnly: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncSetLocalOnly](input)),
+      introSeen: () => transport.request((client) => client[WS_METHODS.projectSyncIntroSeen]({})),
+      answerOld: (input) =>
+        transport.request((client) => client[WS_METHODS.projectSyncAnswerOld](input)),
       secretsList: (input) =>
         transport.request((client) => client[WS_METHODS.projectSecretsList](input)),
       secretsSet: (input) =>

@@ -920,7 +920,7 @@ function syncOutcome(result, json, done) {
     return JSON.stringify(result, null, 2);
   }
   if (!result.ok) throw new UnoCliError(result.message);
-  if (result.state === "conflict" || result.state === "empty" || result.held?.length > 0) {
+  if (result.state === "conflict" || result.state === "empty" || result.held.length > 0) {
     return result.message;
   }
   const extra = /stay on this computer until/.test(result.message) ? ` ${result.message}` : "";

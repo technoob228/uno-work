@@ -160,7 +160,8 @@ export function isKeyFile(/** @type {string} */ relative) {
 
 /**
  * @typedef {{ files: string[], kept: Record<string, "mine" | "theirs">, mine: string,
- *   theirs: string, theirsFrom: string | null, at: string }} ConflictRecord
+ *   theirs: string, theirsFrom: string | null, theirsPerson?: string | null, at: string }} ConflictRecord
+ *   theirsPerson: someone else's name, when another person changed the file.
  * @typedef {"synced" | "conflict" | "too-big" | "blocked" | "busy" | "error" | "empty"} SyncState
  * @typedef {{ ok: boolean, name: string, dir: string, mode: "snapshot" | "git", state: SyncState,
  *   pushed: boolean, pulled: boolean, changedFiles: number, head: string | null,
@@ -290,13 +291,17 @@ async function gitEnv(/** @type {Ctx} */ ctx, /** @type {Record<string, string>}
  * person: "Uno (macbook)".
  */
 export function versionAuthor(/** @type {Ctx} */ ctx) {
-  const clean = (/** @type {string} */ text) =>
-    text
-      .replace(/[<>()\n\r\0]/g, "")
-      .trim()
-      .slice(0, 80);
-  return `${clean(ctx.person ?? "") || "Uno"} (${clean(ctx.hostname ?? os.hostname()) || "computer"})`;
+  return `${personOf(ctx) ?? "Uno"} (${cleanName(ctx.hostname ?? os.hostname()) || "computer"})`;
 }
+
+const cleanName = (/** @type {string} */ text) =>
+  text
+    .replace(/[<>()\n\r\0]/g, "")
+    .trim()
+    .slice(0, 80);
+
+/** This person's name as versions carry it. */
+const personOf = (/** @type {Ctx} */ ctx) => cleanName(ctx.person ?? "") || null;
 
 /** The environment that signs versions as `versionAuthor`. */
 function authorEnv(/** @type {Ctx} */ ctx) {
@@ -1009,6 +1014,7 @@ async function syncSnapshot(input, ctx, result) {
         return stats ? Math.floor(stats.mtimeMs / 1000) : commitTimeOf("HEAD", file, at);
       },
       mergeMessage: (from) => `Synced with ${from ?? "your other computer"}`,
+      person: personOf(ctx),
       refuseUnrelated: input.adopt !== true,
       dirtyHint:
         held.length > 0
@@ -1160,6 +1166,7 @@ async function syncGit(input, gitDir, ctx, result) {
       },
       localTime: (file) => commitTimeOf("HEAD", file, at),
       mergeMessage: (from) => `Merge changes from ${from ?? "your other computer"} (Uno sync)`,
+      person: personOf(ctx),
       refuseUnrelated: !hasRemote && input.adopt !== true,
       keysLeaving: (tip) => keysLeavingWith(tip, gitDir, at),
       dirtyHint: dirty
@@ -1196,7 +1203,7 @@ async function remotesToShare(/** @type {any} */ at) {
  *   result: SyncResult, storage: import("./git-remote-uno.mjs").Storage,
  *   meta: ProjectMeta | null, writeMetaAs: ProjectMeta,
  *   localTime: (file: string) => Promise<number>, mergeMessage: (from: string | null) => string,
- *   refuseUnrelated?: boolean, dirtyHint?: string,
+ *   person: string | null, refuseUnrelated?: boolean, dirtyHint?: string,
  *   keysLeaving?: (tip: string) => Promise<string[]> }} x
  *   keysLeaving: what would leave is read first; with a finding nothing is pushed.
  */
@@ -1274,6 +1281,7 @@ async function exchange(x) {
             mine: local,
             theirs: remote,
             theirsFrom: from,
+            theirsPerson: await otherPerson(remote, files, x.person, at),
             at: new Date().toISOString(),
           };
           await writeConflict(x.gitDir, conflict);
@@ -1317,6 +1325,19 @@ async function exchange(x) {
     return;
   }
   busy(result);
+}
+
+/**
+ * Who changed the first of these files on `tip`, when it wasn't this person:
+ * a colleague's change reads differently from one's own other computer.
+ * @param {string} tip @param {string[]} files @param {string | null} person
+ * @param {{ env: NodeJS.ProcessEnv, cwd: string }} at
+ */
+async function otherPerson(tip, files, person, at) {
+  const out = await git(["log", "-1", "--format=%an%x1f%s", tip, "--", files[0] ?? "."], at);
+  const [author = "", subject = ""] = out.stdout.trim().split("\x1f");
+  const who = whoSaved(author, subject).person;
+  return who && who !== person ? who : null;
 }
 
 /** @param {SyncResult} result @param {string} [hint] */
@@ -1549,7 +1570,10 @@ export async function restoreVersion(input, ctx) {
     state,
     message,
   });
-  if (!/^[0-9a-f]{40,64}$/.test(input.version)) return refuse("That version isn't in this project.");
+  if (!/^[0-9a-f]{40,64}$/.test(input.version))
+    return refuse("That version isn't in this project.");
+  const files = (input.files ?? []).map(safeRelative);
+  if (files.includes(null)) return refuse("That file isn't in this project.");
   const { gitDir, at } = await repositoryOf(dir, ctx);
   const release = await lock(gitDir);
   if (!release) return refuse("Another sync of this project is running; try again.", "busy");
@@ -1560,7 +1584,6 @@ export async function restoreVersion(input, ctx) {
     if (!head || !branchRef || known?.code !== 0 || !(await isAncestor(input.version, head, at))) {
       return refuse("That version isn't in this project.");
     }
-    const files = input.files ?? [];
     /** @type {string} */
     let tree;
     /** @type {string} */
@@ -1569,7 +1592,9 @@ export async function restoreVersion(input, ctx) {
     if (files.length > 0) {
       /** @type {Map<string, { mode: string, oid: string } | null>} */
       const changes = new Map();
-      for (const file of files) changes.set(file, await entryAt(input.version, file, at));
+      for (const file of /** @type {string[]} */ (files)) {
+        changes.set(file, await entryAt(input.version, file, at));
+      }
       tree = await treeWith(head, changes, at, gitDir);
       const what = files.length === 1 ? files[0] : `${files.length} files`;
       message = `Brought back ${what} from ${versionDate(seconds)}`;
@@ -1669,16 +1694,7 @@ export async function setLocalOnly(input, ctx) {
     await refreshExcludes(gitDir, at);
     if (input.localOnly) {
       await gitOk(
-        [
-          "--literal-pathspecs",
-          "rm",
-          "-r",
-          "-q",
-          "--cached",
-          "--ignore-unmatch",
-          "--",
-          relative,
-        ],
+        ["--literal-pathspecs", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", relative],
         at,
         "Couldn't keep that file here",
       );

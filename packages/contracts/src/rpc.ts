@@ -328,13 +328,20 @@ import {
   ProjectSecretRemoveInput,
   ProjectSecretSetInput,
   ProjectSecretsList,
+  ProjectSyncAnswerInput,
   ProjectSyncEntry,
   ProjectSyncError,
+  ProjectSyncFiles,
   ProjectSyncGetHereInput,
   ProjectSyncGetHereResult,
+  ProjectSyncHistory,
+  ProjectSyncHistoryInput,
+  ProjectSyncIntroSeenInput,
   ProjectSyncProjectInput,
   ProjectSyncResolveInput,
+  ProjectSyncRestoreInput,
   ProjectSyncSetEnabledInput,
+  ProjectSyncSetLocalOnlyInput,
   ProjectSyncSnapshot,
 } from "./projectSync.ts";
 import {
@@ -464,6 +471,12 @@ export const WS_METHODS = {
   projectSyncResolve: "projectSync.resolve",
   projectSyncGetHere: "projectSync.getHere",
   projectSyncOpened: "projectSync.opened",
+  projectSyncHistory: "projectSync.history",
+  projectSyncRestore: "projectSync.restore",
+  projectSyncFiles: "projectSync.files",
+  projectSyncSetLocalOnly: "projectSync.setLocalOnly",
+  projectSyncIntroSeen: "projectSync.introSeen",
+  projectSyncAnswerOld: "projectSync.answerOld",
   projectSecretsList: "projectSecrets.list",
   projectSecretsSet: "projectSecrets.set",
   projectSecretsRemove: "projectSecrets.remove",
@@ -760,6 +773,40 @@ export const WsProjectSyncGetHereRpc = Rpc.make(WS_METHODS.projectSyncGetHere, {
 
 export const WsProjectSyncOpenedRpc = Rpc.make(WS_METHODS.projectSyncOpened, {
   payload: ProjectSyncProjectInput,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncHistoryRpc = Rpc.make(WS_METHODS.projectSyncHistory, {
+  payload: ProjectSyncHistoryInput,
+  success: ProjectSyncHistory,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncRestoreRpc = Rpc.make(WS_METHODS.projectSyncRestore, {
+  payload: ProjectSyncRestoreInput,
+  success: ProjectSyncEntry,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncFilesRpc = Rpc.make(WS_METHODS.projectSyncFiles, {
+  payload: ProjectSyncProjectInput,
+  success: ProjectSyncFiles,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncSetLocalOnlyRpc = Rpc.make(WS_METHODS.projectSyncSetLocalOnly, {
+  payload: ProjectSyncSetLocalOnlyInput,
+  success: ProjectSyncFiles,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncIntroSeenRpc = Rpc.make(WS_METHODS.projectSyncIntroSeen, {
+  payload: ProjectSyncIntroSeenInput,
+  error: ProjectSyncError,
+});
+
+export const WsProjectSyncAnswerOldRpc = Rpc.make(WS_METHODS.projectSyncAnswerOld, {
+  payload: ProjectSyncAnswerInput,
   error: ProjectSyncError,
 });
 
@@ -2252,6 +2299,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectSyncResolveRpc,
   WsProjectSyncGetHereRpc,
   WsProjectSyncOpenedRpc,
+  WsProjectSyncHistoryRpc,
+  WsProjectSyncRestoreRpc,
+  WsProjectSyncFilesRpc,
+  WsProjectSyncSetLocalOnlyRpc,
+  WsProjectSyncIntroSeenRpc,
+  WsProjectSyncAnswerOldRpc,
   WsProjectSecretsListRpc,
   WsProjectSecretsSetRpc,
   WsProjectSecretsRemoveRpc,

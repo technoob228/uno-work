@@ -38,6 +38,12 @@ export const TRIGGER_DELAY_MS: Readonly<Record<SyncTrigger, number>> = {
 export const POLL_EVERY_MS = 3 * 60_000;
 /** Folder events right after our own sync are its own writes: ignored this long. */
 export const OWN_WRITES_QUIET_MS = 3_000;
+/**
+ * While a chat works in the folder nothing is saved: its files are half done,
+ * and another chat's turn ending or a poll must not carry them to the other
+ * computers. A stuck turn must not stop saving for good: after this long it saves.
+ */
+export const MAX_WAIT_FOR_TURNS_MS = 30 * 60_000;
 
 export interface SchedulerTimers {
   readonly setTimeout: (run: () => void, ms: number) => unknown;
@@ -62,6 +68,8 @@ interface Slot {
   dueAt: number;
   running: Promise<void> | null;
   again: boolean;
+  /** The person asked for this run: it doesn't wait for anything. */
+  manual: boolean;
   waiters: Array<() => void>;
   finishedAt: number | null;
 }
@@ -72,7 +80,7 @@ interface Slot {
  * to the earliest, except `file-save`, which waits for the folder to be quiet.
  */
 export function createSyncScheduler(input: {
-  readonly run: (key: string) => Promise<void>;
+  readonly run: (key: string, manual: boolean) => Promise<void>;
   readonly timers: SchedulerTimers;
 }): SyncScheduler {
   const slots = new Map<string, Slot>();
@@ -80,7 +88,15 @@ export function createSyncScheduler(input: {
   const slotOf = (key: string): Slot => {
     let slot = slots.get(key);
     if (!slot) {
-      slot = { timer: null, dueAt: 0, running: null, again: false, waiters: [], finishedAt: null };
+      slot = {
+        timer: null,
+        dueAt: 0,
+        running: null,
+        again: false,
+        manual: false,
+        waiters: [],
+        finishedAt: null,
+      };
       slots.set(key, slot);
     }
     return slot;
@@ -96,8 +112,10 @@ export function createSyncScheduler(input: {
       return;
     }
     const waiters = slot.waiters.splice(0);
+    const manual = slot.manual;
+    slot.manual = false;
     slot.running = input
-      .run(key)
+      .run(key, manual)
       .catch(() => undefined)
       .then(() => {
         slot.running = null;
@@ -144,6 +162,7 @@ export function createSyncScheduler(input: {
         }
         const slot = slotOf(key);
         slot.waiters.push(resolve);
+        slot.manual = true;
         if (slot.running) slot.again = true;
         else start(key);
       }),

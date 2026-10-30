@@ -45,6 +45,27 @@ const flush = async () => {
   for (let i = 0; i < 10; i += 1) await Promise.resolve();
 };
 
+describe("who asked for a run", () => {
+  it("tells the person's click from everything else", async () => {
+    const clock = fakeTimers();
+    const runs: Array<[string, boolean]> = [];
+    const scheduler = createSyncScheduler({
+      run: async (key, manual) => void runs.push([key, manual]),
+      timers: clock.timers,
+    });
+    scheduler.schedule("p", "poll");
+    await clock.advance(0);
+    await scheduler.runNow("p");
+    scheduler.schedule("p", "poll");
+    await clock.advance(0);
+    expect(runs).toEqual([
+      ["p", false],
+      ["p", true],
+      ["p", false],
+    ]);
+  });
+});
+
 describe("sync scheduler", () => {
   it("waits for the folder to be quiet: each save restarts the wait", async () => {
     const clock = fakeTimers();

@@ -18,8 +18,12 @@
  * равно видит вывод инструмента целиком (он уходит ей напрямую из харнесса).
  */
 
-/** Секреты Uno (консоль fishcode) и частые сторонние форматы. */
-const SECRET_TOKEN_PATTERN = new RegExp(
+/**
+ * Секреты Uno (консоль fishcode) и частые сторонние форматы. Тот же список —
+ * SECRET_PATTERN в packages/app-sdk/src/uno-sync.mjs (файл живёт отдельно от
+ * демона, импортировать отсюда не может); равенство держит тест projectSyncCore.
+ */
+export const SECRET_TOKEN_PATTERN = new RegExp(
   [
     // Uno: ключ шлюза, токены пользователя/агента/бокса, GPU, refresh.
     String.raw`\b(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa)_|unor_)[A-Za-z0-9_\-]{12,}`,

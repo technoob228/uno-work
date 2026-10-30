@@ -68,6 +68,7 @@ import {
   isAssistantProjectId,
   type ContextMenuItem,
   type EnvironmentId,
+  type ProjectId,
   type ProviderDriverKind,
   type ScopedThreadRef,
   type ThreadId,
@@ -203,7 +204,9 @@ import {
   ProjectSettingsDialog,
   type ProjectSettingsTarget,
 } from "./projectSync/ProjectSettingsDialog";
+import { ProjectInvites } from "./projectSync/ProjectInvites";
 import { ProjectSyncMark, ProjectsElsewhere, mostUrgent } from "./projectSync/ProjectSyncParts";
+import { ProjectSyncWelcome } from "./projectSync/ProjectSyncWelcome";
 import { toggleMenuLabel } from "./projectSync/projectSync.logic";
 import { useProjectSyncStatuses, useRefreshProjectSync } from "./projectSync/useProjectSync";
 import { doneShelfLabel, threadContextMenuItems } from "./sidebar/simpleSidebar.logic";
@@ -3086,10 +3089,9 @@ export default function Sidebar() {
   const [projectSettingsTarget, setProjectSettingsTarget] = useState<ProjectSettingsTarget | null>(
     null,
   );
-  // Gating (28.10): "On all my computers" is part of the assistants update.
   const projectSyncEnvironments = useMemo(
-    () => (teamShown ? projects.map((project) => project.environmentId) : []),
-    [projects, teamShown],
+    () => projects.map((project) => project.environmentId),
+    [projects],
   );
   const projectSync = useProjectSyncStatuses(projectSyncEnvironments);
   const refreshProjectSync = useRefreshProjectSync();
@@ -3106,6 +3108,15 @@ export default function Sidebar() {
         cwd: project.cwd,
       }),
     [],
+  );
+  const openProjectSettingsById = useCallback(
+    (environmentId: EnvironmentId, projectId: ProjectId) => {
+      const project = projects.find(
+        (item) => item.environmentId === environmentId && item.id === projectId,
+      );
+      if (project) openProjectSettings(project);
+    },
+    [projects, openProjectSettings],
   );
   const toggleProjectSync = useCallback(
     async (project: Project) => {
@@ -3893,6 +3904,10 @@ export default function Sidebar() {
         target={projectSettingsTarget}
         onClose={() => setProjectSettingsTarget(null)}
       />
+      <ProjectSyncWelcome
+        statuses={projectSync.statuses}
+        onOpenSettings={openProjectSettingsById}
+      />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}
@@ -4027,22 +4042,17 @@ export default function Sidebar() {
           label: "Copy path",
           run: (member: Project) => copyPathToClipboard(member.cwd, { path: member.cwd }),
         },
-        ...(teamShown
-          ? [
-              {
-                id: "sync",
-                label: "On all my computers",
-                labelFor: (member: Project) =>
-                  toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
-                run: (member: Project) => void toggleProjectSync(member),
-              },
-              {
-                id: "settings",
-                label: "Project settings…",
-                run: (member: Project) => openProjectSettings(member),
-              },
-            ]
-          : []),
+        {
+          id: "sync",
+          label: "On all my computers",
+          labelFor: (member: Project) => toggleMenuLabel(syncEntryOf(member)?.enabled ?? false),
+          run: (member: Project) => void toggleProjectSync(member),
+        },
+        {
+          id: "settings",
+          label: "Project settings…",
+          run: (member: Project) => openProjectSettings(member),
+        },
       ];
       const items: ContextMenuItem<string>[] = actions.map((action) => {
         if (members.length === 1) {
@@ -4440,6 +4450,7 @@ export default function Sidebar() {
                 </button>
               </li>
             ) : null}
+            <ProjectInvites />
             {dThisComputer
               ? (() => {
                   const here = projectSync.statuses.find(

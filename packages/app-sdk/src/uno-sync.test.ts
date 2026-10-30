@@ -494,10 +494,7 @@ describe("a folder without git", { timeout: 60_000 }, () => {
       ]),
     );
 
-    const back = await restoreVersion(
-      { dir, name: "timeline", version: yesterday?.id ?? "" },
-      a,
-    );
+    const back = await restoreVersion({ dir, name: "timeline", version: yesterday?.id ?? "" }, a);
     expect(back).toMatchObject({ ok: true, state: "synced", pushed: true });
     expect(read(path.join(dir, "plan.md"))).toBe("yesterday\n");
     expect(exists(path.join(dir, "new.md"))).toBe(false);
@@ -643,6 +640,35 @@ describe("a folder with its own git", { timeout: 60_000 }, () => {
     fs.rmSync(path.join(dir, "draft.txt"));
     expect(await sync(a, dir, "api")).toMatchObject({ state: "synced", pulled: true });
     expect(read(path.join(dir, "b.txt"))).toBe("b\n");
+  });
+
+  it("names the other person in a conflict, not one's own other computer", async () => {
+    const misha = { ...computer("misha-pc"), person: "Misha" };
+    const anya = { ...computer("anya-pc"), person: "Anya" };
+    const laptop = { ...computer("misha-laptop"), person: "Misha" };
+    const dir = misha.folder("shared");
+    write(path.join(dir, "plan.md"), "one\n");
+    await sync(misha, dir, "shared");
+    await getProject({ name: "shared" }, anya);
+    await getProject({ name: "shared" }, laptop);
+    const hers = path.join(anya.home, "projects", "shared");
+    const mine = path.join(laptop.home, "projects", "shared");
+
+    write(path.join(hers, "plan.md"), "anya\n");
+    await sync(anya, hers, "shared");
+    write(path.join(dir, "plan.md"), "misha\n");
+    age(path.join(dir, "plan.md"), 3600);
+    const clash = await sync(misha, dir, "shared");
+    expect(clash.conflict).toMatchObject({ files: ["plan.md"], theirsPerson: "Anya" });
+    expect(clash.conflict?.kept).toEqual({ "plan.md": "theirs" });
+
+    await resolveConflict({ dir, name: "shared", keep: "dismiss" }, misha);
+    write(path.join(dir, "plan.md"), "misha again\n");
+    await sync(misha, dir, "shared");
+    write(path.join(mine, "plan.md"), "laptop\n");
+    age(path.join(mine, "plan.md"), 3600);
+    const own = await sync(laptop, mine, "shared");
+    expect(own.conflict).toMatchObject({ theirsPerson: null });
   });
 
   it("won't sync a repository that keeps a .env or a key in git", async () => {
