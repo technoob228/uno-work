@@ -14,7 +14,7 @@ import { render } from "vitest-browser-react";
 
 /**
  * Labs flags as the test wants them: the real value unless a test forces one
- * (the stage's w0139 flags are off by default, as in a release build).
+ * (the w0139 flags are on for everyone since 0.0.141; each can be switched off).
  */
 const forcedFlags = vi.hoisted(() => ({ value: {} as Record<string, boolean> }));
 vi.mock("../../hooks/useFeatureFlags", async (importOriginal) => {
@@ -206,11 +206,15 @@ describe("Labs flags of the stage (w0139) — off is 0.0.137", () => {
   }
 
   it("flags off: the tab row, header and launcher of 0.0.137", async () => {
+    forcedFlags.value = {
+      panelLauncherV2: false,
+      panelTabGroups: false,
+      fullscreenChatDock: false,
+    };
     const screen = await openLauncherOverATab();
-    // The plain tab row (right-click menu), no pins, no "All tabs".
+    // The plain tab row (right-click menu), no tab groups.
     await expect.poll(() => document.querySelectorAll("[data-preview-tab]").length).toBe(1);
-    expect(document.querySelector('[data-testid="panel-pinned-tabs"]')).toBeNull();
-    expect(document.querySelector('[data-testid="panel-all-tabs"]')).toBeNull();
+    expect(document.querySelector('[data-testid="panel-tab-groups"]')).toBeNull();
     // "Focus preview" as before, not the new full-screen pair.
     await expect.element(screen.getByRole("button", { name: "Focus preview" })).toBeVisible();
     // The 0.0.137 launcher: no Apps tile when no app opens, no agent's browser.
@@ -221,10 +225,10 @@ describe("Labs flags of the stage (w0139) — off is 0.0.137", () => {
     expect(document.querySelector('[aria-label="Opened by the agent"]')).toBeNull();
   });
 
-  it("flags on: pins + All tabs, the agent's mark, Apps always in the launcher", async () => {
+  it("flags on: tab groups, the agent's mark, Apps always in the launcher", async () => {
     forcedFlags.value = { panelLauncherV2: true, panelTabGroups: true, fullscreenChatDock: true };
     const screen = await openLauncherOverATab();
-    await expect.element(screen.getByTestId("panel-all-tabs")).toBeVisible();
+    await expect.element(screen.getByTestId("panel-tab-groups")).toBeVisible();
     await expect.element(screen.getByTestId("panel-launcher-apps")).toBeVisible();
     await expect.element(screen.getByRole("button", { name: "Full screen" })).toBeVisible();
     expect(document.querySelector('[aria-label="Opened by the agent"]')).not.toBeNull();

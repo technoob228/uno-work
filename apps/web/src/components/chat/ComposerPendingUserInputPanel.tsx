@@ -203,7 +203,10 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
   }, []);
 
-  const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
+  // Not useEffectEvent: in a memo() component React 19.2 keeps its first render,
+  // so every question was treated like the first (a multi-select after a
+  // single-select moved on, or sent the answers, after one click).
+  const handleOptionSelection = (questionId: string, optionLabel: string) => {
     onToggleOption(questionId, optionLabel);
     if (activeQuestion?.multiSelect) {
       return;
@@ -215,7 +218,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       autoAdvanceTimerRef.current = null;
       onAdvanceRef.current();
     }, 200);
-  });
+  };
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
   // outside editable fields. Multi-select prompts toggle options in place; single-
@@ -245,7 +248,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding]);
+  }, [activeQuestion, handleOptionSelection, isResponding]);
 
   if (!activeQuestion) {
     return null;
