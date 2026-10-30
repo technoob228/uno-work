@@ -322,7 +322,7 @@ export const ASSISTANT_MODE_COPY: Readonly<
   >
 > = {
   itself: {
-    name: "Autonomous",
+    name: "Full access",
     line: "Works without asking for permission.",
     details: [
       "Starts and writes in chats; they run like your own.",

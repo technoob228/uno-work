@@ -126,9 +126,9 @@ describe("what's wrong with it", () => {
       "Cautious — Ada asks you before commenting",
     );
     expect(modeLine("Ada", false, "github.pull_request")).toBe(
-      "Autonomous — Ada comments on its own",
+      "Full access — Ada comments on its own",
     );
-    expect(modeLine("Uno", false, "schedule")).toBe("Autonomous — Uno acts and tells you after");
+    expect(modeLine("Uno", false, "schedule")).toBe("Full access — Uno acts and tells you after");
     expect(emptyHint("Uno")).toContain("every time a PR comes to owner/repo, review it");
   });
 });

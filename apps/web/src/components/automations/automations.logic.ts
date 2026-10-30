@@ -141,8 +141,8 @@ export function modeLine(
       : `Cautious — ${name} asks you before sending anything`;
   }
   return pr
-    ? `Autonomous — ${name} comments on its own`
-    : `Autonomous — ${name} acts and tells you after`;
+    ? `Full access — ${name} comments on its own`
+    : `Full access — ${name} acts and tells you after`;
 }
 
 export type EventSource = "github" | "call" | "gmail" | "webhook" | "form";

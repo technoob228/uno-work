@@ -34,7 +34,7 @@ describe("grantBeyond (child ⊆ parent)", () => {
       apps: { gmail: "write" },
     };
     expect(grantBeyond(parent, child)).toEqual([
-      '"Autonomous" is more than "Cautious"',
+      '"Full access" is more than "Cautious"',
       "project p2",
       "changes in Gmail & Calendar",
       "GitHub",

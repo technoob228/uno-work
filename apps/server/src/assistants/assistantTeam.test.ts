@@ -188,7 +188,7 @@ describe("assistant_profile_set: rights only narrow", () => {
     expect(result._tag).toBe("Failure");
     const error = (result as { failure: { message: string; status: number } }).failure;
     expect(error.status).toBe(403);
-    expect(error.message).toContain('"Autonomous" is more than "Cautious"');
+    expect(error.message).toContain('"Full access" is more than "Cautious"');
     expect(error.message).toContain("every project");
     expect(s.access.get(SCOUT)?.preset).toBe("helper");
     const team = await readTeam(s.stateDir, SCOUT);
@@ -391,7 +391,7 @@ describe("assistant_create: a helper never wider than its creator", () => {
     );
     expect(result._tag).toBe("Failure");
     const message = (result as { failure: { message: string } }).failure.message;
-    expect(message).toContain('"Autonomous" is more than "Cautious"');
+    expect(message).toContain('"Full access" is more than "Cautious"');
     expect(message).toContain("project fishcode");
     expect(message).toContain("changes in GitHub");
     expect(s.inbox).toHaveLength(0);

@@ -109,7 +109,7 @@ describe("rightsBeyondParent", () => {
         projects: ["fishcode", "landing"],
         computers: ["mac"],
       }),
-    ).toEqual(["Autonomous is more than Cautious", "landing", "mac"]);
+    ).toEqual(["Full access is more than Cautious", "landing", "mac"]);
     expect(
       rightsBeyondParent(helper, { preset: "helper", projects: "all", computers: [] }),
     ).toEqual(["every project"]);

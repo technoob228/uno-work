@@ -266,7 +266,7 @@ function modeCard(ctx: ScriptContext, after: Script): Script {
             label: "Cautious",
             description: "I ask first and wait for your Allow — here or in Telegram",
           },
-          { label: "Autonomous", description: "I work without asking for permission" },
+          { label: "Full access", description: "I work without asking for permission" },
         ],
       },
       then: (answer, inner) => {
@@ -283,7 +283,7 @@ function modeCard(ctx: ScriptContext, after: Script): Script {
           {
             say: asks
               ? "Done — Cautious: I'll ask first. You can switch it any time at the top of this chat."
-              : "Done — Autonomous: I'll work and tell you after. You can switch it any time at the top of this chat.",
+              : "Done — Full access: I'll work and tell you after. You can switch it any time at the top of this chat.",
           },
           ...after,
         ];

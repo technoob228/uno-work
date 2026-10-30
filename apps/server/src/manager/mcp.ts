@@ -752,7 +752,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         channel: { type: "string", enum: ["here", "telegram", "slack"] },
         preset: {
           type: "string",
-          description: 'The permission level: "full" = Autonomous, "helper" = Cautious.',
+          description: 'The permission level: "full" = Full access, "helper" = Cautious.',
           enum: ["full", "helper"],
         },
         projects: {
@@ -821,7 +821,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         character: { type: "string" },
         preset: {
           type: "string",
-          description: 'The permission level: "full" = Autonomous, "helper" = Cautious.',
+          description: 'The permission level: "full" = Full access, "helper" = Cautious.',
           enum: ["full", "helper"],
         },
         projects: {
