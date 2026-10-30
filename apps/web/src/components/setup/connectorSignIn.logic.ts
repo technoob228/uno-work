@@ -38,3 +38,24 @@ export function connectorsGate(
 
 /** The GitHub row of the account's GitHub App: git access, not a chat tool (audit 27.10 #7). */
 export const GITHUB_FOR_GIT_LINE = "For git: clone and push your repos.";
+
+/**
+ * Connectors shown only once the console offers them (newer, or set up only
+ * on some consoles): Outlook & Teams calendar (`microsoft`, 29.10). The
+ * other four always have a row — "Soon" when the console can't connect them.
+ */
+export const OFFERED_ONLY_PROVIDERS: ReadonlySet<string> = new Set(["microsoft"]);
+
+/** Does this provider get a row: always, or — for an offered-only one — when the console lists it as available (or still connected). */
+export function connectorShown(
+  provider: string,
+  connectors: ReadonlyArray<{
+    readonly provider: string;
+    readonly available: boolean;
+    readonly connected: boolean;
+  }>,
+): boolean {
+  if (!OFFERED_ONLY_PROVIDERS.has(provider)) return true;
+  const row = connectors.find((connector) => connector.provider === provider);
+  return row !== undefined && (row.available || row.connected);
+}

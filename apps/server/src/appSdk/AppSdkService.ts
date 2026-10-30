@@ -198,9 +198,11 @@ export function effectiveStorageLimitBytes(
   return Math.round(gb * GB);
 }
 
-/** An app gets a token when its manifest asks for AI, cloud storage, notifications or calls. */
+/** An app gets a token when its manifest asks for AI, cloud storage, notifications, calls or calendars. */
 export function wantsAppToken(manifest: AppManifest | undefined): boolean {
-  return Boolean(manifest?.ai || manifest?.storage || manifest?.notify || manifest?.calls);
+  return Boolean(
+    manifest?.ai || manifest?.storage || manifest?.notify || manifest?.calls || manifest?.calendar,
+  );
 }
 
 export const makeAppSdkService = (
@@ -353,6 +355,7 @@ export const makeAppSdkService = (
           : null,
         notify: manifest.notify === true,
         calls: manifest.calls === true,
+        calendar: manifest.calendar === true,
         appIcon: manifest.icon,
       };
     };

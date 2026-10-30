@@ -846,7 +846,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
   {
     name: "ask_user",
     description:
-      'Ask the person ONE question as a card in this conversation in Uno Work: a short header, the question, 2–4 options (label + short description), optionally a longer `detail`, a short `input` field for a value (email, time, link), or a Connect button for an app (`connect`: gmail | google-drive | notion | github), or `connect: "calls"` — the "Join my calls" button: one click connects Google Calendar and sets up the notetaker, and from then on you get the notes of their meetings. The card always lets them type their own answer or Skip. After calling it, END YOUR TURN with no other text: the answer arrives as their next message, "<header>: <answer>".',
+      'Ask the person ONE question as a card in this conversation in Uno Work: a short header, the question, 2–4 options (label + short description), optionally a longer `detail`, a short `input` field for a value (email, time, link), or a Connect button for an app (`connect`: gmail | google-drive | notion | github | microsoft — Outlook & Teams calendar, only when their Uno account offers it), or `connect: "calls"` — the "Join my calls" button: one click connects Google Calendar and sets up the notetaker, and from then on you get the notes of their meetings. The card always lets them type their own answer or Skip. After calling it, END YOUR TURN with no other text: the answer arrives as their next message, "<header>: <answer>".',
     inputSchema: {
       type: "object",
       properties: {
@@ -872,7 +872,10 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
           required: ["placeholder"],
           additionalProperties: false,
         },
-        connect: { type: "string", enum: ["gmail", "google-drive", "notion", "github", "calls"] },
+        connect: {
+          type: "string",
+          enum: ["gmail", "google-drive", "notion", "github", "microsoft", "calls"],
+        },
       },
       required: ["header", "question"],
       additionalProperties: false,

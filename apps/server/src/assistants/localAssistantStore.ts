@@ -34,7 +34,11 @@ import {
   type AssistantPreset,
   type ManagerScope,
 } from "@t3tools/contracts";
-import { capAppLevel, type AssistantTokenAccess } from "@t3tools/shared/assistantPreset";
+import {
+  capAppLevel,
+  defaultAppLevel,
+  type AssistantTokenAccess,
+} from "@t3tools/shared/assistantPreset";
 
 /** How long a deleted assistant is kept (same as an assistant computer). */
 export const DELETED_ASSISTANT_KEEP_DAYS = 7;
@@ -137,8 +141,8 @@ export async function writeAppAccess(
 
 /**
  * One connector call by a chat that belongs to an assistant: allowed, or why
- * not. A provider the person never set is allowed ("full access by default",
- * decision 02.10); `read` lets only the tools that change nothing through.
+ * not. A provider the person never set is at its default ("full access by
+ * default", decision 02.10; Outlook only reads, `defaultAppLevel`); `read` lets only the tools that change nothing through.
  */
 export function connectorAccessDecision(
   access: AppAccess,
@@ -147,7 +151,9 @@ export function connectorAccessDecision(
   /** The assistant's preset caps the level (Observer only reads). Absent: Full. */
   preset: AssistantPreset = "full",
 ): "allow" | "none" | "read-only" {
-  const picked = access.restricted ? (access.permissions[provider] ?? "write") : "write";
+  const picked = access.restricted
+    ? (access.permissions[provider] ?? defaultAppLevel(provider))
+    : defaultAppLevel(provider);
   const level = capAppLevel(picked, preset);
   if (level === "none") return "none";
   if (level === "read" && toolChangesThings) return "read-only";

@@ -62,6 +62,18 @@ describe("Telegram bot manifests", () => {
 });
 
 describe("manifest fields", () => {
+  it("reads the Notetaker's calls and calendar asks, only as true", () => {
+    const both = validateManifest(
+      "notetaker",
+      { name: "Notetaker", port: 8471, calls: true, calendar: true },
+      opts,
+    );
+    expect(both.ok && both.manifest.calls).toBe(true);
+    expect(both.ok && both.manifest.calendar).toBe(true);
+    const neither = validateManifest("n", { name: "N", port: 8471, calendar: "yes" }, opts);
+    expect(neither.ok && "calendar" in neither.manifest).toBe(false);
+  });
+
   it("accepts short ids and nothing else", () => {
     expect(manifestIdFromFileName("notes.json")).toBe("notes");
     expect(manifestIdFromFileName("My-App_2.json")).toBe("my-app_2");
