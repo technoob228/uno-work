@@ -1253,10 +1253,13 @@ describe("a project shared with someone else", { timeout: 120_000 }, () => {
     await syncProject({ dir: notes, name: "notes" }, misha);
     await getProject({ name: "notes", team: TEAM }, anya);
     const there = path.join(anya.home, "projects", "notes");
-    await getProject({ name: "notes", team: TEAM }, {
-      ...boris,
-      env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
-    });
+    await getProject(
+      { name: "notes", team: TEAM },
+      {
+        ...boris,
+        env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
+      },
+    );
     const his = path.join(boris.home, "projects", "notes");
 
     write(path.join(notes, "plan.md"), "misha's plan\n");
@@ -1264,10 +1267,13 @@ describe("a project shared with someone else", { timeout: 120_000 }, () => {
     write(path.join(there, "plan.md"), "anya's plan\n");
     await syncProject({ dir: there }, anya);
 
-    const seen = await syncProject({ dir: his }, {
-      ...boris,
-      env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
-    });
+    const seen = await syncProject(
+      { dir: his },
+      {
+        ...boris,
+        env: { ...boris.env, [FAKE_TEAM_STORAGE_ENV]: cloud },
+      },
+    );
     expect(seen).toMatchObject({ ok: true, state: "synced", conflict: null });
   });
 });

@@ -1053,10 +1053,8 @@ async function snapshotAddress(/** @type {string} */ dir, /** @type {NodeJS.Proc
   return url.code === 0 ? addressOf(url.stdout) : null;
 }
 
-const storageOf = (
-  /** @type {Ctx} */ ctx,
-  /** @type {number | null | undefined} */ team = null,
-) => ctx.storage ?? openStorage({ home: ctx.home, env: ctx.env, team });
+const storageOf = (/** @type {Ctx} */ ctx, /** @type {number | null | undefined} */ team = null) =>
+  ctx.storage ?? openStorage({ home: ctx.home, env: ctx.env, team });
 
 /**
  * A folder without git: commit what changed into the snapshot repository,

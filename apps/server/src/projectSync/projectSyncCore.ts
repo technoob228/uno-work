@@ -1091,7 +1091,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       let vaultError: string | null = null;
       if (synced) {
         try {
-          vaultNames = new Set((await keysOf(entry).list(entry.name!)).map((secret) => secret.name));
+          vaultNames = new Set(
+            (await keysOf(entry).list(entry.name!)).map((secret) => secret.name),
+          );
         } catch (error) {
           vaultError = error instanceof Error ? error.message : String(error);
         }

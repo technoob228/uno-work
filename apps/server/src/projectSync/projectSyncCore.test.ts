@@ -655,9 +655,13 @@ describe("a project shared with this person", { timeout: 120_000 }, () => {
   }
 
   const trackedIn = (dir: string) =>
-    spawnSync("git", ["--git-dir", path.join(dir, ".uno-git"), "ls-tree", "-r", "--name-only", "HEAD"], {
-      encoding: "utf8",
-    }).stdout;
+    spawnSync(
+      "git",
+      ["--git-dir", path.join(dir, ".uno-git"), "ls-tree", "-r", "--name-only", "HEAD"],
+      {
+        encoding: "utf8",
+      },
+    ).stdout;
 
   it("arrives with the keys it was given, in .env and out of git; the rest stay with the owner", async () => {
     const { misha, anya, console: team } = people();

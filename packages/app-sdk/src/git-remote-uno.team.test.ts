@@ -18,13 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  ObjectExists,
-  addressOf,
-  consoleStorage,
-  logKey,
-  remoteUrl,
-} from "./git-remote-uno.mjs";
+import { ObjectExists, addressOf, consoleStorage, logKey, remoteUrl } from "./git-remote-uno.mjs";
 
 const helperModule = path.join(path.dirname(fileURLToPath(import.meta.url)), "git-remote-uno.mjs");
 
@@ -146,7 +140,9 @@ async function fakeCloud() {
       uploads.delete(uploadId);
       return refuse(response, 409, "OBJECT_EXISTS");
     }
-    const chunks = [...upload.parts.entries()].toSorted(([a], [b]) => a - b).map(([, bytes]) => bytes);
+    const chunks = [...upload.parts.entries()]
+      .toSorted(([a], [b]) => a - b)
+      .map(([, bytes]) => bytes);
     const bytes = Buffer.concat(chunks);
     if (bytes.length !== upload.size) return refuse(response, 400, "INVALID_UPLOAD");
     objects.set(upload.key, { bytes, at: Date.now() });
@@ -479,7 +475,10 @@ describe("working in someone else's project", { timeout: 120_000 }, () => {
     const old = Date.now() - 3 * 60 * 60_000;
     const stray = ".uno-git/notes/bundles/2020-01-01T00-00-00-000Z-abcdef.bundle";
     cloud.objects.set(stray, { bytes: Buffer.from("x"), at: old });
-    const current = [...cloud.objects.keys()].filter((key) => key.includes("/log/")).toSorted().at(-1);
+    const current = [...cloud.objects.keys()]
+      .filter((key) => key.includes("/log/"))
+      .toSorted()
+      .at(-1);
     const entry = cloud.objects.get(current!)!;
     cloud.objects.set(current!, { ...entry, at: old });
     const state = JSON.parse(entry.bytes.toString());
@@ -587,11 +586,7 @@ describe("working in someone else's project", { timeout: 120_000 }, () => {
 
 describe("the storage of someone else's project", () => {
   const storage = () =>
-    consoleStorage(
-      { token: MEMBER_TOKEN, boxId: null, consoleUrl: cloud.base },
-      fetch,
-      TEAM_ID,
-    );
+    consoleStorage({ token: MEMBER_TOKEN, boxId: null, consoleUrl: cloud.base }, fetch, TEAM_ID);
 
   it("won't delete, and doesn't ask the console to", async () => {
     await expect(storage().remove(".uno-git/notes/log/000000000001.json")).rejects.toThrow(

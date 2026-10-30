@@ -90,7 +90,10 @@ describe("consoleProjectTeams", () => {
       request.method === "GET"
         ? {
             status: 200,
-            body: { project_id: 12, secrets: [{ name: "STRIPE_KEY", version: 3, updated_at: "t" }] },
+            body: {
+              project_id: 12,
+              secrets: [{ name: "STRIPE_KEY", version: 3, updated_at: "t" }],
+            },
           }
         : { status: 200, body: { project_id: 12, values: { STRIPE_KEY: VALUE }, missing: [] } },
     );
