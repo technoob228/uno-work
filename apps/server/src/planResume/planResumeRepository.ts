@@ -37,7 +37,7 @@ export const makePlanResumeRepository = Effect.gen(function* () {
     resume_at AS "resumeAt"
   `;
 
-  const threadTail = (threadId: ThreadId): Effect.Effect<ThreadTail, unknown> =>
+  const threadTail = (threadId: ThreadId) =>
     Effect.gen(function* () {
       const latest = yield* sql<{
         readonly role: string;
@@ -62,7 +62,7 @@ export const makePlanResumeRepository = Effect.gen(function* () {
       return {
         latest: row ? { ...row, streaming: row.streaming !== 0 } : null,
         lastUserMessageId: user[0]?.messageId ?? null,
-      };
+      } satisfies ThreadTail;
     });
 
   /** This request already had a wait, whatever became of it. */

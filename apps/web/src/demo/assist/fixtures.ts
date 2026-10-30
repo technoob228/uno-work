@@ -220,7 +220,9 @@ function liveChats(world: AssistWorld): ChatSpec[] {
         state: "running",
         role: "solo",
         now: "Renamed 140 of 214",
-        messages: [["user", "Rename the screenshots on my Desktop by date, like 2026-10-28 14.03."]],
+        messages: [
+          ["user", "Rename the screenshots on my Desktop by date, like 2026-10-28 14.03."],
+        ],
       },
       {
         id: "m-landing-build",

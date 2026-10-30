@@ -10,11 +10,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime";
 import type { ProjectId } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
-import {
-  useComposerDraftStore,
-  type DraftId,
-  type DraftSessionState,
-} from "../composerDraftStore";
+import { useComposerDraftStore, type DraftId, type DraftSessionState } from "../composerDraftStore";
 import { findProjectByPath } from "../lib/projectPaths";
 import { selectEnvironmentState, useStore } from "../store";
 import { useFolderChats } from "./useFolderChats";

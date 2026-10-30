@@ -161,7 +161,11 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   const trigger = (
     // Variant C (28.10): the account is named after the person, not "the current computer" —
     // the computers live in the chip at the top right.
-    <SidebarDAccountTrigger label={accountLabel(who) ?? props.computerName} who={who} variant={props.variant} />
+    <SidebarDAccountTrigger
+      label={accountLabel(who) ?? props.computerName}
+      who={who}
+      variant={props.variant}
+    />
   );
   const [fixWorkOpen, setFixWorkOpen] = useState(false);
   return (

@@ -80,7 +80,10 @@ function wobble(key: string, swing: number): number {
 
 export function demoMetrics(machine: DemoMachine) {
   const shape = shapeOf(machine);
-  const cpu = Math.max(1, Math.min(99, Math.round(shape.cpu + wobble(machine.key, shape.cpuSwing))));
+  const cpu = Math.max(
+    1,
+    Math.min(99, Math.round(shape.cpu + wobble(machine.key, shape.cpuSwing))),
+  );
   const mem = shape.memGb + wobble(`${machine.key}-mem`, 0.3);
   return {
     hostname: machine.label,

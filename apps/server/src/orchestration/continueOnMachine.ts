@@ -50,7 +50,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { HTML_RENDER_ACTIVITY_KIND } from "@t3tools/shared/htmlRender";
-import { type Cause, Effect, Option, Schema } from "effect";
+import { type Cause, Data, Effect, Option, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as nodePath from "node:path";
 
@@ -71,6 +71,11 @@ export const CONTINUE_ORIGIN_COMPONENT = "thread-continue";
 
 /** How many `uno/continue/<id>-N` names `land` tries before giving up. */
 const MAX_BRANCH_ATTEMPTS = 50;
+
+/** A chat's page that couldn't be saved on this machine. */
+export class StorePageError extends Data.TaggedError("StorePageError")<{
+  readonly message: string;
+}> {}
 
 export interface ContinueOnMachineDeps {
   readonly transport: ContinueTransportShape;
@@ -105,7 +110,7 @@ export interface ContinueOnMachineDeps {
   readonly storePage: (input: {
     readonly threadId: ThreadId;
     readonly html: string;
-  }) => Effect.Effect<{ readonly attachmentId: string; readonly path: string }, Error>;
+  }) => Effect.Effect<{ readonly attachmentId: string; readonly path: string }, StorePageError>;
   readonly cloneRepository: (input: {
     readonly remoteUrl: string;
     readonly destinationPath: string;

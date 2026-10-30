@@ -160,6 +160,7 @@ import {
   makeThreadContinueReadChunk,
   makeThreadContinueSnapshot,
   makeThreadContinueWriteChunk,
+  StorePageError,
 } from "./orchestration/continueOnMachine.ts";
 import { expandHomePath } from "./pathExpansion.ts";
 import * as fsPromises from "node:fs/promises";
@@ -419,7 +420,10 @@ const makeWsRpcLayer = (
         storePage: (input: { readonly threadId: ThreadId; readonly html: string }) =>
           Effect.tryPromise({
             try: () => storePage({ attachmentsDir: config.attachmentsDir, ...input }),
-            catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+            catch: (cause) =>
+              new StorePageError({
+                message: cause instanceof Error ? cause.message : String(cause),
+              }),
           }),
         cloneRepository: (input: {
           readonly remoteUrl: string;

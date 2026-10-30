@@ -3338,7 +3338,10 @@ export default function ChatView(props: ChatViewProps) {
     }
     if (!activeProject) {
       keepQueued();
-      setThreadError(activeThread.id, "This chat's folder isn't here. Start a new chat to send it.");
+      setThreadError(
+        activeThread.id,
+        "This chat's folder isn't here. Start a new chat to send it.",
+      );
       return;
     }
     const threadIdForSend = activeThread.id;

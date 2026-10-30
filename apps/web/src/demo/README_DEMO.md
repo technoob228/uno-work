@@ -112,6 +112,7 @@ Flows: `demo-e2e/flows/automations.flow.mjs` (`node demo-e2e/run.mjs auto-`; one
 Known gaps: the demo doesn't fake "Join my calls", so "After a call" always shows
 the hint to turn it on; Gmail is "Soon" only; a run's "Open chat" goes to the
 assistant's main chat (the daemon's "Automations" thread for personas isn't faked).
+
 ## Multi-computer base (branch `demo/multi-computer-1028`)
 
 Misha 28.10: "the interface is tied to one computer while the sidebar piles

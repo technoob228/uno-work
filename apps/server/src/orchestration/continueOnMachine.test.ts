@@ -33,6 +33,7 @@ import {
   makeThreadContinueLegacyRefusal,
   makeThreadContinueSnapshot,
   resolveTargetModelSelection,
+  StorePageError,
 } from "./continueOnMachine.ts";
 import { CONTINUE_SEED_PREFIX, HANDOFF_PREAMBLE_START } from "./handoff.ts";
 
@@ -302,7 +303,7 @@ function makeFixture(options?: {
     readPage: (attachmentId) => Effect.succeed(options?.pageFiles?.[attachmentId] ?? null),
     storePage: (input) =>
       options?.storePageFails
-        ? Effect.fail(new Error("disk full"))
+        ? Effect.fail(new StorePageError({ message: "disk full" }))
         : Effect.sync(() => {
             storedPages.push(input);
             const attachmentId = `new-${storedPages.length}`;

@@ -53,7 +53,9 @@ export const QUEUED_MESSAGE_HOLD_AFTER_MS = 30 * 60_000;
 
 type Queues = Readonly<Record<string, ReadonlyArray<QueuedChatMessage>>>;
 
-const queueStorage = resolveStorage(typeof window !== "undefined" ? window.localStorage : undefined);
+const queueStorage = resolveStorage(
+  typeof window !== "undefined" ? window.localStorage : undefined,
+);
 
 function isQueuedMessage(value: unknown): value is QueuedChatMessage {
   if (typeof value !== "object" || value === null) return false;

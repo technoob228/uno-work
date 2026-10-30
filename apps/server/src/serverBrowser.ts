@@ -256,6 +256,10 @@ class ServerBrowserCommandError extends Data.TaggedError("ServerBrowserCommandEr
   readonly message: string;
 }> {}
 
+class CapturePageError extends Data.TaggedError("CapturePageError")<{
+  readonly cause: unknown;
+}> {}
+
 function commandErrorMessage(cause: unknown): string {
   if (cause instanceof ServerBrowserCommandError) return cause.message;
   const detail = cause instanceof Error ? cause.message : String(cause);
@@ -1176,9 +1180,9 @@ export const makeServerBrowser = Effect.gen(function* () {
               await browser.close().catch(() => undefined);
             }
           },
-          catch: (cause) => cause,
+          catch: (cause) => new CapturePageError({ cause }),
         }).pipe(
-          Effect.catch((cause) =>
+          Effect.catch(({ cause }) =>
             Effect.logWarning("html_preview could not take a picture", { cause }).pipe(
               Effect.as({
                 error:

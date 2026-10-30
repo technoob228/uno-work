@@ -59,7 +59,8 @@ const COPY = {
 function ProgressMark({ progress }: { progress: RowProgress | undefined }) {
   if (progress?.kind === "working") return <Spinner className="size-3.5" />;
   if (progress?.kind === "done") return <CheckIcon className="size-3.5 text-success" />;
-  if (progress?.kind === "held") return <HourglassIcon className="size-3.5 text-muted-foreground" />;
+  if (progress?.kind === "held")
+    return <HourglassIcon className="size-3.5 text-muted-foreground" />;
   if (progress?.kind === "failed") {
     return <TriangleAlertIcon className="size-3.5 text-warning-foreground" />;
   }
