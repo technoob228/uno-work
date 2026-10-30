@@ -296,6 +296,8 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  // Dev mode: runs in the chat's worktree when the chat settles, e.g. `cargo clean`.
+  runOnSettle: Schema.optional(Schema.Boolean),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

@@ -4,11 +4,41 @@ import { describe, expect, it } from "vitest";
 import {
   applyGitStatusStreamEvent,
   buildTemporaryWorktreeBranchName,
+  formatGeneratedBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
+
+describe("formatGeneratedBranchName", () => {
+  const defaults = { mode: "static", prefix: WORKTREE_BRANCH_PREFIX, instructions: "" } as const;
+
+  it("keeps today's names with the default settings", () => {
+    expect(formatGeneratedBranchName("Fix Login Page", defaults)).toBe(
+      `${WORKTREE_BRANCH_PREFIX}/fix-login-page`,
+    );
+    expect(formatGeneratedBranchName(`refs/heads/${WORKTREE_BRANCH_PREFIX}/fix`, defaults)).toBe(
+      `${WORKTREE_BRANCH_PREFIX}/fix`,
+    );
+    expect(formatGeneratedBranchName("  ", defaults)).toBe(`${WORKTREE_BRANCH_PREFIX}/update`);
+  });
+
+  it("uses the chosen prefix, or none", () => {
+    expect(formatGeneratedBranchName("fix", { ...defaults, prefix: "misha/work" })).toBe(
+      "misha/work/fix",
+    );
+    expect(formatGeneratedBranchName("fix", { ...defaults, prefix: " / " })).toBe("fix");
+    expect(formatGeneratedBranchName("fix-it", { ...defaults, mode: "semantic" })).toBe("fix-it");
+  });
+
+  it("leaves the shape to custom instructions but keeps the name safe for git", () => {
+    const custom = { ...defaults, mode: "custom" } as const;
+    expect(formatGeneratedBranchName("JIRA-12/Fix", custom)).toBe("JIRA-12/Fix");
+    expect(formatGeneratedBranchName("--force  it", custom)).toBe("force-it");
+    expect(formatGeneratedBranchName("  ", custom)).toBe("update");
+  });
+});
 
 describe("normalizeGitRemoteUrl", () => {
   it("canonicalizes equivalent GitHub remotes across protocol variants", () => {

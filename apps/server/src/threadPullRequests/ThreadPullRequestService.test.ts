@@ -13,6 +13,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { runMigrations } from "../persistence/Migrations.ts";
 import * as NodeSqliteClient from "../persistence/NodeSqliteClient.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
@@ -56,6 +57,7 @@ interface World {
   answer: (query: ChangeRequestStatusQuery) => ChangeRequestStatusRead;
   failWith: string | null;
   commands: Array<{ readonly type: string; readonly [key: string]: unknown }>;
+  settleRuns: Array<{ readonly threadId: string; readonly worktreePath: string }>;
 }
 
 const newWorld = (): World => ({
@@ -76,6 +78,7 @@ const newWorld = (): World => ({
   }),
   failWith: null,
   commands: [],
+  settleRuns: [],
 });
 
 const syncedLinks = (world: World): ReadonlyArray<ThreadPullRequest> | undefined =>
@@ -124,6 +127,7 @@ const serviceFor = (world: World) =>
             })) as never,
           }),
           Layer.mock(SessionCredentialService)({
+            cookieName: "test-session",
             listActive: () =>
               Effect.sync(() => (world.clients ? [{ connected: true }] : []) as never),
           }),
@@ -150,6 +154,13 @@ const serviceFor = (world: World) =>
                   remoteName: "origin",
                   remoteUrl: "git@github.com:acme/app.git",
                 },
+              }),
+          }),
+          Layer.mock(ProjectSetupScriptRunner)({
+            runForThread: (input) =>
+              Effect.sync(() => {
+                world.settleRuns.push(input);
+                return { status: "no-script" } as const;
               }),
           }),
           Layer.mock(VcsProcess.VcsProcess)({
@@ -473,6 +484,37 @@ layer("ThreadPullRequestService", (it) => {
       yield* service.tick;
       yield* service.drain;
       assert.equal(world.reads.length, 2);
+    }),
+  );
+
+  it.effect("runs the project's action on settle once, in the chat's worktree", () =>
+    Effect.gen(function* () {
+      const world = newWorld();
+      world.shell = { ...world.shell, projectId: "project-1", worktreePath: "/copies/fix" } as never;
+      yield* seed({});
+      const service = yield* serviceFor(world);
+      const settled = {
+        type: "thread.settled",
+        payload: { threadId, settledAt: iso(START), updatedAt: iso(START) },
+      } as unknown as OrchestrationEvent;
+      yield* service.onDomainEvent(settled);
+      yield* service.onDomainEvent(settled);
+      assert.equal(world.settleRuns.length, 1);
+      assert.equal(world.settleRuns[0]?.worktreePath, "/copies/fix");
+    }),
+  );
+
+  it.effect("leaves a shared checkout alone on settle", () =>
+    Effect.gen(function* () {
+      const world = newWorld();
+      world.shell = { ...world.shell, projectId: "project-1", worktreePath: null } as never;
+      yield* seed({});
+      const service = yield* serviceFor(world);
+      yield* service.onDomainEvent({
+        type: "thread.settled",
+        payload: { threadId, settledAt: iso(START), updatedAt: iso(START) },
+      } as unknown as OrchestrationEvent);
+      assert.equal(world.settleRuns.length, 0);
     }),
   );
 

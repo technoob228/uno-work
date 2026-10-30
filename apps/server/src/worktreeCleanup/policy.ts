@@ -10,11 +10,13 @@
  * "Done" mirrors the sidebar (Sidebar.sections.ts): Done by hand, or a chat
  * whose last turn finished and that has been idle 3 days. The server doesn't
  * see read marks, so a finished chat nobody opened counts as Done here too —
- * its copy comes back on the next message anyway.
+ * its copy comes back on the next message anyway. An open pull request keeps a
+ * chat out of the automatic Done here too.
  *
  * @module worktreeCleanup/policy
  */
 import type { OrchestrationThreadShell, StorageCleanupSettings } from "@t3tools/contracts";
+import { pullRequestHoldsThread } from "@t3tools/shared/threadPullRequests";
 
 import { DISK_TIGHT_FREE_GB, DISK_TIGHT_PCT } from "../computerResources/resourceWarnings.ts";
 
@@ -45,6 +47,7 @@ export type CleanupThread = Pick<
   | "latestUserMessageAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
+  | "pullRequests"
 >;
 
 export interface CleanupRules {
@@ -134,6 +137,8 @@ export function doneSinceMs(thread: CleanupThread, now: number): number | null {
     return Math.max(activity, toMs(thread.settledAt) ?? 0);
   }
   if (thread.settledOverride === "active" || thread.pinnedAt != null) return null;
+  // Same as the sidebar: an open PR keeps the chat out of Done.
+  if (pullRequestHoldsThread(thread.pullRequests, now)) return null;
   const turn = thread.latestTurn;
   // A chat that never ran a turn never settles (the sidebar's rule too).
   if (turn === null || turn.startedAt == null || turn.completedAt == null) return null;

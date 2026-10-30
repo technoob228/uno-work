@@ -189,6 +189,39 @@ describe("doneSinceMs", () => {
   it("never counts a chat that never finished a turn", () => {
     expect(doneSinceMs(thread({ latestTurn: null }, 30 * DAY_MS), NOW)).toBeNull();
   });
+
+  it("keeps a chat with an open PR out of Done, but not on a link nobody reads", () => {
+    const snapshot = {
+      title: "Fix",
+      state: "open",
+      isDraft: false,
+      headBranch: "fix",
+      baseBranch: "main",
+      updatedAt: ago(DAY_MS),
+      mergedAt: null,
+      closedAt: null,
+      checks: "none",
+      review: "none",
+    } as const;
+    const link = (syncedAt: string, state: "open" | "merged" = "open") =>
+      ({
+        provider: "github",
+        repository: "getuno/app",
+        number: 12,
+        url: "https://github.com/getuno/app/pull/12",
+        source: "branch",
+        linkedAt: ago(4 * DAY_MS),
+        snapshot: { ...snapshot, state, syncedAt },
+      }) as NonNullable<CleanupThread["pullRequests"]>[number];
+    const done = NOW - 4 * DAY_MS;
+    expect(doneSinceMs(thread({ pullRequests: [link(ago(DAY_MS))] }, 4 * DAY_MS), NOW)).toBeNull();
+    expect(doneSinceMs(thread({ pullRequests: [link(ago(15 * DAY_MS))] }, 4 * DAY_MS), NOW)).toBe(
+      done,
+    );
+    expect(
+      doneSinceMs(thread({ pullRequests: [link(ago(DAY_MS), "merged")] }, 4 * DAY_MS), NOW),
+    ).toBe(done);
+  });
 });
 
 describe("liveThreadVerdict", () => {

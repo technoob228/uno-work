@@ -32,6 +32,7 @@ import { Cause, Context, Duration, Effect, Layer, Option, Schedule, Stream } fro
 import { SessionCredentialService } from "../auth/Services/SessionCredentialService.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScriptRunner.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { MAX_STATUS_READS_PER_DOCUMENT } from "../sourceControl/gitHubPullRequestStatuses.ts";
@@ -117,6 +118,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     const sourceControl = yield* SourceControlProviderRegistry;
     const sessions = yield* SessionCredentialService;
     const vcsProcess = yield* VcsProcess.VcsProcess;
+    const projectScripts = yield* ProjectSetupScriptRunner;
     const repository = yield* makeThreadPullRequestRepository;
     const nowMs = options.now ?? Date.now;
 
@@ -126,6 +128,8 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     let requestedSweepQueued = false;
     // A sweep that outlasts the minute (slow host) must not pile up ticks.
     let tickQueued = false;
+    /** A repeated `thread.settled` keeps its time; the action runs once per settle. */
+    const settleActionRunAt = new Map<string, string>();
     /** `kind:host` or `kind:host/repository` → until when we don't ask. */
     const pausedUntil = new Map<string, number>();
     const repositoryInfo = new Map<
@@ -508,7 +512,38 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
       return worker.enqueue({ kind: "tick" });
     });
 
+    /**
+     * A project's "Run on settle" action, in the chat's own worktree: a shared
+     * checkout may have other chats working in it, so it is left alone.
+     */
+    const runSettleAction = (threadId: string, settledAt: string) =>
+      Effect.gen(function* () {
+        if (settleActionRunAt.get(threadId) === settledAt) return;
+        const shell = Option.getOrNull(
+          yield* projections.getThreadShellById(ThreadId.make(threadId)),
+        );
+        if (shell === null || shell.worktreePath === null) return;
+        settleActionRunAt.set(threadId, settledAt);
+        yield* projectScripts.runForThread({
+          threadId,
+          projectId: shell.projectId,
+          worktreePath: shell.worktreePath,
+          trigger: "settle",
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logWarning("project action on settle failed").pipe(
+                Effect.annotateLogs({ threadId, cause: Cause.pretty(cause) }),
+              ),
+        ),
+      );
+
     const onDomainEvent = (event: OrchestrationEvent): Effect.Effect<void> => {
+      if (event.type === "thread.settled") {
+        return runSettleAction(event.payload.threadId, event.payload.settledAt);
+      }
       if (event.type === "thread.session-set") {
         const status = event.payload.session.status;
         // The turn is over: the agent may have pushed, opened or merged something.

@@ -1,3 +1,5 @@
+import type { BranchNamingOptions } from "@t3tools/contracts";
+
 import type { TextGenerationPolicy, TextGenerationPolicyKind } from "./TextGenerationPolicy.ts";
 
 export const defaultTextGenerationPolicy: TextGenerationPolicy = {
@@ -38,4 +40,21 @@ export const textGenerationPresets: Record<
   default: defaultTextGenerationPolicy,
   conventional_commits: conventionalCommitsTextGenerationPolicy,
   repo_conventions: repositoryConventionsTextGenerationPolicy,
+};
+
+/** What the branch prompt adds for Settings → Worktrees → Branches. */
+export const branchNamingPolicy = (naming: BranchNamingOptions): TextGenerationPolicy => {
+  switch (naming.mode) {
+    case "static":
+      return defaultTextGenerationPolicy;
+    case "semantic":
+      return customTextGenerationPolicy({
+        branchInstructions:
+          "Start with a prefix that describes the kind of work, such as feat/add-search, fix/login-timeout or refactor/auth.",
+      });
+    case "custom":
+      return customTextGenerationPolicy({
+        branchInstructions: `${naming.instructions}\n\nReturn the complete branch name.`.trim(),
+      });
+  }
 };

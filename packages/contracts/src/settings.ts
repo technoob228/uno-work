@@ -836,6 +836,35 @@ export const StorageCleanupStatus = Schema.Struct({
 });
 export type StorageCleanupStatus = typeof StorageCleanupStatus.Type;
 
+/** How commit messages and PR text are written (Dev mode, Settings → Source Control). */
+export const SourceControlWritingStyleMode = Schema.Literals([
+  "repo_conventions",
+  "conventional_commits",
+  "custom",
+]);
+export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode.Type;
+
+export const SourceControlWritingStyleSettings = Schema.Struct({
+  mode: SourceControlWritingStyleMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
+  ),
+  customInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+});
+export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
+
+/** How a chat's worktree branch gets its name (Dev mode, Settings → Worktrees). */
+export const BranchNamingMode = Schema.Literals(["static", "semantic", "custom"]);
+export type BranchNamingMode = typeof BranchNamingMode.Type;
+
+export interface BranchNamingOptions {
+  readonly mode: BranchNamingMode;
+  readonly prefix: string;
+  readonly instructions: string;
+}
+
+/** Same as WORKTREE_BRANCH_PREFIX: an untouched setting names branches as before. */
+export const DEFAULT_BRANCH_NAME_PREFIX = "t3code";
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
@@ -852,6 +881,16 @@ export const ServerSettings = Schema.Struct({
   // Dev mode: a chat settles by itself when its PR merges after the person's
   // last message. Field name as upstream T3 Code; a closed PR settles anyway.
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  branchNamingMode: BranchNamingMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed("static" as const)),
+  ),
+  branchNamePrefix: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_BRANCH_NAME_PREFIX)),
+  ),
+  branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   // Sidebar pins (apps, files, folders, links) — see `UnoPin`.
   pins: Schema.Array(UnoPin).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   // Guided setup progress — see `UnoSetupProgress`.
@@ -1024,6 +1063,15 @@ export const ServerSettingsPatch = Schema.Struct({
   devMode: Schema.optionalKey(Schema.Boolean),
   devModeChangedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  branchNamingMode: Schema.optionalKey(BranchNamingMode),
+  branchNamePrefix: Schema.optionalKey(TrimmedString),
+  branchNameInstructions: Schema.optionalKey(TrimmedString),
+  sourceControlWritingStyle: Schema.optionalKey(
+    Schema.Struct({
+      mode: Schema.optionalKey(SourceControlWritingStyleMode),
+      customInstructions: Schema.optionalKey(TrimmedString),
+    }),
+  ),
   pins: Schema.optionalKey(Schema.Array(UnoPin)),
   // Both replaced whole (see applyServerSettingsPatch).
   setup: Schema.optionalKey(UnoSetupProgress),
