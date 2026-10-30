@@ -15,6 +15,14 @@ export type ChatProjectOffer =
   /** Already in a folder of its own: that folder becomes the project. */
   | { readonly kind: "own-folder"; readonly folder: string };
 
+const withoutTrailingSlash = (path: string): string => path.replace(/\/+$/, "") || "/";
+
+/** The daemon may give a folder with a trailing slash, projects never have one. */
+export function isSameFolder(left: string | null, right: string | null): boolean {
+  if (left === null || right === null) return false;
+  return withoutTrailingSlash(left) === withoutTrailingSlash(right);
+}
+
 export function chatProjectOffer(input: {
   readonly worktreePath: string | null;
   /** The git branch of a separate copy: that stays a copy of its project. */
@@ -24,12 +32,15 @@ export function chatProjectOffer(input: {
   readonly isAssistantChat: boolean;
 }): ChatProjectOffer | null {
   if (input.isAssistantChat || input.projectRoot === null) return null;
-  const inOwnFolder =
-    input.worktreePath !== null &&
-    input.worktreePath !== input.projectRoot &&
-    input.worktreePath !== input.homeFolder;
-  if (inOwnFolder) return input.branch ? null : { kind: "own-folder", folder: input.worktreePath! };
-  return input.projectRoot === input.homeFolder ? { kind: "pick-folder" } : null;
+  const { worktreePath, projectRoot, homeFolder } = input;
+  if (
+    worktreePath !== null &&
+    !isSameFolder(worktreePath, projectRoot) &&
+    !isSameFolder(worktreePath, homeFolder)
+  ) {
+    return input.branch ? null : { kind: "own-folder", folder: worktreePath };
+  }
+  return isSameFolder(projectRoot, homeFolder) ? { kind: "pick-folder" } : null;
 }
 
 export async function turnChatIntoProject(

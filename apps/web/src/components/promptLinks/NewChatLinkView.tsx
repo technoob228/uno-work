@@ -31,7 +31,8 @@ export function NewChatLinkView({ prompt }: { readonly prompt: LinkedPrompt }) {
     const startedAt = Date.now();
     const attempt = () => {
       void chatInHomeFolder({ replaceRoute: true }).then((started) => {
-        if (cancelled || placed.current) return;
+        // Not `cancelled` yet: arriving at the chat is what unmounts this view.
+        if (placed.current) return;
         const params = router.state.matches[router.state.matches.length - 1]?.params ?? {};
         const route = resolveThreadRouteTarget(params);
         if (started && route?.kind === "draft") {
@@ -39,6 +40,7 @@ export function NewChatLinkView({ prompt }: { readonly prompt: LinkedPrompt }) {
           placeLinkedPrompt(route.draftId, prompt);
           return;
         }
+        if (cancelled) return;
         if (Date.now() - startedAt >= GIVE_UP_MS) {
           setGaveUp(true);
           return;

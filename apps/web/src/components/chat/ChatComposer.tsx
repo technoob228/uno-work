@@ -4324,7 +4324,8 @@ export const ChatComposer = memo(
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     sendAndNewShortcut={shortcutLabelForCommand(
                       shortcutBindings,
-                      "composer.sendAndNewThread",
+                      isLocalDraftThread ? "composer.sendBackground" : "composer.sendAndNewThread",
+                      { context: { composerFocus: true, draftThreadRoute: isLocalDraftThread } },
                     )}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                     onInterrupt={handleInterruptPrimaryAction}

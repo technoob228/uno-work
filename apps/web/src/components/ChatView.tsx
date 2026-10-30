@@ -123,6 +123,7 @@ import {
 import { clearThreadTasks, publishThreadTasks } from "./preview/tasksTabStore";
 import { useChatPanelActionsStore } from "./preview/chatPanelActions";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
+import { withAppShortcutDefaults } from "./appShortcuts.logic";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { BellIcon, ChevronDownIcon, ClockIcon, WifiOffIcon } from "lucide-react";
 import { cn, randomUUID } from "~/lib/utils";
@@ -2946,7 +2947,7 @@ export default function ChatView(props: ChatViewProps) {
         modelPickerOpen: composerRef.current?.isModelPickerOpen() ?? false,
       };
 
-      const command = resolveShortcutCommand(event, keybindings, {
+      const command = resolveShortcutCommand(event, withAppShortcutDefaults(keybindings), {
         context: shortcutContext,
       });
       if (!command) return;

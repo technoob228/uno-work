@@ -338,7 +338,7 @@ import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarFooter, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { regenerateThreadTitle } from "../hooks/threadTitleActions";
-import { chatProjectOffer, turnChatIntoProject } from "../hooks/turnChatIntoProject";
+import { chatProjectOffer, isSameFolder, turnChatIntoProject } from "../hooks/turnChatIntoProject";
 import { resolveHomeFolder } from "../hooks/useFolderChats";
 import { ChatInFolderDialog } from "./computer/ChatInFolderDialog";
 import { SidebarDraftsBlock } from "./sidebar/SidebarDraftsBlock";
@@ -3995,7 +3995,9 @@ export default function Sidebar() {
         onStart={async (folder) => {
           if (!projectFolderTarget) return;
           const home = await resolveHomeFolder(projectFolderTarget.environmentId);
-          if (folder === home) throw new Error("Pick a folder inside your home folder.");
+          if (isSameFolder(folder, home)) {
+            throw new Error("Pick a folder inside your home folder.");
+          }
           await turnChatIntoProject(projectFolderTarget, folder);
           setProjectFolderTarget(null);
           toastManager.add(

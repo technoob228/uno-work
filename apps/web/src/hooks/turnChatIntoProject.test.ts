@@ -15,6 +15,10 @@ describe("chatProjectOffer", () => {
     expect(chatProjectOffer(chat)).toEqual({ kind: "pick-folder" });
   });
 
+  it("reads the home folder with a trailing slash as the same folder", () => {
+    expect(chatProjectOffer({ ...chat, homeFolder: "/home/u/" })).toEqual({ kind: "pick-folder" });
+  });
+
   it("uses a chat's own folder", () => {
     expect(chatProjectOffer({ ...chat, worktreePath: "/home/u/site" })).toEqual({
       kind: "own-folder",
