@@ -22,6 +22,7 @@ import { CheckpointReactor, type CheckpointReactorShape } from "../Services/Chec
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
+import { latestAgentSwitch } from "../handoff.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
@@ -670,10 +671,20 @@ const make = Effect.gen(function* () {
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
     if (rolledBackTurns > 0) {
-      yield* providerService.rollbackConversation({
-        threadId: sessionRuntime.value.threadId,
-        numTurns: rolledBackTurns,
-      });
+      const lastSwitch = latestAgentSwitch(thread.activities);
+      if (lastSwitch !== null && lastSwitch.turnCount >= event.payload.turnCount) {
+        // The session only ever held the turns since the chat moved to it, and
+        // those are gone: the next turn starts a new one with the saved history.
+        yield* providerService.stopSession({
+          threadId: sessionRuntime.value.threadId,
+          forgetResume: true,
+        });
+      } else {
+        yield* providerService.rollbackConversation({
+          threadId: sessionRuntime.value.threadId,
+          numTurns: rolledBackTurns,
+        });
+      }
     }
 
     const staleCheckpointRefs = thread.checkpoints

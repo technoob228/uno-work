@@ -2580,13 +2580,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_status",
     group: "chats",
     description:
-      "Status and last messages of a chat. waitMs holds the call while it is running — use it to wait for a result instead of polling. Each message says who wrote it (you, assistant, human).",
+      "Status and last messages of a chat. waitMs holds the call while it is running — use it to wait for a result instead of polling. Each message says who wrote it (you, assistant, human). To read further back, set before to how many of the newest messages to skip (totalMessages says how many there are); a message marked truncated goes on with textOffset.",
     inputSchema: {
       type: "object",
       properties: {
         threadId: { type: "string", minLength: 1 },
         limit: { type: "integer", minimum: 1, maximum: 100 },
         waitMs: { type: "integer", minimum: 0, maximum: 600000 },
+        before: { type: "integer", minimum: 0 },
+        textOffset: { type: "integer", minimum: 0 },
       },
       required: ["threadId"],
       additionalProperties: false,
@@ -2598,6 +2600,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       const query = new URLSearchParams();
       if (num(args, "limit")) query.set("limit", String(num(args, "limit")));
       if (num(args, "waitMs")) query.set("waitMs", String(num(args, "waitMs")));
+      if (num(args, "before")) query.set("before", String(num(args, "before")));
+      if (num(args, "textOffset")) query.set("textOffset", String(num(args, "textOffset")));
       const suffix = query.size > 0 ? `?${query.toString()}` : "";
       return deps
         .bridge({
