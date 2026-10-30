@@ -89,8 +89,9 @@ export function levelsLabel(levels: ReadonlyArray<SidebarGroupLevel>): string {
 }
 
 /**
- * The three simple views Settings offers (variant B): Projects (folders), One
- * list, Inbox (by status). Computer stays as it is; any other mix is "custom".
+ * The three simple views Settings offers (variant B), named as in the title
+ * menu: By project (folders), One list, By status. Computer stays as it is;
+ * any other mix is "custom". "Inbox" stays the name of the Inbox under Home.
  */
 export type SidebarDPreset = "projects" | "list" | "inbox";
 
@@ -98,9 +99,9 @@ export const SIDEBAR_D_PRESETS: ReadonlyArray<{
   readonly id: SidebarDPreset;
   readonly label: string;
 }> = [
-  { id: "projects", label: "Projects" },
+  { id: "projects", label: "By project" },
   { id: "list", label: "One list" },
-  { id: "inbox", label: "Inbox" },
+  { id: "inbox", label: "By status" },
 ];
 
 export function presetOf(levels: ReadonlyArray<SidebarGroupLevel>): SidebarDPreset | null {

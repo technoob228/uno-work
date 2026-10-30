@@ -5,7 +5,8 @@ import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSubmissionIntent = "foreground" | "background";
+/** `background-home`: Home's ⌘Enter, the task goes and the person is back on Home. */
+export type ComposerSubmissionIntent = "foreground" | "background" | "background-home";
 
 /**
  * "Background": the task goes and the person stays on a fresh chat. One
@@ -17,7 +18,7 @@ export function resolveComposerSubmissionIntent(input: {
   readonly keybindings: ResolvedKeybindingsConfig;
   readonly isDraftThread: boolean;
   readonly platform?: string;
-}): ComposerSubmissionIntent {
+}): Extract<ComposerSubmissionIntent, "foreground" | "background"> {
   const command = resolveShortcutCommand(input.event, input.keybindings, {
     ...(input.platform === undefined ? {} : { platform: input.platform }),
     context: { composerFocus: true, draftThreadRoute: input.isDraftThread },

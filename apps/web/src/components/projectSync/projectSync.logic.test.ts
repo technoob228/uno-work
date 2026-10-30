@@ -17,6 +17,7 @@ import {
   syncMarkOf,
   toggleMenuLabel,
   versionDay,
+  projectKeyCount,
   versionLine,
 } from "./projectSync.logic";
 import { mostUrgent } from "./ProjectSyncParts";
@@ -71,6 +72,8 @@ describe("versions", () => {
 
   it("reads like a person wrote it, with no git words", () => {
     expect(versionLine(version({}))).toBe("Misha on macbook · plan.md");
+    expect(versionLine(version({ mine: true }))).toBe("You on macbook · plan.md");
+    expect(versionLine(version({ mine: true, computer: null }))).toBe("You · plan.md");
     expect(versionLine(version({ person: null }))).toBe("macbook · plan.md");
     expect(versionLine(version({ person: null, computer: null }))).toBe("Saved · plan.md");
     expect(
@@ -195,5 +198,16 @@ describe("project sync marks", () => {
     expect(refreshEveryMs(undefined)).toBe(30_000);
     const map = entriesByProject([{ environmentId: "env-a" as EnvironmentId, status: snapshot }]);
     expect(map.get("env-a:p1")?.state).toBe("syncing");
+  });
+});
+
+describe("projectKeyCount", () => {
+  it("counts a key once, not again for the .env it is in", () => {
+    expect(projectKeyCount(1, [".env"])).toBe(1);
+    expect(projectKeyCount(0, [".env"])).toBe(0);
+  });
+
+  it("adds key files that hold other keys", () => {
+    expect(projectKeyCount(2, [".env", "certs/server.pem", "apps/api/.env"])).toBe(4);
   });
 });

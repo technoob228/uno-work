@@ -9,6 +9,30 @@ import {
 } from "../../composerStashStore";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { toastManager } from "../ui/toast";
+
+/** "Set aside", with Undo. `leftBehind`: what stayed in the box, when something did. */
+export function toastSetAside(
+  entry: StashedMessage,
+  options: {
+    readonly leftBehind: string | null;
+    readonly onRestore: (entry: StashedMessage) => void;
+  },
+): void {
+  toastManager.add({
+    type: "success",
+    title: "Set aside",
+    description: options.leftBehind ?? "⌘S on an empty box brings it back, in any chat.",
+    timeout: 4_000,
+    actionProps: {
+      children: "Undo",
+      onClick: () => {
+        const taken = useComposerStashStore.getState().take(entry.id);
+        if (taken) options.onRestore(taken);
+      },
+    },
+  });
+}
 
 export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
   readonly open: boolean;

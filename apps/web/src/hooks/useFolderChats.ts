@@ -41,6 +41,10 @@ export { HOME_FOLDER_TITLE };
 
 const homeFolderByEnvironment = new Map<EnvironmentId, string>();
 
+export function resetHomeFolderCacheForTests(): void {
+  homeFolderByEnvironment.clear();
+}
+
 /** The machine's home folder (`~`, resolved by the daemon); null when unreachable. */
 export async function resolveHomeFolder(environmentId: EnvironmentId): Promise<string | null> {
   const cached = homeFolderByEnvironment.get(environmentId);

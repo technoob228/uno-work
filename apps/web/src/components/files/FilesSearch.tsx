@@ -10,7 +10,12 @@ import type { EnvironmentId, FilesEntry } from "@t3tools/contracts";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Loader2Icon, SearchIcon, XIcon } from "lucide-react";
-import { useMemo, type ReactNode, type RefObject } from "react";
+import {
+  useMemo,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 
 import { cn } from "../../lib/utils";
 import { filesSearchQueryOptions } from "./filesApi";
@@ -92,6 +97,23 @@ export function useFilesSearch(input: {
     searching: query.length > 0 && (query !== pausedQuery || server.isFetching),
     truncated: query.length > 0 && !server.isPlaceholderData && Boolean(server.data?.truncated),
   };
+}
+
+/**
+ * ⌘F in Files: the search field, in whichever view it is. The root of a view
+ * listens, so the key works from any row of it.
+ */
+export function focusFilesSearchOnFind(
+  event: ReactKeyboardEvent,
+  input: HTMLInputElement | null,
+): void {
+  if (!input) return;
+  if (event.key !== "f" && event.key !== "F") return;
+  if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  event.stopPropagation();
+  input.focus();
+  input.select();
 }
 
 export function FilesSearchField({

@@ -185,6 +185,9 @@ const UNAVAILABLE =
 const ELSEWHERE_TTL_MS = 2 * 60_000;
 /** Turn starts and opens don't need a fresh look more often than this. */
 const FRESH_ENOUGH_MS = 60_000;
+/** How long Keep only here / Sync it wait for a running sync to let go of the folder. */
+const LOCAL_ONLY_WAIT_MS = 20_000;
+const LOCAL_ONLY_POLL_MS = 200;
 const HISTORY_PAGE = 100;
 
 const expandHome = (home: string, dir: string) =>
@@ -862,8 +865,17 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       const engine = await deps.engine();
       const dir = folderOf(project);
       const ctx = await engineCtx();
+      // The engine refuses while a sync holds the folder: the choice waits its turn.
+      for (let waited = 0; scheduler.isRunning(projectId) && waited < LOCAL_ONLY_WAIT_MS; ) {
+        await new Promise<void>((resolve) =>
+          deps.timers.setTimeout(() => resolve(), LOCAL_ONLY_POLL_MS),
+        );
+        waited += LOCAL_ONLY_POLL_MS;
+      }
       await engine.setLocalOnly({ dir, path: relative, localOnly }, ctx);
-      await scheduler.runNow(projectId);
+      // The list answers now; the other computers follow in the background
+      // (it took seconds on the person's click, with nothing on screen).
+      void scheduler.runNow(projectId);
       return engine.projectFiles({ dir }, ctx);
     },
 

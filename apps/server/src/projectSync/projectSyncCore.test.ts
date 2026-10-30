@@ -401,7 +401,7 @@ describe("versions, files, keys in files", { timeout: 120_000 }, () => {
 
     const history = await laptop.core.history(id);
     expect(history.versions).toHaveLength(2);
-    expect(history.versions[0]).toMatchObject({ person: "Misha", computer: "laptop" });
+    expect(history.versions[0]).toMatchObject({ person: "Misha", computer: "laptop", mine: true });
     const yesterday = history.versions.at(-1)?.id ?? "";
 
     laptop.busy.add(id);
@@ -428,7 +428,9 @@ describe("versions, files, keys in files", { timeout: 120_000 }, () => {
     expect(files.synced).toBe(1);
     expect(files.localOnly).toEqual([{ path: "movie.mov", yours: true }]);
     expect(fs.existsSync(path.join(dir, "movie.mov"))).toBe(true);
+    // Right after: the sync it started in the background doesn't get in the way.
     expect((await laptop.core.setLocalOnly(id, "movie.mov", false)).synced).toBe(2);
+    await laptop.core.syncNow(id);
   });
 
   it("the engine's key patterns are the daemon's", async () => {

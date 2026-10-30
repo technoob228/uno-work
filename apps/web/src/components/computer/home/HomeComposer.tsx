@@ -22,6 +22,10 @@
  * recording as the chat's Record button. Its card waits in this box (saving,
  * watching, Retry), the words go in once, and on Enter it moves to the new
  * chat, whose first message carries it (see `screenRecording/homeRecording.ts`).
+ *
+ * The chat box's shortcuts work here too: ⌘Enter sends and stays on Home (the
+ * chat opens for a moment: the send lives in it, see `pendingSendStore`), ⌘S
+ * sets the task aside or brings it back.
  */
 import {
   DEFAULT_RUNTIME_MODE,
@@ -51,7 +55,17 @@ import {
 } from "lucide-react";
 import { type ClipboardEvent, type DragEvent, useEffect, useMemo, useRef, useState } from "react";
 
+import { resolveComposerSubmissionIntent } from "~/composer-logic";
+import {
+  loadComposerStash,
+  registerStashTarget,
+  setAsideOrBringBack,
+  useComposerStashStore,
+  type StashedMessage,
+} from "~/composerStashStore";
+import { resolveShortcutCommand } from "~/keybindings";
 import { cn } from "~/lib/utils";
+import { useServerKeybindings } from "~/rpc/serverState";
 import {
   type ComposerFileAttachment,
   type ComposerImageAttachment,
@@ -83,6 +97,8 @@ import {
 import { useScreenRecordingStore } from "../../../screenRecording/recordingStore";
 import { type DictationDraft, resolveDictationInsert } from "../../../hooks/dictationDraft";
 import { isDictationSupported, useDictation } from "../../../hooks/useDictation";
+import { withAppShortcutDefaults } from "../../appShortcuts.logic";
+import { ComposerStashMenu, toastSetAside } from "../../chat/ComposerStashMenu";
 import { type TeamMember, useStartableAssistants } from "../../assistants/useAssistantTeam";
 import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
 import {
@@ -131,6 +147,8 @@ export interface HomeStartOptions {
   readonly files?: ReadonlyArray<ComposerFileAttachment>;
   /** Home's screen recording (its store key): it moves to the new chat and goes with the message. */
   readonly recordingKey?: string;
+  /** ⌘Enter: the person stays on Home. */
+  readonly inBackground?: boolean;
 }
 
 /**
@@ -360,7 +378,68 @@ export function HomeComposer({
     ref.current?.focus();
   }, []);
 
-  const submit = async () => {
+  const keybindings = useServerKeybindings();
+  const shortcutBindings = useMemo(() => withAppShortcutDefaults(keybindings), [keybindings]);
+  const [stashMenuOpen, setStashMenuOpen] = useState(false);
+
+  const restoreStashed = (entry: StashedMessage) => {
+    if (entry.quotes.length > 0) {
+      // Quotes belong to a chat's box: this one has no place for them.
+      useComposerStashStore.getState().stash(entry);
+      toastManager.add({ type: "info", title: "Open a chat to bring this one back" });
+      return;
+    }
+    if (entry.text) {
+      setText((current) => (current.trim() ? `${current.trimEnd()}\n\n${entry.text}` : entry.text));
+    }
+    attachFiles(entry.files);
+    ref.current?.focus();
+  };
+  const setAside = () => {
+    const result = setAsideOrBringBack({
+      text,
+      files: [...images.map((image) => image.file), ...files.map((file) => file.file)],
+      quotes: [],
+    });
+    if (result.kind === "back") restoreStashed(result.entry);
+    if (result.kind === "pick") setStashMenuOpen(true);
+    if (result.kind !== "aside") return;
+    for (const image of images) URL.revokeObjectURL(image.previewUrl);
+    setImages([]);
+    setFiles([]);
+    setText("");
+    ref.current?.focus();
+    toastSetAside(result.entry, {
+      leftBehind: recording ? "The recording stays here." : null,
+      onRestore: (entry) => restoreStashedRef.current(entry),
+    });
+  };
+  const restoreStashedRef = useRef(restoreStashed);
+  restoreStashedRef.current = restoreStashed;
+  const setAsideRef = useRef(setAside);
+  setAsideRef.current = setAside;
+  useEffect(() => {
+    loadComposerStash();
+    return registerStashTarget((entry) => restoreStashedRef.current(entry));
+  }, []);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (resolveShortcutCommand(event, shortcutBindings) !== "composer.stash") return;
+      const focused = document.activeElement;
+      const typingElsewhere =
+        focused instanceof HTMLElement &&
+        focused !== ref.current &&
+        (focused.isContentEditable || focused.matches("input, textarea, select"));
+      if (typingElsewhere) return;
+      event.preventDefault();
+      setAsideRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [shortcutBindings]);
+
+  const submit = async (options?: { readonly inBackground?: boolean }) => {
     const prompt = text.trim();
     const check = homeSendCheck({
       text: prompt,
@@ -394,6 +473,7 @@ export function HomeComposer({
         images,
         files,
         ...(recording ? { recordingKey: recording.threadKey } : {}),
+        ...(options?.inBackground ? { inBackground: true } : {}),
       });
       // The new chat's draft owns the previews now (no revoke).
       setImages([]);
@@ -511,7 +591,12 @@ export function HomeComposer({
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
-              void submit();
+              const intent = resolveComposerSubmissionIntent({
+                event,
+                keybindings: shortcutBindings,
+                isDraftThread: true,
+              });
+              void submit({ inBackground: intent === "background" });
             }
           }}
           rows={minimal ? 3 : 2}
@@ -706,6 +791,11 @@ export function HomeComposer({
             // (as in the chat's composer).
             <RecordButton threadKey={recordingKey} environmentId={environmentId} />
           ) : null}
+          <ComposerStashMenu
+            open={stashMenuOpen}
+            onOpenChange={setStashMenuOpen}
+            onRestore={restoreStashed}
+          />
           <button
             type="button"
             onClick={() => void submit()}

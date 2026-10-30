@@ -15,7 +15,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import type { ProjectSettingsTarget } from "./ProjectSettingsDialog";
-import { fileCount } from "./projectSync.logic";
+import { fileCount, projectKeyCount } from "./projectSync.logic";
 import { projectFilesQueryKey } from "./useProjectSync";
 
 export function ProjectFiles(props: { target: ProjectSettingsTarget; keyCount: number }) {
@@ -56,7 +56,7 @@ export function ProjectFiles(props: { target: ProjectSettingsTarget; keyCount: n
 
   const data = files.data;
   const localCount = (data?.localOnly.length ?? 0) + (data?.more ?? 0);
-  const keyCount = props.keyCount + (data?.keyFiles.length ?? 0);
+  const keyCount = projectKeyCount(props.keyCount, data?.keyFiles ?? []);
 
   return (
     <section className="space-y-2" data-testid="project-files">
@@ -146,7 +146,7 @@ export function ProjectFiles(props: { target: ProjectSettingsTarget; keyCount: n
             disabled={!path.trim() || working}
             title="It stays here and leaves your other computers."
           >
-            Keep only here
+            {working ? "Keeping…" : "Keep only here"}
           </Button>
         </form>
       ) : null}

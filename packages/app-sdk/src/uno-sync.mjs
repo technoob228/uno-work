@@ -1464,7 +1464,8 @@ async function versionFrom(tree, on, message, at) {
 /**
  * @typedef {{ path: string, change: "added" | "changed" | "removed" }} VersionFile
  * @typedef {{ id: string, at: string, person: string | null, computer: string | null,
- *   note: string | null, files: VersionFile[], moreFiles: number }} ProjectVersion
+ *   mine: boolean, note: string | null, files: VersionFile[], moreFiles: number }} ProjectVersion
+ *   mine: this person saved it, so the list can say "You".
  */
 
 /** "Misha (macbook)" → both; an older "Uno" version → the computer from "Saved on …". */
@@ -1513,6 +1514,7 @@ export async function projectHistory(input, ctx) {
   );
   // No version yet.
   if (log.code !== 0) return { mode, versions: [], more: false };
+  const me = personOf(ctx);
   /** @type {ProjectVersion[]} */
   const versions = log.stdout
     .split("\x1e")
@@ -1530,10 +1532,12 @@ export async function projectHistory(input, ctx) {
           },
         ];
       });
+      const who = whoSaved(author, subject);
       return {
         id,
         at: new Date(Number(time) * 1000).toISOString(),
-        ...whoSaved(author, subject),
+        ...who,
+        mine: me !== null && who.person === me,
         note: /^Saved on /.test(subject) ? null : subject || null,
         files: changed.slice(0, MAX_VERSION_FILES),
         moreFiles: Math.max(0, changed.length - MAX_VERSION_FILES),
@@ -1614,6 +1618,23 @@ export async function restoreVersion(input, ctx) {
 // ── What travels and what stays ─────────────────────────────────────────
 
 /**
+ * `git ls-files --directory` names a folder of nothing but ignored files and
+ * those files too (`data/`, `data/sample.csv`): one thing, not two. The file
+ * stays, it's what the person chose.
+ * @param {string[]} entries
+ */
+function withoutEnclosingFolders(entries) {
+  const enclosing = new Set();
+  for (const entry of entries) {
+    const end = entry.length - 1;
+    for (let at = entry.indexOf("/"); at !== -1 && at < end; at = entry.indexOf("/", at + 1)) {
+      enclosing.add(entry.slice(0, at + 1));
+    }
+  }
+  return entries.filter((entry) => !enclosing.has(entry));
+}
+
+/**
  * The folder's files by what happens to them: how many travel, what stays
  * only on this computer (`yours`: the person chose it; else Uno's rules or
  * the project's own ignore list), and the key files, by name.
@@ -1638,7 +1659,9 @@ export async function projectFiles(input, ctx) {
   }
   const ignored = await list(["--others", "--ignored", "--exclude-standard", "--directory"]);
   const yours = new Set(mode === "snapshot" ? await readLocalOnly(gitDir) : []);
-  const stays = ignored.filter((entry) => !/^\.(uno-)?git(\/|\.|$)/.test(entry));
+  const stays = withoutEnclosingFolders(
+    ignored.filter((entry) => !/^\.(uno-)?git(\/|\.|$)/.test(entry)),
+  );
   const keyFiles = stays.filter((entry) => isKeyFile(entry.replace(/\/$/, "")));
   const localOnly = stays
     .filter((entry) => !isKeyFile(entry.replace(/\/$/, "")))

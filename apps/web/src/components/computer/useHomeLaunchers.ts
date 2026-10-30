@@ -184,7 +184,9 @@ export function useHomeLaunchers(environmentId: EnvironmentId | null) {
         store.setRuntimeMode(draftId, options.runtimeMode);
         store.setDraftThreadContext(draftId, { runtimeMode: options.runtimeMode });
       }
-      usePendingSendStore.getState().request(draftId, prompt);
+      usePendingSendStore
+        .getState()
+        .request(draftId, prompt, { backToHome: options.inBackground === true });
     },
     [openChatWithPrompt],
   );

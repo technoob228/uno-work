@@ -670,7 +670,7 @@ export function GeneralSettingsPanel({
           <>
             <SettingsRow
               title="Sidebar view"
-              description="How chats are laid out in the sidebar: Projects — folders with their chats; One list — newest first; Inbox — by status, what needs you first."
+              description="How chats are laid out in the sidebar: By project — folders with their chats; One list — newest first; By status — what needs you first."
               resetAction={
                 settings.sidebarGroupLevels !== null ? (
                   <SettingResetButton

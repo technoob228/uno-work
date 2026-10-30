@@ -27,6 +27,15 @@ describe("resolveMarkdownFileLinkTarget", () => {
     );
   });
 
+  it("takes a relative path with a closing slash for a folder", () => {
+    expect(resolveMarkdownFileLinkTarget("docs/", "/Users/julius/project")).toBe(
+      "/Users/julius/project/docs/",
+    );
+    expect(resolveMarkdownFileLinkTarget("src/components/", "/Users/julius/project")).toBe(
+      "/Users/julius/project/src/components/",
+    );
+  });
+
   it("resolves relative file paths against cwd", () => {
     expect(resolveMarkdownFileLinkTarget("src/processRunner.ts:71", "/Users/julius/project")).toBe(
       "/Users/julius/project/src/processRunner.ts:71",
