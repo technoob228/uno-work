@@ -1,7 +1,7 @@
-// T3 port S3 (29.10): the sidebar's time groups, the Undo note, the chat
+// T3 port S3 (29.10): the sidebar's chat ages (30.10, were time groups), the Undo note, the chat
 // header without </> and the composer without Build/Plan, on the demo.
-// The clock is fixed to Wed 4 Nov 2026 01:00 so the demo's chats (minutes to
-// two days old) fall into all four groups. Usage:
+// The clock is fixed to Wed 4 Nov 2026 01:00 so the demo's chats read ages
+// from minutes to days. Usage:
 //   npx vite --port 5747 &   # in apps/web
 //   node demo-e2e/sidebar-shots.mjs <out-dir> [base-url]
 import { mkdirSync } from "node:fs";
@@ -50,21 +50,21 @@ async function sidebarBox() {
 }
 
 await page.goto(`${base}/?demo=${demo}`, { waitUntil: "commit", timeout: 180_000 });
-await page.waitForSelector("[data-testid^=sidebar-recents-time-]", { timeout: 180_000 });
+await page.waitForSelector("[data-testid=sidebar-row-age]", { timeout: 180_000 });
 await page.waitForTimeout(1500);
 await dismissCards();
-// Open every "Show N more" so the older groups are on screen too.
+// Open every "Show N more" so the older chats are on screen too.
 for (let i = 0; i < 3; i++) {
   const more = page.getByText(/^Show \d+ more$/).first();
   if (!(await more.isVisible().catch(() => false))) break;
   await more.click().catch(() => {});
   await page.waitForTimeout(300);
 }
-const labels = await page.locator("[data-testid^=sidebar-recents-time-]").allTextContents();
-console.log("groups:", labels.join(" / "));
-await shot("01-recents-time-groups", await sidebarBox());
+const labels = await page.locator("[data-testid=sidebar-row-age]").allTextContents();
+console.log("ages:", labels.join(" / "));
+await shot("01-recents-ages", await sidebarBox());
 await page
-  .locator("[data-testid^=sidebar-recents-time-]")
+  .locator("[data-testid=sidebar-row-age]")
   .last()
   .scrollIntoViewIfNeeded()
   .catch(() => {});
@@ -73,7 +73,7 @@ await shot("02-recents-older", await sidebarBox());
 // Open the first chat of the list: header and composer.
 // A finished chat ("Ready"): its composer is free and it can be made Done.
 await page
-  .locator("[data-testid^=sidebar-recents-time-] ~ li", { hasText: "Ready" })
+  .locator("[data-testid=sidebar-row-d]", { hasText: "Ready" })
   .first()
   .click({ timeout: 10_000 });
 await page.waitForTimeout(2000);
