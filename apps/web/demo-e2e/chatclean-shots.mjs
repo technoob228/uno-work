@@ -148,6 +148,11 @@ for (const theme of themes) {
     await other.click();
     await page.waitForTimeout(2000);
     await shot("06-chat-other");
+    await page.getByTestId("turn-fold").getByRole("button").first().click();
+    await page.waitForTimeout(800);
+    await shot("06b-fold-open");
+    await page.getByTestId("turn-fold").getByRole("button").first().click();
+    await page.waitForTimeout(500);
     const message = page.locator("[data-message-role=user]").last();
     await message.hover({ timeout: 4000 }).catch(() => {});
     await page.waitForTimeout(400);
