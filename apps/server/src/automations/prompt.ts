@@ -207,6 +207,7 @@ export function automationEventPrompt(event: AutomationEvent): string {
     pr !== null
       ? `Do the real work in a chat (chat_create on the computer that has the project; for this PR: \`git fetch origin pull/${pr.number}/head\`, read the diff, write the review). When the chat is done you get its result: then post with github_pr_comment {repo: "${pr.repo}", number: ${pr.number}, body} if the instruction says to comment, and tell the person in 1–3 lines with the link.`
       : "Do the real work in a chat (chat_create on the computer that has the project). When the chat is done you get its result: then tell the person in 1–3 lines (with a link when there is one).",
+    "If the instruction only asks to remind or tell the person something, no chat is needed: write it as your final message now.",
     `If you only started the chat now, answer exactly ${ASSISTANT_TURN_NO_REPLY}.`,
   ].join("\n");
 }
@@ -268,7 +269,7 @@ export function automationSummary(
     case "answered":
       return oneLine(outcome.text, 500) || "Done.";
     case "handed_off":
-      return "Handed off to a chat; the result goes to the person when it finishes.";
+      return "No message this time. If Uno started a chat, you get the result when it finishes.";
     case "timeout":
       return `The assistant didn't finish within ${outcome.minutes} minutes.`;
   }

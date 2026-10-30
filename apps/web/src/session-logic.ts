@@ -2,6 +2,7 @@ import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import {
   ApprovalRequestId,
+  isAssistantNoReply,
   isToolLifecycleItemType,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
@@ -1438,6 +1439,9 @@ export function hasToolActivityForTurn(
   return activities.some((activity) => activity.turnId === turnId && activity.tone === "tool");
 }
 
+/** The assistant's "nothing to tell" is a word for Uno, not for the person. */
+export const NO_REPLY_TEXT = "Nothing to tell you this time.";
+
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
@@ -1448,7 +1452,10 @@ export function deriveTimelineEntries(
     id: message.id,
     kind: "message",
     createdAt: message.createdAt,
-    message,
+    message:
+      message.role === "assistant" && !message.streaming && isAssistantNoReply(message.text)
+        ? { ...message, text: NO_REPLY_TEXT }
+        : message,
   }));
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,

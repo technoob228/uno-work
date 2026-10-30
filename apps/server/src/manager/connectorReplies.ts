@@ -33,7 +33,7 @@
  */
 import {
   ASSISTANT_PROJECT_ID,
-  ASSISTANT_TURN_NO_REPLY,
+  isAssistantNoReply,
   CommandId,
   MessageId,
   type ChatAttachment,
@@ -429,10 +429,7 @@ export const resumePromptText = (original: string) =>
     original,
   ].join("\n");
 
-/** NO_REPLY (any case, optional trailing dot) means: say nothing. */
-export function isNoReply(text: string): boolean {
-  return text.trim().replace(/\.$/, "").toUpperCase() === ASSISTANT_TURN_NO_REPLY;
-}
+export const isNoReply = isAssistantNoReply;
 
 // ── The loop ────────────────────────────────────────────────────────────
 

@@ -1603,6 +1603,9 @@ export const ASSISTANT_SCHEDULE_DEFAULT_MINUTES = 15;
 export const ASSISTANT_SCHEDULE_MAX_MINUTES = 60;
 /** The final answer that means "nothing to tell the person" — not delivered. */
 export const ASSISTANT_TURN_NO_REPLY = "NO_REPLY";
+/** NO_REPLY (any case, optional trailing dot) means: say nothing. */
+export const isAssistantNoReply = (text: string): boolean =>
+  text.trim().replace(/\.$/, "").toUpperCase() === ASSISTANT_TURN_NO_REPLY;
 
 export const ManagerScheduleCreateInput = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSISTANT_SCHEDULE_NAME_MAX_CHARS)),

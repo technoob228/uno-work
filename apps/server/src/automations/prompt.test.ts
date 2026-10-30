@@ -81,6 +81,11 @@ describe("automation event prompt", () => {
     );
   });
 
+  it("a reminder is the final message, not a chat started on the side", () => {
+    const prompt = automationEventPrompt({ ...prEvent(), kind: "schedule", payload: {} });
+    expect(prompt).toContain("only asks to remind or tell the person something");
+  });
+
   it("a schedule: the label, no PR steps", () => {
     const prompt = automationEventPrompt({
       ...prEvent(),
@@ -101,7 +106,8 @@ describe("automation event prompt", () => {
     expect(automationSummary({ kind: "answered", text: `Done.\n${"y".repeat(800)}` })).toHaveLength(
       500,
     );
-    expect(automationSummary({ kind: "handed_off" })).toContain("Handed off");
+    expect(automationSummary({ kind: "handed_off" })).toContain("No message this time");
+    expect(automationSummary({ kind: "handed_off" })).not.toContain("NO_REPLY");
     expect(afterCallAutomationsText([])).toBe("");
     expect(
       afterCallAutomationsText([{ name: "Follow-up", instruction: "Draft the follow-up email" }]),

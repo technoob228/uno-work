@@ -227,7 +227,7 @@ describe("automation event loop", () => {
           reply: "NO_REPLY",
         },
       }),
-    ).toMatchObject({ state: "done", summary: expect.stringContaining("Handed off") });
+    ).toMatchObject({ state: "done", summary: expect.stringContaining("No message this time") });
   });
 
   it("a busy assistant (AssistantTurnError) → failed with its message", async () => {

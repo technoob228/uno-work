@@ -15,6 +15,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
+  NO_REPLY_TEXT,
   deriveAgentSwitchEntries,
   deriveWorkLogEntries,
   findLatestProposedPlan,
@@ -1447,6 +1448,29 @@ describe("a page in the chat", () => {
 });
 
 describe("deriveTimelineEntries", () => {
+  it("never shows the assistant's NO_REPLY word", () => {
+    const message = (id: string, text: string, role: "assistant" | "user" = "assistant") => ({
+      id: MessageId.make(id),
+      role,
+      text,
+      createdAt: "2026-02-23T00:00:01.000Z",
+      streaming: false,
+    });
+    const entries = deriveTimelineEntries(
+      [
+        message("a", "NO_REPLY"),
+        message("b", "no_reply."),
+        message("c", "NO_REPLY", "user"),
+        message("d", "I said NO_REPLY earlier"),
+      ],
+      [],
+      [],
+    );
+    expect(
+      entries.map((entry) => (entry.kind === "message" ? entry.message.text : null)),
+    ).toEqual([NO_REPLY_TEXT, NO_REPLY_TEXT, "NO_REPLY", "I said NO_REPLY earlier"]);
+  });
+
   it("includes proposed plans alongside messages and work entries in chronological order", () => {
     const entries = deriveTimelineEntries(
       [
