@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.166 — 2026-10-30
+
+- Uno Notetaker sits next to Uno Drive: in the sidebar (Built in), on the Computer page and in the App Store. It isn't installed by itself — press Add once and it's there.
+- Notetaker uses the calendars already connected to your Uno account (Google Calendar) — nothing to paste, and no assistant needed. Connect opens from inside Notetaker.
+
 ## v0.0.165 — 2026-10-30
 
 - Uno answers faster and stays on point: it hands real work to a separate chat in the right project, keeps its own context small, and starts fresh when its instructions change (instructions 2026-10-29.3).
