@@ -134,7 +134,7 @@ export const FEATURE_FLAGS = [
     key: "sidebarViewMenu",
     label: "Sidebar view menu",
     description:
-      "Pick how chats are laid out (projects, one list, inbox, by computer) and filter by project right from the sidebar's title. One list and Inbox show each chat's project.",
+      "Pick how chats are laid out (by project, one list, by status, by computer) and filter by project right from the sidebar's title. One list and Inbox show each chat's project.",
     default: true,
   },
   {
