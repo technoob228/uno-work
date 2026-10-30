@@ -87,15 +87,12 @@ describe("Assistants and the account's assistants flag", () => {
     expect(screen.getByText("New assistant").query()).toBeNull();
   });
 
-  it("flag on: the new assistants", async () => {
+  it("flag on: every assistant, each opening its one settings page (29.10)", async () => {
     availability = "on";
     const screen = await mount();
-    await expect
-      .element(screen.getByTestId("assistants-empty"))
-      .toHaveTextContent("An assistant that works while you don't");
-    await expect
-      .element(screen.getByTestId("assistants-empty-create"))
-      .toHaveTextContent("New assistant");
+    await expect.element(screen.getByTestId("assistants-team-list")).toBeInTheDocument();
+    await expect.element(screen.getByTestId("assistants-new")).toHaveTextContent("New assistant");
     expect(screen.getByTestId("assistants-classic").query()).toBeNull();
+    expect(screen.getByTestId("assistants-empty").query()).toBeNull();
   });
 });

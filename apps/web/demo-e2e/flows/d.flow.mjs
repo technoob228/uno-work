@@ -616,13 +616,13 @@ export const flows = [
         throw new Error("the New assistant line is still there");
       }
       await page.getByTestId("sidebar-assistants-settings").hover();
-      await tooltip(page).filter({ hasText: "Assistant settings" }).waitFor();
+      await tooltip(page).filter({ hasText: "All assistants and their settings" }).waitFor();
     });
     await shot("header-gear");
-    await step("the gear opens the assistants' settings", async () => {
+    await step("the gear opens every assistant, each with its settings (29.10)", async () => {
       await page.getByTestId("sidebar-assistants-settings").click();
-      await page.waitForFunction(() => location.hash.includes("/settings/assistants-phone"));
-      await seeText(page, "Assistants & phone");
+      await page.getByTestId("assistants-team-list").waitFor();
+      await seeText(page, "Open one to change its name");
     });
     await shot("settings");
     await step("hide the assistants → one small line", async () => {
