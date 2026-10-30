@@ -18,9 +18,13 @@ import * as nodePath from "node:path";
 
 export const IMAGE_SIZES = ["1024x1024", "1024x1536", "1536x1024", "auto"] as const;
 export const IMAGE_PROMPT_MAX_CHARS = 8_000;
+/** The picture models an agent picks from; the gateway keeps the versions. */
+export const IMAGE_MODELS = ["design", "photo", "standard", "fast"] as const;
+export const IMAGE_DEFAULT_MODEL = "design";
 /** Folder (inside the chat's folder) the pictures land in. */
 export const IMAGES_FOLDER = "images";
-const GATEWAY_TIMEOUT_MS = 180_000;
+// GPT Image takes about two minutes per picture.
+const GATEWAY_TIMEOUT_MS = 300_000;
 
 export interface GeneratedImage {
   readonly bytes: Uint8Array;
@@ -124,6 +128,8 @@ export async function requestGatewayImage(input: {
   readonly apiKey: string;
   readonly prompt: string;
   readonly size?: string | undefined;
+  /** One of IMAGE_MODELS; absent — the gateway's own pick (avatars). */
+  readonly model?: string | undefined;
   readonly fetchImpl?: typeof fetch;
 }): Promise<GeneratedImage> {
   if (input.apiKey.length === 0) throw new ImageGenerateError(imageGatewayProblem(401, null));
@@ -136,7 +142,7 @@ export async function requestGatewayImage(input: {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "default",
+        model: input.model ? `uno/image-${input.model}` : "default",
         prompt: input.prompt,
         n: 1,
         ...(input.size && input.size !== "auto" ? { size: input.size } : {}),

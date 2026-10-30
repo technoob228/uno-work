@@ -98,6 +98,17 @@ describe("image generation", () => {
         body: { model: "default", prompt: "fox", n: 1, size: "1024x1024" },
       },
     ]);
+    await requestGatewayImage({
+      baseUrl: "https://api.getuno.xyz/v1",
+      apiKey: "unollm_key",
+      prompt: "fox",
+      model: "photo",
+      fetchImpl: (async (url: string, init?: RequestInit) => {
+        seen.push({ url, auth: null, body: JSON.parse(String(init?.body)) });
+        return new Response(JSON.stringify({ data: [{ b64_json: PNG.toString("base64") }] }));
+      }) as typeof fetch,
+    });
+    expect(seen.at(-1)?.body).toMatchObject({ model: "uno/image-photo" });
     await expect(
       requestGatewayImage({
         baseUrl: "https://api.getuno.xyz/v1",
