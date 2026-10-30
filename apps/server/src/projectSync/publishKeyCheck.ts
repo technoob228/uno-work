@@ -9,9 +9,13 @@
  */
 import os from "node:os";
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
 
 import { loadEngine } from "./syncEngine.ts";
+
+class PublishKeyCheckError extends Data.TaggedError("PublishKeyCheckError")<{
+  readonly message: string;
+}> {}
 
 export interface PublishKeyCheckShape {
   /** Why this folder can't be published (the files, never a value); null when it can. */
@@ -35,6 +39,11 @@ export const layer = Layer.succeed(PublishKeyCheck, {
         return found.length > 0 ? engine.heldFromPublishMessage(found) : null;
       },
       catch: (cause) =>
-        cause instanceof Error ? cause : new Error("Couldn't read the project before publishing."),
+        new PublishKeyCheckError({
+          message:
+            cause instanceof Error
+              ? cause.message
+              : "Couldn't read the project before publishing.",
+        }),
     }),
 });
