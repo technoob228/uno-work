@@ -219,6 +219,10 @@ const turnStartFailure = (probe: ReplyProbe): string | null => {
     : "the assistant could not start";
 };
 
+/** The harness session went away under the start (it was being restarted): a new run starts one. */
+const isSessionGone = (detail: string): boolean =>
+  /ProviderAdapterSession(?:NotFound|Closed)Error|Unknown \S+ adapter thread/.test(detail);
+
 /** The turn answering the row's message, if it can be told yet. */
 const attributeTurn = (probe: ReplyProbe): string | null => {
   if (probe.knownTurnId !== null) return probe.knownTurnId;
@@ -295,7 +299,7 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
 
   const startFailure = turnStartFailure(probe);
   if (startFailure !== null && turnId === null) {
-    return { kind: "failed", turnId, reason: startFailure };
+    return { kind: isSessionGone(startFailure) ? "lost" : "failed", turnId, reason: startFailure };
   }
 
   const sessionDied =
@@ -382,17 +386,30 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
 
 const say = (language: ReplyLanguage, ru: string, en: string) => (language === "ru" ? ru : en);
 
+const FAILURE_REASON_MAX = 300;
+
 export const doneText = (language: ReplyLanguage) => say(language, "Готово.", "Done.");
 
 export const stoppedText = (language: ReplyLanguage) =>
   say(language, "Остановлено в Uno Work.", "Stopped in Uno Work.");
 
-export const failedText = (language: ReplyLanguage, reason: string) =>
-  say(
+/** What of a failure a person can read: no stack, no class names. Null: nothing. */
+export const readableFailure = (reason: string): string | null => {
+  const line = (reason.split("\n")[0] ?? "")
+    .replace(/\s+at\s+\S+\s+\((?:file|node):.*$/, "")
+    .trim();
+  if (line.length === 0 || /^[A-Za-z]+Error\b/.test(line)) return null;
+  return line.length > FAILURE_REASON_MAX ? `${line.slice(0, FAILURE_REASON_MAX)}…` : line;
+};
+
+export const failedText = (language: ReplyLanguage, reason: string) => {
+  const readable = readableFailure(reason);
+  return say(
     language,
-    `Не получилось ответить на это сообщение: ${reason}\nНапишите ещё раз — попробую снова.`,
-    `I couldn't finish this one: ${reason}\nSend it again and I'll retry.`,
+    `Не получилось ответить на это сообщение${readable === null ? "." : `: ${readable}`}\nНапишите ещё раз — попробую снова.`,
+    `I couldn't finish this one${readable === null ? "." : `: ${readable}`}\nSend it again and I'll retry.`,
   );
+};
 
 export const queuedText = (language: ReplyLanguage) =>
   say(
@@ -567,6 +584,8 @@ export const isThreadBusyForNewTurn = (input: {
   readonly selfCreatedAt: string | null;
   readonly session: { readonly status: string; readonly updatedAt: string } | null;
   readonly turns: ReadonlyArray<Pick<ProjectionTurn, "turnId" | "state" | "requestedAt">>;
+  /** The thread's activities: a turn whose start failed is not on its way. */
+  readonly activities?: ReadonlyArray<{ readonly kind: string; readonly createdAt: string }>;
   readonly nowMs: number;
 }): { readonly busy: boolean; readonly sinceMs: number } => {
   const ahead = input.rows.find(
@@ -581,11 +600,15 @@ export const isThreadBusyForNewTurn = (input: {
   if (session !== null && ACTIVE_SESSION_STATUSES.has(session.status)) {
     return { busy: true, sinceMs: toMs(session.updatedAt) };
   }
+  const startFailures = (input.activities ?? []).filter(
+    (activity) => activity.kind === "provider.turn.start.failed",
+  );
   const pendingStart = input.turns.find(
     (turn) =>
       turn.turnId === null &&
       turn.state === "pending" &&
-      input.nowMs - toMs(turn.requestedAt) < LOST_TURN_MS,
+      input.nowMs - toMs(turn.requestedAt) < LOST_TURN_MS &&
+      !startFailures.some((failure) => failure.createdAt >= turn.requestedAt),
   );
   if (pendingStart !== undefined) return { busy: true, sinceMs: toMs(pendingStart.requestedAt) };
   return { busy: false, sinceMs: 0 };
@@ -703,6 +726,7 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
           selfCreatedAt: row.createdAt,
           session: detail?.session ?? null,
           turns,
+          ...(detail ? { activities: detail.activities } : {}),
           nowMs: yield* Clock.currentTimeMillis,
         });
         return { ...busy, dispatcher: yield* isDispatcherThread(row.threadId, detail) };
@@ -1254,14 +1278,10 @@ export const makeConnectorReplies = (transport: ReplyTransport) =>
         if (dispatcher) {
           const stoppedAt = readMeta(current).watchdogStoppedAt;
           if (stoppedAt !== undefined) {
-            // Stopped by the watchdog: wait for the session to let go (the
-            // adapter drops a stuck prompt after ~10 s), then go on.
-            const settling =
-              detail.session !== null &&
-              ACTIVE_SESSION_STATUSES.has(detail.session.status) &&
-              detail.session.activeTurnId === (verdict.turnId ?? detail.session.activeTurnId) &&
-              nowMs - toMs(stoppedAt) < DISPATCHER_STOP_SETTLE_MS;
-            if (settling) {
+            // Stopped by the watchdog: the projection says "ready" at once,
+            // while the adapter may still drop a stuck prompt and restart the
+            // session ~10 s later. A retry sent before that dies with it.
+            if (nowMs - toMs(stoppedAt) < DISPATCHER_STOP_SETTLE_MS) {
               if (readMeta(current).systemTurn !== true) yield* typingIfDue(current, nowMs);
               return;
             }

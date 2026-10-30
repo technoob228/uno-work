@@ -1637,6 +1637,21 @@ describe("sites: password and forms", () => {
     expect(JSON.stringify(result)).toContain("no site “team-site”");
   });
 
+  it("site_open_link names the latest reports when the name is wrong", async () => {
+    const { deps, home } = makeDeps({ console: () => ({ status: 404, body: {} }) });
+    await recordReport(home, {
+      slug: "r-abcdefghij",
+      threadId: "t1",
+      title: "Итоги",
+      source: "/a/b.md",
+      url: "https://r-abcdefghij.uno4.me/__open?t=1",
+      expiresAtMs: 1,
+      createdAtMs: 1,
+    });
+    const result = await run("site_open_link", deps, { slug: "shop-report" });
+    expect(JSON.stringify(result)).toContain("r-abcdefghij (Итоги)");
+  });
+
   it("generates a readable password and can remove it", async () => {
     const generated = makeDeps();
     const result = await run("site_set_password", generated.deps, { slug: "team-site" });

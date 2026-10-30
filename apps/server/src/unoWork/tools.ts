@@ -1104,6 +1104,7 @@ const siteIsListed = (
 /** site_open_link: at most 30 days, what hosting takes. */
 const SITE_OPEN_LINK_MAX_HOURS = 720;
 const REPORTS_LISTED = 10;
+const REPORTS_SUGGESTED = 5;
 
 const tryFile = <A>(read: () => Promise<A>): Effect.Effect<A, UnoWorkToolError> =>
   Effect.tryPromise({
@@ -1125,7 +1126,16 @@ const openSiteLink = (
       body: { ttl_seconds: ttlSeconds },
     });
     if (reply.status === 404) {
-      return yield* toolError(`There is no site “${slug}” on this account (see sites_list).`);
+      // Saves a step: the person's "link expired" rarely comes with the name.
+      const latest = (yield* Effect.promise(() => readReports(deps.home)))
+        .slice(-REPORTS_SUGGESTED)
+        .toReversed()
+        .map((report) => `${report.slug} (${report.title})`);
+      return yield* toolError(
+        `There is no site “${slug}” on this account (see sites_list).${
+          latest.length > 0 ? ` Latest reports: ${latest.join(", ")}.` : ""
+        }`,
+      );
     }
     if (reply.status === 409) {
       return yield* toolError(
