@@ -857,6 +857,13 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
   ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  // A chat stopped by the limit of the person's own AI plan goes on by itself
+  // once the plan resets (Settings → AI → "Resume automatically").
+  resumeAfterPlanLimit: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // More than one Claude / ChatGPT account on this computer (Settings → AI →
+  // "Use more than one account"). Off by default: a provider may limit an
+  // account for it. Switching between them is always by a button.
+  multipleAccounts: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Harnesses (by driver kind) the person allowed to run on the account's Uno
   // credits on this machine when they have no sign-in of their own — Claude
   // Code on Uno AI. Absent = not decided yet: chats ask first and nothing is
@@ -1011,6 +1018,8 @@ export const ServerSettingsPatch = Schema.Struct({
   agentThreadsScope: Schema.optionalKey(Schema.Literals(["own-project", "any-project"])),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
+  resumeAfterPlanLimit: Schema.optionalKey(Schema.Boolean),
+  multipleAccounts: Schema.optionalKey(Schema.Boolean),
   harnessUnoCredits: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   harnessUnoCreditsMigrated: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),

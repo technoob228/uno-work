@@ -6,9 +6,11 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CHATGPT_USAGE_URL,
   CLAUDE_USAGE_URL,
+  claudeKeychainService,
   makeMacClaudeKeychain,
   openPlanLimitsReader,
   PLAN_LIMITS_MAX_AGE_MS,
+  planLimitsHomes,
   type ClaudeKeychain,
   type PlanLimitsHomes,
 } from "./planLimitsReader.ts";
@@ -289,6 +291,155 @@ describe("openPlanLimitsReader", () => {
       expect.objectContaining({ provider: "claude", problem: "locked", windows: [] }),
     ]);
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("second accounts", () => {
+  const folder = "/home/unowork/.uno-accounts/claudeAgent_account_ab12cd34";
+  const shadow = "/home/unowork/.uno-accounts/codex_account_ab12cd34";
+  const accounts = [
+    { instanceId: "claudeAgent_account_ab12cd34", provider: "claude", folder },
+    { instanceId: "codex_account_ab12cd34", provider: "chatgpt", folder: shadow },
+  ] as const;
+  const secondConfig = JSON.stringify({ oauthAccount: { emailAddress: "two@example.com" } });
+  const secondCodex = JSON.stringify({
+    tokens: {
+      id_token: jwt({
+        email: "two@example.com",
+        "https://api.openai.com/auth": { chatgpt_account_id: "acc-2", chatgpt_plan_type: "pro" },
+      }),
+      access_token: CODEX_TOKEN,
+    },
+  });
+
+  it("reads each from its own folder and says which instance it is", async () => {
+    const { reader, fetch } = await setup({
+      files: {
+        ...signedIn,
+        [`${folder}/.credentials.json`]: claudeCredentials(T0 + 3_600_000),
+        [`${folder}/.claude.json`]: secondConfig,
+        [`${shadow}/auth.json`]: secondCodex,
+      },
+    });
+    const { accounts: rows } = await reader.read({ homes: { ...HOMES, accounts } });
+    expect(rows.map((row) => [row.id, row.instanceId])).toEqual([
+      ["claude:misha@example.com", undefined],
+      ["chatgpt:misha@example.com", undefined],
+      ["claude:two@example.com", "claudeAgent_account_ab12cd34"],
+      ["chatgpt:two@example.com", "codex_account_ab12cd34"],
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("shows an account signed in after the last read, without waiting for the cache", async () => {
+    const { reader, fetch, files } = await setup({ files: signedIn });
+    const homes = { ...HOMES, accounts: [accounts[0]] };
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // Not signed in yet: the cache holds, nobody asks the provider again.
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    files.set(`${folder}/.credentials.json`, claudeCredentials(T0 + 3_600_000));
+    files.set(`${folder}/.claude.json`, secondConfig);
+    const { accounts: rows } = await reader.read({ homes });
+    expect(rows.map((row) => row.instanceId)).toContain("claudeAgent_account_ab12cd34");
+    expect(fetch).toHaveBeenCalledTimes(5);
+
+    await reader.read({ homes });
+    expect(fetch).toHaveBeenCalledTimes(5);
+  });
+
+  it("doesn't read a second account's email from the main sign-in", async () => {
+    const { reader } = await setup({
+      files: { ...signedIn, [`${folder}/.credentials.json`]: claudeCredentials(T0 + 3_600_000) },
+    });
+    const { accounts: rows } = await reader.read({ homes: { ...HOMES, accounts } });
+    const second = rows.find((row) => row.instanceId === "claudeAgent_account_ab12cd34");
+    expect(second?.id).toBe("claude:claudeAgent_account_ab12cd34");
+    expect(second?.email).toBeUndefined();
+  });
+
+  it("counts one account signed in twice once, as the main sign-in", async () => {
+    const { reader } = await setup({
+      files: {
+        ...signedIn,
+        [`${folder}/.credentials.json`]: claudeCredentials(T0 + 3_600_000),
+        [`${folder}/.claude.json`]: claudeConfig,
+      },
+    });
+    const { accounts: rows } = await reader.read({ homes: { ...HOMES, accounts } });
+    expect(rows.filter((row) => row.provider === "claude")).toHaveLength(1);
+    expect(rows[0]?.instanceId).toBeUndefined();
+  });
+
+  it("isn't listed before it signs in", async () => {
+    const { reader } = await setup({ files: signedIn });
+    const { accounts: rows } = await reader.read({ homes: { ...HOMES, accounts } });
+    expect(rows.map((row) => row.instanceId)).toEqual([undefined, undefined]);
+  });
+
+  it("shows an account added since the last read, without waiting for the cache", async () => {
+    const { reader, files } = await setup({ files: signedIn });
+    await reader.read({ homes: HOMES });
+    files.set(`${folder}/.credentials.json`, claudeCredentials(T0 + 3_600_000));
+    files.set(`${folder}/.claude.json`, secondConfig);
+    const { accounts: rows } = await reader.read({ homes: { ...HOMES, accounts } });
+    expect(rows.map((row) => row.email)).toContain("two@example.com");
+  });
+
+  it("asks the Mac Keychain for the folder's own item, not the main one", async () => {
+    const asked: Array<string | undefined> = [];
+    const keychain: ClaudeKeychain = {
+      exists: async (service) => {
+        asked.push(service);
+        return service !== undefined;
+      },
+      read: async (service) => {
+        asked.push(service);
+        return { raw: claudeCredentials(T0 + 3_600_000), blocked: false };
+      },
+    };
+    const { reader } = await setup({ keychain, files: {} });
+    await reader.read({ homes: { ...HOMES, accounts: [accounts[0]] } });
+    expect(new Set(asked.filter(Boolean))).toEqual(new Set([claudeKeychainService(folder)]));
+  });
+
+  it("names the Keychain item as Claude Code does: sha256 of the folder, 8 hex", () => {
+    expect(claudeKeychainService("/a")).toBe("Claude Code-credentials-6a50dc85");
+  });
+
+  it("finds them in the settings, skipping switched-off ones and plain instances", () => {
+    const providers = {
+      claudeAgent: { homePath: "" },
+      codex: { homePath: "", shadowHomePath: "" },
+    } as never;
+    const homes = planLimitsHomes(
+      {
+        providers,
+        providerInstances: {
+          claudeAgent_account_a: {
+            driver: "claudeAgent",
+            environment: [{ name: "CLAUDE_CONFIG_DIR", value: "/f/a", sensitive: false }],
+          },
+          codex_account_b: { driver: "codex", config: { shadowHomePath: "/f/b" } },
+          claudeAgent_account_off: {
+            driver: "claudeAgent",
+            enabled: false,
+            environment: [{ name: "CLAUDE_CONFIG_DIR", value: "/f/off", sensitive: false }],
+          },
+          codex_plain: { driver: "codex", config: {} },
+          opencode_x: { driver: "opencode" },
+        },
+      } as never,
+      "/home/unowork",
+      {},
+    );
+    expect(homes.accounts).toEqual([
+      { instanceId: "claudeAgent_account_a", provider: "claude", folder: "/f/a" },
+      { instanceId: "codex_account_b", provider: "chatgpt", folder: "/f/b" },
+    ]);
   });
 });
 

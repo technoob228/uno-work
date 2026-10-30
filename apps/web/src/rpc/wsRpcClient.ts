@@ -353,6 +353,11 @@ export interface WsRpcClient {
     readonly appAiSpend: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.appAiSpend>>;
     readonly appAiStatus: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.appAiStatus>>;
     readonly planLimits: RpcUnaryMethod<typeof WS_METHODS.unoComputerPlanLimits>;
+    readonly planResumeCancel: RpcUnaryMethod<typeof WS_METHODS.unoComputerPlanResumeCancel>;
+    readonly providerAccountAdd: RpcUnaryMethod<typeof WS_METHODS.unoComputerProviderAccountAdd>;
+    readonly providerAccountRemove: RpcUnaryMethod<
+      typeof WS_METHODS.unoComputerProviderAccountRemove
+    >;
     readonly workSites: () => ReturnType<RpcUnaryMethod<typeof WS_METHODS.workSites>>;
     readonly workSiteUnpublish: RpcUnaryMethod<typeof WS_METHODS.workSiteUnpublish>;
     readonly resizeOptions: (
@@ -825,6 +830,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       appAiStatus: () => transport.request((client) => client[WS_METHODS.appAiStatus]({})),
       planLimits: (input) =>
         transport.request((client) => client[WS_METHODS.unoComputerPlanLimits](input)),
+      planResumeCancel: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerPlanResumeCancel](input)),
+      providerAccountAdd: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerProviderAccountAdd](input)),
+      providerAccountRemove: (input) =>
+        transport.request((client) => client[WS_METHODS.unoComputerProviderAccountRemove](input)),
       workSites: () => transport.request((client) => client[WS_METHODS.workSites]({})),
       workSiteUnpublish: (input) =>
         transport.request((client) => client[WS_METHODS.workSiteUnpublish](input)),

@@ -125,6 +125,7 @@ import { ComputerResourcesService } from "./computerResources/ComputerResourcesS
 import { checkEmbed } from "./machineApps/embedCheck.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { PlanLimitsService } from "./planLimits/PlanLimitsService.ts";
+import { PlanResume } from "./planResume/PlanResumeService.ts";
 import { InboxService } from "./inbox/InboxService.ts";
 import { HarnessSetup } from "./provider/setup/HarnessSetupService.ts";
 import { CustomHarnessService } from "./provider/customHarness/CustomHarnessService.ts";
@@ -341,6 +342,7 @@ const makeWsRpcLayer = (
       const machineApps = yield* MachineAppsService;
       const appSdk = yield* AppSdkService;
       const planLimits = yield* PlanLimitsService;
+      const planResume = yield* PlanResume;
       const inbox = yield* InboxService;
       const computerResources = yield* ComputerResourcesService;
       const harnessSetup = yield* HarnessSetup;
@@ -1879,6 +1881,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.unoComputerPlanLimits, planLimits.read(input), {
             "rpc.aggregate": "uno-computer",
           }),
+        [WS_METHODS.unoComputerPlanResumeCancel]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerPlanResumeCancel,
+            planResume
+              .cancel(input.threadId, "person-cancelled")
+              .pipe(Effect.map((cancelled) => ({ cancelled }))),
+            { "rpc.aggregate": "uno-computer" },
+          ),
         [WS_METHODS.workSites]: (_input) =>
           observeRpcEffect(
             WS_METHODS.workSites,
@@ -2410,9 +2420,14 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "thread-continue" },
           ),
         [WS_METHODS.threadContinueComplete]: (input) =>
-          observeRpcEffect(WS_METHODS.threadContinueComplete, threadContinueComplete(input), {
-            "rpc.aggregate": "thread-continue",
-          }),
+          observeRpcEffect(
+            WS_METHODS.threadContinueComplete,
+            threadContinueComplete(input).pipe(
+              // The chat went on on another computer: it doesn't go on here too.
+              Effect.tap(() => planResume.cancel(input.threadId, "moved-to-another-computer")),
+            ),
+            { "rpc.aggregate": "thread-continue" },
+          ),
         [WS_METHODS.vcsListRefs]: (input) =>
           observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
             "rpc.aggregate": "vcs",
@@ -2649,6 +2664,18 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.providerAuthSignOut, harnessSetup.authSignOut(input), {
             "rpc.aggregate": "provider-setup",
           }),
+        [WS_METHODS.unoComputerProviderAccountAdd]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerProviderAccountAdd,
+            harnessSetup.accountAdd(input),
+            { "rpc.aggregate": "provider-setup" },
+          ),
+        [WS_METHODS.unoComputerProviderAccountRemove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.unoComputerProviderAccountRemove,
+            harnessSetup.accountRemove(input),
+            { "rpc.aggregate": "provider-setup" },
+          ),
         [WS_METHODS.providerAuthCancel]: (input) =>
           observeRpcEffect(WS_METHODS.providerAuthCancel, harnessSetup.authCancel(input), {
             "rpc.aggregate": "provider-setup",

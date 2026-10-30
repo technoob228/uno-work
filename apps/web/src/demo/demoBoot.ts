@@ -14,6 +14,7 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
+import { pendingPlanResume } from "@t3tools/shared/planLimitRules";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { HttpResponse, delay, http, ws } from "msw";
 import { setupWorker } from "msw/browser";
@@ -62,7 +63,18 @@ import {
 } from "./assist/daemon";
 import { installAssistFixtures } from "./assist/fixtures";
 import { answerVaultRpc } from "./assist/vault";
-import { planLimitsFor } from "./assist/plans";
+import {
+  addDemoAccount,
+  applyDemoPlanSettings,
+  DEMO_ACCOUNTS,
+  PLAN_LIMIT_CHAT,
+  planLimitsFor,
+  planResumeActivity,
+  planResumeEndedActivity,
+  pollDemoAuth,
+  removeDemoAccount,
+  startDemoAuth,
+} from "./assist/plans";
 import { WORLD, worldStamp } from "./assist/world";
 import "./assist/variant";
 import {
@@ -184,6 +196,11 @@ function modelFor(machine: DemoMachine): Model {
     model = readModelFor(machine) as unknown as Model;
     const world = demoWorld();
     if (world !== null) model = freshAccount(model, world === "one");
+    // The stopped chat is already waiting for the reset, as the daemon left it.
+    if (DEMO_ACCOUNTS && machine.key === "work") {
+      const stopped = model.threads.find((thread) => thread.id === PLAN_LIMIT_CHAT.id);
+      if (stopped) (stopped.activities as unknown[]).push(planResumeActivity());
+    }
     // An assistant's chats run in its own mode (Cautious → asks), as the daemon does.
     if (DEMO_ASSIST) {
       for (const thread of model.threads) {
@@ -338,6 +355,42 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
       };
     case WS_METHODS.unoComputerPlanLimits:
       return planLimitsFor(machine.key);
+    case WS_METHODS.serverUpdateSettings: {
+      if (!DEMO_ACCOUNTS) return {};
+      applyDemoPlanSettings((body as { patch?: Record<string, unknown> }).patch ?? {});
+      emitDemoConfig(machine);
+      return serverConfigFor(machine).settings;
+    }
+    case WS_METHODS.unoComputerPlanResumeCancel: {
+      const threadId = (body as { threadId?: string }).threadId ?? "";
+      const thread = modelFor(machine).threads.find((entry) => entry.id === threadId);
+      if (thread) {
+        (thread.activities as Array<Record<string, unknown>>).push(planResumeEndedActivity());
+        touch(modelFor(machine));
+        publishThread(machine, threadId);
+      }
+      return { cancelled: thread !== undefined };
+    }
+    case WS_METHODS.unoComputerProviderAccountAdd: {
+      const input = body as { driver?: "claudeAgent" | "codex"; name?: string };
+      const added = addDemoAccount(input.driver ?? "claudeAgent", input.name ?? "Personal");
+      emitDemoConfig(machine);
+      return added;
+    }
+    case WS_METHODS.unoComputerProviderAccountRemove: {
+      const removed = removeDemoAccount((body as { instanceId?: string }).instanceId ?? "");
+      emitDemoConfig(machine);
+      return removed;
+    }
+    case WS_METHODS.providerAuthStart:
+      return {
+        jobId: startDemoAuth(body as unknown as { driver: string; instanceId?: string }),
+      };
+    case WS_METHODS.providerAuthStatus: {
+      const { status, done } = pollDemoAuth((body as { jobId?: string }).jobId ?? "");
+      if (done) emitDemoConfig(machine);
+      return status;
+    }
     case WS_METHODS.unoComputerMachineApps:
       return demoMachineApps(machine);
     case WS_METHODS.workSites:
@@ -609,6 +662,7 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
       if (thread) {
         if (typeof command.title === "string") thread.title = command.title;
         if (command.pinnedAt !== undefined) thread.pinnedAt = command.pinnedAt as string | null;
+        if (command.modelSelection) thread.modelSelection = command.modelSelection as never;
       }
       break;
     case "thread.delete":
@@ -667,6 +721,13 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
           : ((command.bootstrap as { createThread?: Record<string, unknown> } | undefined)
               ?.createThread ?? null);
       let target = thread;
+      if (DEMO_ACCOUNTS && target && pendingPlanResume(target.activities as never)) {
+        // The person went on themselves: the daemon drops the wait.
+        (target.activities as unknown[]).push(planResumeEndedActivity());
+      }
+      if (DEMO_ACCOUNTS && target && command.modelSelection) {
+        target.modelSelection = command.modelSelection as never;
+      }
       if (!target && create) {
         target = {
           id: command.threadId,
@@ -1064,6 +1125,24 @@ function assistantSays(
   });
   touch(model);
   publishThread(machine, threadId);
+}
+
+/** What the daemon pushes after a settings or sign-in change. */
+function emitDemoConfig(machine: DemoMachine) {
+  const config = serverConfigFor(machine);
+  const harness = harnesses.get(machine.environmentId);
+  setTimeout(() => {
+    harness?.emitStreamValue(WS_METHODS.subscribeServerConfig, {
+      version: 1,
+      type: "settingsUpdated",
+      payload: { settings: config.settings },
+    });
+    harness?.emitStreamValue(WS_METHODS.subscribeServerConfig, {
+      version: 1,
+      type: "providerStatuses",
+      payload: { providers: config.providers },
+    });
+  }, 30);
 }
 
 function publishThread(machine: DemoMachine, threadId: string) {

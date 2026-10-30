@@ -149,6 +149,23 @@ export const buildContinueSeed = (input: ContinueSeedInput): string => {
   return [header, "", wrapHandoffPreamble(context)].join("\n");
 };
 
+/**
+ * "Continue with <account>" where the other account can't resume the session
+ * (Claude keeps transcripts per sign-in folder): the first prompt of the new
+ * session says so and carries the visible history. Null: nothing to carry.
+ */
+export const buildAccountSwitchSeed = (thread: {
+  readonly messages: ReadonlyArray<HandoffMessage>;
+}): string | null => {
+  const context = buildHandoffContext(thread, CONTINUE_HANDOFF_OPTIONS);
+  if (context === null) return null;
+  return [
+    "This chat continues in a new session on the person's other account: the earlier session can't be resumed here. The project files are as the conversation below left them.",
+    "",
+    wrapHandoffPreamble(context),
+  ].join("\n");
+};
+
 /** Note appended to a seed when the target machine runs a different model than the source did. */
 export const buildModelFallbackNote = (input: {
   readonly sourceMachineLabel: string;

@@ -54,6 +54,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
+import { instanceClaudeConfigDir } from "../providerAccounts.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
 
@@ -183,7 +184,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // is read once per instance — the registry rebuilds Claude when it
       // changes (ProviderInstanceRegistryHydration). Who Claude runs as is
       // decided by every status check and read per query.
-      const unoGatewayKey = yield* (yield* UnoGatewayKey).harnessKey();
+      // A second account (its own sign-in folder) is that account or nothing:
+      // signed out, it asks to sign in rather than runs on Uno AI.
+      const accountConfigDir = instanceClaudeConfigDir(environment);
+      const unoGatewayKey = accountConfigDir ? "" : yield* (yield* UnoGatewayKey).harnessKey();
       const unoOverlay = unoGatewayKey.length > 0 ? unoClaudeEnvironment(unoGatewayKey) : null;
       // A trial computer (free chat) has no Claude on Uno AI: the gateway says so.
       const unoAvailable =
@@ -256,7 +260,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       } else {
         yield* Deferred.succeed(unoCreditsMigrated, undefined);
       }
-      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
+      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(
+        effectiveConfig,
+        accountConfigDir,
+      );
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,

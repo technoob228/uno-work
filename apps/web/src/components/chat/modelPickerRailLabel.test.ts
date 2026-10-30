@@ -16,5 +16,6 @@ describe("model picker rail labels", () => {
     expect(modelPickerRailLabel("Codex Personal")).toBe("Codex");
     expect(modelPickerRailLabel("My research agent")).toBe("My research agent");
     expect(modelPickerRailLabel("  Hermes ")).toBe("Hermes");
+    expect(modelPickerRailLabel("Claude · Personal")).toBe("Personal");
   });
 });

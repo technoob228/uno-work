@@ -9,6 +9,7 @@
  * with {@link parseUnoWorkNote} and shows one quiet line instead.
  */
 
+import { ACCOUNT_SWITCH_NOTE_BODY, PLAN_RESUME_NOTE_BODY } from "./planLimitRules.ts";
 import { turnAutoRetryNoteLine } from "./turnErrorRetry.ts";
 
 /** Marks a message the computer (not the person) put into a chat for its agent. */
@@ -152,6 +153,7 @@ export function lateSecretMessage(input: {
 export type UnoWorkNote =
   | { readonly kind: "assistant-bot-connected"; readonly text: string }
   | { readonly kind: "auto-retry"; readonly text: string }
+  | { readonly kind: "plan-resume"; readonly text: string }
   | { readonly kind: "secret-saved"; readonly name: string; readonly text: string }
   | { readonly kind: "secret-declined"; readonly name: string; readonly text: string }
   | { readonly kind: "work-update"; readonly text: string }
@@ -229,6 +231,12 @@ export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const autoRetry = turnAutoRetryNoteLine(body);
   if (autoRetry !== null) return { kind: "auto-retry", text: autoRetry };
+  if (body === PLAN_RESUME_NOTE_BODY) {
+    return { kind: "plan-resume", text: "Your plan's limit reset. The chat went on by itself." };
+  }
+  if (body === ACCOUNT_SWITCH_NOTE_BODY) {
+    return { kind: "plan-resume", text: "Continued with your other account." };
+  }
   const bot =
     /^The person connected the assistant's own Telegram bot (@[A-Za-z0-9_]+|its bot)\./.exec(body);
   if (bot) {

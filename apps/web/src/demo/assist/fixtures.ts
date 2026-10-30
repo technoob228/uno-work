@@ -330,7 +330,7 @@ export function installAssistFixtures(world: AssistWorld) {
   const live = world.account === "live";
   const projects = live ? liveProjects() : newProjects();
   const chats = live ? liveChats(world) : [];
-  if (live && world.plans === "full") {
+  if (live && (world.plans === "full" || world.plans === "accounts")) {
     chats.push({
       ...PLAN_LIMIT_CHAT,
       project: "p-work-landing",

@@ -141,6 +141,7 @@ import { UnoComputerService } from "./workspaceRegistry/UnoComputerService.ts";
 import { FilesService } from "./files/FilesService.ts";
 import { FilesRecentService } from "./files/FilesRecentService.ts";
 import { PlanLimitsService } from "./planLimits/PlanLimitsService.ts";
+import { PlanResume } from "./planResume/PlanResumeService.ts";
 import { MachineAppsService } from "./machineApps/MachineAppsService.ts";
 import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
@@ -730,6 +731,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(MachineAppsService)({}),
           Layer.mock(AppSdkService)({}),
           Layer.mock(PlanLimitsService)({}),
+          Layer.mock(PlanResume)({}),
           Layer.mock(ConnectorsService)({
             list: () =>
               Effect.succeed({ available: false, reason: "sign_in_required", connectors: [] }),

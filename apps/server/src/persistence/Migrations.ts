@@ -66,6 +66,7 @@ import Migration0049 from "./Migrations/049_ThreadAgentsClosed.ts";
 import Migration0050 from "./Migrations/050_ManagerConnectorPendingReplies.ts";
 import Migration0052 from "./Migrations/052_ProjectionThreadsLastVisited.ts";
 import Migration0053 from "./Migrations/053_ThreadOwner.ts";
+import Migration0054 from "./Migrations/054_PlanResumes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -133,6 +134,7 @@ export const migrationEntries = [
   // recorded it as 51 and run it again as 53: it is written to be a no-op there.
   [52, "ProjectionThreadsLastVisited", Migration0052],
   [53, "ThreadOwner", Migration0053],
+  [54, "PlanResumes", Migration0054],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

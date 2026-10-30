@@ -2960,6 +2960,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                 claudeSettings.homePath.trim().length > 0
                   ? nodePath.resolve(expandHomePath(claudeSettings.homePath.trim()))
                   : input.harnessSandbox.home,
+              configDir: options?.environment?.CLAUDE_CONFIG_DIR ?? null,
               workDirs: input.harnessSandbox.writableDirs,
             }),
           }

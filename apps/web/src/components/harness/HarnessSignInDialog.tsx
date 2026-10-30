@@ -47,6 +47,8 @@ export interface HarnessSignInPanelProps {
   readonly onSubmitCode: (code: string) => void;
   /** Forget the finished job so the panel starts over. */
   readonly onReset: () => void;
+  /** A second account: its plan's sign-in only, no API key. */
+  readonly accountOnly?: boolean;
 }
 
 export interface HarnessSignInDialogProps extends HarnessSignInPanelProps {
@@ -82,9 +84,14 @@ const CODE_CHECKER: Readonly<Record<ProviderAuthDriver, string>> = {
 };
 
 /** One-line lead for the sign-in surface, shared by the dialog and the picker pane. */
-export function describeSignInState(label: string, job: AuthJobView | undefined): string {
-  return job?.state === "succeeded"
-    ? `${label} is signed in on this machine.`
+export function describeSignInState(
+  label: string,
+  job: AuthJobView | undefined,
+  accountOnly = false,
+): string {
+  if (job?.state === "succeeded") return `${label} is signed in on this machine.`;
+  return accountOnly
+    ? "Sign in with the account you want to add."
     : `Use your own ${label} account, or an API key.`;
 }
 
@@ -99,6 +106,7 @@ export function HarnessSignInPanel({
   onSubmitCode,
   onReset,
   onCancel,
+  accountOnly,
   className,
 }: Omit<HarnessSignInPanelProps, "label"> & { readonly className?: string }) {
   const [apiKey, setApiKey] = useState("");
@@ -340,31 +348,33 @@ export function HarnessSignInPanel({
             <span className="text-[11px] text-muted-foreground">{ACCOUNT_HINT[driver]}</span>
           </div>
 
-          <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
-            <label className="text-xs font-medium" htmlFor={`harness-key-${driver}`}>
-              Or use an API key
-            </label>
-            <div className="flex items-center gap-2">
-              <Input
-                id={`harness-key-${driver}`}
-                type="password"
-                value={apiKey}
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="sk-…"
-                autoComplete="off"
-                spellCheck={false}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={apiKey.trim().length === 0}
-                onClick={() => onStart({ method: "apiKey", apiKey: apiKey.trim() })}
-              >
-                Connect
-              </Button>
+          {accountOnly ? null : (
+            <div className="flex flex-col gap-1.5 border-t border-border/60 pt-3">
+              <label className="text-xs font-medium" htmlFor={`harness-key-${driver}`}>
+                Or use an API key
+              </label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id={`harness-key-${driver}`}
+                  type="password"
+                  value={apiKey}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  placeholder="sk-…"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={apiKey.trim().length === 0}
+                  onClick={() => onStart({ method: "apiKey", apiKey: apiKey.trim() })}
+                >
+                  Connect
+                </Button>
+              </div>
+              <span className="text-[11px] text-muted-foreground">{API_KEY_HINT[driver]}</span>
             </div>
-            <span className="text-[11px] text-muted-foreground">{API_KEY_HINT[driver]}</span>
-          </div>
+          )}
         </div>
       )}
 
@@ -408,6 +418,7 @@ export function HarnessSignInDialog({
   onSubmitCode,
   onReset,
   onCancel,
+  accountOnly,
 }: HarnessSignInDialogProps) {
   // Remount the panel when the dialog closes so its inputs start empty next time.
   const [panelKey, setPanelKey] = useState(0);
@@ -423,7 +434,7 @@ export function HarnessSignInDialog({
       <DialogPopup className="max-w-md">
         <DialogHeader>
           <DialogTitle>Sign in to {label}</DialogTitle>
-          <DialogDescription>{describeSignInState(label, job)}</DialogDescription>
+          <DialogDescription>{describeSignInState(label, job, accountOnly)}</DialogDescription>
         </DialogHeader>
 
         <HarnessSignInPanel
@@ -434,6 +445,7 @@ export function HarnessSignInDialog({
           onSubmitCode={onSubmitCode}
           onReset={onReset}
           {...(onCancel ? { onCancel } : {})}
+          {...(accountOnly ? { accountOnly: true } : {})}
           className="px-4 pb-2 sm:px-6"
         />
 

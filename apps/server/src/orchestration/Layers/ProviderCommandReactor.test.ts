@@ -1853,6 +1853,67 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("full-access");
   });
 
+  it("moves a chat to the person's other account: fresh session, history in the prompt", async () => {
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-4-6",
+      },
+    });
+    const now = new Date().toISOString();
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-account-1"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-account-1"),
+          role: "user",
+          text: "Fix the login page",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    const otherAccount = ProviderInstanceId.make("claudeAgent_account_ab12cd34");
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-account-2"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-account-2"),
+          role: "user",
+          text: "(Uno Work) Continue where you left off.",
+          attachments: [],
+        },
+        modelSelection: { instanceId: otherAccount, model: "claude-opus-4-6" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+
+    expect(harness.stopSession.mock.calls.length).toBe(1);
+    const started = harness.startSession.mock.calls[1]?.[1] as {
+      readonly providerInstanceId?: string;
+      readonly resumeCursor?: unknown;
+    };
+    expect(started.providerInstanceId).toBe(otherAccount);
+    expect(started.resumeCursor).toBeUndefined();
+    const input = (harness.sendTurn.mock.calls[1]?.[0] as { input?: string }).input ?? "";
+    expect(input).toContain("on the person's other account");
+    expect(input).toContain("User: Fix the login page");
+    expect(input.endsWith("(Uno Work) Continue where you left off.")).toBe(true);
+    // The note itself is the last thing said, not part of the carried history.
+    expect(input.indexOf("User: (Uno Work)")).toBe(-1);
+  });
+
   it("rejects provider changes after a thread is already bound to a session provider", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();

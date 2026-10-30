@@ -1,4 +1,8 @@
-import { ProviderDriverKind, type ProviderSetupJobId } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type ProviderInstanceId,
+  type ProviderSetupJobId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -178,6 +182,93 @@ describe("install jobs", () => {
   it("reports unknown job ids", () => {
     const harness = makeHarness();
     expect(() => harness.runner.installStatus({ jobId: jobId("nope") })).toThrow(/Unknown/);
+  });
+});
+
+describe("a second account's sign-in", () => {
+  const instanceId = "claudeAgent_account_ab12cd34" as ProviderInstanceId;
+  const folderEnv = { CLAUDE_CONFIG_DIR: "/home/unowork/.uno-accounts/x" };
+
+  const harnessForAccount = () => {
+    const asked: Array<ProviderInstanceId | undefined> = [];
+    const refreshed: Array<ProviderInstanceId | undefined> = [];
+    const harness = makeHarness({
+      resolveCliEnvironment: async (_driver, instance) => {
+        asked.push(instance);
+        return { binaryPath: "claude", env: instance ? folderEnv : {} };
+      },
+      refreshProvider: async (_driver, instance) => {
+        refreshed.push(instance);
+      },
+    });
+    return { harness, asked, refreshed };
+  };
+
+  it("runs the CLI in that account's folder and refreshes that account", async () => {
+    const { harness, asked, refreshed } = harnessForAccount();
+    harness.runner.authStart({ driver: "claudeAgent", method: "oauth", instanceId });
+    await tick();
+    expect(asked).toEqual([instanceId]);
+    expect(harness.latest().input.env.CLAUDE_CONFIG_DIR).toBe(folderEnv.CLAUDE_CONFIG_DIR);
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await harness.runner.drain();
+    expect(refreshed).toEqual([instanceId]);
+  });
+
+  it("waits next to the main sign-in, not instead of it", async () => {
+    const { harness } = harnessForAccount();
+    const main = harness.runner.authStart({ driver: "claudeAgent", method: "oauth" });
+    await tick();
+    const second = harness.runner.authStart({ driver: "claudeAgent", method: "oauth", instanceId });
+    await tick();
+    expect(second.jobId).not.toBe(main.jobId);
+    expect(harness.processes).toHaveLength(2);
+    expect(harness.runner.authStatus({ jobId: main.jobId }).state).toBe("running");
+    expect(harness.runner.authStatus({ jobId: second.jobId }).driver).toBe("claudeAgent");
+
+    expect(harness.runner.authCancel({ driver: "claudeAgent", instanceId }).cancelled).toBe(true);
+    expect(harness.runner.authStatus({ jobId: main.jobId }).state).toBe("running");
+  });
+
+  it("hands the same sign-in back when the page asks again", async () => {
+    const { harness } = harnessForAccount();
+    const first = harness.runner.authStart({ driver: "claudeAgent", method: "oauth", instanceId });
+    await tick();
+    const again = harness.runner.authStart({ driver: "claudeAgent", method: "oauth", instanceId });
+    expect(again).toEqual({ jobId: first.jobId, resumed: true });
+  });
+
+  it("is a plan's sign-in, not an API key", () => {
+    const { harness } = harnessForAccount();
+    expect(() =>
+      harness.runner.authStart({
+        driver: "claudeAgent",
+        method: "apiKey",
+        apiKey: "sk-x",
+        instanceId,
+      }),
+    ).toThrow(/plan, not an API key/);
+  });
+
+  it("signs out of that folder and leaves the main stored key alone", async () => {
+    let keyRemoved = false;
+    const harness = makeHarness({
+      resolveCliEnvironment: async (_driver, instance) => ({
+        binaryPath: "claude",
+        env: instance ? folderEnv : {},
+      }),
+      removeClaudeApiKey: async () => {
+        keyRemoved = true;
+        return true;
+      },
+    });
+    const signOut = harness.runner.authSignOut({ driver: "claudeAgent", instanceId });
+    await tick(8);
+    expect(harness.latest().input.args).toEqual(["auth", "logout"]);
+    expect(harness.latest().input.env.CLAUDE_CONFIG_DIR).toBe(folderEnv.CLAUDE_CONFIG_DIR);
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await expect(signOut).resolves.toEqual({ driver: "claudeAgent", signedOut: true });
+    expect(keyRemoved).toBe(false);
   });
 });
 

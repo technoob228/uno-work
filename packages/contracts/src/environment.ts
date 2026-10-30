@@ -69,6 +69,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server answers `uno.computer.planLimits` (Home's "AI plan limits",
       0.0.157). Absent: clients don't offer the widget for this computer. */
   planLimits: Schema.optionalKey(Schema.Boolean),
+  /** A chat stopped at the plan's limit goes on by itself after the reset:
+      `resumeAfterPlanLimit` in server settings, `uno.computer.planResumeCancel`. */
+  planResume: Schema.optionalKey(Schema.Boolean),
+  /** Second Claude / ChatGPT accounts: `multipleAccounts` in server settings,
+      `uno.computer.providerAccountAdd|Remove`, sign-in by instance. */
+  providerAccounts: Schema.optionalKey(Schema.Boolean),
   /** The daemon cleans chat copies (worktrees) itself: `storageCleanup` in
       server settings, `uno.computer.worktreeCleanup*` RPCs, and the copy of a
       deleted chat is removed on the server (0.0.157). Absent: clients hide

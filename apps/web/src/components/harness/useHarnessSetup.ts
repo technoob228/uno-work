@@ -21,6 +21,7 @@ import {
   type ProviderAuthMethod,
   type ProviderDriverKind,
   type ProviderInstallJobStatus,
+  type ProviderInstanceId,
 } from "@t3tools/contracts";
 
 import { getPrimaryEnvironmentConnection, readEnvironmentConnection } from "~/environments/runtime";
@@ -100,20 +101,28 @@ export function useHarnessSetup(
   options: {
     /** What a sign-in that lands here also changes (useAdoptSignedInAgent). */
     readonly adopt?: AdoptSignedInAgentOptions;
+    /**
+     * A second account's provider instance: every job here is that account's
+     * own, and its sign-in changes nothing about what new chats start on.
+     */
+    readonly instanceId?: ProviderInstanceId;
   } = {},
 ): HarnessSetupApi {
+  const instanceId = options.instanceId;
+  const instanceInput = useMemo(() => (instanceId ? { instanceId } : {}), [instanceId]);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const environmentId = explicitEnvironmentId ?? null;
   const refreshTargetId = explicitEnvironmentId ?? primaryEnvironmentId;
   // A sign-in finished here: new chats start on that agent, and Claude's
   // plan powers the assistant too — one sign-in for both (P2/P3, 28.10).
   const adopt = useAdoptSignedInAgent(refreshTargetId, options.adopt);
+  const onSignedIn = instanceId ? null : adopt;
   const onSignedInRef = useRef<
     ((driver: ProviderAuthDriver, method: ProviderAuthMethod) => void) | null
-  >(adopt);
+  >(onSignedIn);
   useEffect(() => {
-    onSignedInRef.current = adopt;
-  }, [adopt]);
+    onSignedInRef.current = onSignedIn;
+  }, [onSignedIn]);
 
   const [installJobs, setInstallJobs] = useState<Record<string, InstallJobView | undefined>>({});
   const [authJobs, setAuthJobs] = useState<Record<string, AuthJobView | undefined>>({});
@@ -127,13 +136,13 @@ export function useHarnessSetup(
       if (!refreshTargetId) return;
       void refreshEnvironmentProviders(
         refreshTargetId,
-        defaultInstanceIdForDriver(driver as ProviderDriverKind),
+        instanceId ?? defaultInstanceIdForDriver(driver as ProviderDriverKind),
       ).catch(() => {
         // A refresh that fails is not worth interrupting the flow for; the
         // daemon re-probes on its own schedule anyway.
       });
     },
-    [refreshTargetId],
+    [instanceId, refreshTargetId],
   );
 
   const startInstall = useCallback(
@@ -193,6 +202,7 @@ export function useHarnessSetup(
         const { jobId } = await client.providerSetup.authStart({
           driver,
           method,
+          ...instanceInput,
           ...(apiKey ? { apiKey } : {}),
           ...(restart ? { restart: true } : {}),
         });
@@ -213,7 +223,7 @@ export function useHarnessSetup(
         }));
       }
     },
-    [environmentId],
+    [environmentId, instanceInput],
   );
 
   const cancelAuth = useCallback<HarnessSetupApi["cancelAuth"]>(
@@ -221,12 +231,12 @@ export function useHarnessSetup(
       authIds.current.delete(driver);
       setAuthJobs((current) => ({ ...current, [driver]: undefined }));
       try {
-        await resolveClient(environmentId).providerSetup.authCancel({ driver });
+        await resolveClient(environmentId).providerSetup.authCancel({ driver, ...instanceInput });
       } catch {
         // An older daemon has no cancel: its sign-in times out by itself.
       }
     },
-    [environmentId],
+    [environmentId, instanceInput],
   );
 
   const submitAuthCode = useCallback<HarnessSetupApi["submitAuthCode"]>(
@@ -266,11 +276,17 @@ export function useHarnessSetup(
         // drop it, and Submit then did nothing). If it still waits on the
         // computer, it comes back as the same job and takes the code.
         try {
-          const resumed = await client.providerSetup.authStart({ driver, method: "oauth" });
+          const resumed = await client.providerSetup.authStart({
+            driver,
+            method: "oauth",
+            ...instanceInput,
+          });
           if (!resumed.resumed) {
             // Nothing was waiting: the code belongs to a sign-in that is gone.
             // Stop the one this just started; "Try again" begins cleanly.
-            await client.providerSetup.authCancel({ driver }).catch(() => undefined);
+            await client.providerSetup
+              .authCancel({ driver, ...instanceInput })
+              .catch(() => undefined);
             failSubmit(LOST_SIGN_IN_MESSAGE, true);
             return;
           }
@@ -297,14 +313,14 @@ export function useHarnessSetup(
         failSubmit(lost ? LOST_SIGN_IN_MESSAGE : errorMessage(error), lost);
       }
     },
-    [environmentId],
+    [environmentId, instanceInput],
   );
 
   const signOut = useCallback<HarnessSetupApi["signOut"]>(
     async (driver) => {
       try {
         const client = resolveClient(environmentId);
-        const result = await client.providerSetup.authSignOut({ driver });
+        const result = await client.providerSetup.authSignOut({ driver, ...instanceInput });
         authIds.current.delete(driver);
         setAuthJobs((current) => ({ ...current, [driver]: undefined }));
         refreshProviders(driver);
@@ -315,7 +331,7 @@ export function useHarnessSetup(
         return { signedOut: false, error: errorMessage(error) };
       }
     },
-    [environmentId, refreshProviders],
+    [environmentId, instanceInput, refreshProviders],
   );
 
   const clearAuth = useCallback((driver: ProviderAuthDriver) => {

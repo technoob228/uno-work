@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Home's "AI plan limits": how much of the person's own Claude (Claude Code)
@@ -45,6 +45,12 @@ export const PlanLimitsAccount = Schema.Struct({
   /** `claude:<email>` / `chatgpt:<email>` — stable across reads. */
   id: TrimmedNonEmptyString,
   provider: Schema.Literals(["claude", "chatgpt"]),
+  /**
+   * A second account on this computer (Settings → AI → "Use more than one
+   * account"): the provider instance it signs in. Absent: the computer's main
+   * sign-in.
+   */
+  instanceId: Schema.optional(TrimmedNonEmptyString),
   /** "Max 20x", "Pro", "Plus" — without the provider's name. */
   plan: Schema.optional(TrimmedNonEmptyString),
   email: Schema.optional(TrimmedNonEmptyString),
@@ -71,3 +77,14 @@ export const PlanLimits = Schema.Struct({
   accounts: Schema.Array(PlanLimitsAccount),
 });
 export type PlanLimits = typeof PlanLimits.Type;
+
+/** "Resumes at 16:40 · Cancel": the chat stays stopped until the person goes on. */
+export const PlanResumeCancelInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type PlanResumeCancelInput = typeof PlanResumeCancelInput.Type;
+
+export const PlanResumeCancelResult = Schema.Struct({
+  cancelled: Schema.Boolean,
+});
+export type PlanResumeCancelResult = typeof PlanResumeCancelResult.Type;

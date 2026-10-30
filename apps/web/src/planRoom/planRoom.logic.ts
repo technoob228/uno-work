@@ -16,79 +16,45 @@
  *
  * T3 deliberately does NOT switch between several accounts of one provider
  * on one machine (their FAQ: an auto-switcher risks the providers' terms).
- * Uno Work doesn't either: one sign-in per provider per computer, and "move
- * the chat to the computer whose plan has room" is a suggestion by default
- * (`planLimitSwitch: "ask"`).
+ * Uno Work doesn't either: a second account on a computer (Settings → AI →
+ * "Use more than one account", off by default) is used only by a button
+ * ({@link otherAccountWithRoom}) and is never a target of "Switch by itself",
+ * which moves a new chat only between the person's computers, to their main
+ * sign-ins. That move is a suggestion by default (`planLimitSwitch: "ask"`).
  *
  * Pure, so the rules are unit-tested without React (planRoom.logic.test.ts).
  */
-import type { EnvironmentId, PlanLimitsAccount, PlanLimitsWindow } from "@t3tools/contracts";
+import type { EnvironmentId, PlanLimitsAccount } from "@t3tools/contracts";
+import {
+  blocksWork,
+  isPlanLimitText,
+  planAtLimit,
+  planAccountForInstance,
+  planLimitResetFromText,
+  planProviderForDriver,
+  DRIVER_BY_PLAN_PROVIDER,
+  usedNow,
+  type PlanLimitHit,
+  type PlanProvider,
+} from "@t3tools/shared/planLimitRules";
 
-export type PlanProvider = PlanLimitsAccount["provider"];
+export {
+  DRIVER_BY_PLAN_PROVIDER,
+  isPlanLimitText,
+  pendingPlanResume,
+  planAtLimit,
+  planLimitResetFromText,
+  planProviderForDriver,
+  type PlanLimitHit,
+  type PlanProvider,
+} from "@t3tools/shared/planLimitRules";
 
-/** The plan a harness runs on when signed in with the person's own account. */
-const PLAN_PROVIDER_BY_DRIVER: Readonly<Record<string, PlanProvider>> = {
-  claudeAgent: "claude",
-  codex: "chatgpt",
-};
-
-/** The harness a plan belongs to, the other way round. */
-export const DRIVER_BY_PLAN_PROVIDER: Readonly<Record<PlanProvider, string>> = {
-  claude: "claudeAgent",
-  chatgpt: "codex",
-};
+const HOUR_MS = 60 * 60_000;
 
 export const PLAN_PROVIDER_NAME: Readonly<Record<PlanProvider, string>> = {
   claude: "Claude",
   chatgpt: "ChatGPT",
 };
-
-/** Null for a harness without a plan of its own (Uno AI, OpenCode, Hermes…). */
-export function planProviderForDriver(driver: string | null | undefined): PlanProvider | null {
-  return driver ? (PLAN_PROVIDER_BY_DRIVER[driver] ?? null) : null;
-}
-
-/** Extra usage (pay-as-you-go spend) isn't a wall: the plan itself still runs. */
-function blocksWork(window: PlanLimitsWindow): boolean {
-  return window.id !== "monthly_spend";
-}
-
-function resetMs(window: PlanLimitsWindow): number | null {
-  const at = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-  return Number.isFinite(at) ? at : null;
-}
-
-/** A window whose reset already passed is empty again, whatever the old number says. */
-function usedNow(window: PlanLimitsWindow, now: number): number {
-  const at = resetMs(window);
-  return at !== null && at <= now ? 0 : window.usedPercent;
-}
-
-export interface PlanLimitHit {
-  readonly window: PlanLimitsWindow;
-  /** When work can go on: the latest reset among the full windows (null: not said). */
-  readonly resetsAt: string | null;
-}
-
-/**
- * Is this account at its limit now (upstream `exhaustedUsageWindow`)? Every
- * window at 100% that hasn't reset yet; work goes on when the last of them
- * resets — a full weekly window outlasts a full 5-hour one.
- */
-export function planAtLimit(account: PlanLimitsAccount, now: number): PlanLimitHit | null {
-  const full = account.windows.filter(
-    (window) => blocksWork(window) && usedNow(window, now) >= 100,
-  );
-  if (full.length === 0) return null;
-  let latest: PlanLimitsWindow | null = null;
-  for (const window of full) {
-    const at = resetMs(window);
-    if (at === null) continue;
-    if (latest === null || at > (resetMs(latest) ?? 0)) latest = window;
-  }
-  const window = latest ?? full[0]!;
-  return { window, resetsAt: latest?.resetsAt ?? null };
-}
 
 /**
  * Room left on the account now, 0–100: what the fullest window has left (a
@@ -157,7 +123,8 @@ function findAlternative(input: {
   let best: PlanAlternative | null = null;
   for (const computer of input.computers) {
     if (computer.environmentId === input.currentEnvironmentId || !computer.connected) continue;
-    const account = computer.accounts?.find((candidate) => candidate.provider === input.provider);
+    // Its main sign-in only: a second account is used by a button, never by a move.
+    const account = planAccountForInstance(computer.accounts ?? [], input.provider, null);
     if (!account || planAtLimit(account, input.now)) continue;
     if (input.blocked && sameAccount(account, input.blocked)) continue;
     // No numbers (a fresh sign-in): room is likely, but less sure than a known number.
@@ -184,6 +151,8 @@ function findAlternative(input: {
 export function pickComputerForNewChat(input: {
   readonly currentEnvironmentId: EnvironmentId;
   readonly provider: PlanProvider | null;
+  /** The provider instance picked: a second account has limits of its own. */
+  readonly instanceId?: string | null | undefined;
   readonly computers: ReadonlyArray<PlanComputer>;
   readonly now: number;
 }): NewChatPlanRoom {
@@ -192,7 +161,7 @@ export function pickComputerForNewChat(input: {
   const current = input.computers.find(
     (computer) => computer.environmentId === input.currentEnvironmentId,
   );
-  const blocked = current?.accounts?.find((account) => account.provider === provider);
+  const blocked = planAccountForInstance(current?.accounts ?? [], provider, input.instanceId);
   if (!current || !blocked) return { kind: "ok" };
   const hit = planAtLimit(blocked, now);
   if (!hit) return { kind: "ok" };
@@ -212,6 +181,39 @@ export function pickComputerForNewChat(input: {
     resetsAt: hit.resetsAt,
     alternative: best,
   };
+}
+
+export interface OtherAccount {
+  readonly instanceId: string;
+  readonly account: PlanLimitsAccount;
+  readonly roomPercent: number;
+}
+
+/**
+ * Another account of `provider` signed in on this computer, with room now:
+ * the one with the most. What "Continue with <account>" offers; nothing here
+ * ever acts on it by itself.
+ */
+export function otherAccountWithRoom(input: {
+  readonly accounts: ReadonlyArray<PlanLimitsAccount> | null;
+  readonly provider: PlanProvider;
+  readonly blocked: PlanLimitsAccount | null;
+  readonly now: number;
+}): OtherAccount | null {
+  let best: OtherAccount | null = null;
+  for (const account of input.accounts ?? []) {
+    if (account.provider !== input.provider || planAtLimit(account, input.now)) continue;
+    if (input.blocked && account.id === input.blocked.id) continue;
+    const roomPercent = planRoomPercent(account, input.now) ?? 1;
+    if (best === null || roomPercent > best.roomPercent) {
+      best = {
+        instanceId: account.instanceId ?? DRIVER_BY_PLAN_PROVIDER[input.provider],
+        account,
+        roomPercent,
+      };
+    }
+  }
+  return best;
 }
 
 // ── Pooled view (Settings → AI → "Your AI plans") ─────────────────────
@@ -302,85 +304,14 @@ export function poolPlans(
 
 // ── A chat that stopped at the plan's limit ───────────────────────────
 
-/**
- * The CLIs' own words when the plan is out (Claude Code: "You've hit your
- * limit · resets 3pm", "5-hour limit reached ∙ resets 3pm", older "Claude AI
- * usage limit reached|<unix>"; Codex: "You've hit your usage limit … try
- * again at 3:05 PM"). Not "approaching the limit" warnings, not the Uno
- * gateway's own "busy" (turnErrorRetry).
- */
-const PLAN_LIMIT_PATTERNS: ReadonlyArray<RegExp> = [
-  /\busage[ _]limit[ _]reached\b/i,
-  /\bhit your (?:\w+[ -])?limit\b/i,
-  /\b(?:5-hour|five-hour|session|weekly|opus|sonnet|daily|monthly) limit reached\b/i,
-  /\bout of (?:extra )?usage\b/i,
-];
-const NOT_YET = /\bapproaching\b|\bnearing\b|\bclose to\b/i;
-
-/** Texts this long are an answer that mentions limits, not the CLI's stop line. */
-const MAX_LIMIT_LINE = 600;
-
-export function isPlanLimitText(text: string | null | undefined): boolean {
-  if (!text || text.length > MAX_LIMIT_LINE) return false;
-  if (NOT_YET.test(text)) return false;
-  return PLAN_LIMIT_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-const HOUR_MS = 60 * 60_000;
-
-/**
- * When the stop line says work resumes: `|<unix seconds>`, "in 2 hours 5
- * minutes", or "resets 3pm" / "try again at 3:05 PM" (the next such time,
- * in this browser's time zone — the CLI's own zone in brackets is ignored).
- * Null when it doesn't say.
- */
-export function planLimitResetFromText(text: string, now: number): string | null {
-  const epoch = /\|\s*(\d{10,13})\b/.exec(text);
-  if (epoch?.[1]) {
-    const raw = Number(epoch[1]);
-    const at = raw > 1e12 ? raw : raw * 1000;
-    if (at > now) return new Date(at).toISOString();
-  }
-  const relative = /\b(?:try again|resets?|available again)\s+in\s+([^.;)]+)/i.exec(text);
-  if (relative?.[1]) {
-    let total = 0;
-    for (const match of relative[1].matchAll(
-      /(\d+(?:\.\d+)?)\s*(days?|d|hours?|hrs?|h|minutes?|mins?|m)\b/gi,
-    )) {
-      const amount = Number(match[1]);
-      const unit = (match[2] ?? "").toLowerCase();
-      if (unit.startsWith("d")) total += amount * 24 * HOUR_MS;
-      else if (unit.startsWith("h")) total += amount * HOUR_MS;
-      else total += amount * 60_000;
-    }
-    if (total > 0) return new Date(now + total).toISOString();
-  }
-  const clock =
-    /\b(?:resets?|try again at|available again at)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(
-      text,
-    );
-  if (clock?.[1]) {
-    let hour = Number(clock[1]);
-    const minute = clock[2] ? Number(clock[2]) : 0;
-    const meridiem = clock[3]!.toLowerCase();
-    if (hour >= 1 && hour <= 12 && minute <= 59) {
-      if (meridiem === "pm" && hour < 12) hour += 12;
-      if (meridiem === "am" && hour === 12) hour = 0;
-      const at = new Date(now);
-      at.setHours(hour, minute, 0, 0);
-      if (at.getTime() <= now) at.setDate(at.getDate() + 1);
-      return at.toISOString();
-    }
-  }
-  return null;
-}
-
 export interface ChatPlanLimit {
   readonly provider: PlanProvider;
   readonly computerName: string;
   /** From the computer's plan numbers first, else from the stop line. */
   readonly resetsAt: string | null;
   readonly alternative: PlanAlternative | null;
+  /** Another account on this computer with room: "Continue with <account>". */
+  readonly otherAccount: OtherAccount | null;
 }
 
 /**
@@ -391,6 +322,8 @@ export interface ChatPlanLimit {
  */
 export function chatPlanLimit(input: {
   readonly driver: string | null;
+  /** The provider instance the chat runs on: a second account has limits of its own. */
+  readonly instanceId?: string | null | undefined;
   readonly stopText: string | null;
   /** When the chat stopped (the turn's end); the stop line's "3pm" is read from then. */
   readonly stoppedAt?: string | null;
@@ -406,7 +339,18 @@ export function chatPlanLimit(input: {
   const room = pickComputerForNewChat({
     currentEnvironmentId: input.currentEnvironmentId,
     provider,
+    instanceId: input.instanceId,
     computers: input.computers,
+    now: input.now,
+  });
+  const here = input.computers.find(
+    (computer) => computer.environmentId === input.currentEnvironmentId,
+  );
+  const hereAccount = planAccountForInstance(here?.accounts ?? [], provider, input.instanceId);
+  const otherAccount = otherAccountWithRoom({
+    accounts: here?.accounts ?? null,
+    provider,
+    blocked: hereAccount,
     now: input.now,
   });
   if (room.kind === "full") {
@@ -415,12 +359,9 @@ export function chatPlanLimit(input: {
       computerName: room.computerName,
       resetsAt: room.resetsAt ?? textReset,
       alternative: room.alternative,
+      otherAccount,
     };
   }
-  const here = input.computers.find(
-    (computer) => computer.environmentId === input.currentEnvironmentId,
-  );
-  const hereAccount = here?.accounts?.find((account) => account.provider === provider) ?? null;
   // The plan is back: numbers read after the stop say there's room, or the
   // reset the stop line named has passed, or (saying nothing) a 5-hour window has.
   const readAfterStop = hereAccount?.checkedAt
@@ -442,10 +383,22 @@ export function chatPlanLimit(input: {
       computers: input.computers,
       now: input.now,
     }),
+    otherAccount,
   };
 }
 
 // ── Words ─────────────────────────────────────────────────────────────
+
+/** "Resumes at 3:00 PM" / "Resumes Fri 3:00 PM"; null once the time has passed. */
+export function planResumeLine(
+  resumeAt: string,
+  now: number,
+  format: { readonly locale?: string; readonly timeZone?: string } = {},
+): string | null {
+  const until = planUntilText(resumeAt, now, format);
+  if (until === null) return null;
+  return /^\d/.test(until) ? `Resumes at ${until}` : `Resumes ${until}`;
+}
 
 /** "3:00 PM" today, "Fri 3:00 PM" this week, "Nov 3, 3:00 PM" later. */
 export function planUntilText(

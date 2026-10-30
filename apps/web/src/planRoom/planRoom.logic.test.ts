@@ -4,11 +4,13 @@ import { describe, expect, it } from "vitest";
 import {
   chatPlanLimit,
   isPlanLimitText,
+  otherAccountWithRoom,
   pickComputerForNewChat,
   planAtLimit,
   planFullLine,
   planLimitResetFromText,
   planProviderForDriver,
+  planResumeLine,
   planRoomPercent,
   planStartedOnLine,
   poolPlans,
@@ -390,6 +392,114 @@ describe("chatPlanLimit", () => {
         now: NOW,
       }),
     ).toBeNull();
+  });
+});
+
+describe("a second account on one computer", () => {
+  const SECOND = "claudeAgent_account_ab12cd34";
+  const mainFull = claude("main@x.io", 100);
+  const secondRoom = claude("two@x.io", 30, 20, { instanceId: SECOND });
+  const stopText = "You've hit your limit · resets 3pm";
+
+  it("finds the other account with room, for a chat on the main one", () => {
+    const other = otherAccountWithRoom({
+      accounts: [mainFull, secondRoom],
+      provider: "claude",
+      blocked: mainFull,
+      now: NOW,
+    });
+    expect(other?.instanceId).toBe(SECOND);
+    expect(other?.account.email).toBe("two@x.io");
+  });
+
+  it("offers the main account to a chat on the second one", () => {
+    const other = otherAccountWithRoom({
+      accounts: [claude("main@x.io", 10), claude("two@x.io", 100, 20, { instanceId: SECOND })],
+      provider: "claude",
+      blocked: claude("two@x.io", 100, 20, { instanceId: SECOND }),
+      now: NOW,
+    });
+    expect(other?.instanceId).toBe("claudeAgent");
+  });
+
+  it("offers nothing when the other one is at its limit too, or is another provider", () => {
+    expect(
+      otherAccountWithRoom({
+        accounts: [mainFull, claude("two@x.io", 100, 20, { instanceId: SECOND })],
+        provider: "claude",
+        blocked: mainFull,
+        now: NOW,
+      }),
+    ).toBeNull();
+    expect(
+      otherAccountWithRoom({
+        accounts: [mainFull, { ...secondRoom, provider: "chatgpt" }],
+        provider: "claude",
+        blocked: mainFull,
+        now: NOW,
+      }),
+    ).toBeNull();
+  });
+
+  it("puts it on a stopped chat, next to the computers", () => {
+    const limit = chatPlanLimit({
+      driver: "claudeAgent",
+      instanceId: "claudeAgent",
+      stopText,
+      stoppedAt: at(-1),
+      currentEnvironmentId: WORK,
+      computers: [computer(WORK, "uno-work", [mainFull, secondRoom])],
+      now: NOW,
+    });
+    expect(limit?.otherAccount?.instanceId).toBe(SECOND);
+  });
+
+  it("reads a chat on the second account by that account's limits, not the main one's", () => {
+    const room = pickComputerForNewChat({
+      currentEnvironmentId: WORK,
+      provider: "claude",
+      instanceId: SECOND,
+      computers: [computer(WORK, "uno-work", [mainFull, secondRoom])],
+      now: NOW,
+    });
+    expect(room).toEqual({ kind: "ok" });
+  });
+
+  it("is never where Switch by itself goes: only another computer's main sign-in", () => {
+    const room = pickComputerForNewChat({
+      currentEnvironmentId: WORK,
+      provider: "claude",
+      computers: [
+        computer(WORK, "uno-work", [mainFull]),
+        // MacBook: its main sign-in is full, a second account there has room.
+        computer(MAC, "MacBook", [claude("mac@x.io", 100), secondRoom]),
+      ],
+      now: NOW,
+    });
+    expect(room).toMatchObject({ kind: "full", alternative: null });
+  });
+
+  it("and the computer's own second account isn't a move either", () => {
+    const room = pickComputerForNewChat({
+      currentEnvironmentId: WORK,
+      provider: "claude",
+      computers: [computer(WORK, "uno-work", [mainFull, secondRoom])],
+      now: NOW,
+    });
+    expect(room).toMatchObject({ kind: "full", alternative: null });
+  });
+});
+
+describe("planResumeLine", () => {
+  const format = { locale: "en-US", timeZone: "UTC" };
+
+  it("says when, later today or on another day", () => {
+    expect(planResumeLine(at(60), NOW, format)).toMatch(/^Resumes at \d/);
+    expect(planResumeLine(at(60 * 24 * 2), NOW, format)).toMatch(/^Resumes [A-Z][a-z]{2} /);
+  });
+
+  it("says nothing once the time has passed", () => {
+    expect(planResumeLine(at(-1), NOW, format)).toBeNull();
   });
 });
 
