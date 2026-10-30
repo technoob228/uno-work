@@ -2,15 +2,20 @@ import {
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   chatFileRejection,
   chatUploadIncomingRelativePath,
   displayUploadPath,
   routeComposerFiles,
+  stageChatFileUpload,
 } from "./chatUploads";
+import type { ComposerFileAttachment } from "./composerDraftStore";
+import { ensureEnvironmentApi } from "./environmentApi";
 import { PROJECT_UPLOAD_MAX_FILE_BYTES } from "./projectUpload";
+
+vi.mock("./environmentApi", () => ({ ensureEnvironmentApi: vi.fn() }));
 
 const entry = (name: string, type: string, size = 10) => ({ name, type, size });
 const isVideo = (file: { type: string }) => file.type.startsWith("video/");
@@ -74,9 +79,61 @@ describe("any safe file can be attached", () => {
 describe("chatFileRejection", () => {
   it("only refuses files over the upload limit", () => {
     expect(chatFileRejection({ name: "a.zip", size: 1 })).toBeNull();
+    expect(chatFileRejection({ name: "a.zip", size: 10 * 1024 ** 3 })).toBeNull();
     expect(
       chatFileRejection({ name: "a.zip", size: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1 }),
     ).toContain("a.zip");
+  });
+});
+
+describe("stageChatFileUpload", () => {
+  const attachment = {
+    type: "file",
+    id: "file-1",
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    sizeBytes: 4,
+    file: new File(["data"], "report.pdf"),
+  } as ComposerFileAttachment;
+
+  const writes: Array<{ contents: string; relativePath: string; mode?: string }> = [];
+  const ensureSpace = vi.fn(async () => ({}));
+  let failWrite: Error | null = null;
+
+  beforeEach(() => {
+    writes.length = 0;
+    failWrite = null;
+    ensureSpace.mockReset().mockResolvedValue({});
+    vi.mocked(ensureEnvironmentApi).mockReturnValue({
+      projects: {
+        writeFile: async (input: (typeof writes)[number]) => {
+          writes.push(input);
+          if (failWrite && input.contents !== "") throw failWrite;
+          return { relativePath: input.relativePath };
+        },
+      },
+      files: { ensureSpace },
+    } as unknown as ReturnType<typeof ensureEnvironmentApi>);
+  });
+
+  it("checks the disk, then stages into the hidden folder", async () => {
+    const staged = await stageChatFileUpload("env" as never, attachment);
+    expect(ensureSpace).toHaveBeenCalledWith({ path: "~", bytes: 4 });
+    expect(writes[0]?.relativePath).toBe(chatUploadIncomingRelativePath(staged.uploadId));
+  });
+
+  it("says a full disk at once, without sending anything", async () => {
+    const refusal = new Error("Not enough space on this computer: needs 4 B, 1 B free.");
+    ensureSpace.mockRejectedValue(refusal);
+    await expect(stageChatFileUpload("env" as never, attachment)).rejects.toBe(refusal);
+    expect(writes.filter((write) => write.contents !== "")).toEqual([]);
+  });
+
+  it("gives back the room when the disk fills up on the way", async () => {
+    failWrite = new Error("Not enough space on this computer. Free up space or pick fewer files.");
+    await expect(stageChatFileUpload("env" as never, attachment)).rejects.toBe(failWrite);
+    expect(writes.at(-1)?.contents).toBe("");
+    expect(writes.at(-1)?.relativePath).toBe(writes[0]?.relativePath);
   });
 });
 

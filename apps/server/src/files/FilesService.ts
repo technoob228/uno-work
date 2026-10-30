@@ -34,6 +34,9 @@ import {
   type FilesStatInput,
   type FilesCloudBucket,
   type FilesCloudCopyToCloudInput,
+  type FilesCloudUploadStepInput,
+  type FilesCloudUploadStepResult,
+  type FilesEnsureSpaceInput,
   type FilesCloudCopyToComputerInput,
   type FilesCloudCreateBucketInput,
   type FilesCloudDeleteResult,
@@ -103,10 +106,12 @@ import {
   cloudList,
   cloudPresign,
   cloudState,
+  cloudUploadStep,
   copyToCloud,
   copyToComputer,
   type CloudDeps,
 } from "./cloudStorage.ts";
+import { ensureDiskSpace, spaceCheckPath } from "./diskSpace.ts";
 import { CLOUD_OFFICE_STAGING_DIR, openCloudOffice, saveCloudOffice } from "./cloudOffice.ts";
 import { listCloudOfficeVersions } from "./officeVersions.ts";
 import { publishToUnoHosting } from "./sitePublish.ts";
@@ -158,6 +163,12 @@ export interface FilesServiceShape {
   readonly cloudCopyToCloud: (
     input: FilesCloudCopyToCloudInput,
   ) => Effect.Effect<FilesCloudTransferResult, FilesError>;
+  /** One step of a browser's upload straight to storage (cloudStorage.ts). */
+  readonly cloudUploadStep: (
+    input: FilesCloudUploadStepInput,
+  ) => Effect.Effect<FilesCloudUploadStepResult, FilesError>;
+  /** Fails with a message for the person when the bytes won't fit (diskSpace.ts). */
+  readonly ensureSpace: (input: FilesEnsureSpaceInput) => Effect.Effect<{}, FilesError>;
   readonly cloudCopyToComputer: (
     input: FilesCloudCopyToComputerInput,
   ) => Effect.Effect<FilesCloudTransferResult, FilesError>;
@@ -666,6 +677,13 @@ export const makeFilesService = (
           url: await cloudPresign(deps, input.bucketId, input.key, "get"),
         })),
       cloudCopyToCloud: cloudCopyToCloudEffect,
+      cloudUploadStep: (input) =>
+        withCloud("Couldn't reach Cloud storage.", (deps) => cloudUploadStep(deps, input)),
+      ensureSpace: (input) =>
+        withRoot("Couldn't check the free space.", async (root) => {
+          await ensureDiskSpace(spaceCheckPath(root, input.path), input.bytes);
+          return {};
+        }),
       cloudCopyToComputer: cloudCopyToComputerEffect,
       rootPath,
       list,

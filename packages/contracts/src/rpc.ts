@@ -135,6 +135,9 @@ import {
   FilesCloudDeleteResult,
   FilesCloudDownloadUrl,
   FilesCloudCopyToCloudInput,
+  FilesCloudUploadStepInput,
+  FilesCloudUploadStepResult,
+  FilesEnsureSpaceInput,
   FilesCloudCopyToComputerInput,
   FilesCloudOfficeOpenInput,
   FilesCloudOfficeOpened,
@@ -558,6 +561,8 @@ export const WS_METHODS = {
   filesCloudDelete: "files.cloud.delete",
   filesCloudDownloadUrl: "files.cloud.downloadUrl",
   filesCloudCopyToCloud: "files.cloud.copyToCloud",
+  filesCloudUploadStep: "files.cloud.uploadStep",
+  filesEnsureSpace: "files.ensureSpace",
   filesCloudCopyToComputer: "files.cloud.copyToComputer",
   filesCloudOfficeOpen: "files.cloud.officeOpen",
   filesCloudOfficeSave: "files.cloud.officeSave",
@@ -1960,6 +1965,18 @@ export const WsFilesCloudCopyToCloudRpc = Rpc.make(WS_METHODS.filesCloudCopyToCl
   error: FilesError,
 });
 
+export const WsFilesCloudUploadStepRpc = Rpc.make(WS_METHODS.filesCloudUploadStep, {
+  payload: FilesCloudUploadStepInput,
+  success: FilesCloudUploadStepResult,
+  error: FilesError,
+});
+
+export const WsFilesEnsureSpaceRpc = Rpc.make(WS_METHODS.filesEnsureSpace, {
+  payload: FilesEnsureSpaceInput,
+  success: Schema.Struct({}),
+  error: FilesError,
+});
+
 export const WsFilesCloudCopyToComputerRpc = Rpc.make(WS_METHODS.filesCloudCopyToComputer, {
   payload: FilesCloudCopyToComputerInput,
   success: FilesCloudTransferResult,
@@ -2262,6 +2279,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesCloudDeleteRpc,
   WsFilesCloudDownloadUrlRpc,
   WsFilesCloudCopyToCloudRpc,
+  WsFilesCloudUploadStepRpc,
+  WsFilesEnsureSpaceRpc,
   WsFilesCloudCopyToComputerRpc,
   WsFilesCloudOfficeOpenRpc,
   WsFilesCloudOfficeSaveRpc,
