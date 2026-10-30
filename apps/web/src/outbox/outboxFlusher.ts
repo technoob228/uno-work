@@ -5,6 +5,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 
+import { isElectron } from "../env";
 import { readEnvironmentApi } from "../environmentApi";
 import { readPrimaryEnvironmentDescriptor } from "../environments/primary";
 import { useSavedEnvironmentRuntimeStore } from "../environments/runtime/catalog";
@@ -32,7 +33,11 @@ const OUTBOX_RETRY_COOLDOWN_MS = 2_500;
 export function isEnvironmentLinkUp(environmentId: EnvironmentId): boolean {
   const connection = readEnvironmentConnection(environmentId);
   if (!connection || !connection.isConnectionHealthy()) return false;
-  if (environmentId === readPrimaryEnvironmentDescriptor()?.environmentId) {
+  const primary = environmentId === readPrimaryEnvironmentDescriptor()?.environmentId;
+  // The device has no network: a socket takes ~40 s to notice, and until then a
+  // message looked sent. The Mac app's own computer needs no network.
+  if (navigator.onLine === false && !(primary && isElectron)) return false;
+  if (primary) {
     return getWsConnectionStatus().phase === "connected";
   }
   const saved = useSavedEnvironmentRuntimeStore.getState().byId[environmentId];

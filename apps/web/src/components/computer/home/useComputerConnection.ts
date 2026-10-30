@@ -9,6 +9,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
+import { isElectron } from "../../../env";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
 import { useSavedEnvironmentRuntimeStore } from "../../../environments/runtime";
 import { useReconnectEnvironment } from "../../../hooks/useReconnectEnvironment";
@@ -53,7 +54,8 @@ function usePrimaryFacts(): Facts {
           ? "down"
           : "first",
     downSince: parseTime(ws.disconnectedAt),
-    networkOnline: ws.online,
+    // The Mac app's own computer needs no network.
+    networkOnline: ws.online || isElectron,
     economy,
     signInNeeded: false,
   };
@@ -109,7 +111,8 @@ export function useComputerConnection(environmentId: EnvironmentId | null): Comp
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const [primaryRetrying, setPrimaryRetrying] = useState(false);
 
-  const down = facts.link !== "connected";
+  // The device says it has no network: the socket would take ~40 s to notice.
+  const down = facts.link !== "connected" || !facts.networkOnline;
   const [clock, setClock] = useState(() => ({
     now: Date.now(),
     seenDownAt: null as number | null,

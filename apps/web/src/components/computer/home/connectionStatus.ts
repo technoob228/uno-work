@@ -118,7 +118,7 @@ export function describeConnection(facts: ConnectionFacts): ConnectionStatus {
       action: "wake",
     };
   }
-  if (facts.link === "connected") return CONNECTED;
+  if (facts.link === "connected" && facts.networkOnline) return CONNECTED;
 
   // Unknown start of the outage: count it from now, i.e. a fresh short drop.
   const since = facts.downSince ?? facts.now;

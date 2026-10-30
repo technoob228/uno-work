@@ -87,6 +87,16 @@ describe("describeConnection — said quietly in the computer chip", () => {
     expect(describeConnection({ ...downFor(1_000), networkOnline: false }).chip).toBeNull();
   });
 
+  it("the device lost its network: Offline after the grace, before the socket notices", () => {
+    expect(
+      describeConnection({
+        ...downFor(CONNECTION_GRACE_MS + 1_000),
+        link: "connected",
+        networkOnline: false,
+      }),
+    ).toMatchObject({ kind: "no-network", chip: "Offline" });
+  });
+
   it("an economy computer resting while you're away is Asleep, with Wake up in the menu", () => {
     expect(describeConnection(facts({ economy: "sleeping" }))).toMatchObject({
       kind: "asleep",
