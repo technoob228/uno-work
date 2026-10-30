@@ -6,6 +6,7 @@
  * here and takes them back when it leaves. `null` for an action: it makes no
  * sense in this chat (no project for a terminal, not a git project for
  * Changes) — the launcher hides the tile rather than showing it off.
+ * `saved`: a draft has no automations yet.
  */
 import { create } from "zustand";
 
@@ -13,6 +14,7 @@ export interface ChatPanelActions {
   readonly threadId: string;
   readonly openTerminal: (() => void) | null;
   readonly openChanges: (() => void) | null;
+  readonly saved: boolean;
 }
 
 interface ChatPanelActionsStore {

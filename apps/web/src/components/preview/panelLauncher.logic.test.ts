@@ -19,6 +19,7 @@ const everything: LauncherContext = {
   agentBrowserOn: "uno-product",
   hasComputer: true,
   canOpenChanges: true,
+  canOpenAutomations: true,
 };
 
 const ids = (context: LauncherContext) => visibleLauncherTiles(context).map((tile) => tile.id);
@@ -27,7 +28,14 @@ const tile = (context: LauncherContext, id: string) =>
 
 describe("visibleLauncherTiles", () => {
   it("a git project chat on a cloud computer: Your site first, the agent's browser last", () => {
-    expect(ids(everything)).toEqual(["site", "files", "changes", "apps", "agentBrowser"]);
+    expect(ids(everything)).toEqual([
+      "site",
+      "files",
+      "changes",
+      "apps",
+      "automations",
+      "agentBrowser",
+    ]);
   });
 
   it("no Terminal tile: it opens at the bottom of the chat", () => {
@@ -59,6 +67,7 @@ describe("visibleLauncherTiles", () => {
       "files",
       "changes",
       "apps",
+      "automations",
     ]);
   });
 
@@ -68,6 +77,7 @@ describe("visibleLauncherTiles", () => {
         agentBrowserOn: null,
         hasComputer: false,
         canOpenChanges: false,
+        canOpenAutomations: false,
       }),
     ).toEqual(["site", "apps"]);
   });
@@ -75,6 +85,7 @@ describe("visibleLauncherTiles", () => {
   it("no computer: no Files; not a git project: no Changes", () => {
     expect(ids({ ...everything, hasComputer: false })).not.toContain("files");
     expect(ids({ ...everything, canOpenChanges: false })).not.toContain("changes");
+    expect(ids({ ...everything, canOpenAutomations: false })).not.toContain("automations");
   });
 
   it("every tile has its own letter: B for the local browser, R for the agent's", () => {
@@ -106,6 +117,7 @@ describe("launcherTileForKey", () => {
     expect(key("F")).toBe("files");
     expect(key("c")).toBe("changes");
     expect(key("a")).toBe("apps");
+    expect(key("m")).toBe("automations");
   });
 
   it("a letter of a hidden tile, a shortcut with a modifier, or another key does nothing", () => {

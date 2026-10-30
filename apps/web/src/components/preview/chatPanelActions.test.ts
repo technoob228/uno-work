@@ -9,7 +9,7 @@ describe("chat panel actions", () => {
 
   it("a chat leaving takes back only its own actions", () => {
     const { publish, withdraw } = useChatPanelActionsStore.getState();
-    publish({ threadId: "b", openTerminal: () => {}, openChanges: null });
+    publish({ threadId: "b", openTerminal: () => {}, openChanges: null, saved: true });
     // Chat A unmounts after chat B already published (chat → chat).
     withdraw("a");
     expect(useChatPanelActionsStore.getState().actions?.threadId).toBe("b");

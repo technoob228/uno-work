@@ -2208,10 +2208,12 @@ export default function ChatView(props: ChatViewProps) {
             if (!diffOpen) onToggleDiff();
           }
         : null,
+      saved: isServerThread,
     });
   }, [
     changesAvailable,
     diffOpen,
+    isServerThread,
     onToggleDiff,
     panelActionsThreadId,
     publishChatPanelActions,

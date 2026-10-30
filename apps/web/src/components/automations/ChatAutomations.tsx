@@ -1,11 +1,12 @@
 /**
- * The automations of one chat (29.10, T3's ThreadAutomationsPanel): a clock
- * in the chat's header — with how many run here — opens the list: a dot for
+ * The automations of one chat (29.10, T3's ThreadAutomationsPanel): the list
+ * lives in the Panel, and a clock in the chat's header — with how many run
+ * here — opens it too once the chat has some (Misha 30.10). A row: a dot for
  * how it is, its name, when it runs and how soon, Run now, Edit, on/off, and
  * "New automation" (this chat runs it by default; a new chat each time is
  * the other choice). Shown only where the computer has Automations (a cloud
  * computer, the account's switch on). The list is asked again only while
- * the panel is open.
+ * it is open.
  */
 import {
   type Automation,
@@ -135,57 +136,158 @@ function AutomationRow(props: {
   );
 }
 
-/** The clock in a chat's header and its panel. Nothing where Automations aren't. */
+export interface ChatAutomationsHere {
+  readonly environmentId: EnvironmentId;
+  readonly chat: AutomationChatContext;
+  /** The ones that run in this chat. */
+  readonly automations: ReadonlyArray<Automation>;
+}
+
+/** A chat's automations; null where there are none to have (no such chat, no Automations). */
+export function useChatAutomations(
+  environmentId: EnvironmentId | null,
+  threadId: string | null,
+  /** On screen: asked often. */
+  live: boolean,
+): ChatAutomationsHere | null {
+  const list = useQuery({
+    queryKey: [...AUTOMATIONS_KEY, "list", environmentId],
+    queryFn: () => listAutomations({ environmentId: environmentId as EnvironmentId }),
+    enabled: environmentId !== null,
+    // The same cache as the Automations screen; asked often only while open.
+    staleTime: 60_000,
+    retry: false,
+    refetchInterval: live ? 5_000 : false,
+  });
+  // Primitives only: a new object per render would loop the store.
+  const shell = useStore((state) =>
+    environmentId && threadId
+      ? (selectEnvironmentState(state, environmentId).threadShellById[threadId as ThreadId] ?? null)
+      : null,
+  );
+  const projectName = useStore((state) =>
+    environmentId && shell
+      ? (selectEnvironmentState(state, environmentId).projectById[shell.projectId]?.name ?? null)
+      : null,
+  );
+  if (list.data?.available !== true || environmentId === null || shell === null) return null;
+  return {
+    environmentId,
+    chat: {
+      environmentId,
+      threadId: threadId as ThreadId,
+      title: shell.title,
+      projectId: shell.projectId,
+      projectTitle: projectName ?? "this project",
+    },
+    automations: list.data.automations.filter((a) => automationRunsInChat(a, threadId as ThreadId)),
+  };
+}
+
+/** The list: the same in the header's clock and in the Panel. */
+function ChatAutomationsList(props: {
+  readonly here: ChatAutomationsHere;
+  /** A row's Edit, or New automation (null). */
+  readonly onEdit: (automation: Automation | null) => void;
+  /** Leaving for All automations. */
+  readonly onLeave?: () => void;
+}) {
+  const { here } = props;
+  const navigate = useNavigate();
+  return (
+    <div className="flex flex-col gap-2" data-testid="chat-automations-panel">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold">Automations in this chat</span>
+        <button
+          type="button"
+          className="cursor-pointer text-xs text-muted-foreground hover:text-foreground hover:underline"
+          onClick={() => {
+            props.onLeave?.();
+            void navigate({ to: "/automations" });
+          }}
+          data-testid="chat-automations-all"
+        >
+          All automations
+        </button>
+      </div>
+      {here.automations.length > 0 ? (
+        <ul className="divide-y divide-border/70 rounded-md border border-border/70">
+          {here.automations.map((automation) => (
+            <AutomationRow
+              key={automation.id}
+              automation={automation}
+              environmentId={here.environmentId}
+              onEdit={() => props.onEdit(automation)}
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="chat-automations-empty">
+          Nothing runs here on its own yet. Say it in the chat — “every weekday at 9, sum up what
+          changed” — or set one up.
+        </p>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        className="self-start"
+        onClick={() => props.onEdit(null)}
+        data-testid="chat-automations-new"
+      >
+        <PlusIcon className="size-3.5" /> New automation
+      </Button>
+    </div>
+  );
+}
+
+/** Stays on screen after the list that asked for it has closed. */
+function ChatAutomationDialog(props: {
+  readonly here: ChatAutomationsHere;
+  readonly dialog: { automation: Automation | null } | null;
+  readonly onClose: () => void;
+}) {
+  return (
+    <AutomationDialog
+      open={props.dialog !== null}
+      onClose={props.onClose}
+      choices={[]}
+      chat={props.here.chat}
+      automation={props.dialog?.automation ?? null}
+      automationEnvironmentId={props.here.environmentId}
+    />
+  );
+}
+
+/** The list in the Panel. */
+export function ChatAutomationsInPanel(props: { readonly here: ChatAutomationsHere }) {
+  const [dialog, setDialog] = useState<{ automation: Automation | null } | null>(null);
+  return (
+    <>
+      <ChatAutomationsList here={props.here} onEdit={(automation) => setDialog({ automation })} />
+      <ChatAutomationDialog here={props.here} dialog={dialog} onClose={() => setDialog(null)} />
+    </>
+  );
+}
+
+/** The clock in a chat's header: only once the chat has automations. */
 export function ChatAutomationsButton(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
 }) {
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<{ automation: Automation | null } | null>(null);
-  const navigate = useNavigate();
-  const list = useQuery({
-    queryKey: [...AUTOMATIONS_KEY, "list", props.environmentId],
-    queryFn: () => listAutomations({ environmentId: props.environmentId }),
-    // The same cache as the Automations screen; asked often only while open.
-    staleTime: 60_000,
-    retry: false,
-    refetchInterval: open ? 5_000 : false,
-  });
-  // Primitives only: a new object per render would loop the store.
-  const shell = useStore(
-    (state) =>
-      selectEnvironmentState(state, props.environmentId).threadShellById[props.threadId] ?? null,
-  );
-  const projectName = useStore((state) =>
-    shell
-      ? (selectEnvironmentState(state, props.environmentId).projectById[shell.projectId]?.name ??
-        null)
-      : null,
-  );
-  const chat: AutomationChatContext | null = shell
-    ? {
-        environmentId: props.environmentId,
-        threadId: props.threadId,
-        title: shell.title,
-        projectId: shell.projectId,
-        projectTitle: projectName ?? "this project",
-      }
-    : null;
-  if (list.data?.available !== true || chat === null) return null;
-  const mine = list.data.automations.filter((a) => automationRunsInChat(a, props.threadId));
-  const active = mine.filter((a) => a.enabled).length;
+  const here = useChatAutomations(props.environmentId, props.threadId, open);
+  if (here === null || here.automations.length === 0) return null;
+  const count = here.automations.length;
+  const active = here.automations.filter((a) => a.enabled).length;
 
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           data-testid="chat-automations-button"
-          data-count={mine.length}
-          title={
-            mine.length > 0
-              ? `${mine.length} automation${mine.length === 1 ? "" : "s"} in this chat`
-              : "Automations: make this chat do something on its own"
-          }
+          data-count={count}
+          title={`${count} automation${count === 1 ? "" : "s"} in this chat`}
           aria-label="Automations in this chat"
           className={cn(
             "inline-flex h-7 min-w-7 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-md border border-input px-[calc(--spacing(1)-1px)] text-xs shadow-xs/5 hover:bg-accent hover:text-foreground sm:h-6 sm:min-w-6",
@@ -193,71 +295,22 @@ export function ChatAutomationsButton(props: {
           )}
         >
           <AlarmClockIcon className="size-3.5" />
-          {mine.length > 0 ? (
-            <span className="pr-0.5 tabular-nums" data-testid="chat-automations-count">
-              {mine.length}
-            </span>
-          ) : null}
+          <span className="pr-0.5 tabular-nums" data-testid="chat-automations-count">
+            {count}
+          </span>
         </PopoverTrigger>
-        <PopoverPopup align="end" className="w-[24rem]" data-testid="chat-automations-panel">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-semibold">Automations in this chat</span>
-              <button
-                type="button"
-                className="cursor-pointer text-xs text-muted-foreground hover:text-foreground hover:underline"
-                onClick={() => {
-                  setOpen(false);
-                  void navigate({ to: "/automations" });
-                }}
-                data-testid="chat-automations-all"
-              >
-                All automations
-              </button>
-            </div>
-            {mine.length > 0 ? (
-              <ul className="divide-y divide-border/70 rounded-md border border-border/70">
-                {mine.map((automation) => (
-                  <AutomationRow
-                    key={automation.id}
-                    automation={automation}
-                    environmentId={props.environmentId}
-                    onEdit={() => {
-                      setOpen(false);
-                      setDialog({ automation });
-                    }}
-                  />
-                ))}
-              </ul>
-            ) : (
-              <p className="text-xs text-muted-foreground" data-testid="chat-automations-empty">
-                Nothing runs here on its own yet. Say it in the chat — “every weekday at 9, sum up
-                what changed” — or set one up.
-              </p>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="self-start"
-              onClick={() => {
-                setOpen(false);
-                setDialog({ automation: null });
-              }}
-              data-testid="chat-automations-new"
-            >
-              <PlusIcon className="size-3.5" /> New automation
-            </Button>
-          </div>
+        <PopoverPopup align="end" className="w-[24rem]">
+          <ChatAutomationsList
+            here={here}
+            onLeave={() => setOpen(false)}
+            onEdit={(automation) => {
+              setOpen(false);
+              setDialog({ automation });
+            }}
+          />
         </PopoverPopup>
       </Popover>
-      <AutomationDialog
-        open={dialog !== null}
-        onClose={() => setDialog(null)}
-        choices={[]}
-        chat={chat}
-        automation={dialog?.automation ?? null}
-        automationEnvironmentId={props.environmentId}
-      />
+      <ChatAutomationDialog here={here} dialog={dialog} onClose={() => setDialog(null)} />
     </>
   );
 }

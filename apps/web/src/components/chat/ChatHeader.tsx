@@ -359,7 +359,7 @@ export const ChatHeader = memo(function ChatHeader({
         ) : isAssistantChat ? (
           <UnoModeChip environmentId={activeThreadEnvironmentId} compact={isMobile} />
         ) : null}
-        {/* S5 29.10: the chat's automations (a clock; nothing where they aren't on). */}
+        {/* The chat's automations, once it has some (Misha 30.10); else they live in the Panel. */}
         {draftId ? null : (
           <ChatAutomationsButton
             environmentId={activeThreadEnvironmentId}
@@ -420,9 +420,8 @@ export const ChatHeader = memo(function ChatHeader({
             {...(draftId ? { draftId } : {})}
           />
         )}
-        {/* Terminal is a developer tool (29.10: Dev mode only; the panel's
-            launcher and ctrl+` still open it); a phone keeps the room for the title. */}
-        {isMobile || !devMode ? null : (
+        {/* Terminal for everyone (Misha 30.10); a phone keeps the room for the title. */}
+        {isMobile ? null : (
           <Foldable id="terminal" folded={folded}>
             <Tooltip>
               <TooltipTrigger
@@ -527,7 +526,7 @@ export const ChatHeader = memo(function ChatHeader({
                   Started by Uno — open Uno's chat
                 </MenuItem>
               ) : null}
-              {isFolded("terminal") && !isMobile && devMode ? (
+              {isFolded("terminal") && !isMobile ? (
                 <MenuCheckboxItem
                   checked={terminalOpen}
                   onCheckedChange={onToggleTerminal}

@@ -23,7 +23,7 @@
  */
 import type { ProgramStatus } from "../computer/programModel";
 
-export type LauncherTileId = "site" | "agentBrowser" | "files" | "changes" | "apps";
+export type LauncherTileId = "site" | "agentBrowser" | "files" | "changes" | "apps" | "automations";
 
 export interface LauncherTileCopy {
   readonly id: LauncherTileId;
@@ -47,6 +47,12 @@ export const LAUNCHER_TILES: ReadonlyArray<LauncherTileCopy> = [
   { id: "files", name: "Files", key: "F", description: "Browse the computer's files" },
   { id: "changes", name: "Changes", key: "C", description: "What the agent changed" },
   { id: "apps", name: "Apps", key: "A", description: "Your apps and sites" },
+  {
+    id: "automations",
+    name: "Automations",
+    key: "M",
+    description: "What this chat does on its own",
+  },
   // Secondary (Misha 16.10, 21:15): your browser is the default; the agent's
   // browser comes last and quieter.
   {
@@ -70,6 +76,8 @@ export interface LauncherContext {
   readonly hasComputer: boolean;
   /** The chat on screen is a saved chat in a git project (its Changes panel). */
   readonly canOpenChanges: boolean;
+  /** The chat on screen is a saved chat on a computer with Automations. */
+  readonly canOpenAutomations: boolean;
 }
 
 export function visibleLauncherTiles(context: LauncherContext): LauncherTileCopy[] {
@@ -85,6 +93,8 @@ export function visibleLauncherTiles(context: LauncherContext): LauncherTileCopy
         return context.hasComputer;
       case "changes":
         return context.canOpenChanges;
+      case "automations":
+        return context.canOpenAutomations;
     }
     return false;
   });

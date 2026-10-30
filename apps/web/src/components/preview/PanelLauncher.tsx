@@ -4,20 +4,22 @@
  * Tiles — Your site (always first: the person's site in this device's
  * browser, one Comment button for notes and errors), Agent's browser (the
  * chat computer's: the agent works there, the person signs in for it),
- * Files, Changes, Apps — each opening the thing that already exists (rules:
- * `panelLauncher.logic.ts`). A letter opens a tile while the launcher has
- * focus, like t3's empty right panel.
+ * Files, Changes, Apps, Automations — each opening the thing that already
+ * exists (rules: `panelLauncher.logic.ts`). A letter opens a tile while the
+ * launcher has focus, like t3's empty right panel.
  *
  * Apps opens a list right here (← All goes back): the apps of every
  * computer and the person's sites; a pick opens as a tab beside the chat,
  * everything else about them stays on Apps & sites. With no apps the list
- * says how to get one.
+ * says how to get one. Automations opens the chat's own list right here the
+ * same way: the header shows them only once the chat has some (Misha 30.10).
  *
  * Behind the Labs flag `panelLauncherV2`; without it the panel shows the
  * launcher of 0.0.137 (`LegacyPanelLauncher.tsx`).
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
+  AlarmClockIcon,
   ArrowLeftIcon,
   DiffIcon,
   FolderIcon,
@@ -42,6 +44,7 @@ import { useIsMobile } from "../../hooks/useMediaQuery";
 import { useFeatureFlag } from "../../hooks/useFeatureFlags";
 import { useMachineLabels } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
+import { ChatAutomationsInPanel, useChatAutomations } from "../automations/ChatAutomations";
 import { ProgramIcon } from "../computer/ComputerPrograms";
 import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { siteRows } from "../sites/sitesModel";
@@ -71,9 +74,10 @@ const TILE_ICON: Record<LauncherTileId, typeof GlobeIcon> = {
   files: FolderIcon,
   changes: DiffIcon,
   apps: LayoutGridIcon,
+  automations: AlarmClockIcon,
 };
 
-type LauncherView = "tiles" | "apps";
+type LauncherView = "tiles" | "apps" | "automations";
 
 type PanelLauncherProps = Parameters<typeof LegacyPanelLauncher>[0];
 
@@ -126,7 +130,14 @@ function PanelLauncherV2({
   const apps = useLauncherApps();
   const sitesQuery = useWorkSites(machine.environmentId);
   const composerRef = useComposerHandleContext();
-  const [view, setView] = useState<LauncherView>("tiles");
+  const [picked, setView] = useState<LauncherView>("tiles");
+  const chatAutomations = useChatAutomations(
+    chatActions?.saved ? currentChatEnvironmentId : null,
+    currentChatThreadId,
+    picked === "automations",
+  );
+  // Another chat came on screen and has no Automations: back to the tiles.
+  const view = picked === "automations" && chatAutomations === null ? "tiles" : picked;
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -159,6 +170,7 @@ function PanelLauncherV2({
     agentBrowserOn: agentComputer,
     hasComputer: environmentId !== null,
     canOpenChanges: chatActions?.openChanges != null,
+    canOpenAutomations: chatAutomations !== null,
   });
 
   const open = (id: LauncherTileId): void => {
@@ -188,7 +200,8 @@ function PanelLauncherV2({
         onOpenedElsewhere();
         return;
       case "apps":
-        setView("apps");
+      case "automations":
+        setView(id);
         return;
     }
   };
@@ -231,6 +244,16 @@ function PanelLauncherV2({
   // Couldn't ask any computer: say so rather than "no apps yet".
   const appsFailed = nothingListed && apps.failed;
   const noApps = nothingListed && !apps.failed;
+  const backToTiles = (
+    <button
+      type="button"
+      onClick={() => setView("tiles")}
+      className="mb-2 inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+    >
+      <ArrowLeftIcon className="size-3.5" />
+      All
+    </button>
+  );
 
   return (
     <div
@@ -308,16 +331,14 @@ function PanelLauncherV2({
             })}
           </ul>
         </>
+      ) : view === "automations" && chatAutomations ? (
+        <>
+          {backToTiles}
+          <ChatAutomationsInPanel here={chatAutomations} />
+        </>
       ) : (
         <>
-          <button
-            type="button"
-            onClick={() => setView("tiles")}
-            className="mb-2 inline-flex w-fit cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-3.5" />
-            All
-          </button>
+          {backToTiles}
           <SectionTitle>Apps</SectionTitle>
           {appsFailed ? (
             <p
