@@ -189,46 +189,51 @@ function ProjectActions(props: { readonly project: Project }) {
         </Button>
       }
     >
-      {project.scripts.length > 0 ? (
-        <div className="mt-2 flex flex-col pb-3">
-          {project.scripts.map((script) => (
-            <button
-              key={script.id}
-              type="button"
-              className="-mx-2 flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
-              onClick={() =>
-                setDraft({
-                  id: script.id,
-                  name: script.name,
-                  command: script.command,
-                  runOnWorktreeCreate: script.runOnWorktreeCreate,
-                  runOnSettle: script.runOnSettle === true,
-                })
-              }
-            >
-              <span className="shrink-0 font-medium">{script.name}</span>
-              <code className="min-w-0 truncate font-mono text-muted-foreground">
-                {script.command}
-              </code>
-              {script.runOnWorktreeCreate ? (
-                <Badge variant="outline" className="ml-auto shrink-0">
-                  On copy
-                </Badge>
-              ) : null}
-              {script.runOnSettle ? (
-                <Badge
-                  variant="outline"
-                  className={script.runOnWorktreeCreate ? "shrink-0" : "ml-auto shrink-0"}
+      {/* No empty body: the row keeps its bottom padding. */}
+      {project.scripts.length > 0 || draft ? (
+        <>
+          {project.scripts.length > 0 ? (
+            <div className="mt-2 flex flex-col pb-3">
+              {project.scripts.map((script) => (
+                <button
+                  key={script.id}
+                  type="button"
+                  className="-mx-2 flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent"
+                  onClick={() =>
+                    setDraft({
+                      id: script.id,
+                      name: script.name,
+                      command: script.command,
+                      runOnWorktreeCreate: script.runOnWorktreeCreate,
+                      runOnSettle: script.runOnSettle === true,
+                    })
+                  }
                 >
-                  On Done
-                </Badge>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {draft ? (
-        <ActionDialog project={project} draft={draft} onClose={() => setDraft(null)} />
+                  <span className="shrink-0 font-medium">{script.name}</span>
+                  <code className="min-w-0 truncate font-mono text-muted-foreground">
+                    {script.command}
+                  </code>
+                  {script.runOnWorktreeCreate ? (
+                    <Badge variant="outline" className="ml-auto shrink-0">
+                      On copy
+                    </Badge>
+                  ) : null}
+                  {script.runOnSettle ? (
+                    <Badge
+                      variant="outline"
+                      className={script.runOnWorktreeCreate ? "shrink-0" : "ml-auto shrink-0"}
+                    >
+                      On Done
+                    </Badge>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {draft ? (
+            <ActionDialog project={project} draft={draft} onClose={() => setDraft(null)} />
+          ) : null}
+        </>
       ) : null}
     </SettingsRow>
   );

@@ -61,7 +61,7 @@ export function settingsPageScope(pathname: string): SettingsPageScope | null {
 export function settingsOwnerLine(owner: SettingsPageOwner, computerLabel: string): string {
   switch (owner) {
     case "account":
-      return "Your Uno account. The same on every computer.";
+      return "Your plan is the same on every computer. General settings here belong to this device.";
     case "connectors":
       return `Apps connect through your Uno account, so every computer gets them. Servers of your own stay on ${computerLabel}.`;
     case "this-computer":
