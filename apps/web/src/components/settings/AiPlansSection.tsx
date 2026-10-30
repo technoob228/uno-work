@@ -31,18 +31,18 @@ const SWITCH_LABEL = {
   auto: "Switch by itself",
 } as const;
 
+/** Under the provider's name: "Room on 1 of 2 accounts. More from 4:40 AM." */
 function planSummary(plan: PooledPlan, now: number): string {
   const total = plan.accounts.length;
-  const name = PLAN_PROVIDER_NAME[plan.provider];
   if (plan.withRoom === total) {
-    return total === 1 ? `${name}: room now.` : `${name}: room on all ${total} accounts.`;
+    return total === 1 ? "Room now." : `Room on all ${total} accounts.`;
   }
   const until = planUntilText(plan.nextResetAt, now);
   const back = until ? ` More from ${until}.` : "";
   if (plan.withRoom === 0) {
-    return total === 1 ? `${name}: at its limit.${back}` : `${name}: all at their limit.${back}`;
+    return total === 1 ? `At its limit.${back}` : `All at their limit.${back}`;
   }
-  return `${name}: room on ${plan.withRoom} of ${total} accounts.${back}`;
+  return `Room on ${plan.withRoom} of ${total} accounts.${back}`;
 }
 
 export const AiPlansSection = memo(function AiPlansSection() {
