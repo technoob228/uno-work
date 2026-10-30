@@ -1,6 +1,7 @@
 import "../../index.css";
 
 import type { UnoMachineApp, UnoPin } from "@t3tools/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { page, userEvent } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -71,15 +72,17 @@ const { SidebarPinned } = await import("./SidebarPinned");
 
 function mount() {
   return render(
-    <SidebarProvider open onOpenChange={vi.fn()}>
-      <div style={{ width: 256 }}>
-        <SidebarPinned pinnedChats={null} hasPinnedChats={false} />
-      </div>
-      <div
-        data-testid="elsewhere"
-        style={{ position: "fixed", right: 0, bottom: 0, width: 200, height: 200 }}
-      />
-    </SidebarProvider>,
+    <QueryClientProvider client={new QueryClient()}>
+      <SidebarProvider open onOpenChange={vi.fn()}>
+        <div style={{ width: 256 }}>
+          <SidebarPinned pinnedChats={null} hasPinnedChats={false} />
+        </div>
+        <div
+          data-testid="elsewhere"
+          style={{ position: "fixed", right: 0, bottom: 0, width: 200, height: 200 }}
+        />
+      </SidebarProvider>
+    </QueryClientProvider>,
   );
 }
 

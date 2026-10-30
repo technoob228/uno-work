@@ -39,7 +39,8 @@ vi.mock("./useAssistantTeam", async (importOriginal) => ({
 vi.mock("./useQuickCreateAssistant", () => ({
   useQuickCreateAssistant: () => ({ create: quickCreate, creating: false, available: true }),
 }));
-vi.mock("../../hooks/useHandleNewThread", () => ({
+vi.mock("../../hooks/useHandleNewThread", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
   useNewThreadHandler: () => ({ handleNewThread: vi.fn() }),
 }));
 vi.mock("../../hooks/useMachineRows", async (importOriginal) => ({

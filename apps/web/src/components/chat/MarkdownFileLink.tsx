@@ -84,7 +84,8 @@ function useOpenInPanel(environmentId: EnvironmentId | undefined) {
         return;
       }
       const tab = makeFilesTabFile(environment, preview.currentChatThreadId);
-      usePanelFilesStore.getState().setPlace(tab.id, { path });
+      // "docs/" as the agent wrote it, the same place as "docs".
+      usePanelFilesStore.getState().setPlace(tab.id, { path: path.replace(/(?<=.)\/+$/, "") });
       preview.openFile(tab);
     },
     [environmentId, preview],
