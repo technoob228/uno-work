@@ -5909,7 +5909,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("filters archived threads out of command palette search results", async () => {
+  it("finds archived threads in command palette search, marked as archived", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotWithSecondaryProject(),
@@ -5947,7 +5947,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await page.getByPlaceholder("Search commands, projects, and chats...").fill("docs-archive");
       await expect
         .element(palette.getByText("Archived Docs Notes", { exact: true }))
-        .not.toBeInTheDocument();
+        .toBeInTheDocument();
+      await expect.element(palette.getByText(/· Archived$/)).toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }
