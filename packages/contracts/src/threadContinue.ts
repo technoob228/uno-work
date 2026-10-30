@@ -32,6 +32,11 @@
  * - `thread.continue.complete` (SOURCE): mark the old thread, optionally
  *   archive it.
  *
+ * HTML pages an agent put in the chat are files on the source, so they travel
+ * as a second transfer next to the bundle; a target that advertises
+ * `threadContinuePages` writes them into the new chat. Losing them never stops
+ * the move.
+ *
  * Daemons that speak this protocol advertise `threadContinueDirect` in their
  * environment descriptor; the client refuses to start without it on both
  * sides. `prepare` / `receive` / `cleanup` are the 0.0.53–0.0.56 protocol that
@@ -51,6 +56,22 @@ export const THREAD_CONTINUE_CHUNK_BYTES = 2 * 1024 * 1024;
 
 /** Largest bundle either side accepts. Ignored files (node_modules, build output) never count. */
 export const THREAD_CONTINUE_MAX_BUNDLE_BYTES = 1024 * 1024 * 1024;
+
+/** Most bytes of a chat's HTML pages one transfer carries; the newest pages go first. */
+export const THREAD_CONTINUE_MAX_PAGES_BYTES = 256 * 1024 * 1024;
+
+/**
+ * Root env files that travel besides `.env`: `.env.local`, `.env.production`.
+ * Never a path, so `land` can't be told to write outside the folder.
+ */
+export const THREAD_CONTINUE_ENV_FILE_NAME = /^\.env\.[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
+
+/** `.env.example` and friends are templates: they live in git, not in the secrets. */
+const ENV_TEMPLATE_NAME = /(?:^|\.)(?:example|sample|template|dist)(?:\.|$)/i;
+
+export function isCarriedEnvFileName(name: string): boolean {
+  return THREAD_CONTINUE_ENV_FILE_NAME.test(name) && !ENV_TEMPLATE_NAME.test(name);
+}
 
 export const ThreadContinueErrorReason = Schema.Literals([
   "thread_not_found",
@@ -139,8 +160,35 @@ export const ThreadContinueSnapshotInput = Schema.Struct({
    * return it as `envText`. Off unless the person ticked the box.
    */
   includeEnv: Schema.optional(Schema.Boolean),
+  /**
+   * Also pack the chat's HTML pages: they are files on this machine, so a chat
+   * moved without them would lose them. Only when the target can take them.
+   */
+  includePages: Schema.optional(Schema.Boolean),
+  /**
+   * `project`: snapshot the project's own folder, whichever worktree the chat
+   * runs in. That is what moving a project means.
+   */
+  scope: Schema.optional(Schema.Literals(["chat", "project"])),
 });
 export type ThreadContinueSnapshotInput = typeof ThreadContinueSnapshotInput.Type;
+
+/** A second file moved through the same chunks as the bundle. */
+export const ThreadContinuePagesTransfer = Schema.Struct({
+  transferId: ThreadContinueTransferId,
+  sizeBytes: Schema.Number,
+  sha256: TrimmedNonEmptyString,
+  chunkCount: Schema.Number,
+  pageCount: Schema.Number,
+});
+export type ThreadContinuePagesTransfer = typeof ThreadContinuePagesTransfer.Type;
+
+/** A root env file besides `.env`. */
+export const ThreadContinueEnvFile = Schema.Struct({
+  name: Schema.String.check(Schema.isPattern(THREAD_CONTINUE_ENV_FILE_NAME)),
+  text: Schema.String,
+});
+export type ThreadContinueEnvFile = typeof ThreadContinueEnvFile.Type;
 
 export const ThreadContinueSnapshotResult = Schema.Struct({
   transferId: ThreadContinueTransferId,
@@ -172,6 +220,12 @@ export const ThreadContinueSnapshotResult = Schema.Struct({
   seedText: TrimmedNonEmptyString,
   /** `.env` text; null when not requested or absent. */
   envText: Schema.NullOr(Schema.String),
+  /** `.env.local` and the like; only with `includeEnv`. */
+  envFiles: Schema.optional(Schema.Array(ThreadContinueEnvFile)),
+  /** The chat's HTML pages; absent when there are none or they were not asked for. */
+  pagesTransfer: Schema.optional(ThreadContinuePagesTransfer),
+  /** Pages that stay behind: over the limit, or their file is gone. */
+  pagesLeftBehind: Schema.optional(Schema.Number),
 });
 export type ThreadContinueSnapshotResult = typeof ThreadContinueSnapshotResult.Type;
 
@@ -237,10 +291,27 @@ export const ThreadContinueLandInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   seedText: TrimmedNonEmptyString,
-  /** Written into the new worktree only; the target's own checkout keeps its `.env`. */
+  /** Written into the chat's folder only; the target's own checkout keeps its `.env`. */
   envText: Schema.optional(Schema.NullOr(Schema.String)),
+  envFiles: Schema.optional(Schema.Array(ThreadContinueEnvFile)),
   sourceMachineLabel: TrimmedNonEmptyString,
   sourceThreadId: Schema.optional(ThreadId),
+  /**
+   * `project-root`: when this call creates the project, the files go straight
+   * into its folder on the source's branch, so a moved project is simply there.
+   * A project the machine already had always gets a worktree: its files are
+   * never touched.
+   */
+  placement: Schema.optional(Schema.Literals(["worktree", "project-root"])),
+  sourceBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  /** The pages file that arrived; the digest is checked again here. */
+  pages: Schema.optional(
+    Schema.Struct({
+      transferId: ThreadContinueTransferId,
+      sizeBytes: Schema.Number,
+      sha256: TrimmedNonEmptyString,
+    }),
+  ),
 });
 export type ThreadContinueLandInput = typeof ThreadContinueLandInput.Type;
 
@@ -248,9 +319,9 @@ export const ThreadContinueLandResult = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
   projectPath: TrimmedNonEmptyString,
-  /** The new worktree the chat runs in. */
+  /** The folder the chat runs in: a new worktree, or `projectPath` for a moved project. */
   worktreePath: TrimmedNonEmptyString,
-  /** The new branch checked out in that worktree (`uno/continue/…`). */
+  /** The branch checked out there: `uno/continue/…`, or the source's for a moved project. */
   branch: TrimmedNonEmptyString,
   /** True when the project was cloned (or created) and registered by this call. */
   projectCreated: Schema.Boolean,
@@ -258,6 +329,8 @@ export const ThreadContinueLandResult = Schema.Struct({
   /** True when the requested harness is not installed here and the project default was used. */
   modelFallbackApplied: Schema.Boolean,
   envWritten: Schema.Boolean,
+  /** HTML pages restored into the new chat. */
+  pagesCarried: Schema.optional(Schema.Number),
 });
 export type ThreadContinueLandResult = typeof ThreadContinueLandResult.Type;
 

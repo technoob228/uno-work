@@ -33,6 +33,7 @@ import {
   SparklesIcon,
   SquarePenIcon,
   WorkflowIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { memo, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 
@@ -46,6 +47,9 @@ import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { useGoHome } from "../../navigation/useGoHome";
 import { toggleDevMode, useDevMode } from "../../devMode";
+import { FixWorkDialog } from "../../fixWork/FixWorkDialog";
+import { FIX_WORK_COPY } from "../../fixWork/fixWork";
+import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
 import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
@@ -151,98 +155,112 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
   const trigger = (
     <SidebarDAccountTrigger label={props.computerName} who={who} variant={props.variant} />
   );
+  const [fixWorkOpen, setFixWorkOpen] = useState(false);
   return (
-    <Menu>
-      {trigger}
-      <MenuPopup
-        align="start"
-        side={props.variant === "rail" ? "right" : "bottom"}
-        className="min-w-60"
-        data-testid="sidebar-account-menu"
-      >
-        <div className="px-2 py-1.5 leading-tight">
-          <p className="truncate text-sm font-medium">{props.computerName}</p>
-          {who ? <p className="truncate text-xs text-muted-foreground">{who}</p> : null}
-        </div>
-        <MenuSeparator />
-        <MenuItem
-          onClick={() => {
-            close();
-            void navigate({ to: "/settings" });
-          }}
+    <>
+      {fixWorkOpen ? <FixWorkDialog open onOpenChange={setFixWorkOpen} /> : null}
+      <Menu>
+        {trigger}
+        <MenuPopup
+          align="start"
+          side={props.variant === "rail" ? "right" : "bottom"}
+          className="min-w-60"
+          data-testid="sidebar-account-menu"
         >
-          <SettingsIcon />
-          Settings
-        </MenuItem>
-        {lines.signInElsewhere ? (
-          // This address can't reach the Uno account: say where it works.
+          <div className="px-2 py-1.5 leading-tight">
+            <p className="truncate text-sm font-medium">{props.computerName}</p>
+            {who ? <p className="truncate text-xs text-muted-foreground">{who}</p> : null}
+          </div>
+          <MenuSeparator />
           <MenuItem
-            onClick={() => openExternal(UNO_WORK_URL)}
-            data-testid="sidebar-sign-in-elsewhere"
+            onClick={() => {
+              close();
+              void navigate({ to: "/settings" });
+            }}
           >
-            <LogInIcon />
-            <span className="flex-1">Sign in at app.uno4.work</span>
-            <ArrowUpRightIcon className="opacity-60" />
+            <SettingsIcon />
+            Settings
           </MenuItem>
-        ) : null}
-        {lines.accountItems ? (
-          <>
+          {lines.signInElsewhere ? (
+            // This address can't reach the Uno account: say where it works.
             <MenuItem
-              onClick={() => {
-                close();
-                void navigate({ to: "/my-uno", search: { tab: "billing" } });
-              }}
+              onClick={() => openExternal(UNO_WORK_URL)}
+              data-testid="sidebar-sign-in-elsewhere"
             >
-              <SparklesIcon />
-              Plan &amp; AI
-            </MenuItem>
-            <MenuItem onClick={() => openExternal(consoleLinks.plans)}>
-              <CreditCardIcon />
-              <span className="flex-1">Billing</span>
+              <LogInIcon />
+              <span className="flex-1">Sign in at app.uno4.work</span>
               <ArrowUpRightIcon className="opacity-60" />
             </MenuItem>
-            <MenuItem onClick={() => openExternal(CONSOLE_URL)}>
-              <ArrowUpRightIcon />
-              Uno console
-            </MenuItem>
-          </>
-        ) : null}
-        <MenuItem onClick={() => openExternal(`${CONSOLE_URL}/docs`)}>
-          <CircleHelpIcon />
-          <span className="flex-1">Help</span>
-          <ArrowUpRightIcon className="opacity-60" />
-        </MenuItem>
-        {lines.desktopSignOut ? (
-          <>
-            <MenuSeparator />
-            <MenuItem
-              onClick={() => {
-                close();
-                void signOutOfDesktop();
-              }}
-              data-testid="sidebar-desktop-sign-out"
-            >
-              <LogOutIcon />
-              Sign out of Uno
-            </MenuItem>
-          </>
-        ) : null}
-        {canSignOut ? (
-          <>
-            <MenuSeparator />
-            <MenuItem
-              onClick={() => {
-                window.location.href = "/logout";
-              }}
-              data-testid="sidebar-sign-out"
-            >
-              <LogOutIcon />
-              Sign out
-            </MenuItem>
-          </>
-        ) : null}
-      </MenuPopup>
-    </Menu>
+          ) : null}
+          {lines.accountItems ? (
+            <>
+              <MenuItem
+                onClick={() => {
+                  close();
+                  void navigate({ to: "/my-uno", search: { tab: "billing" } });
+                }}
+              >
+                <SparklesIcon />
+                Plan &amp; AI
+              </MenuItem>
+              <MenuItem onClick={() => openExternal(consoleLinks.plans)}>
+                <CreditCardIcon />
+                <span className="flex-1">Billing</span>
+                <ArrowUpRightIcon className="opacity-60" />
+              </MenuItem>
+              <MenuItem onClick={() => openExternal(CONSOLE_URL)}>
+                <ArrowUpRightIcon />
+                Uno console
+              </MenuItem>
+            </>
+          ) : null}
+          <MenuItem onClick={() => openExternal(`${CONSOLE_URL}/docs`)}>
+            <CircleHelpIcon />
+            <span className="flex-1">Help</span>
+            <ArrowUpRightIcon className="opacity-60" />
+          </MenuItem>
+          <MenuItem
+            data-testid="sidebar-fix-work"
+            onClick={() => {
+              close();
+              setFixWorkOpen(true);
+            }}
+          >
+            <WrenchIcon />
+            {FIX_WORK_COPY.menu}
+          </MenuItem>
+          {lines.desktopSignOut ? (
+            <>
+              <MenuSeparator />
+              <MenuItem
+                onClick={() => {
+                  close();
+                  void signOutOfDesktop();
+                }}
+                data-testid="sidebar-desktop-sign-out"
+              >
+                <LogOutIcon />
+                Sign out of Uno
+              </MenuItem>
+            </>
+          ) : null}
+          {canSignOut ? (
+            <>
+              <MenuSeparator />
+              <MenuItem
+                onClick={() => {
+                  window.location.href = "/logout";
+                }}
+                data-testid="sidebar-sign-out"
+              >
+                <LogOutIcon />
+                Sign out
+              </MenuItem>
+            </>
+          ) : null}
+        </MenuPopup>
+      </Menu>
+    </>
   );
 });
 
@@ -676,7 +694,14 @@ const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
  * assistants update (28.10), else the v0.0.156 rows.
  */
 export const SidebarDPlaces = memo(function SidebarDPlaces() {
-  return useTeamShown() ? <SidebarDPlaceIcons /> : <SidebarDPlaceRows />;
+  return useTeamShown() ? (
+    <>
+      <SidebarDPlaceIcons />
+      <SidebarPinRow />
+    </>
+  ) : (
+    <SidebarDPlaceRows />
+  );
 });
 
 function RailButton(props: {

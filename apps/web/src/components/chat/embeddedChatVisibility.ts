@@ -38,6 +38,7 @@ function isAnswerEntry(entry: TimelineEntry): boolean {
       return true;
     // Страница агента — это и есть ответ.
     case "html-render":
+    case "support-draft":
       return true;
     case "message": {
       const { message } = entry;

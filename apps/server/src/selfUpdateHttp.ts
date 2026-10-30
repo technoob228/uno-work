@@ -3,6 +3,9 @@
  *
  *   GET  /api/self-update/status   any signed-in session — is there an update,
  *                                  how the running one is going;
+ *   GET  /api/self-update/agents   any signed-in session — which of Claude,
+ *                                  Codex and OpenCode are behind (read-only: the
+ *                                  update itself is the harness install job);
  *   POST /api/self-update/start    OWNER session only, body `{"confirm":"update"}`.
  *
  * There is no other way to ask for an update: no WS method, no agent tool, no
@@ -13,10 +16,12 @@ import { Effect } from "effect";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
 import packageJson from "../package.json" with { type: "json" };
+import { agentUpdateStatuses, findInstalledBin, latestNpmVersion } from "./agentUpdates.ts";
 import { respondToAuthError } from "./auth/http.ts";
 import { AuthError, ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { ServerConfig } from "./config.ts";
 import { readWorkMachineIdentity } from "./manager/workConsole.ts";
+import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
 import {
   makeSelfUpdateController,
   selfUpdatePathsFromEnv,
@@ -84,6 +89,22 @@ export const selfUpdateStatusRouteLayer = HttpRouter.add(
       yield* reportSelfUpdateToConsole.pipe(Effect.ignore, Effect.forkDetach);
     }
     return HttpServerResponse.jsonUnsafe(status, { headers: NO_STORE });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const selfUpdateAgentsRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/self-update/agents",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const serverAuth = yield* ServerAuth;
+    yield* serverAuth.authenticateHttpRequest(request);
+    const registry = yield* ProviderRegistry;
+    const providers = yield* registry.getProviders;
+    const agents = yield* Effect.promise(() =>
+      agentUpdateStatuses(providers, { latest: latestNpmVersion, binPath: findInstalledBin }),
+    );
+    return HttpServerResponse.jsonUnsafe({ agents }, { headers: NO_STORE });
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

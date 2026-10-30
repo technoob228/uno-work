@@ -51,6 +51,8 @@ import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { replyButtons } from "../manager/connectorButtons.ts";
+import { SUPPORT_DRAFT_ACTIVITY_KIND } from "@t3tools/shared/supportDraft";
+import { redactForSupport } from "../fixWork/fixWorkReport.ts";
 import { storePage } from "../htmlRender/htmlRender.ts";
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import { ServerBrowser } from "../serverBrowser.ts";
@@ -386,6 +388,37 @@ const makeDeps = (input: {
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
+      supportDraft: {
+        publish: (draft) =>
+          Effect.gen(function* () {
+            const subject = redactForSupport(draft.subject);
+            const body = redactForSupport(draft.body);
+            const redactions = subject.count + body.count;
+            const createdAt = new Date().toISOString();
+            yield* engine
+              .dispatch({
+                type: "thread.activity.append",
+                commandId: CommandId.make(`support-draft:${crypto.randomUUID()}`),
+                threadId: ThreadId.make(input.threadId),
+                activity: {
+                  id: EventId.make(crypto.randomUUID()),
+                  tone: "info",
+                  kind: SUPPORT_DRAFT_ACTIVITY_KIND,
+                  summary: subject.text,
+                  payload: { subject: subject.text, body: body.text, redactions },
+                  turnId: thread?.session?.activeTurnId ?? thread?.latestTurn?.turnId ?? null,
+                  createdAt,
+                },
+                createdAt,
+              })
+              .pipe(
+                Effect.mapError(
+                  () => new UnoWorkToolError({ message: "The letter could not be shown." }),
+                ),
+              );
+            return { redactions };
+          }),
+      },
       htmlRender: {
         publish: (page) =>
           Effect.gen(function* () {

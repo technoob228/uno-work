@@ -17,6 +17,11 @@ import {
   readHtmlRenderReference,
   type HtmlRenderReference,
 } from "@t3tools/shared/htmlRender";
+import {
+  readSupportDraft,
+  SUPPORT_DRAFT_ACTIVITY_KIND,
+  type SupportDraft,
+} from "@t3tools/shared/supportDraft";
 import { UNO_CODE_LABEL, UNO_HERMES_LABEL } from "./unoHarnessLabels";
 import {
   describeToolActivity,
@@ -166,6 +171,13 @@ export type TimelineEntry =
       kind: "html-render";
       createdAt: string;
       htmlRender: HtmlRenderReference;
+    }
+  | {
+      /** A letter to support, for the person to send (Fix Work). */
+      id: string;
+      kind: "support-draft";
+      createdAt: string;
+      draft: SupportDraft;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -585,6 +597,26 @@ export function deriveWorkLogEntries(
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
+}
+
+/** Letters to support in a chat (Fix Work): the person reads and sends them. */
+export function deriveSupportDraftEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Extract<TimelineEntry, { kind: "support-draft" }>[] {
+  return activities.flatMap((activity) => {
+    if (activity.kind !== SUPPORT_DRAFT_ACTIVITY_KIND) return [];
+    const draft = readSupportDraft(activity.payload);
+    return draft
+      ? [
+          {
+            id: `support-draft:${activity.id}`,
+            kind: "support-draft" as const,
+            createdAt: activity.createdAt,
+            draft,
+          },
+        ]
+      : [];
+  });
 }
 
 /** The pages of a chat, every turn's: unlike the work log, they stay. */
@@ -1378,7 +1410,7 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
-  htmlRenderEntries: ReadonlyArray<TimelineEntry> = [],
+  pageEntries: ReadonlyArray<TimelineEntry> = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1398,7 +1430,7 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows, ...htmlRenderEntries].toSorted((a, b) =>
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...pageEntries].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }

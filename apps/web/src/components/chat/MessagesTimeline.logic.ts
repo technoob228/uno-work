@@ -7,6 +7,7 @@ import {
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 import { htmlRenderReferencesEqual, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import type { SupportDraft } from "@t3tools/shared/supportDraft";
 import { liveThoughtFromReasoningTail, workEntryIsThought } from "./workLogSummary";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
@@ -64,6 +65,13 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       htmlRender: HtmlRenderReference;
+    }
+  | {
+      /** A letter to support: the person reads it and sends it (Fix Work). */
+      kind: "support-draft";
+      id: string;
+      createdAt: string;
+      draft: SupportDraft;
     }
   | {
       /** The agent waits for an OK: the question on its own row (upstream 1f8530ec3c). */
@@ -413,6 +421,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "support-draft") {
+      nextRows.push({
+        kind: "support-draft",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        draft: timelineEntry.draft,
+      });
+      continue;
+    }
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -508,6 +526,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "html-render":
       return htmlRenderReferencesEqual(a.htmlRender, (b as typeof a).htmlRender);
+
+    case "support-draft":
+      return a.draft === (b as typeof a).draft;
 
     case "work": {
       const bw = b as typeof a;

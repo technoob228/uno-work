@@ -41,6 +41,7 @@ import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
 import { HomeNextStepCard, isAgentOnServerPlan, useNextStep } from "./HomeNextStep";
 import { isWebLite } from "../../../lite/webLite";
 import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
+import { HomeAppWidgetPin, HomeWidgetPin } from "./HomeWidgetPin";
 import { HomeUnoEntry } from "./HomeUnoEntry";
 import {
   ContinueCards,
@@ -462,13 +463,22 @@ export function HomeStart({
           body: <RecentChatsWidget threads={threads} now={now} onNewChat={builtIns.onNewChat} />,
         };
       case "cloud":
-        return { body: <CloudWidget environmentId={environmentId} /> };
+        return {
+          body: <CloudWidget environmentId={environmentId} />,
+          action: <HomeWidgetPin id="cloud" />,
+        };
       case "sites":
-        return { body: <SitesWidget /> };
+        return { body: <SitesWidget />, action: <HomeWidgetPin id="sites" /> };
       case "ai-spend":
-        return { body: <AiSpendWidget environmentId={environmentId} /> };
+        return {
+          body: <AiSpendWidget environmentId={environmentId} />,
+          action: <HomeWidgetPin id="ai-spend" />,
+        };
       case "plan-limits":
-        return { body: <PlanLimitsWidget environmentId={environmentId} /> };
+        return {
+          body: <PlanLimitsWidget environmentId={environmentId} />,
+          action: <HomeWidgetPin id="plan-limits" />,
+        };
     }
   };
 
@@ -478,7 +488,12 @@ export function HomeStart({
       return app
         ? {
             body: <HomeAppWidget app={app} environmentId={environmentId} />,
-            action: <HomeAppWidgetOpen app={app} environmentId={environmentId} />,
+            action: (
+              <>
+                <HomeAppWidgetPin app={app} environmentId={environmentId} />
+                <HomeAppWidgetOpen app={app} environmentId={environmentId} />
+              </>
+            ),
           }
         : { body: null };
     }

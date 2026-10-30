@@ -5,6 +5,24 @@
  */
 import { MAX_UNO_PINS, type UnoPin, type UnoPinKind } from "@t3tools/contracts";
 
+/**
+ * A built-in Home widget in the pins. Stored as an app pin with its own
+ * address, not as a new `kind`: settings.json that an older daemon can't decode
+ * falls back to all defaults, and an update can roll back by itself.
+ */
+const WIDGET_PIN_PREFIX = "uno-widget:";
+
+export function widgetPinTarget(widgetId: string): string {
+  return `${WIDGET_PIN_PREFIX}${widgetId}`;
+}
+
+/** The Home widget this pin stands for; null for any other pin. */
+export function pinnedWidgetId(pin: Pick<UnoPin, "kind" | "target">): string | null {
+  return pin.kind === "app" && pin.target.startsWith(WIDGET_PIN_PREFIX)
+    ? pin.target.slice(WIDGET_PIN_PREFIX.length)
+    : null;
+}
+
 export function pinIdFor(kind: UnoPinKind, target: string): string {
   return `${kind}:${target}`;
 }
@@ -70,4 +88,21 @@ export function pathTitle(path: string): string {
   const trimmed = path.replace(/\/+$/, "");
   const name = trimmed.slice(trimmed.lastIndexOf("/") + 1);
   return name || "/";
+}
+
+/** One icon of the pin row with its gap, in pixels. */
+const PIN_ICON_PX = 30;
+
+/**
+ * Pins that get an icon in a row `width` wide, and the rest, which go under
+ * "More". The "More" button takes the last place when it's needed.
+ */
+export function splitRowPins<T>(
+  pins: ReadonlyArray<T>,
+  width: number,
+): { readonly shown: ReadonlyArray<T>; readonly rest: ReadonlyArray<T> } {
+  const slots = Math.max(1, Math.floor(width / PIN_ICON_PX));
+  if (pins.length <= slots) return { shown: pins, rest: [] };
+  const kept = slots - 1;
+  return { shown: pins.slice(0, kept), rest: pins.slice(kept) };
 }

@@ -10,6 +10,7 @@ import {
   ExternalLinkIcon,
   FileIcon,
   FolderIcon,
+  LayoutGridIcon,
   LinkIcon,
   PencilIcon,
   PlusIcon,
@@ -20,12 +21,17 @@ import { memo, useState, type ReactNode } from "react";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
-import { linkTitle, normalizeLinkInput } from "../../navigation/pins";
+import { linkTitle, normalizeLinkInput, pinnedWidgetId } from "../../navigation/pins";
+import { useGoHome } from "../../navigation/useGoHome";
+import { useNavLayout } from "../../navigation/useNavLayout";
 import { useOpenComputerFile } from "../../navigation/useOpenComputerFile";
 import { openInNewTab, useOpenApp } from "../../navigation/useOpenApp";
 import { usePins } from "../../navigation/usePins";
 import { opensInOwnTab } from "../apps/ownTabApps";
+import { useTeamShown } from "../assistants/useAssistantTeam";
 import { ProgramIcon } from "../computer/ComputerPrograms";
+import { HOME_WIDGETS } from "../computer/home/HomeWidgets";
+import { isHomeWidgetId } from "../computer/home/homeModel";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -40,6 +46,15 @@ import { Input } from "../ui/input";
 import { useSidebar } from "../ui/sidebar";
 import { PinWidgetPeek, usePeekHover, usePinnedApp } from "./PinPeek";
 
+/**
+ * Apps and widgets have the icon row under the places (SidebarPinRow.tsx) when
+ * the places are icons themselves; the other layouts keep them in this list.
+ */
+export function useAppPinsInRow(): boolean {
+  const teamShown = useTeamShown();
+  return useNavLayout() !== "rail" && teamShown;
+}
+
 export const SidebarPinned = memo(function SidebarPinned({
   pinnedChats,
   hasPinnedChats,
@@ -51,7 +66,9 @@ export const SidebarPinned = memo(function SidebarPinned({
   const { pins, unpin, rename, pin } = usePins();
   const [linkOpen, setLinkOpen] = useState(false);
   const [renaming, setRenaming] = useState<UnoPin | null>(null);
-  const empty = pins.length === 0 && !hasPinnedChats;
+  const appPinsInRow = useAppPinsInRow();
+  const listed = appPinsInRow ? pins.filter((item) => item.kind !== "app") : pins;
+  const empty = listed.length === 0 && !hasPinnedChats;
 
   return (
     <section aria-label="Pinned" className="flex flex-col gap-px">
@@ -73,9 +90,9 @@ export const SidebarPinned = memo(function SidebarPinned({
         </p>
       ) : null}
       {hasPinnedChats ? <ul className="flex flex-col gap-px">{pinnedChats}</ul> : null}
-      {pins.length > 0 ? (
+      {listed.length > 0 ? (
         <ul className="flex flex-col gap-px">
-          {pins.map((item) => (
+          {listed.map((item) => (
             <PinRow
               key={item.id}
               item={item}
@@ -104,6 +121,14 @@ export const SidebarPinned = memo(function SidebarPinned({
 });
 
 export function PinIcon({ item }: { item: UnoPin }) {
+  const widgetId = pinnedWidgetId(item);
+  if (widgetId !== null) {
+    return (
+      <span className="flex size-5 shrink-0 items-center justify-center [&>svg]:size-4">
+        {isHomeWidgetId(widgetId) ? HOME_WIDGETS[widgetId].icon : <LayoutGridIcon />}
+      </span>
+    );
+  }
   if (item.kind === "app") {
     return (
       <ProgramIcon
@@ -143,16 +168,21 @@ export function usePinActive(item: UnoPin): boolean {
  * new tab. Inside a chat, an app or a file a panel can show opens in the
  * right panel, so the chat you work in stays put (Misha 13.10); from Home or
  * any other screen it opens in the main area as before. The panel's "Open full
- * screen" button moves it to the main area.
+ * screen" button moves it to the main area. A widget lives on Home.
  */
 export function useOpenPin() {
   const navigate = useNavigate();
+  const goHome = useGoHome();
   const { openHere, openBeside } = useOpenApp();
   const openComputerFile = useOpenComputerFile();
   const inChat = useMatch({ from: "/_chat/$environmentId/$threadId", shouldThrow: false });
   const { isMobile, setOpenMobile } = useSidebar();
   return (item: UnoPin) => {
     if (isMobile) setOpenMobile(false);
+    if (pinnedWidgetId(item) !== null) {
+      goHome();
+      return;
+    }
     switch (item.kind) {
       case "app": {
         const app = { url: item.target, name: item.title, icon: item.icon ?? null };
@@ -199,7 +229,7 @@ function PinRow({
     if (!api) return;
     const choice = await api.contextMenu.show(
       [
-        ...(item.kind === "app"
+        ...(item.kind === "app" && pinnedWidgetId(item) === null
           ? [
               { id: "beside" as const, label: "Open beside a chat" },
               { id: "tab" as const, label: "Open in a new tab" },

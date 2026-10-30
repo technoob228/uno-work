@@ -265,7 +265,7 @@ function WidgetFrame({
       data-testid={`home-widget-${id}`}
       aria-label={meta.title}
       className={cn(
-        "relative flex min-w-0 flex-col gap-3 rounded-2xl p-4",
+        "group/widget relative flex min-w-0 flex-col gap-3 rounded-2xl p-4",
         meta.bare ? "bg-transparent" : "border border-border/70 bg-card shadow-xs/5",
         SPAN_CLASS[meta.span],
         editing && "cursor-grab border border-dashed border-primary/40",

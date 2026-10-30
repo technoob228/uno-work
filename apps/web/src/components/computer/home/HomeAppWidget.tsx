@@ -150,6 +150,21 @@ export function HomeAppWidget({
 }
 
 /** "Open" next to the widget's title: the whole app inside Uno. */
+/**
+ * The address a pin of this app keeps: the one its tile opens. Null when only
+ * the computer reaches the app, or it isn't running.
+ */
+export function useAppWidgetPinTarget(
+  app: UnoMachineApp,
+  environmentId: EnvironmentId | null,
+): string | null {
+  const computer = useCloudComputer(environmentId);
+  return (
+    machineAppOpenUrl(app, isBrowserOnMachine(window.location.hostname) && computer === null) ??
+    null
+  );
+}
+
 export function HomeAppWidgetOpen({
   app,
   environmentId,

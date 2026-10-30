@@ -4,6 +4,7 @@
  * Server side: apps/server/src/selfUpdate.ts (+ the root updater in deploy/install.sh).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
+import type { AgentUpdateStatus } from "@t3tools/shared/agentVersions";
 import { queryOptions } from "@tanstack/react-query";
 
 import {
@@ -58,6 +59,35 @@ function isSelfUpdateStatus(value: unknown): value is SelfUpdateStatus {
     typeof status["state"] === "string"
   );
 }
+
+/** Which agents on a computer are behind; null on a computer before this route. */
+export async function fetchAgentUpdates(
+  environmentId: EnvironmentId,
+): Promise<ReadonlyArray<AgentUpdateStatus> | null> {
+  try {
+    const response = await environmentFetchResponse({
+      environmentId,
+      pathname: "/api/self-update/agents",
+    });
+    if (!(response.headers.get("content-type") ?? "").includes("application/json")) return null;
+    const body = (await response.json().catch(() => null)) as {
+      readonly agents?: ReadonlyArray<AgentUpdateStatus>;
+    } | null;
+    return Array.isArray(body?.agents) ? body.agents : null;
+  } catch (error) {
+    if (isEnvironmentHttpError(error) && error.status === 404) return null;
+    throw error;
+  }
+}
+
+export const agentUpdatesQueryOptions = (environmentId: EnvironmentId | null) =>
+  queryOptions({
+    queryKey: ["agent-updates", environmentId] as const,
+    queryFn: () => (environmentId ? fetchAgentUpdates(environmentId) : null),
+    enabled: environmentId !== null,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 
 export function requestSelfUpdate(environmentId: EnvironmentId): Promise<SelfUpdateStatus> {
   return environmentFetchJson<SelfUpdateStatus>({
@@ -185,12 +215,8 @@ export const SELF_UPDATE_COPY = {
   notOwner: "The owner of this computer can update it from Uno Work.",
   update: "Update",
   later: "Later",
-  confirmTitle: (version: string) => `Update Uno Work to ${version}?`,
-  confirmBody:
-    "It takes about two minutes. Your chats and files stay as they are. Uno Work restarts once: anything an agent is doing right now stops, and you can continue it after the update.",
   confirmSafety:
     "If the new version doesn't start, this computer goes back to the current one by itself.",
-  confirm: "Update now",
   updatingTitle: (version: string | null) =>
     version ? `Updating Uno Work to ${version}…` : "Updating Uno Work…",
   updatingBody: (step: string) =>

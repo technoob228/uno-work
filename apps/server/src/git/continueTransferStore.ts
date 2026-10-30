@@ -44,6 +44,12 @@ export interface ContinueTransferStoreShape {
     transferId: string,
   ) => Effect.Effect<ContinueBundleDigest, ThreadContinueError>;
   readonly incomingPath: (transferId: string) => Effect.Effect<string, ThreadContinueError>;
+  /** Writes a small file to send (the chat's pages); it moves in chunks like a bundle. */
+  readonly writeOutgoingText: (
+    transferId: string,
+    text: string,
+  ) => Effect.Effect<void, ThreadContinueError>;
+  readonly readIncomingText: (transferId: string) => Effect.Effect<string, ThreadContinueError>;
   /** Base64 of chunk `index` of the outgoing bundle. */
   readonly readChunk: (input: {
     readonly transferId: string;
@@ -149,6 +155,28 @@ export function makeContinueTransferStore(options: {
 
   const incomingPath: ContinueTransferStoreShape["incomingPath"] = (transferId) =>
     pathFor("incoming", transferId);
+
+  const writeOutgoingText: ContinueTransferStoreShape["writeOutgoingText"] = (transferId, text) =>
+    prepareOutgoing(transferId).pipe(
+      Effect.flatMap((filePath) =>
+        Effect.tryPromise({
+          try: () => fsPromises.writeFile(filePath, text, { mode: 0o600 }),
+          catch: (cause) => fail("capture_failed", "Could not write the transfer file", cause),
+        }),
+      ),
+    );
+
+  const readIncomingText: ContinueTransferStoreShape["readIncomingText"] = (transferId) =>
+    Effect.gen(function* () {
+      const filePath = yield* pathFor("incoming", transferId);
+      return yield* Effect.tryPromise({
+        try: () => fsPromises.readFile(filePath, "utf8"),
+        catch: (cause) =>
+          isNotFound(cause)
+            ? fail("transfer_not_found", "The transferred file is no longer on this machine.")
+            : fail("transfer_incomplete", "Could not read the transferred file", cause),
+      });
+    });
 
   const readChunk: ContinueTransferStoreShape["readChunk"] = (input) =>
     Effect.gen(function* () {
@@ -259,5 +287,15 @@ export function makeContinueTransferStore(options: {
     }
   });
 
-  return { prepareOutgoing, digest, incomingPath, readChunk, writeChunk, discard, sweep };
+  return {
+    prepareOutgoing,
+    digest,
+    incomingPath,
+    writeOutgoingText,
+    readIncomingText,
+    readChunk,
+    writeChunk,
+    discard,
+    sweep,
+  };
 }

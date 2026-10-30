@@ -49,6 +49,22 @@ describe("makeContinueTransferStore", () => {
     expect(await fsPromises.readFile(await run(target.incomingPath(ID)))).toEqual(payload);
   });
 
+  it("moves a text file the same way, and reports one that isn't there", async () => {
+    const source = makeContinueTransferStore({ rootDir: nodePath.join(root, "a"), chunkBytes: 4 });
+    const target = makeContinueTransferStore({ rootDir: nodePath.join(root, "b"), chunkBytes: 4 });
+    await run(source.writeOutgoingText(ID, '{"pages":[]}'));
+    const first = await run(source.readChunk({ transferId: ID, index: 0 }));
+    const second = await run(source.readChunk({ transferId: ID, index: 1 }));
+    const third = await run(source.readChunk({ transferId: ID, index: 2 }));
+    await run(target.writeChunk({ transferId: ID, offset: 0, data: first }));
+    await run(target.writeChunk({ transferId: ID, offset: 4, data: second }));
+    await run(target.writeChunk({ transferId: ID, offset: 8, data: third }));
+    expect(await run(target.readIncomingText(ID))).toBe('{"pages":[]}');
+
+    await run(target.discard(ID));
+    expect((await flip(target.readIncomingText(ID))).reason).toBe("transfer_not_found");
+  });
+
   it("accepts a re-sent chunk, restarts at offset 0 and refuses a gap", async () => {
     const store = makeContinueTransferStore({ rootDir: root });
     await run(store.writeChunk({ transferId: ID, offset: 0, data: b64("aaaa") }));

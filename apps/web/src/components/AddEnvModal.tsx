@@ -20,6 +20,7 @@ import type {
 import { APP_BASE_NAME } from "../branding";
 import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { readHostedPairingRequest } from "../hostedPairing";
+import { trackBringYourOwnClick } from "../lib/funnel";
 import { cn } from "../lib/utils";
 import { unoCloudStateQueryOptions, workspaceQueryKeys } from "../lib/workspaceReactQuery";
 import { describeMachineError } from "../machineErrors";
@@ -277,16 +278,20 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
         </button>
         <button
           type="button"
-          onClick={() => setStep("custom")}
+          data-testid="add-env-bring-your-own"
+          onClick={() => {
+            trackBringYourOwnClick();
+            setStep("custom");
+          }}
           className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/4"
         >
           <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
             <LaptopIcon className="size-4" />
           </div>
-          <div className="font-medium text-sm">Your computer or another machine</div>
+          <div className="font-medium text-sm">Your own machine</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
-            Connect {APP_BASE_NAME} running on your own computer, or any machine you can reach over
-            SSH.
+            Connect a computer or server you run. You need SSH or a direct network route: Uno
+            doesn't provide a tunnel. Updates and backups are on you.
           </div>
           <Badge variant="outline" className="mt-auto self-start text-[10px] text-muted-foreground">
             Bring your own
@@ -711,8 +716,8 @@ function CustomEnvironmentStep({ onBack, onClose }: { onBack: () => void; onClos
           <Explain term="machine" technical />
         </DialogPrimitive.Title>
         <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-          Link a machine you already run to this app — your own computer with {APP_BASE_NAME} on it,
-          or any machine you can reach over SSH.
+          Use a pairing link from {APP_BASE_NAME} on that machine, or SSH from the desktop app. Uno
+          doesn't provide a tunnel, so this app must be able to reach the machine.
         </DialogPrimitive.Description>
       </div>
       <ScrollArea className="min-h-0">

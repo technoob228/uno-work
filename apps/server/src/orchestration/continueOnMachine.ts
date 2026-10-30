@@ -28,6 +28,8 @@ import {
   THREAD_CONTINUE_CHUNK_BYTES,
   THREAD_CONTINUE_LEGACY_CLIENT_MESSAGE,
   THREAD_CONTINUE_MAX_BUNDLE_BYTES,
+  THREAD_CONTINUE_MAX_PAGES_BYTES,
+  type ThreadContinueEnvFile,
   ThreadContinueError,
   type ThreadContinueErrorReason,
   type ThreadContinueCompleteInput,
@@ -38,6 +40,7 @@ import {
   type ThreadContinueInspectResult,
   type ThreadContinueLandInput,
   type ThreadContinueLandResult,
+  type ThreadContinuePagesTransfer,
   type ThreadContinueReadChunkInput,
   type ThreadContinueReadChunkResult,
   type ThreadContinueSnapshotInput,
@@ -46,6 +49,7 @@ import {
   type ThreadContinueWriteChunkResult,
   ThreadId,
 } from "@t3tools/contracts";
+import { HTML_RENDER_ACTIVITY_KIND } from "@t3tools/shared/htmlRender";
 import { type Cause, Effect, Option, Schema } from "effect";
 import * as crypto from "node:crypto";
 import * as nodePath from "node:path";
@@ -58,6 +62,7 @@ import {
 } from "../git/continueTransport.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { systemCommandOrigin } from "./commandOrigin.ts";
+import { collectPages, pageReference, readPagePack } from "./continuePages.ts";
 import { buildContinueSeed, buildModelFallbackNote } from "./handoff.ts";
 import type { OrchestrationEngineShape } from "./Services/OrchestrationEngine.ts";
 import type { ProjectionSnapshotQueryShape } from "./Services/ProjectionSnapshotQuery.ts";
@@ -85,9 +90,22 @@ export interface ContinueOnMachineDeps {
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   /** Friendly label of this machine, as shown in the machine switcher. */
   readonly getMachineLabel: Effect.Effect<string>;
-  /** `.env` in a folder as text; null when absent or unreadable. */
-  readonly readEnvFile: (folder: string) => Effect.Effect<string | null>;
-  readonly writeEnvFile: (folder: string, text: string) => Effect.Effect<void, Error>;
+  /** An env file in a folder as text (`.env` unless named); null when absent or unreadable. */
+  readonly readEnvFile: (folder: string, name?: string) => Effect.Effect<string | null>;
+  readonly writeEnvFile: (
+    folder: string,
+    text: string,
+    name?: string,
+  ) => Effect.Effect<void, Error>;
+  /** Names of the `.env.*` files in a folder that are secrets, not templates. */
+  readonly listEnvFiles: (folder: string) => Effect.Effect<ReadonlyArray<string>>;
+  /** An HTML page of a chat on this machine; null when its file is gone. */
+  readonly readPage: (attachmentId: string) => Effect.Effect<string | null>;
+  /** Saves a page under a chat, the way an agent's page is saved. */
+  readonly storePage: (input: {
+    readonly threadId: ThreadId;
+    readonly html: string;
+  }) => Effect.Effect<{ readonly attachmentId: string; readonly path: string }, Error>;
   readonly cloneRepository: (input: {
     readonly remoteUrl: string;
     readonly destinationPath: string;
@@ -298,7 +316,9 @@ export function makeThreadContinueSnapshot(deps: ContinueOnMachineDeps) {
     input: ThreadContinueSnapshotInput,
   ): Effect.Effect<ThreadContinueSnapshotResult, ThreadContinueError> =>
     Effect.gen(function* () {
-      const { thread, project, cwd } = yield* resolveSourceCwd(deps, input.threadId);
+      const source = yield* resolveSourceCwd(deps, input.threadId);
+      const { thread, project } = source;
+      const cwd = input.scope === "project" ? project.workspaceRoot : source.cwd;
       const isGit = yield* deps.transport
         .isGitRepository(cwd)
         .pipe(mapFailure("not_git", "Could not inspect the project folder"));
@@ -361,6 +381,13 @@ export function makeThreadContinueSnapshot(deps: ContinueOnMachineDeps) {
         }
       }
 
+      const envFiles =
+        input.includeEnv === true ? yield* readEnvFiles(deps, cwd, project.workspaceRoot) : [];
+      const pages =
+        input.includePages === true
+          ? yield* packPages(deps, thread, newTransferId())
+          : { transfer: null, leftBehind: 0 };
+
       yield* Effect.logInfo("thread.continue.snapshot", {
         threadId: thread.id,
         transferId,
@@ -368,6 +395,8 @@ export function makeThreadContinueSnapshot(deps: ContinueOnMachineDeps) {
         baseCommit: head.commit,
         sizeBytes: digest.sizeBytes,
         envIncluded: envText !== null,
+        envFiles: envFiles.length,
+        pagesLeftBehind: pages.leftBehind,
       });
 
       return {
@@ -388,8 +417,80 @@ export function makeThreadContinueSnapshot(deps: ContinueOnMachineDeps) {
         interactionMode: thread.interactionMode,
         seedText,
         envText,
+        ...(envFiles.length > 0 ? { envFiles } : {}),
+        ...(pages.transfer ? { pagesTransfer: pages.transfer } : {}),
+        ...(pages.leftBehind > 0 ? { pagesLeftBehind: pages.leftBehind } : {}),
       } satisfies ThreadContinueSnapshotResult;
     });
+}
+
+/** `.env.local` and the like: the chat's folder wins over the project root. */
+function readEnvFiles(
+  deps: ContinueOnMachineDeps,
+  cwd: string,
+  projectRoot: string,
+): Effect.Effect<ReadonlyArray<ThreadContinueEnvFile>> {
+  return Effect.gen(function* () {
+    const folders = normalizePath(cwd) === normalizePath(projectRoot) ? [cwd] : [cwd, projectRoot];
+    const files = new Map<string, string>();
+    for (const folder of folders) {
+      for (const name of yield* deps.listEnvFiles(folder)) {
+        if (files.has(name)) continue;
+        const text = yield* deps.readEnvFile(folder, name);
+        if (text !== null) files.set(name, text);
+      }
+    }
+    return [...files].map(([name, text]) => ({ name, text }));
+  });
+}
+
+/**
+ * The chat's pages as one file to send. Pages are what the person saw, but
+ * never worth failing the move: whatever goes wrong here, they stay behind.
+ */
+function packPages(
+  deps: ContinueOnMachineDeps,
+  thread: OrchestrationThread,
+  transferId: string,
+): Effect.Effect<{
+  readonly transfer: ThreadContinuePagesTransfer | null;
+  readonly leftBehind: number;
+}> {
+  return Effect.gen(function* () {
+    const pack = yield* collectPages({
+      activities: thread.activities,
+      readPage: deps.readPage,
+      maxBytes: THREAD_CONTINUE_MAX_PAGES_BYTES,
+    });
+    if (pack.pages.length === 0) {
+      return { transfer: null, leftBehind: pack.leftBehind };
+    }
+    yield* deps.transfers.writeOutgoingText(transferId, JSON.stringify({ pages: pack.pages }));
+    const digest = yield* deps.transfers.digest("outgoing", transferId);
+    return {
+      transfer: {
+        transferId,
+        sizeBytes: digest.sizeBytes,
+        sha256: digest.sha256,
+        chunkCount: Math.max(1, Math.ceil(digest.sizeBytes / THREAD_CONTINUE_CHUNK_BYTES)),
+        pageCount: pack.pages.length,
+      },
+      leftBehind: pack.leftBehind,
+    };
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("thread.continue.snapshot: pages not packed", {
+        threadId: thread.id,
+        detail: errorDetail(cause),
+      }).pipe(
+        Effect.as({
+          transfer: null,
+          leftBehind: thread.activities.filter((activity) => pageReference(activity) !== null)
+            .length,
+        }),
+      ),
+    ),
+  );
 }
 
 export function makeThreadContinueReadChunk(deps: ContinueOnMachineDeps) {
@@ -420,6 +521,8 @@ export function makeThreadContinueDiscard(deps: ContinueOnMachineDeps) {
 interface ResolvedTargetProject {
   readonly project: OrchestrationProjectShell;
   readonly created: boolean;
+  /** This call made the folder, so nothing of the person's is in it. */
+  readonly fresh: boolean;
 }
 
 function findProjectByPath(
@@ -456,13 +559,13 @@ function resolveTargetProject(
           `No project is registered at ${projectPath} on this machine.`,
         );
       }
-      return { project, created: false };
+      return { project, created: false, fresh: false };
     }
 
     const destination = deps.expandPath(input.project.destinationPath);
     const alreadyRegistered = findProjectByPath(snapshot.projects, destination);
     if (alreadyRegistered) {
-      return { project: alreadyRegistered, created: false };
+      return { project: alreadyRegistered, created: false, fresh: false };
     }
 
     let cwd = destination;
@@ -518,8 +621,13 @@ function resolveTargetProject(
     if (Option.isNone(project)) {
       return yield* fail("dispatch_failed", "The project was created but cannot be read back.");
     }
-    return { project: project.value, created: true };
+    return { project: project.value, created: true, fresh: !exists };
   });
+}
+
+/** The source's branch for a moved project; a name git would read as a flag never gets there. */
+function rootBranchName(sourceBranch: string | null | undefined, id: string): string {
+  return sourceBranch && !sourceBranch.startsWith("-") ? sourceBranch : continueBranchName(id);
 }
 
 /** First `uno/continue/<id>[-N]` whose branch and worktree folder are both free. */
@@ -547,9 +655,76 @@ function pickWorktree(
 }
 
 /**
+ * Saves the pages that arrived under the new chat and puts them in its
+ * timeline, after the seed. Returns how many made it; never fails the move.
+ */
+function landPages(
+  deps: ContinueOnMachineDeps,
+  input: {
+    readonly pages: NonNullable<ThreadContinueLandInput["pages"]>;
+    readonly threadId: ThreadId;
+    readonly createdAt: string;
+    readonly origin: ReturnType<typeof systemCommandOrigin>;
+  },
+): Effect.Effect<number> {
+  let carried = 0;
+  return Effect.gen(function* () {
+    const digest = yield* deps.transfers.digest("incoming", input.pages.transferId);
+    if (digest.sizeBytes !== input.pages.sizeBytes || digest.sha256 !== input.pages.sha256) {
+      return yield* fail("transfer_incomplete", "The pages did not arrive intact.");
+    }
+    const text = yield* deps.transfers.readIncomingText(input.pages.transferId);
+    const pack = yield* Effect.try({
+      try: () => readPagePack(text),
+      catch: (cause) => fail("transfer_incomplete", "The pages could not be read.", cause),
+    });
+    const start = Date.parse(input.createdAt);
+    for (const [index, page] of pack.entries()) {
+      const stored = yield* deps.storePage({ threadId: input.threadId, html: page.html });
+      const at = new Date(start + index + 1).toISOString();
+      yield* deps.engine.dispatch(
+        {
+          type: "thread.activity.append",
+          commandId: CommandId.make(`html-render:${stored.attachmentId}`),
+          threadId: input.threadId,
+          activity: {
+            id: EventId.make(crypto.randomUUID()),
+            tone: "info",
+            kind: HTML_RENDER_ACTIVITY_KIND,
+            summary: page.title,
+            payload: {
+              ...stored,
+              title: page.title,
+              height: page.height,
+              ...(page.heights ? { heights: page.heights } : {}),
+            },
+            turnId: null,
+            createdAt: at,
+          },
+          createdAt: at,
+        },
+        { origin: input.origin },
+      );
+      carried += 1;
+    }
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("thread.continue.land: pages not restored", {
+        threadId: input.threadId,
+        detail: errorDetail(cause),
+      }),
+    ),
+    Effect.andThen(deps.transfers.discard(input.pages.transferId)),
+    Effect.map(() => carried),
+  );
+}
+
+/**
  * Target side: check the bundle that arrived, make sure the project exists,
  * open a new worktree on a new branch with the source's files, and create the
- * thread there. The person's own checkout of the project is not touched.
+ * thread there. The person's own checkout of the project is not touched. Only
+ * a project this call created can take the files in its own folder
+ * (`placement: "project-root"`): that folder holds nothing of theirs yet.
  */
 export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -642,23 +817,28 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
       }
 
       // 4. A worktree of its own: new branch at the source's base commit, the
-      //    snapshot's files on top as uncommitted changes.
-      const worktree = yield* pickWorktree(deps, {
-        cwd,
-        id: input.sourceThreadId ?? input.transferId,
-      });
-      yield* deps.transport
-        .addWorktree({
-          cwd,
-          branch: worktree.branch,
-          path: worktree.path,
-          // An unborn source has no base: the branch starts at the snapshot.
-          startPoint: input.baseCommit ?? input.commit,
-        })
-        .pipe(
-          mapFailure("worktree_failed", "Could not create a worktree for the chat"),
-          Effect.tapError(() => deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore)),
-        );
+      //    snapshot's files on top as uncommitted changes. A moved project
+      //    takes them in its new folder instead, on the source's own branch.
+      const id = input.sourceThreadId ?? input.transferId;
+      const intoRoot = input.placement === "project-root" && target.fresh;
+      const worktree = intoRoot
+        ? { branch: rootBranchName(input.sourceBranch, id), path: cwd }
+        : yield* pickWorktree(deps, { cwd, id });
+      // An unborn source has no base: the branch starts at the snapshot.
+      const startPoint = input.baseCommit ?? input.commit;
+      yield* (
+        intoRoot
+          ? deps.transport.checkoutBranch({ cwd, branch: worktree.branch, startPoint })
+          : deps.transport.addWorktree({
+              cwd,
+              branch: worktree.branch,
+              path: worktree.path,
+              startPoint,
+            })
+      ).pipe(
+        mapFailure("worktree_failed", "Could not create a worktree for the chat"),
+        Effect.tapError(() => deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore)),
+      );
       if (input.baseCommit !== null) {
         const restored = yield* deps.transport
           .restoreTree({ cwd: worktree.path, ref })
@@ -670,17 +850,23 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
       yield* deps.transport.deleteRef({ cwd, ref }).pipe(Effect.ignore);
       yield* deps.transfers.discard(input.transferId);
 
+      const envToWrite = [
+        ...(typeof input.envText === "string" ? [{ name: ".env", text: input.envText }] : []),
+        ...(input.envFiles ?? []),
+      ];
       let envWritten = false;
-      if (typeof input.envText === "string") {
-        envWritten = yield* deps.writeEnvFile(worktree.path, input.envText).pipe(
+      for (const file of envToWrite) {
+        const written = yield* deps.writeEnvFile(worktree.path, file.text, file.name).pipe(
           Effect.as(true),
           Effect.catch((cause) =>
-            Effect.logWarning("thread.continue.land: .env not written", {
+            Effect.logWarning("thread.continue.land: env file not written", {
               worktreePath: worktree.path,
+              name: file.name,
               detail: errorDetail(cause),
             }).pipe(Effect.as(false)),
           ),
         );
+        envWritten = envWritten || written;
       }
 
       const seedText =
@@ -712,7 +898,7 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
         runtimeMode: input.runtimeMode,
         interactionMode: input.interactionMode,
         branch: worktree.branch,
-        worktreePath: worktree.path,
+        worktreePath: intoRoot ? null : worktree.path,
         createdAt,
       });
       yield* dispatch({
@@ -748,6 +934,10 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
         createdAt,
       });
 
+      const pagesCarried = input.pages
+        ? yield* landPages(deps, { pages: input.pages, threadId, createdAt, origin })
+        : 0;
+
       yield* Effect.logInfo("thread.continue.land", {
         threadId,
         projectId: target.project.id,
@@ -758,6 +948,8 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
         commit: input.commit,
         envWritten,
         modelFallbackApplied: model.fallbackApplied,
+        intoRoot,
+        pagesCarried,
       });
 
       return {
@@ -770,6 +962,7 @@ export function makeThreadContinueLand(deps: ContinueOnMachineDeps) {
         modelSelection: model.selection,
         modelFallbackApplied: model.fallbackApplied,
         envWritten,
+        ...(input.pages ? { pagesCarried } : {}),
       } satisfies ThreadContinueLandResult;
     });
 }

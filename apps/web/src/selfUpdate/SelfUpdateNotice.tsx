@@ -4,22 +4,13 @@
  * same thing and the confirmation is asked once.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { CircleCheckIcon, DownloadIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 
 import { APP_VERSION } from "../branding";
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../components/ui/alert";
-import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "../components/ui/alert-dialog";
 import { Button } from "../components/ui/button";
 import { Spinner } from "../components/ui/spinner";
 import { isElectron } from "../env";
@@ -28,21 +19,17 @@ import {
   PAGE_LOADED_AT,
   dismissSelfUpdateNotice,
   isSelfUpdateNoticeDismissed,
-  requestSelfUpdate,
   resolveSelfUpdateView,
   SELF_UPDATE_COPY as COPY,
-  selfUpdateQueryKey,
   selfUpdateQueryOptions,
-  type SelfUpdateStatus,
   type SelfUpdateView,
 } from "./selfUpdate";
+import { UpdateEverythingDialog } from "../updateEverything/UpdateEverythingDialog";
 
 export interface SelfUpdateController {
   readonly view: SelfUpdateView | null;
   /** The person dismissed this exact notice ("Later", ×). */
   readonly dismissed: boolean;
-  readonly starting: boolean;
-  readonly startError: string | null;
   readonly askToUpdate: () => void;
   readonly dismiss: () => void;
   readonly reload: () => void;
@@ -51,33 +38,9 @@ export interface SelfUpdateController {
 }
 
 export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateController {
-  const queryClient = useQueryClient();
   const query = useQuery(selfUpdateQueryOptions(environmentId));
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [dismissedKey, setDismissedKey] = useState<string | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
-  /** This tab started the update: it reloads by itself when the new version is up. */
-  const startedHere = useRef(false);
-
-  const mutation = useMutation({
-    mutationFn: () => {
-      if (!environmentId) throw new Error("No computer to update.");
-      return requestSelfUpdate(environmentId);
-    },
-    onMutate: () => setStartError(null),
-    onSuccess: (status: SelfUpdateStatus) => {
-      startedHere.current = true;
-      queryClient.setQueryData(selfUpdateQueryKey(environmentId), status);
-    },
-    onError: (error: unknown) => {
-      setStartError(
-        error instanceof Error && error.message
-          ? error.message
-          : "Couldn't start the update. Try again in a minute.",
-      );
-      void queryClient.invalidateQueries({ queryKey: selfUpdateQueryKey(environmentId) });
-    },
-  });
 
   const view = useMemo(
     () =>
@@ -94,13 +57,6 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     key !== null && (dismissedKey === key || isSelfUpdateNoticeDismissed(environmentId, key));
 
   const reload = useCallback(() => window.location.reload(), []);
-  const needsReload = view?.kind === "done" && view.needsReload && !isElectron;
-  useEffect(() => {
-    if (!needsReload || !startedHere.current) return;
-    startedHere.current = false;
-    const timer = setTimeout(reload, 1_500);
-    return () => clearTimeout(timer);
-  }, [needsReload, reload]);
 
   const dismiss = useCallback(() => {
     if (key === null) return;
@@ -108,40 +64,14 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     setDismissedKey(key);
   }, [environmentId, key]);
 
-  const version = view?.kind === "available" || view?.kind === "failed" ? view.version : null;
-  const dialog = (
-    <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-      <AlertDialogPopup>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{COPY.confirmTitle(version ?? "the new version")}</AlertDialogTitle>
-          <AlertDialogDescription>{COPY.confirmBody}</AlertDialogDescription>
-          <p className="text-muted-foreground text-sm">{COPY.confirmSafety}</p>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>{COPY.later}</AlertDialogClose>
-          <Button
-            data-testid="self-update-confirm"
-            onClick={() => {
-              setConfirmOpen(false);
-              mutation.mutate();
-            }}
-          >
-            {COPY.confirm}
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogPopup>
-    </AlertDialog>
-  );
-
   return {
     view,
     dismissed,
-    starting: mutation.isPending,
-    startError,
-    askToUpdate: () => setConfirmOpen(true),
+    askToUpdate: () => setDialogOpen(true),
     dismiss,
     reload,
-    dialog,
+    // Mounted only when open: it asks every computer what it needs.
+    dialog: dialogOpen ? <UpdateEverythingDialog open onOpenChange={setDialogOpen} /> : null,
   };
 }
 
@@ -164,15 +94,9 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
         variant: "info",
         icon: <DownloadIcon />,
         title: COPY.availableTitle,
-        description:
-          update.startError ?? (view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner),
+        description: view.canUpdate ? COPY.availableBody(view.version) : COPY.notOwner,
         actions: view.canUpdate ? (
-          <Button
-            size={size}
-            data-testid="self-update-button"
-            disabled={update.starting}
-            onClick={update.askToUpdate}
-          >
+          <Button size={size} data-testid="self-update-button" onClick={update.askToUpdate}>
             {COPY.update}
           </Button>
         ) : null,
@@ -207,13 +131,12 @@ function noticeParts(update: SelfUpdateController, size: "xs" | "sm"): NoticePar
         variant: "warning",
         icon: <TriangleAlertIcon />,
         title: COPY.failedTitle,
-        description: update.startError ?? view.message,
+        description: view.message,
         actions: view.canRetry ? (
           <Button
             size={size}
             variant="outline"
             data-testid="self-update-retry"
-            disabled={update.starting}
             onClick={update.askToUpdate}
           >
             {COPY.tryAgain}

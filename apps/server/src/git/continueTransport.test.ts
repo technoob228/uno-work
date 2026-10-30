@@ -327,6 +327,99 @@ it.layer(TestLayer)("ContinueTransportLive", (it) => {
       }),
     );
 
+    it.effect("puts a project into a folder just cloned, on the source's own branch", () =>
+      Effect.gen(function* () {
+        const transport = yield* ContinueTransport;
+        const root = yield* makeTmpDir();
+        const remote = path.join(root, "remote.git");
+        const source = path.join(root, "source");
+        const target = path.join(root, "target");
+        const bundlePath = path.join(root, "transfer.bundle");
+
+        yield* git(root, ["init", "--bare", "--initial-branch=main", remote]);
+        yield* git(root, ["clone", "--quiet", remote, source]);
+        yield* configureUser(source);
+        yield* write(path.join(source, "a.txt"), "pushed\n");
+        yield* git(source, ["add", "."]);
+        yield* git(source, ["commit", "-q", "-m", "initial"]);
+        yield* git(source, ["push", "-q", "-u", "origin", "HEAD:main"]);
+        yield* git(root, ["clone", "--quiet", remote, target]);
+
+        // An unpushed branch with uncommitted work on top: what a move must not lose.
+        yield* git(source, ["checkout", "-q", "-b", "feat/local"]);
+        yield* write(path.join(source, "b.txt"), "committed here\n");
+        yield* git(source, ["add", "."]);
+        yield* git(source, ["commit", "-q", "-m", "local"]);
+        yield* write(path.join(source, "a.txt"), "edited\n");
+        yield* write(path.join(source, "c.txt"), "new\n");
+
+        const head = yield* transport.readHead(source);
+        const ref = continueLocalRefForTransfer("0f8fad5b-d9cb-469f-a165-70867728950e");
+        yield* transport.captureSnapshot({
+          cwd: source,
+          ref,
+          parents: [head.commit!],
+          message: "uno continue: project",
+        });
+        yield* transport.createBundle({ cwd: source, ref, bundlePath });
+
+        yield* transport.fetchBundle({ cwd: target, bundlePath, ref });
+        yield* transport.checkoutBranch({
+          cwd: target,
+          branch: "feat/local",
+          startPoint: head.commit!,
+        });
+        expect(yield* transport.restoreTree({ cwd: target, ref })).toBe(true);
+        yield* transport.deleteRef({ cwd: target, ref });
+
+        expect(yield* git(target, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("feat/local");
+        expect(yield* git(target, ["rev-parse", "HEAD"])).toBe(head.commit);
+        expect(yield* read(path.join(target, "a.txt"))).toBe("edited\n");
+        expect(yield* read(path.join(target, "b.txt"))).toBe("committed here\n");
+        expect(yield* read(path.join(target, "c.txt"))).toBe("new\n");
+        expect(yield* porcelain(target)).toEqual(["?? c.txt", "M a.txt"]);
+        // Nothing was pushed on the way.
+        expect(yield* lsRemote(remote)).not.toContain("feat/local");
+      }),
+    );
+
+    it.effect("puts a project without a remote into a repository just started", () =>
+      Effect.gen(function* () {
+        const transport = yield* ContinueTransport;
+        const root = yield* makeTmpDir();
+        const source = path.join(root, "source");
+        const target = path.join(root, "target");
+        const bundlePath = path.join(root, "transfer.bundle");
+
+        yield* git(root, ["init", "-q", "--initial-branch=main", source]);
+        yield* configureUser(source);
+        yield* write(path.join(source, "a.txt"), "committed\n");
+        yield* git(source, ["add", "."]);
+        yield* git(source, ["commit", "-q", "-m", "initial"]);
+        yield* write(path.join(source, "b.txt"), "uncommitted\n");
+
+        const head = yield* transport.readHead(source);
+        const ref = continueLocalRefForTransfer("0f8fad5b-d9cb-469f-a165-70867728950e");
+        yield* transport.captureSnapshot({
+          cwd: source,
+          ref,
+          parents: [head.commit!],
+          message: "uno continue: project",
+        });
+        yield* transport.createBundle({ cwd: source, ref, bundlePath });
+
+        yield* write(path.join(target, ".keep"), "");
+        yield* transport.initRepository(target);
+        yield* transport.fetchBundle({ cwd: target, bundlePath, ref });
+        yield* transport.checkoutBranch({ cwd: target, branch: "main", startPoint: head.commit! });
+        expect(yield* transport.restoreTree({ cwd: target, ref })).toBe(true);
+
+        expect(yield* read(path.join(target, "a.txt"))).toBe("committed\n");
+        expect(yield* read(path.join(target, "b.txt"))).toBe("uncommitted\n");
+        expect(yield* git(target, ["rev-parse", "--abbrev-ref", "HEAD"])).toBe("main");
+      }),
+    );
+
     it.effect("prefers origin, then the first other remote", () =>
       Effect.gen(function* () {
         const transport = yield* ContinueTransport;

@@ -30,6 +30,7 @@ import {
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed, type PendingApproval } from "../../session-logic";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
+import { SupportDraftCard } from "./SupportDraftCard";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import { useDevMode } from "../../devMode";
 import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
@@ -807,6 +808,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
             environmentId={ctx.activeThreadEnvironmentId}
             htmlRender={row.htmlRender}
           />
+        </div>
+      )}
+
+      {row.kind === "support-draft" && (
+        <div className="min-w-0">
+          <SupportDraftCard draft={row.draft} />
         </div>
       )}
 

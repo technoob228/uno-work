@@ -16,6 +16,14 @@
       "types": "./src/git.ts",
       "import": "./src/git.ts"
     },
+    "./supportDraft": {
+      "types": "./src/supportDraft.ts",
+      "import": "./src/supportDraft.ts"
+    },
+    "./agentVersions": {
+      "types": "./src/agentVersions.ts",
+      "import": "./src/agentVersions.ts"
+    },
     "./sourceControl": {
       "types": "./src/sourceControl.ts",
       "import": "./src/sourceControl.ts"

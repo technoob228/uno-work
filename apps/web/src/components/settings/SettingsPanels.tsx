@@ -2,6 +2,7 @@ import { ArchiveIcon, ArchiveX } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { UpdateEverythingDialog } from "../../updateEverything/UpdateEverythingDialog";
 import { type DesktopUpdateChannel, type ScopedThreadRef } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS, UNO_GATEWAY_BASE_URL } from "@t3tools/contracts/settings";
@@ -80,6 +81,29 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+function UpdateEverythingRow() {
+  const [open, setOpen] = useState(false);
+  return (
+    <SettingsRow
+      title="Update everything"
+      description="Uno Work and your agents, on all your computers."
+      control={
+        <>
+          <Button
+            size="xs"
+            variant="outline"
+            data-testid="settings-update-everything"
+            onClick={() => setOpen(true)}
+          >
+            Check
+          </Button>
+          {open ? <UpdateEverythingDialog open onOpenChange={setOpen} /> : null}
+        </>
+      }
+    />
+  );
+}
 
 function AboutVersionTitle() {
   return (
@@ -1008,6 +1032,7 @@ export function GeneralSettingsPanel({
             description="Current version of the application."
           />
         )}
+        <UpdateEverythingRow />
         {isElectron && !simple ? <UnoCodeInstallSection /> : null}
         {simple ? null : (
           <>

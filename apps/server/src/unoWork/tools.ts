@@ -99,6 +99,7 @@ import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { htmlRenderTools } from "./htmlTools.ts";
+import { supportDraftTool } from "./supportDraftTool.ts";
 import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
 import {
   decideUnoWorkGate,
@@ -208,6 +209,13 @@ export interface UnoWorkToolDeps {
       readonly width: number;
       readonly appearance: "dark" | "light";
     }) => Effect.Effect<HtmlPageCapture, UnoWorkToolError>;
+  };
+  /** A letter to support as a card in this chat (`support_draft`). Absent: not on this daemon. */
+  readonly supportDraft?: {
+    readonly publish: (input: {
+      readonly subject: string;
+      readonly body: string;
+    }) => Effect.Effect<{ readonly redactions: number }, UnoWorkToolError>;
   };
   /**
    * The calling chat's assistant preset refuses tools that change things
@@ -3866,6 +3874,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
 
   // A page in the chat instead of only text (htmlTools.ts)
   ...htmlRenderTools({ resolvePath: resolveUserPath, fail: toolError }),
+  // The letter Fix Work leaves for the person to send (fixWork/).
+  supportDraftTool(toolError),
   // Spark: one JS/Python file answers HTTPS, no server, free (sparkTools.ts)
   ...sparkTools({
     resolvePath: (raw, deps) => resolveUserPath(raw, deps),
