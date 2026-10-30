@@ -433,5 +433,47 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
     updatedAt: at(t4, 64),
   });
 
-  return [running, finished, asking, naming, report];
+  // ── Fix Work: what it did, and the letter the person sends themselves ──
+  const t5 = now - 3 * 60_000;
+  const repair = "showcase-fix-work";
+  const repairTurn = "turn-showcase-fix-work-1";
+  const fixWork = thread({
+    id: repair,
+    projectId,
+    title: "Fix Work",
+    messages: [
+      message(`${repair}-u1`, "user", "Fix Work: my chats stopped answering.", at(t5, 0), null),
+      message(
+        `${repair}-a1`,
+        "assistant",
+        "Chats stopped because the disk was full. I cleared 2.1 GB of old build caches and they answer again. Nothing else changed. The letter below is only for support if it happens again.",
+        at(t5, 41),
+        repairTurn,
+      ),
+    ],
+    activities: [
+      {
+        id: `${repair}-letter`,
+        tone: "info",
+        kind: "support.draft",
+        summary: "Letter to support",
+        payload: {
+          subject: "Work stopped answering: disk full",
+          body: "Hi,\n\nChats stopped answering at about 14:20 because the disk was full. I cleared old build caches and they work again.\n\nWhat I'd like to know: why the disk filled up.\n\nWork 0.0.168, Linux, 2 CPU, 4 GB.",
+          redactions: 1,
+        },
+        turnId: repairTurn,
+        createdAt: at(t5, 38),
+      },
+    ],
+    turn: {
+      turnId: repairTurn,
+      startedAt: at(t5, 0),
+      completedAt: at(t5, 41),
+      answerId: `${repair}-a1`,
+    },
+    updatedAt: at(t5, 41),
+  });
+
+  return [running, finished, asking, naming, report, fixWork];
 }

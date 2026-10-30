@@ -674,8 +674,12 @@ function landPages(
       return yield* fail("transfer_incomplete", "The pages did not arrive intact.");
     }
     const text = yield* deps.transfers.readIncomingText(input.pages.transferId);
+    const pack = yield* Effect.try({
+      try: () => readPagePack(text),
+      catch: (cause) => fail("transfer_incomplete", "The pages could not be read.", cause),
+    });
     const start = Date.parse(input.createdAt);
-    for (const [index, page] of readPagePack(text).entries()) {
+    for (const [index, page] of pack.entries()) {
       const stored = yield* deps.storePage({ threadId: input.threadId, html: page.html });
       const at = new Date(start + index + 1).toISOString();
       yield* deps.engine.dispatch(

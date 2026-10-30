@@ -995,6 +995,17 @@ describe("the chat's HTML pages", () => {
     }),
   );
 
+  it.effect("lands the chat when the file isn't what it should be", () =>
+    Effect.gen(function* () {
+      const fixture = makeFixture({
+        transfers: { readIncomingText: () => Effect.succeed("not json") },
+      });
+      const result = yield* makeThreadContinueLand(fixture.deps)(landInput({ pages: pagesInput }));
+      assert.equal(result.pagesCarried, 0);
+      assert.deepEqual(fixture.storedPages, []);
+    }),
+  );
+
   it.effect("lands the chat when a page can't be saved", () =>
     Effect.gen(function* () {
       const fixture = makeFixture({ transfers: arrivedPages, storePageFails: true });
