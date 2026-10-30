@@ -79,6 +79,7 @@ export const CONTINUE_ON_MACHINE_COPY = {
 /** The same dialog, moving a whole project. */
 export const MOVE_PROJECT_COPY = {
   action: "Move to another computer…",
+  from: (machineLabel: string) => `From ${machineLabel}`,
   title: "Move to another computer",
   description: (projectName: string) =>
     `"${projectName}" opens on the computer you pick, with all its files, including work you haven't committed. Your latest chat continues there. Other chats stay here, and so does this copy of the files.`,

@@ -222,7 +222,7 @@ import { usePins } from "../navigation/usePins";
 import { SidebarAppsList } from "./sidebar/SidebarAppsList";
 import { SidebarUnoAiChats } from "../unoai/UnoAiChatsList";
 import { SidebarFilesTree } from "./sidebar/SidebarFilesTree";
-import { SidebarPinned } from "./sidebar/SidebarPinned";
+import { SidebarPinned, useAppPinsInRow } from "./sidebar/SidebarPinned";
 import { type SidebarMode, useNavStore } from "../navigation/navStore";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { InboxNeedsYouList, InboxPanel } from "./inbox/InboxPanel";
@@ -1851,6 +1851,7 @@ export default function Sidebar() {
   const devMode = useDevMode();
   const simple = !devMode;
   const { pins } = usePins();
+  const appPinsInRow = useAppPinsInRow();
   const pathname = useLocation({ select: (location) => location.pathname });
   const isOnSettings = pathname.startsWith("/settings");
   const router = useRouter();
@@ -4213,6 +4214,8 @@ export default function Sidebar() {
         {
           id: "move",
           label: MOVE_PROJECT_COPY.action,
+          // A bare computer name here would read as the destination.
+          memberLabel: MOVE_PROJECT_COPY.from,
           run: (member: Project) => openProjectMove(member),
         },
         {
@@ -4239,7 +4242,12 @@ export default function Sidebar() {
             const where = resolveEnvironmentLabel(member.environmentId) ?? member.environmentId;
             return {
               id,
-              label: "labelFor" in action && syncEntryOf(member)?.enabled ? `✓ ${where}` : where,
+              label:
+                "memberLabel" in action
+                  ? action.memberLabel(where)
+                  : "labelFor" in action && syncEntryOf(member)?.enabled
+                    ? `✓ ${where}`
+                    : where,
             };
           }),
         };
@@ -4561,7 +4569,9 @@ export default function Sidebar() {
             )}
             {/* Pinned sits under the assistants (Misha 30.10) and scrolls with
                 the chats: a block of its own held 40% of the sidebar. */}
-            {pins.length > 0 || pinnedThreads.length > 0 ? (
+            {/* Apps and widgets may live in the icon row: nothing to list then. */}
+            {pins.some((item) => !appPinsInRow || item.kind !== "app") ||
+            pinnedThreads.length > 0 ? (
               <li className="mt-2 list-none" data-testid="sidebar-d-pinned">
                 <SidebarPinned
                   hasPinnedChats={pinnedThreads.length > 0}

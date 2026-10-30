@@ -446,7 +446,7 @@ export function timelineShowcaseThreads(projectId: string, root: string) {
       message(
         `${repair}-a1`,
         "assistant",
-        "Chats stopped because the disk was full. I cleared 2.1 GB of old build caches and they answer again. Nothing else changed. The letter below is only for support if it happens again.",
+        "Chats stopped because the disk was full. I cleared 2.1 GB of old build caches and they answer again. Nothing else changed. If it happens again, send support the letter.",
         at(t5, 41),
         repairTurn,
       ),
