@@ -2410,7 +2410,9 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
-              const permission = buildOpenCodePermissionRules(input.runtimeMode);
+              const permission = buildOpenCodePermissionRules(input.runtimeMode, [
+                path.join(serverConfig.stateDir, "fix-work"),
+              ]);
               // Resume: the same OpenCode session, if it still exists and
               // belongs to this directory. Any failure falls back to a new
               // session — the thread keeps working, only without history. That

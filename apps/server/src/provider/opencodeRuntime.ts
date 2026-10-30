@@ -228,8 +228,15 @@ export function toOpenCodeFileParts(input: {
  * - `auto-accept-edits` ("Edit files freely") — the same, plus edits inside
  *   the project. Before this, both modes asked even to read a file, so
  *   "Edit files freely" asked for every read and every write.
+ *
+ * `openFolders`: folders the daemon itself made for the agent, nothing of the
+ * person's in them (Fix Work's cleaned copies). Opening one doesn't ask; editing
+ * there still follows the rules above.
  */
-export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): PermissionRuleset {
+export function buildOpenCodePermissionRules(
+  runtimeMode: RuntimeMode,
+  openFolders: ReadonlyArray<string> = [],
+): PermissionRuleset {
   if (runtimeMode === "full-access") {
     return [{ permission: "*", pattern: "*", action: "allow" }];
   }
@@ -253,6 +260,11 @@ export function buildOpenCodePermissionRules(runtimeMode: RuntimeMode): Permissi
     { permission: "codesearch", pattern: "*", action: "ask" },
     // Last: a path outside the project asks even for a read.
     { permission: "external_directory", pattern: "*", action: "ask" },
+    ...openFolders.map((folder) => ({
+      permission: "external_directory",
+      pattern: `${folder}/*`,
+      action: "allow" as const,
+    })),
     { permission: "doom_loop", pattern: "*", action: "ask" },
     { permission: "question", pattern: "*", action: "allow" },
     // The uno-work MCP tools: the daemon asks the person itself (per tool
