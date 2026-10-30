@@ -247,6 +247,8 @@ export function NewProjectDialog() {
         ) : environmentId === null || home === null ? (
           <DialogPanel>
             <BackToOptions onBack={() => setStep("choose")} />
+            {/* A computer that doesn't answer mustn't be a dead end: pick another. */}
+            {step === "empty" ? <ComputerRow environmentId={environmentId} /> : null}
             <p className="py-6 text-center text-sm text-muted-foreground">
               {environmentId === null
                 ? "No computer is connected."
@@ -1715,6 +1717,30 @@ function useProjectDestinations(environmentId: EnvironmentId) {
   );
 }
 
+/** Which computer it goes to: the same choice as Home's, and the same computer stays picked. */
+function ComputerRow({ environmentId }: { environmentId: EnvironmentId | null }) {
+  const setEnvironmentId = useNewProjectStore((state) => state.setEnvironmentId);
+  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  return (
+    <div
+      className="mt-2 flex items-center justify-between gap-2"
+      data-testid="new-project-computer"
+    >
+      <span className="text-sm font-medium">Computer</span>
+      <NewChatComputerPicker
+        variant="chip"
+        environmentId={environmentId}
+        shortcut={false}
+        testId="new-project-computer-picker"
+        onPick={(next) => {
+          setEnvironmentId(next);
+          setActiveEnvironmentId(next);
+        }}
+      />
+    </div>
+  );
+}
+
 /** Publish a new project in the background: the chat opens right away (as in T3 Code). */
 function connectProjectHost(input: {
   readonly environmentId: EnvironmentId;
@@ -1767,8 +1793,6 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
     destinations.find(
       (item) => destinationChoice && destinationKey(item) === destinationKey(destinationChoice),
     ) ?? destinations[0]!;
-  const setEnvironmentId = useNewProjectStore((state) => state.setEnvironmentId);
-  const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
 
   const submit = async () => {
     if (!check.ok) {
@@ -1832,22 +1856,7 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
             ? `Creates ${tildePath(uploadedProjectPath(home, check.name), home)}`
             : "Creates ~/projects/<name>"}
         </p>
-        <div
-          className="mt-2 flex items-center justify-between gap-2"
-          data-testid="new-project-computer"
-        >
-          <span className="text-sm font-medium">Computer</span>
-          <NewChatComputerPicker
-            variant="chip"
-            environmentId={environmentId}
-            shortcut={false}
-            testId="new-project-computer-picker"
-            onPick={(next) => {
-              setEnvironmentId(next);
-              setActiveEnvironmentId(next);
-            }}
-          />
-        </div>
+        <ComputerRow environmentId={environmentId} />
         {destinations.length > 1 ? (
           <DestinationPicker
             destinations={destinations}

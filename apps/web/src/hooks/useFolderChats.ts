@@ -60,6 +60,8 @@ export async function resolveHomeFolder(environmentId: EnvironmentId): Promise<s
   }
 }
 
+const HOME_FOLDER_RETRY_MS = 3000;
+
 /** The home folder for rendering ("is this chat in the home folder?"). */
 export function useHomeFolderPath(environmentId: EnvironmentId | null): string | null {
   return (
@@ -68,6 +70,8 @@ export function useHomeFolderPath(environmentId: EnvironmentId | null): string |
       queryFn: () => resolveHomeFolder(environmentId!),
       enabled: environmentId !== null,
       staleTime: Number.POSITIVE_INFINITY,
+      // Not answered yet (a computer still connecting): ask again, don't keep the "no".
+      refetchInterval: (query) => (query.state.data ? false : HOME_FOLDER_RETRY_MS),
     }).data ?? null
   );
 }

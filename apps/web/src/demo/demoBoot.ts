@@ -342,7 +342,27 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
     case WS_METHODS.vcsListRefs:
       return { isRepo: false, hasPrimaryRemote: false, nextCursor: null, totalCount: 0, refs: [] };
     case WS_METHODS.serverDiscoverSourceControl:
-      return { versionControlSystems: [], sourceControlProviders: [] };
+      return { versionControlSystems: [], sourceControlProviders: demoSourceControlHosts() };
+    // A new project on GitHub or GitLab (`?hosts=github,gitlab`): nothing leaves the page.
+    case WS_METHODS.projectSyncStartRepository:
+      return null; // a void answer: this harness doesn't encode it, and JSON would drop undefined
+    case WS_METHODS.projectSyncConnectHost:
+      return {
+        projectId: body.projectId,
+        enabled: true,
+        name: String(body.repository).split("/").pop(),
+        mode: "git",
+        state: "synced",
+        message: "",
+        lastSyncedAt: new Date().toISOString(),
+        conflict: null,
+        host: {
+          provider: body.provider,
+          repository: String(body.repository),
+          url: `https://${String(body.provider)}.com/${String(body.repository)}`,
+          remote: "origin",
+        },
+      };
     case WS_METHODS.serverGetTraceDiagnostics:
       return demoTraceDiagnostics();
     case WS_METHODS.unoComputerGetState:
@@ -427,6 +447,25 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
       }
       return {};
   }
+}
+
+/** What `?hosts=github,gitlab` says this computer is signed in to. */
+function demoSourceControlHosts() {
+  const hosts = new URLSearchParams(location.search).get("hosts")?.split(",") ?? [];
+  return hosts.map((kind) => ({
+    kind,
+    label: kind === "github" ? "GitHub" : "GitLab",
+    status: "available",
+    version: { _tag: "None" },
+    installHint: "Sign in on this computer.",
+    detail: { _tag: "None" },
+    auth: {
+      status: "authenticated",
+      account: { _tag: "Some", value: "demo-user" },
+      host: { _tag: "None" },
+      detail: { _tag: "None" },
+    },
+  }));
 }
 
 function initialStream(machine: DemoMachine, request: NormalizedWsRpcRequestBody) {
