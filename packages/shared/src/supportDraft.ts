@@ -5,7 +5,7 @@
  */
 export const SUPPORT_DRAFT_TOOL_NAME = "support_draft";
 export const SUPPORT_DRAFT_ACTIVITY_KIND = "support.draft";
-export const SUPPORT_EMAIL = "hello@getuno.xyz";
+export const SUPPORT_EMAIL = "hello@uno4.dev";
 export const SUPPORT_TELEGRAM = "get_uno_support";
 export const SUPPORT_DRAFT_MAX_SUBJECT = 200;
 export const SUPPORT_DRAFT_MAX_BODY = 6_000;
