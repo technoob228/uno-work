@@ -106,10 +106,13 @@ const SPARK_GUIDE = `## Spark: code without a server (free)
 One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\` — no server, nothing to keep running, free on every plan. \`spark_deploy\` puts it there (a file, or a small folder with \`entry\`) and returns the address; deploying the same name again makes a new version. \`spark_logs\` shows what it printed and a line per request, \`spark_list\` the apps and the account's limits, \`spark_delete\` removes one (the person approves).
 
 ### When Spark, when not
-- **Fits:** a webhook, a Telegram bot, a small JSON API, a form handler, glue between services — anything that answers a request with a little work.
-- **Inside:** \`env.KV\` (key → value, shared by the account's apps: \`get\`, \`put\`, \`delete\`, \`list\`, \`incr\`), \`fetch\` to public addresses, variables (\`env\`) and secrets.
-- **Not there:** files on a disk, SQL databases, packages (npm, pip), timers or cron — it runs only when a request comes.
-- **A model without a key:** \`await env.AI.chat({ messages })\` → the OpenAI chat answer; \`return env.AI.chat({ stream: true, messages })\` streams it to the client (Python: \`env.AI.chat(messages)\`, \`stream=True\`). The account pays from its AI balance and Uno AI hours through its AI key «spark» ($5 limit to start, the person changes it in the console). Never put a model key in the code.
+- **Fits:** a webhook, a Telegram bot, a small JSON API, a form handler, glue between services, a job on a schedule — anything that answers a request with a little work.
+- **Inside:** \`env.KV\` (key → value, shared by the account's apps: \`get\`, \`put\`, \`delete\`, \`list\`, \`incr\`, \`batch\`, \`getWithVersion\`), timers (\`env.TIMERS\`), \`fetch\` to public addresses, variables (\`env\`) and secrets.
+- **Not there:** files on a disk, SQL databases, packages (npm, pip), Unicode escapes in RegExp (\`\\p{L}\`: the build refuses the app, use explicit ranges).
+- **Timers and schedules:** the app asks to be called later and Spark sends the request itself, nothing keeps running: \`await env.TIMERS.after(60, { path: "/tick", body: { job: 7 } })\`, \`.at(date, opts)\`, \`.cron("0 9 * * 1-5", { path: "/digest", id: "digest" })\` (UTC), \`.list()\`, \`.get(id)\`, \`.cancel(id)\`. Python: \`env.TIMERS.after(60, path="/tick", body={...})\`. A call is an ordinary request to the app and comes at least once: a 429 or 5xx is retried (5 attempts), and after a restart of Spark it may come twice; tell by the headers \`x-uno-spark-timer\`, \`x-uno-spark-timer-at\`. Free: 10 timers per app, at most one call a minute; paid plans: 100 timers, one call a second.
+- **KV, several writes, all or none:** \`await env.KV.batch([{op: "put", key, value, ifVersion?}, {op: "delete", key}, {op: "check", key, ifVersion}])\`, up to 128 operations; a stale version throws \`SparkError\` with code \`conflict\` and nothing is written. \`env.KV.getWithVersion(key)\` gives \`{value, version}\`. Python: \`batch\`, \`get_with_version\`, \`if_version\`.
+- **Requests side by side:** \`await Promise.all([fetch(a), fetch(b)])\` takes as long as the slowest one; Python: \`spark.fetch_all([...])\`. Up to 4 at once on Free, 8 on paid plans; over that the request is refused and the app's log says why.
+- **A model without a key:** \`await env.AI.chat({ messages })\` → the OpenAI chat answer; \`return env.AI.chat({ stream: true, messages })\` streams it to the client, and its body is empty inside the app: to read the answer in code, call without \`stream\` (Python: \`env.AI.chat(messages)\`, \`stream=True\`). The account pays from its AI balance and Uno AI hours through its AI key «spark» ($5 limit to start, the person changes it in the console). Never put a model key in the code.
 - **Streaming:** return a \`fetch(url, { ..., stream: true })\` as it is (Python \`spark.fetch(..., stream=True)\`) and the client gets it as it arrives — up to 120 s, 2 streams at once on Free.
 - **Limits:** Free holds 3 apps, paid plans 20; a few ms of CPU per call; on Free a call ends after 30 s (a \`fetch\` is cut with it; exact figures: \`spark_list\`); about 600 requests a minute per account; a streamed answer may run 120 s. Over a limit the answer carries \`X-Uno-Spark-Error\`: \`cpu_limit\`, \`wall_limit\`, \`rate_limited\`, \`concurrency\` (retry).
 - "Deploy / put online my project" (also "on uno.place"): pages and a built frontend go on Sites (\`site_publish\`); a small backend goes on Spark. Never answer "there is no server, order a plan" when it fits Spark.
@@ -118,7 +121,7 @@ One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\`
 When the person's backend (Express, Flask, FastAPI, Go, PHP…) is small and fits the list above, rewrite it as one file and keep the original:
 - One \`fetch(request, env)\`; route by \`new URL(request.url).pathname\` and \`request.method\`; answer JSON.
 - Data: SQLite or a JSON file → \`env.KV\` (one key per record, a prefix and \`list\` for a collection, \`incr\` for counters).
-- A background job ("check every minute") → do the check when a request comes, but only if that is acceptable for what the person wants; say so in one line.
+- A background job ("check every minute") → a timer: \`env.TIMERS.cron("* * * * *", { path: "/check" })\`. On Free at most one call a minute.
 - Packages and SDKs → plain \`fetch\` to the service's HTTP API.
 - The frontend → Sites, calling the Spark address (send \`Access-Control-Allow-Origin\` from Spark when the site calls it).
 - Put it next to the project (\`spark.js\` or \`spark.py\`), deploy, call the address once to check, read \`spark_logs\` if it fails. Several files: deploy the folder with \`entry\` (no packages inside).
@@ -154,11 +157,11 @@ def fetch(request, env):
 2. The bot answers Telegram's POST: read the update (\`await request.json()\`), reply with \`fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendMessage", …)\` and return 200 fast. Keep what it must remember in \`env.KV\`.
 3. \`spark_deploy\` with \`secrets: [{"name": "TELEGRAM_BOT_TOKEN", "hosts": ["api.telegram.org"]}]\`.
 4. Point the bot's webhook at the app address once (\`setWebhook\`; the deploy result has the command — it reads \`.env\` and never prints the token). Then write to the bot to check, and \`spark_logs\` if it is silent.
-A bot that writes on its own on a schedule (reminders, "every morning") needs a timer: not Spark.
+A bot that writes on its own (reminders, "every morning"): a timer calls the app, \`env.TIMERS.cron("0 9 * * *", { path: "/remind" })\`, and the app sends the message.
 
 ### When it doesn't fit
 Say in one sentence what stops it, then the next step — no long explanation, no workaround that breaks the limits:
-- "It checks prices every 30 seconds, and Spark only answers requests (no timers)."
+- "It checks prices every 30 seconds, and on Free a Spark timer fires at most once a minute."
 - "Its jobs take longer than 30 seconds, the most a Spark call may take on Free."
 - "It needs a SQL database (or files, headless Chrome, packages)."
 Next step: run it as an app on this computer (\`uno_guide("apps")\`; a computer that sleeps pauses it — Plus stays on), or on an app server when \`app_servers_list\` says \`enabled: true\` (\`uno_guide("app-servers")\`); a database: \`db_create\`. If the plan is short, give the upgrade link from \`account_overview\`.
