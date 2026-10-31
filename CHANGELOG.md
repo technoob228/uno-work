@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.171 — 2026-10-31
+
+- A new chat survives a reload: it keeps its project, no longer asks to "Sign in to Codex", and your message sends. A draft that was already broken repairs itself.
+- Uno no longer says «Не запустил» in Telegram when the chat really started.
+
+---
+
 ## v0.0.170 — 2026-10-30
 
 - Files of any size into Cloud storage: big files from the browser go straight to storage, with a progress bar and a clear result. Chat attachments and Files take up to 100 GB and check there is room on the computer first.
