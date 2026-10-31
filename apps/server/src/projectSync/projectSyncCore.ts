@@ -11,7 +11,9 @@
  *
  * A project someone shared with this person (`team`) lives in the owner's Uno
  * cloud and syncs through the team routes. Its keys only come in: the ones the
- * owner ticked land in `.env`; a key added here stays here.
+ * owner ticked land in `.env`; a key added here stays here. Once accepted it
+ * comes by itself to the first computer the person opens Work on (`arrive`); the
+ * others keep it under "Projects on your other computers".
  *
  * Plain promises with every dependency injected (tests use fakes); the
  * Effect service around it is `ProjectSyncService.ts`.
@@ -24,6 +26,7 @@ import path from "node:path";
 import {
   isAssistantProjectId,
   type ProjectSecretsList,
+  type ProjectSyncArrival,
   type ProjectSyncConflict,
   type ProjectSyncElsewhere,
   type ProjectSyncEntry,
@@ -151,6 +154,10 @@ export interface SyncEngine {
     readonly updatedAt: string | null;
     readonly mode: ProjectSyncMode;
   } | null>;
+  readonly claimSharedArrival: (
+    input: { name: string; team: number; membership: string },
+    ctx: EngineCtx,
+  ) => Promise<boolean>;
   readonly defaultName: (dir: string) => string;
 }
 
@@ -184,6 +191,11 @@ export interface ProjectSyncDeps {
 }
 
 export class ProjectSyncFailure extends Error {}
+
+interface GotHere {
+  readonly projectId: string;
+  readonly entry: ProjectSyncEntry;
+}
 
 /** What this computer remembers per project (`<stateDir>/project-sync.json`). */
 interface Stored {
@@ -272,6 +284,8 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const lastRun = new Map<string, EngineResult>();
   /** Folders "Get it here" is filling: not new projects to adopt. */
   const arriving = new Set<string>();
+  /** Projects on their way here: asked twice (two windows, a click meanwhile), they come once. */
+  const gettingHere = new Map<string, Promise<GotHere>>();
   /** Since when a project's syncs have been waiting for chats to finish. */
   const waitingSince = new Map<string, number>();
   /** The answer "turn on" to the question about older projects, working through them. */
@@ -297,21 +311,27 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const sharedWithMe = async () =>
     ((await deps.teams?.projects()) ?? []).filter((project) => project.role === "editor");
 
-  const sharedProject = async (teamId: number, name: string) => {
-    const found = (await sharedWithMe()).find(
-      (project) => project.id === teamId && project.name === name,
-    );
-    if (!found) throw new ProjectSyncFailure(`${name} isn't shared with you.`);
-    return teamOf(found);
-  };
+  const sharedProject = async (teamId: number, name: string) =>
+    (await sharedWithMe()).find((project) => project.id === teamId && project.name === name) ??
+    null;
 
   /** A shared project is on this computer. */
   const arrived = (teamId: number) =>
     Object.values(store).some((entry) => entry.team?.id === teamId);
 
   /** "The project owner's…" from the engine, with their name in it. */
-  const ownerNamed = (entry: Stored, message: string) =>
+  const ownerNamed = (entry: Pick<Stored, "team">, message: string) =>
     entry.team ? message.replace("The project owner's", `${entry.team.owner}'s`) : message;
+
+  /** Why a project didn't get here, in the person's words: no system error goes to them. */
+  const notHere = (name: string, team: ProjectSyncTeam | null, error: unknown) => {
+    const reason = error instanceof Error ? error.message : String(error);
+    return new ProjectSyncFailure(
+      /ENOSPC|no space left/i.test(reason)
+        ? `There isn't enough free space on this computer for ${name}. Free some up, then choose Get it here.`
+        : ownerNamed(team ? { team } : {}, reason),
+    );
+  };
 
   const load = async () => {
     if (loaded) return;
@@ -719,33 +739,76 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     engine: SyncEngine,
     ctx: EngineCtx,
   ): Promise<ReadonlyArray<ProjectSyncElsewhere>> => {
+    // A look that fails says nothing new: the rows stay as they were.
+    const shownBefore = (elsewhere?.list ?? []).filter((project) => project.team);
     const shared = await sharedWithMe().catch((error) => {
       deps.log("warn", "project sync: couldn't list the shared projects", {
         reason: error instanceof Error ? error.message : String(error),
       });
-      return [];
+      return null;
     });
+    if (shared === null) return shownBefore;
     const rows = await Promise.all(
       shared
         .filter((project) => !arrived(project.id))
         .map(async (project) => {
+          const team = teamOf(project);
           const peek = await engine
             .peekSharedProject({ name: project.name, team: project.id }, ctx)
-            .catch(() => null);
-          if (!peek) return [];
-          const team = teamOf(project);
+            .catch(() => undefined);
+          if (peek === undefined) {
+            return shownBefore.filter((shown) => shown.team?.id === project.id);
+          }
           return [
-            {
-              name: project.name,
-              updatedAt: peek.updatedAt,
-              from: team.owner,
-              mode: peek.mode,
-              team,
-            },
+            peek
+              ? {
+                  name: project.name,
+                  updatedAt: peek.updatedAt,
+                  from: team.owner,
+                  mode: peek.mode,
+                  team,
+                }
+              : {
+                  name: project.name,
+                  updatedAt: null,
+                  from: team.owner,
+                  mode: "git" as const,
+                  team,
+                  waiting: true,
+                },
           ];
         }),
     );
     return rows.flat();
+  };
+
+  /** This computer is the first of the person's to take a shared project. */
+  const claimArrival = async (project: SharedProject) => {
+    if (!project.joinedAt) return false;
+    const engine = await deps.engine();
+    return engine.claimSharedArrival(
+      { name: project.name, team: project.id, membership: project.joinedAt },
+      await engineCtx(),
+    );
+  };
+
+  /** A project this person accepted has something in it to bring. */
+  const hasVersion = async (project: SharedProject) => {
+    const engine = await deps.engine();
+    const peek = await engine.peekSharedProject(
+      { name: project.name, team: project.id },
+      await engineCtx(),
+    );
+    return peek !== null;
+  };
+
+  /** Not an empty project: it can still come to whichever computer is open when it fills. */
+  const noteArrival = async (project: SharedProject) =>
+    (await hasVersion(project)) && claimArrival(project);
+
+  /** A row that has to show now: the next look at the cloud could be two minutes away. */
+  const showRow = (teamId: number) => {
+    if (!elsewhere?.list.some((project) => project.team?.id === teamId)) elsewhere = null;
   };
 
   const schedulePolls = () => {
@@ -764,6 +827,76 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const fresh = (projectId: string) => {
     const at = scheduler.lastFinishedAt(projectId);
     return at !== null && deps.timers.now() - at < FRESH_ENOUGH_MS;
+  };
+
+  async function getHereNow(name: string, team: ProjectSyncTeam | null): Promise<GotHere> {
+    const linked = Object.entries(store).find(
+      ([, entry]) => entry.name === name && (entry.team?.id ?? null) === (team?.id ?? null),
+    );
+    if (linked) {
+      const [projectId, entry] = linked;
+      if (!entry.enabled) {
+        entry.enabled = true;
+        await persist();
+        startWatch(projectId, entry.dir);
+      }
+      await scheduler.runNow(projectId);
+      return { projectId, entry: view(projectId) };
+    }
+    const root = path.join(deps.home, "projects");
+    let dir = path.join(root, name);
+    for (let n = 2; n < 50; n += 1) {
+      const entries = await readdir(dir).catch(() => null);
+      if (entries === null || entries.length === 0) break;
+      dir = path.join(root, `${name}-${n}`);
+    }
+    const engine = await deps.engine();
+    const result = await engine
+      .getProject({ name, dir, ...(team ? { team: team.id } : {}) }, await engineCtx())
+      .catch((error) => {
+        throw notHere(name, team, error);
+      });
+    if (!result.ok) throw notHere(name, team, result.message);
+    const entry: Stored = {
+      name,
+      dir,
+      enabled: true,
+      mode: result.mode,
+      state: result.state === "busy" ? "syncing" : result.state,
+      message: result.message,
+      lastSyncedAt: new Date(deps.timers.now()).toISOString(),
+      conflict: null,
+      keyVersions: {},
+      ...(team ? { team } : {}),
+    };
+    arriving.add(dir);
+    const projectId = await deps
+      .createProject({ title: name, workspaceRoot: dir })
+      .then((id) => {
+        store[id] = entry;
+        return id;
+      })
+      .finally(() => arriving.delete(dir));
+    quietUntil.set(projectId, deps.timers.now() + OWN_WRITES_QUIET_MS);
+    await syncKeys(projectId, entry, false).catch((error) =>
+      deps.log("warn", "project sync: keys didn't arrive", {
+        project: name,
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    await persist();
+    startWatch(projectId, dir);
+    elsewhere = null;
+    return { projectId, entry: view(projectId) };
+  }
+
+  const getHereOnce = (name: string, team: ProjectSyncTeam | null) => {
+    const key = `${team?.id ?? ""}/${name}`;
+    const running = gettingHere.get(key);
+    if (running) return running;
+    const work = getHereNow(name, team).finally(() => gettingHere.delete(key));
+    gettingHere.set(key, work);
+    return work;
   };
 
   return {
@@ -794,14 +927,12 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       await load();
       const available = await deps.available();
       if (available && (!elsewhere || deps.timers.now() - elsewhere.at > ELSEWHERE_TTL_MS)) {
-        const loading = refreshElsewhere();
-        // The first time, wait a little for it; after that the cached list is shown.
-        if (!elsewhere) {
-          await Promise.race([
-            loading,
-            new Promise((resolve) => deps.timers.setTimeout(() => resolve(null), 4_000)),
-          ]);
-        }
+        // Wait a little for it: Work opened right after an Accept should know at
+        // once, and a cloud computer's list is old by the time someone looks.
+        await Promise.race([
+          refreshElsewhere(),
+          new Promise((resolve) => deps.timers.setTimeout(() => resolve(null), 4_000)),
+        ]);
       }
       const here = new Set(
         Object.values(store)
@@ -937,64 +1068,60 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     getHere: async (name: string, teamId?: number) => {
       await load();
       await ensureAvailable();
-      const team = teamId === undefined ? null : await sharedProject(teamId, name);
-      const linked = Object.entries(store).find(
-        ([, entry]) => entry.name === name && (entry.team?.id ?? null) === (team?.id ?? null),
-      );
-      if (linked) {
-        const [projectId, entry] = linked;
-        if (!entry.enabled) {
-          entry.enabled = true;
-          await persist();
-          startWatch(projectId, entry.dir);
+      const shared = teamId === undefined ? null : await sharedProject(teamId, name);
+      if (teamId !== undefined && !shared) {
+        throw new ProjectSyncFailure(`${name} isn't shared with you.`);
+      }
+      if (shared) {
+        // Asked for by hand: the person's other computers shouldn't bring it as well.
+        await noteArrival(shared).catch((error) =>
+          deps.log("warn", "project sync: couldn't note a shared project's arrival", {
+            project: name,
+            reason: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+      return getHereOnce(name, shared ? teamOf(shared) : null);
+    },
+
+    /**
+     * A shared project coming to the computer the person just opened (the
+     * interface asks, a daemon runs whether anyone is there or not). Only the
+     * first computer takes it, so a project someone deleted here doesn't come
+     * back. A project with nothing saved takes no turn: it can still come once it
+     * has a first version.
+     */
+    arrive: async (name: string, teamId: number): Promise<ProjectSyncArrival> => {
+      await load();
+      await ensureAvailable();
+      const shared = await sharedProject(teamId, name);
+      if (!shared) return { outcome: "gone" };
+      const team = teamOf(shared);
+      const known = Object.entries(store).find(([, entry]) => entry.team?.id === teamId)?.[0];
+      if (known) {
+        return (await projectOf(known))
+          ? { outcome: "here", entry: view(known) }
+          : { outcome: "taken" };
+      }
+      try {
+        if (!(await hasVersion(shared))) {
+          showRow(teamId);
+          return { outcome: "waiting" };
         }
-        await scheduler.runNow(projectId);
-        return { projectId, entry: view(projectId) };
-      }
-      const root = path.join(deps.home, "projects");
-      let dir = path.join(root, name);
-      for (let n = 2; n < 50; n += 1) {
-        const entries = await readdir(dir).catch(() => null);
-        if (entries === null || entries.length === 0) break;
-        dir = path.join(root, `${name}-${n}`);
-      }
-      const engine = await deps.engine();
-      const result = await engine.getProject(
-        { name, dir, ...(team ? { team: team.id } : {}) },
-        await engineCtx(),
-      );
-      if (!result.ok) throw new ProjectSyncFailure(result.message);
-      const entry: Stored = {
-        name,
-        dir,
-        enabled: true,
-        mode: result.mode,
-        state: result.state === "busy" ? "syncing" : result.state,
-        message: result.message,
-        lastSyncedAt: new Date(deps.timers.now()).toISOString(),
-        conflict: null,
-        keyVersions: {},
-        ...(team ? { team } : {}),
-      };
-      arriving.add(dir);
-      const projectId = await deps
-        .createProject({ title: name, workspaceRoot: dir })
-        .then((id) => {
-          store[id] = entry;
-          return id;
-        })
-        .finally(() => arriving.delete(dir));
-      quietUntil.set(projectId, deps.timers.now() + OWN_WRITES_QUIET_MS);
-      await syncKeys(projectId, entry, false).catch((error) =>
-        deps.log("warn", "project sync: keys didn't arrive", {
+        if (!(await claimArrival(shared))) {
+          showRow(teamId);
+          return { outcome: "taken" };
+        }
+        return { outcome: "here", entry: (await getHereOnce(name, team)).entry };
+      } catch (error) {
+        showRow(teamId);
+        const failure = notHere(name, team, error);
+        deps.log("warn", "project sync: a shared project didn't arrive", {
           project: name,
-          reason: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      await persist();
-      startWatch(projectId, dir);
-      elsewhere = null;
-      return { projectId, entry: view(projectId) };
+          reason: failure.message,
+        });
+        throw failure;
+      }
     },
 
     /** The person opened the project here, or a turn starts in it: bring the other computers' changes. */

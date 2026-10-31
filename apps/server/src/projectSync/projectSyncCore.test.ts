@@ -69,6 +69,8 @@ interface ComputerOptions {
   readonly teamCloud?: string;
   readonly person?: string;
   readonly teams?: ProjectTeams;
+  /** Change the engine, for what real storage can't be made to do here. */
+  readonly engine?: (engine: SyncEngine) => SyncEngine;
   readonly log?: (message: string, data?: Record<string, unknown>) => void;
 }
 
@@ -96,7 +98,8 @@ function computer(label: string, vault: ProjectVault, options?: ComputerOptions)
     engine: async () => {
       await installSdkFiles(home);
       const file = path.join(home, ".uno", "sdk", "js", "uno-sync.mjs");
-      return (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
+      const engine = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
+      return options?.engine ? options.engine(engine) : engine;
     },
     available: async () => options?.cloud !== false,
     person: async () => options?.person ?? "Misha",
@@ -603,6 +606,7 @@ describe("a project shared with this person", { timeout: 120_000 }, () => {
     name: "notes",
     role: "editor",
     owner: OWNER,
+    joinedAt: "2026-10-30T12:00:00.123456Z",
     ...overrides,
   });
 
@@ -787,7 +791,9 @@ describe("a project shared with this person", { timeout: 120_000 }, () => {
       rows: [row({ role: "owner" }), row({ id: 13, name: "empty" })],
     });
     await ownerProject(misha);
-    expect((await anya.core.status()).elsewhere).toEqual([]);
+    expect((await anya.core.status()).elsewhere).toEqual([
+      expect.objectContaining({ name: "empty", waiting: true, team: { id: 13, owner: "misha" } }),
+    ]);
     await expect(anya.core.getHere("notes", TEAM)).rejects.toThrow(/isn't shared with you/);
     await expect(anya.core.getHere("empty", 13)).rejects.toThrow(/Nothing is saved in empty yet/);
     expect(anya.projects).toEqual([]);
@@ -888,6 +894,269 @@ describe("a project shared with this person", { timeout: 120_000 }, () => {
     expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("still mine here\n");
     expect(fs.readdirSync(path.join(root, "anya-cloud"))).toEqual([]);
     expect([...anyaVault.projects.values()].flatMap((keys) => [...keys.keys()])).toEqual([]);
+  });
+
+  describe("coming by itself to the first computer opened", () => {
+    /** Anya's two computers: the same console, the same owner's cloud, her own cloud. */
+    function twoComputers() {
+      const { misha, anya, console: team } = people();
+      const second = computer("anya-desktop", memoryVault().vault, {
+        person: "Anya",
+        ownCloud: path.join(root, "anya-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: team.teams,
+      });
+      return { misha, anya, second, console: team };
+    }
+    const arrivals = () => {
+      const dir = path.join(root, "cloud", ".uno-git", "notes", "arrivals");
+      return fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    };
+
+    it("accepted in the console: the project comes here, once, with its keys", async () => {
+      const { misha, anya, console: team } = twoComputers();
+      team.keys.set("STRIPE_KEY", { value: "v1", version: 1 });
+      team.given.add("STRIPE_KEY");
+      await ownerProject(misha);
+
+      const listed = (await anya.core.status()).elsewhere.find((item) => item.team);
+      expect(listed).toMatchObject({ name: "notes", team: { id: TEAM, owner: "misha" } });
+      expect(listed).not.toHaveProperty("waiting");
+
+      const first = await anya.core.arrive("notes", TEAM);
+      expect(first).toMatchObject({
+        outcome: "here",
+        entry: { enabled: true, team: { id: TEAM, owner: "misha" } },
+      });
+      expect(anya.projects).toHaveLength(1);
+      const there = path.join(anya.home, "projects", "notes");
+      expect(fs.readFileSync(path.join(there, "plan.md"), "utf8")).toBe("plan\n");
+      expect(fs.readFileSync(path.join(there, ".env"), "utf8")).toContain("STRIPE_KEY=v1");
+      expect((await anya.core.status()).elsewhere).toEqual([]);
+
+      // Asked again (another window): nothing more happens.
+      expect(await anya.core.arrive("notes", TEAM)).toMatchObject({ outcome: "here" });
+      expect(anya.projects).toHaveLength(1);
+      expect(arrivals()).toEqual(["20261030120000123456"]);
+    });
+
+    it("the second computer keeps it as a row with Get it here", async () => {
+      const { misha, anya, second } = twoComputers();
+      await ownerProject(misha);
+      await anya.core.arrive("notes", TEAM);
+
+      expect(await second.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+      expect(second.projects).toEqual([]);
+      const rows = (await second.core.status()).elsewhere;
+      expect(rows.map((item) => item.team?.id)).toEqual([TEAM]);
+      expect(rows[0]).not.toHaveProperty("waiting");
+
+      const byHand = await second.core.getHere("notes", TEAM);
+      expect(byHand.entry).toMatchObject({ enabled: true, name: "notes" });
+      expect(second.projects).toHaveLength(1);
+    });
+
+    it("two computers opened at the same moment: one takes it", async () => {
+      const { misha, anya, second } = twoComputers();
+      await ownerProject(misha);
+      const results = await Promise.all([
+        anya.core.arrive("notes", TEAM),
+        second.core.arrive("notes", TEAM),
+      ]);
+      expect(results.map((result) => result.outcome).toSorted()).toEqual(["here", "taken"]);
+      expect(anya.projects.length + second.projects.length).toBe(1);
+      expect(arrivals()).toHaveLength(1);
+    });
+
+    it("two windows of one computer and a click meanwhile: one folder", async () => {
+      const { misha, anya } = twoComputers();
+      await ownerProject(misha);
+      await Promise.all([
+        anya.core.arrive("notes", TEAM),
+        anya.core.arrive("notes", TEAM),
+        anya.core.getHere("notes", TEAM),
+      ]);
+      expect(anya.projects).toHaveLength(1);
+      expect(fs.readdirSync(path.join(anya.home, "projects"))).toEqual(["notes"]);
+    });
+
+    it("Get it here by hand counts: another computer doesn't bring it as well", async () => {
+      const { misha, anya, second } = twoComputers();
+      await ownerProject(misha);
+      await anya.core.getHere("notes", TEAM);
+      expect(await second.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+    });
+
+    it("each person's turn is their own", async () => {
+      const { misha, anya } = twoComputers();
+      await ownerProject(misha);
+      const other = computer("gleb", memoryVault().vault, {
+        ownCloud: path.join(root, "gleb-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([row({ joinedAt: "2026-10-30T12:00:01Z" })]).teams,
+      });
+      fs.mkdirSync(path.join(root, "gleb-cloud"));
+      await anya.core.arrive("notes", TEAM);
+      expect(await other.core.arrive("notes", TEAM)).toMatchObject({ outcome: "here" });
+      expect(arrivals()).toHaveLength(2);
+    });
+
+    it("nothing saved yet: it says so, takes no turn, and comes with the first version", async () => {
+      const { misha, anya, second } = twoComputers();
+      expect(await anya.core.arrive("notes", TEAM)).toEqual({ outcome: "waiting" });
+      expect(await second.core.arrive("notes", TEAM)).toEqual({ outcome: "waiting" });
+      expect(anya.projects).toEqual([]);
+      expect(arrivals()).toEqual([]);
+      expect((await anya.core.status()).elsewhere).toEqual([
+        expect.objectContaining({ name: "notes", waiting: true, from: "misha", updatedAt: null }),
+      ]);
+
+      await ownerProject(misha);
+      anya.clock.shift += 3 * 60_000;
+      const rows = (await anya.core.status()).elsewhere;
+      expect(rows.map((item) => item.name)).toEqual(["notes"]);
+      expect(rows[0]).not.toHaveProperty("waiting");
+      expect(await second.core.arrive("notes", TEAM)).toMatchObject({ outcome: "here" });
+      expect(await anya.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+    });
+
+    it("no space: a plain line, the row stays, Get it here works afterwards", async () => {
+      let full = true;
+      const { misha } = people();
+      const anya = computer("anya-laptop", memoryVault().vault, {
+        person: "Anya",
+        ownCloud: path.join(root, "anya-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([row()]).teams,
+        engine: (engine) => ({
+          ...engine,
+          getProject: async (input, ctx) => {
+            if (full) throw new Error("ENOSPC: no space left on device, mkdir '/x'");
+            return engine.getProject(input, ctx);
+          },
+        }),
+      });
+      await ownerProject(misha);
+
+      await expect(anya.core.arrive("notes", TEAM)).rejects.toThrow(
+        "There isn't enough free space on this computer for notes. Free some up, then choose Get it here.",
+      );
+      expect(anya.projects).toEqual([]);
+      expect((await anya.core.status()).elsewhere.map((item) => item.team?.id)).toEqual([TEAM]);
+
+      full = false;
+      await anya.core.getHere("notes", TEAM);
+      expect(anya.projects).toHaveLength(1);
+      expect((await anya.core.status()).elsewhere).toEqual([]);
+    });
+
+    it("no connection or a full owner's cloud: it says so and nothing is taken for good", async () => {
+      const { misha, anya } = twoComputers();
+      await ownerProject(misha);
+      const rows = (await anya.core.status()).elsewhere;
+      expect(rows).toHaveLength(1);
+
+      anya.env.UNO_GIT_FAKE_FAULTS = "owner-full";
+      await expect(anya.core.arrive("notes", TEAM)).rejects.toThrow(
+        "misha's Uno cloud storage is full. Ask them to free up space.",
+      );
+      expect(anya.projects).toEqual([]);
+      expect(arrivals()).toEqual([]);
+      expect((await anya.core.status()).elsewhere).toEqual(rows);
+
+      delete anya.env.UNO_GIT_FAKE_FAULTS;
+      expect(await anya.core.arrive("notes", TEAM)).toMatchObject({ outcome: "here" });
+    });
+
+    it("a look at the cloud that fails doesn't take the row away", async () => {
+      let offline = false;
+      const { misha } = people();
+      const anya = computer("anya-laptop", memoryVault().vault, {
+        person: "Anya",
+        ownCloud: path.join(root, "anya-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([row()]).teams,
+        engine: (engine) => ({
+          ...engine,
+          peekSharedProject: async (input, ctx) => {
+            if (offline) throw new Error("Couldn't reach the Uno console.");
+            return engine.peekSharedProject(input, ctx);
+          },
+        }),
+      });
+      await ownerProject(misha);
+      const rows = (await anya.core.status()).elsewhere;
+      expect(rows).toHaveLength(1);
+
+      offline = true;
+      anya.clock.shift += 3 * 60_000;
+      expect((await anya.core.status()).elsewhere).toEqual(rows);
+      await expect(anya.core.arrive("notes", TEAM)).rejects.toThrow(
+        "Couldn't reach the Uno console.",
+      );
+      expect(anya.projects).toEqual([]);
+      expect(arrivals()).toEqual([]);
+    });
+
+    it("a project the person deleted here doesn't come back", async () => {
+      const { misha, anya, second } = twoComputers();
+      await ownerProject(misha);
+      const { entry } = await anya.core.arrive("notes", TEAM);
+      anya.projects.length = 0;
+      await anya.core.syncNow(entry!.projectId);
+      expect((await anya.core.entry(entry!.projectId)).enabled).toBe(false);
+
+      expect((await anya.core.status()).elsewhere).toEqual([]);
+      expect(await anya.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+      expect(anya.projects).toEqual([]);
+
+      // Nor on a computer that opens later, or this one after forgetting its state.
+      expect(await second.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+      fs.rmSync(path.join(anya.home, ".t3", "userdata", "project-sync.json"));
+      const reinstalled = computer("anya", memoryVault().vault, {
+        person: "Anya",
+        ownCloud: path.join(root, "anya-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([row()]).teams,
+      });
+      expect(await reinstalled.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+      expect(reinstalled.projects).toEqual([]);
+    });
+
+    it("invited again after being removed: it comes once more", async () => {
+      const { misha, anya } = twoComputers();
+      await ownerProject(misha);
+      await anya.core.arrive("notes", TEAM);
+      const again = computer("anya-new", memoryVault().vault, {
+        person: "Anya",
+        ownCloud: path.join(root, "anya-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([row({ joinedAt: "2026-11-02T08:00:00Z" })]).teams,
+      });
+      expect(await again.core.arrive("notes", TEAM)).toMatchObject({ outcome: "here" });
+    });
+
+    it("no longer shared, or teams off: nothing shows and nothing is said", async () => {
+      const { misha } = people({ rows: [] });
+      await ownerProject(misha);
+      const off = computer("off", memoryVault().vault, {
+        ownCloud: path.join(root, "off-cloud"),
+        teamCloud: path.join(root, "cloud"),
+        teams: fakeTeams([]).teams,
+      });
+      fs.mkdirSync(path.join(root, "off-cloud"));
+      expect((await off.core.status()).elsewhere).toEqual([]);
+      expect(await off.core.arrive("notes", TEAM)).toEqual({ outcome: "gone" });
+      expect(off.projects).toEqual([]);
+      expect(arrivals()).toEqual([]);
+    });
+
+    it("an answer without the date of joining: stays a row, doesn't come by itself", async () => {
+      const { misha, anya } = people({ rows: [row({ joinedAt: null })] });
+      await ownerProject(misha);
+      expect(await anya.core.arrive("notes", TEAM)).toEqual({ outcome: "taken" });
+      expect(anya.projects).toEqual([]);
+    });
   });
 
   it("no value in logs, in errors, or in what the interface gets", async () => {

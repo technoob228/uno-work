@@ -75,6 +75,7 @@ const rpcClientMock = {
     restore: vi.fn(),
     files: vi.fn(),
     setLocalOnly: vi.fn(),
+    arrive: vi.fn(),
     introSeen: vi.fn(),
     answerOld: vi.fn(),
     secretsList: vi.fn(),

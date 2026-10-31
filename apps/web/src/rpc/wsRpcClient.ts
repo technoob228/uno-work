@@ -286,6 +286,7 @@ export interface WsRpcClient {
     readonly syncNow: RpcUnaryMethod<typeof WS_METHODS.projectSyncSyncNow>;
     readonly resolve: RpcUnaryMethod<typeof WS_METHODS.projectSyncResolve>;
     readonly getHere: RpcUnaryMethod<typeof WS_METHODS.projectSyncGetHere>;
+    readonly arrive: RpcUnaryMethod<typeof WS_METHODS.projectSyncArrive>;
     readonly opened: RpcUnaryMethod<typeof WS_METHODS.projectSyncOpened>;
     readonly history: RpcUnaryMethod<typeof WS_METHODS.projectSyncHistory>;
     readonly restore: RpcUnaryMethod<typeof WS_METHODS.projectSyncRestore>;
@@ -764,6 +765,7 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.projectSyncResolve](input)),
       getHere: (input) =>
         transport.request((client) => client[WS_METHODS.projectSyncGetHere](input)),
+      arrive: (input) => transport.request((client) => client[WS_METHODS.projectSyncArrive](input)),
       opened: (input) => transport.request((client) => client[WS_METHODS.projectSyncOpened](input)),
       history: (input) =>
         transport.request((client) => client[WS_METHODS.projectSyncHistory](input)),

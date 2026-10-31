@@ -44,6 +44,7 @@
 // `uno` remote, so a sync can't drift into the person's own cloud.
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { closeSync, openSync, writeSync } from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -2142,6 +2143,29 @@ export async function peekSharedProject(input, ctx) {
     updatedBy: state.updatedBy,
     mode: (await readMeta(storage, input.name))?.mode ?? "git",
   };
+}
+
+/**
+ * Whether this computer is the first of this person's to take a shared
+ * project. One small object per membership in the owner's cloud, written only
+ * if it isn't there: of two computers at the same moment exactly one wins, and
+ * reinstalling or deleting the project here doesn't win it again.
+ * @param {{ name: string, team: number, membership: string }} input
+ *   membership: when this person joined (`joined_at`): one per person, and a new
+ *   one after being removed and invited again.
+ * @param {Ctx} ctx
+ * @returns {Promise<boolean>}
+ */
+export async function claimSharedArrival(input, ctx) {
+  const stamp = input.membership.replace(/[^0-9]/g, "");
+  if (!stamp) return false;
+  const storage = storageOf(ctx, input.team);
+  const key = `${GIT_ROOT}${input.name}/arrivals/${stamp}`;
+  const mine = randomUUID();
+  await storage.write(key, Buffer.from(`${mine}\n`), { ifNoneMatch: true });
+  // What's there decides, not the write's answer: a retry refused after a lost
+  // answer says "taken" about our own object.
+  return (await storage.read(key))?.toString("utf8").trim() === mine;
 }
 
 /**

@@ -21,7 +21,7 @@ import { readEnvironmentApi } from "../../environmentApi";
 import { cn } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
-import { syncLabel, syncMarkOf } from "./projectSync.logic";
+import { SHARED_PROJECT_HERE, sharedWaitingLine, syncLabel, syncMarkOf } from "./projectSync.logic";
 import { useRefreshProjectSync } from "./useProjectSync";
 
 const RANK = { conflict: 5, problem: 4, held: 3, syncing: 2, synced: 1 } as const;
@@ -92,14 +92,14 @@ export function ProjectSyncMark(props: { entry: ProjectSyncEntry | null; onOpen:
   );
 }
 
-/** A shared project arrived. */
-export const SHARED_PROJECT_HERE =
-  "Your changes and theirs go both ways. Keys you were given are in its .env.";
-
-/** "Projects on your other computers": cloud projects this computer doesn't have yet. */
+/**
+ * "Projects on your other computers": cloud projects this computer doesn't
+ * have yet. `arrivingTeam`: the shared project coming here by itself right now.
+ */
 export function ProjectsElsewhere(props: {
   environmentId: EnvironmentId;
   projects: ReadonlyArray<ProjectSyncElsewhere>;
+  arrivingTeam: number | null;
 }) {
   const refresh = useRefreshProjectSync();
   const [busy, setBusy] = useState<string | null>(null);
@@ -157,20 +157,28 @@ export function ProjectsElsewhere(props: {
               </span>
             ) : null}
             <span className="flex-1" />
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void getHere(project)}
-              className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs text-foreground/80 hover:bg-accent disabled:cursor-wait disabled:opacity-60"
-            >
-              {busy === rowOf(project) ? (
-                <RefreshCwIcon className="size-3 animate-spin" />
-              ) : (
-                <CloudDownloadIcon className="size-3" />
-              )}
-              Get it here
-            </button>
+            {project.waiting ? null : (
+              <button
+                type="button"
+                disabled={busy !== null || props.arrivingTeam !== null}
+                onClick={() => void getHere(project)}
+                className="inline-flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-xs text-foreground/80 hover:bg-accent disabled:cursor-wait disabled:opacity-60"
+              >
+                {busy === rowOf(project) ||
+                (project.team && project.team.id === props.arrivingTeam) ? (
+                  <RefreshCwIcon className="size-3 animate-spin" />
+                ) : (
+                  <CloudDownloadIcon className="size-3" />
+                )}
+                Get it here
+              </button>
+            )}
           </div>
+          {project.waiting ? (
+            <p className="px-2.5 pb-1 text-xs text-sidebar-muted-foreground/70">
+              {sharedWaitingLine(project.name)}
+            </p>
+          ) : null}
         </li>
       ))}
     </>

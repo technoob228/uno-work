@@ -108,6 +108,8 @@ export const ProjectSyncElsewhere = Schema.Struct({
   mode: ProjectSyncMode,
   /** Set for a project someone shared with this person. */
   team: Schema.optional(Schema.NullOr(ProjectSyncTeam)),
+  /** Shared, and nothing is saved in it yet: nothing to get, it comes once there is. */
+  waiting: Schema.optional(Schema.Boolean),
 });
 export type ProjectSyncElsewhere = typeof ProjectSyncElsewhere.Type;
 
@@ -244,6 +246,24 @@ export const ProjectSyncGetHereResult = Schema.Struct({
   entry: ProjectSyncEntry,
 });
 export type ProjectSyncGetHereResult = typeof ProjectSyncGetHereResult.Type;
+
+export const ProjectSyncArriveInput = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  teamId: Schema.Number,
+});
+export type ProjectSyncArriveInput = typeof ProjectSyncArriveInput.Type;
+
+/** A shared project coming to this computer without anyone asking on it. */
+export const ProjectSyncArrival = Schema.Struct({
+  /**
+   * here: it's on this computer. waiting: nothing is saved in it yet.
+   * taken: another of the person's computers took it, here it stays Get it here.
+   * gone: it isn't shared with this person any more, or teams aren't on.
+   */
+  outcome: Schema.Literals(["here", "waiting", "taken", "gone"]),
+  entry: Schema.optional(ProjectSyncEntry),
+});
+export type ProjectSyncArrival = typeof ProjectSyncArrival.Type;
 
 /** A project key by name; values never cross to the client. */
 export const ProjectSecretEntry = Schema.Struct({

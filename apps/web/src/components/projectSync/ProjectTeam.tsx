@@ -24,6 +24,7 @@ import {
   startTeam,
 } from "./projectTeam.api";
 import {
+  inviteEmailProblem,
   personLabel,
   rotateLine,
   teamErrorMessage,
@@ -54,6 +55,7 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
   const [email, setEmail] = useState("");
   const [working, setWorking] = useState<string | null>(null);
   const [invited, setInvited] = useState<string | null>(null);
+  const [noEmail, setNoEmail] = useState<string | null>(null);
   const [rotate, setRotate] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
 
@@ -84,8 +86,9 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
     act("invite", async () => {
       const address = email.trim();
       const id = teamId ?? (await startTeam(props.syncName)).project.id;
-      await invite(id, address);
+      const answer = await invite(id, address);
       setInvited(address);
+      setNoEmail(inviteEmailProblem(answer));
       setEmail("");
     });
 
@@ -205,7 +208,11 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
           ))}
         </ul>
       ) : null}
-      {invited ? (
+      {noEmail ? (
+        <p className="text-xs text-muted-foreground" data-testid="project-team-no-email">
+          {noEmail}
+        </p>
+      ) : invited ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="min-w-0 flex-1">
             Tell {invited} to sign in to Uno Work with this address. The invitation waits there for

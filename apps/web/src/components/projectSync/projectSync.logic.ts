@@ -6,7 +6,9 @@
  */
 import type {
   EnvironmentId,
+  ProjectSyncArrival,
   ProjectSyncConflict,
+  ProjectSyncElsewhere,
   ProjectSyncEntry,
   ProjectSyncHost,
   ProjectSyncSnapshot,
@@ -208,4 +210,59 @@ export function refreshEveryMs(status: ProjectSyncSnapshot | undefined): number 
 /** The menu item's label: a check when it's on. */
 export function toggleMenuLabel(enabled: boolean): string {
   return enabled ? "✓ On all my computers" : "On all my computers";
+}
+
+/** A shared project arrived. */
+export const SHARED_PROJECT_HERE =
+  "Your changes and theirs go both ways. Keys you were given are in its .env.";
+
+/** A shared project with nothing in it yet. */
+export const sharedWaitingLine = (name: string) =>
+  `Nothing is saved in ${name} yet. It comes here once its owner has saved it.`;
+
+/**
+ * What the person hears of a shared project coming here. Right after their
+ * Accept always something; when it came by itself, only that it's here: its
+ * row in the sidebar says the rest.
+ */
+export function arrivalWords(
+  name: string,
+  outcome: ProjectSyncArrival["outcome"],
+  afterAccept: boolean,
+): {
+  readonly type: "success" | "info";
+  readonly title: string;
+  readonly description: string;
+} | null {
+  if (outcome === "here") {
+    return {
+      type: "success",
+      title: `${name} is on this computer`,
+      description: SHARED_PROJECT_HERE,
+    };
+  }
+  if (!afterAccept) return null;
+  return {
+    type: "info",
+    title: `You're in ${name}`,
+    description:
+      outcome === "waiting"
+        ? sharedWaitingLine(name)
+        : outcome === "taken"
+          ? "Get it here from Projects on your other computers."
+          : "Open it from one of your computers to get it there.",
+  };
+}
+
+/** The accepted projects to bring here, each at most once while this window is open. */
+export function arrivalsToBring(
+  environmentId: string,
+  projects: ReadonlyArray<ProjectSyncElsewhere>,
+  tried: ReadonlySet<string>,
+): ReadonlyArray<ProjectSyncElsewhere & { readonly tryKey: string }> {
+  return projects.flatMap((project) => {
+    if (!project.team || project.waiting) return [];
+    const tryKey = `${environmentId}:${project.team.id}`;
+    return tried.has(tryKey) ? [] : [{ ...project, tryKey }];
+  });
 }
