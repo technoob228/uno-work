@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { UNO_WORK_NOTE_PREFIX, parseUnoWorkNote } from "./secretRequestCopy.ts";
 import {
+  isInternalTurnFailure,
   BUSY_DEFAULT_RETRY_SECONDS,
   NO_ANSWER_RETRY_DELAYS_MS,
   ORPHANED_PROVIDER_SESSION_ERROR,
@@ -190,5 +191,23 @@ describe("a turn cut off by a restart", () => {
     });
     expect(updateRestartNoteLine("Continue please")).toBeNull();
     expect(classifyTurnError(UPDATE_RESTART_NOTE_BODY).kind).toBe("other");
+  });
+});
+
+describe("isInternalTurnFailure", () => {
+  it("knows our own words for an agent that didn't start", () => {
+    expect(
+      isInternalTurnFailure(
+        "ProviderAdapterProcessError: Provider adapter process error (opencode) for thread 644d",
+      ),
+    ).toBe(true);
+    expect(isInternalTurnFailure("Error: boom\n    at Generator.next (<anonymous>)")).toBe(true);
+  });
+
+  it("leaves sentences written for people", () => {
+    expect(
+      isInternalTurnFailure("Claude is not signed in. Run `claude auth login` and try again."),
+    ).toBe(false);
+    expect(isInternalTurnFailure("Uno AI didn't answer in time.")).toBe(false);
   });
 });

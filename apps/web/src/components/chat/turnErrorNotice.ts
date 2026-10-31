@@ -18,6 +18,7 @@
 export {
   BUSY_DEFAULT_RETRY_SECONDS,
   classifyTurnError,
+  isInternalTurnFailure,
   isRestartCutOffError,
   type TurnErrorKind,
   type TurnErrorNotice,
@@ -28,5 +29,8 @@ export const TURN_ERROR_COPY = {
   noAnswer: "Uno AI didn't answer this time. Nothing is lost.",
   /** Uno Work went down mid-turn (an update, a crash): the agent stopped, nothing else broke. */
   restart: "Stopped by a restart. Send a message to continue.",
+  /** The agent itself didn't start: Fix Work can't help then, a person can. */
+  agentDown:
+    "The agent didn't start on this computer. Your message is safe. Write to us and we'll fix it.",
   retry: "Try again",
 } as const;

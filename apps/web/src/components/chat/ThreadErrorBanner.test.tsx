@@ -20,6 +20,28 @@ describe("ThreadErrorBanner", () => {
     expect(markup).not.toContain('data-testid="turn-error-retry"');
   });
 
+  const RAW =
+    "ProviderAdapterProcessError: Provider adapter process error (opencode) for thread 644d1759-2760-4e5f: spawn opencode ENOENT\n    at Generator.next (<anonymous>)";
+
+  it("the agent didn't start: a plain line and the way to a person, none of our words", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadErrorBanner placement="feed" error={RAW} onRetry={() => undefined} />,
+    );
+    expect(markup).toContain('data-kind="agent-down"');
+    expect(markup).toContain("The agent didn&#x27;t start on this computer.");
+    expect(markup).toContain("Write to us on Telegram");
+    expect(markup).toContain("Email us");
+    expect(markup).toContain('data-testid="turn-error-retry"');
+    expect(markup).not.toContain("ProviderAdapter");
+    expect(markup).not.toContain("644d1759");
+  });
+
+  it("says the same outside the feed", () => {
+    const markup = renderToStaticMarkup(<ThreadErrorBanner error={RAW} />);
+    expect(markup).toContain("Write to us on Telegram");
+    expect(markup).not.toContain("ProviderAdapter");
+  });
+
   it("other errors keep their own text", () => {
     const markup = renderToStaticMarkup(
       <ThreadErrorBanner error="Claude Code process exited with code 1" />,

@@ -448,15 +448,25 @@ const make = Effect.gen(function* () {
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);
-    const session = thread?.session;
-    if (!session) {
+    if (!thread) {
       return;
     }
+    // A first message that never got an agent has no session yet: the chat
+    // still has to read as broken, not as a quiet Idle.
+    const session: OrchestrationSession = thread.session ?? {
+      threadId: input.threadId,
+      status: "error",
+      providerName: null,
+      runtimeMode: thread.runtimeMode,
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: input.createdAt,
+    };
     yield* setThreadSession({
       threadId: input.threadId,
       session: {
         ...session,
-        status: session.status === "stopped" ? "stopped" : "ready",
+        status: "error",
         activeTurnId: null,
         lastError: input.detail,
         lastErrorClass: classifyProviderErrorDetail(input.detail),

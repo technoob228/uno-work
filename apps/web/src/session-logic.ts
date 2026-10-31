@@ -609,6 +609,8 @@ export function deriveWorkLogEntries(
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started")
+    // The chat's own error notice says it (ThreadErrorBanner), in words for a person.
+    .filter((activity) => activity.kind !== "provider.turn.start.failed")
     .filter((activity) => activity.kind !== "context-window.updated")
     .filter((activity) => activity.kind !== THREAD_GOAL_ACTIVITY_KIND)
     .filter((activity) => !activity.kind.startsWith("plan-limit."))

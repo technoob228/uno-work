@@ -72,6 +72,16 @@ export function classifyTurnError(error: string): TurnErrorNotice {
   return { kind: "other", retryAfterSeconds: 0 };
 }
 
+/**
+ * Our own words for "the agent didn't start": written for a developer, and they
+ * say nothing a person can act on (`ProviderAdapterProcessError: Provider
+ * adapter process error (opencode) for thread 644d…`, a stack). A sentence an
+ * agent or the gateway wrote for people ("Claude is not signed in…") stays.
+ */
+export function isInternalTurnFailure(error: string): boolean {
+  return /\bProvider[A-Za-z]*Error\b|\bProvider adapter\b|\n\s+at\s/.test(error);
+}
+
 // ── Automatic continuation (daemon) ─────────────────────────────────────
 
 /** Automatic continuations per chain of turns; the person's next message starts a new chain. */

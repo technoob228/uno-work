@@ -25,7 +25,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
-import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
+import { ProviderAdapterProcessError, ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -1966,6 +1966,44 @@ describe("ProviderCommandReactor", () => {
     );
     return (failed?.payload as { detail?: string } | undefined)?.detail ?? "";
   };
+
+  it("a first message whose agent won't start leaves a broken chat, and the next one tries again", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+    harness.startSession.mockImplementationOnce(
+      () =>
+        Effect.fail(
+          new ProviderAdapterProcessError({
+            provider: "opencode",
+            threadId,
+            detail: "spawn opencode ENOENT",
+          }),
+        ) as never,
+    );
+    expect((await threadOf(harness))?.session ?? null).toBeNull();
+
+    await sendInThread(harness, {
+      tag: "broken-1",
+      text: "hello",
+      createdAt: new Date().toISOString(),
+    });
+    const detail = await failedTurnDetail(harness);
+    expect(detail).toContain("ProviderAdapterProcessError");
+    await waitFor(async () => (await threadOf(harness))?.session?.status === "error");
+    expect((await threadOf(harness))?.session).toMatchObject({
+      status: "error",
+      lastError: detail,
+      activeTurnId: null,
+    });
+
+    await sendInThread(harness, {
+      tag: "broken-2",
+      text: "again",
+      createdAt: new Date().toISOString(),
+    });
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await waitFor(async () => (await threadOf(harness))?.session?.lastError === null);
+  });
 
   it("moves a chat to another agent: fresh session, history in the prompt, a line in the feed", async () => {
     const harness = await createHarness();

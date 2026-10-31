@@ -4,7 +4,7 @@
  * for those who came for them (qa 30.10: Help opened a page about POST
  * /api/v1/agent/connect, and there was no one to write to).
  */
-import { SUPPORT_EMAIL, SUPPORT_TELEGRAM } from "@t3tools/shared/supportDraft";
+import { SUPPORT_CONTACTS, SUPPORT_EMAIL, SUPPORT_TELEGRAM } from "@t3tools/shared/supportDraft";
 import { BookOpenIcon, MailIcon, SendIcon, WrenchIcon, type LucideIcon } from "lucide-react";
 
 import { CONSOLE_URL } from "../../account/accountOverview";
@@ -23,8 +23,6 @@ const COPY = {
   description: "Something's off, or you have a question? We read everything.",
   fixWork: "Fix Work",
   fixWorkLine: "Uno finds what's wrong on this computer and tries safe fixes.",
-  telegram: "Write to us on Telegram",
-  email: "Email us",
   developers: "API docs for developers",
 } as const;
 
@@ -77,17 +75,17 @@ export function GetHelpDialog(props: {
           />
           <HelpRow
             icon={SendIcon}
-            title={COPY.telegram}
+            title={SUPPORT_CONTACTS.telegram.label}
             line={`@${SUPPORT_TELEGRAM}`}
             testId="get-help-telegram"
-            onClick={() => openExternal(`https://t.me/${SUPPORT_TELEGRAM}`)}
+            onClick={() => openExternal(SUPPORT_CONTACTS.telegram.url)}
           />
           <HelpRow
             icon={MailIcon}
-            title={COPY.email}
+            title={SUPPORT_CONTACTS.email.label}
             line={SUPPORT_EMAIL}
             testId="get-help-email"
-            onClick={() => openExternal(`mailto:${SUPPORT_EMAIL}`)}
+            onClick={() => openExternal(SUPPORT_CONTACTS.email.url)}
           />
           <button
             type="button"

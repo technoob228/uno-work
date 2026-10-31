@@ -1,11 +1,22 @@
-import { CircleAlertIcon, CirclePauseIcon, HourglassIcon, RotateCwIcon, XIcon } from "lucide-react";
+import { SUPPORT_CONTACTS } from "@t3tools/shared/supportDraft";
+import {
+  CircleAlertIcon,
+  CirclePauseIcon,
+  HourglassIcon,
+  MailIcon,
+  RotateCwIcon,
+  SendIcon,
+  XIcon,
+} from "lucide-react";
 import { memo } from "react";
 
 import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
+import { openExternal } from "../sidebar/SidebarDAccountButton";
 import {
   TURN_ERROR_COPY as COPY,
   classifyTurnError,
+  isInternalTurnFailure,
   isRestartCutOffError,
 } from "./turnErrorNotice";
 
@@ -17,8 +28,10 @@ import {
  * again. No countdown and no retry of its own here: the daemon already
  * continued the turn by itself (turnErrorRetry, up to two times, with or
  * without a tab open) before such an error reaches the chat — retrying again
- * from the tab would double it. Any other error keeps its own text; with
- * `onRetry` it gets the same button, without it — the old red alert.
+ * from the tab would double it. When the agent itself didn't start, its error
+ * is ours and says nothing to a person, and Fix Work runs on that same agent:
+ * one plain line and the way to reach us. Any other error keeps its own text;
+ * with `onRetry` it gets the same button, without it — the old red alert.
  */
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
@@ -77,6 +90,59 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           <AlertDescription>{COPY.restart}</AlertDescription>
           {dismiss ? <AlertAction className="items-center">{dismiss}</AlertAction> : null}
         </Alert>
+      </div>
+    );
+  }
+
+  if (isInternalTurnFailure(error)) {
+    return (
+      <div className={placement === "feed" ? "px-1 pb-2" : "pt-3 mx-auto max-w-3xl"}>
+        <div
+          className="rounded-xl border border-border bg-card px-3 py-2.5"
+          data-testid="turn-error-notice"
+          data-kind="agent-down"
+          role="alert"
+        >
+          <div className="flex items-start gap-2 text-sm">
+            <CircleAlertIcon aria-hidden className="mt-0.5 size-4 shrink-0 text-destructive/80" />
+            <span className="min-w-0 flex-1">{COPY.agentDown}</span>
+            {dismiss}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 pl-6">
+            <Button
+              size="xs"
+              variant="outline"
+              type="button"
+              data-testid="turn-error-telegram"
+              onClick={() => openExternal(SUPPORT_CONTACTS.telegram.url)}
+            >
+              <SendIcon />
+              {SUPPORT_CONTACTS.telegram.label}
+            </Button>
+            <Button
+              size="xs"
+              variant="outline"
+              type="button"
+              data-testid="turn-error-email"
+              onClick={() => openExternal(SUPPORT_CONTACTS.email.url)}
+            >
+              <MailIcon />
+              {SUPPORT_CONTACTS.email.label}
+            </Button>
+            {onRetry ? (
+              <Button
+                size="xs"
+                variant="ghost"
+                type="button"
+                data-testid="turn-error-retry"
+                disabled={retryDisabled}
+                onClick={onRetry}
+              >
+                {COPY.retry}
+              </Button>
+            ) : null}
+          </div>
+        </div>
       </div>
     );
   }

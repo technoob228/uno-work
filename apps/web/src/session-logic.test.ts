@@ -50,6 +50,18 @@ function makeActivity(overrides: {
   };
 }
 
+describe("deriveWorkLogEntries with a turn that never started", () => {
+  it("leaves it to the chat's error notice", () => {
+    const failed = makeActivity({
+      kind: "provider.turn.start.failed",
+      summary: "Provider turn start failed",
+      tone: "error",
+      payload: { detail: "ProviderAdapterProcessError: Provider adapter process error" },
+    });
+    expect(deriveWorkLogEntries([failed], undefined)).toEqual([]);
+  });
+});
+
 describe("deriveApprovalExpiredEntries", () => {
   const resolved = (id: string, decision: string) =>
     makeActivity({
