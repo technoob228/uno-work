@@ -1810,6 +1810,7 @@ function EmptyStep({ environmentId, home, onBack, onDone }: StepProps) {
       }
       const projectRef = await ensureFolderProject(folder, check.name, {
         createFolder: destination.kind !== "host",
+        keepHere: destination.kind === "here",
       });
       if (destination.kind === "here") {
         await api.projectSync.setEnabled({ projectId: projectRef.projectId, enabled: false });

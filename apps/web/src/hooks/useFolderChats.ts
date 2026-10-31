@@ -84,6 +84,8 @@ export interface EnsureFolderProjectOptions {
   readonly createFolder?: boolean;
   /** The new project's default model; the machine's usable default otherwise. */
   readonly defaultModelSelection?: ModelSelection | null;
+  /** "Only on this computer": new projects sync by themselves unless it's said first. */
+  readonly keepHere?: boolean;
 }
 
 /**
@@ -111,7 +113,13 @@ export async function ensureFolderProjectOn(
   const projectId = newProjectId();
   const home = await resolveHomeFolder(environmentId);
   const noProject = home !== null && isNoProjectRoot(folder, home);
-  await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand({
+  const api = ensureEnvironmentApi(environmentId);
+  if (options?.keepHere) {
+    // Before the project exists, so the daemon never sees it undecided. A computer
+    // on an older Work refuses an id it doesn't know: the caller says it again after.
+    await api.projectSync.setEnabled({ projectId, enabled: false }).catch(() => undefined);
+  }
+  await api.orchestration.dispatchCommand({
     type: "project.create",
     commandId: newCommandId(),
     projectId,

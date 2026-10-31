@@ -71,6 +71,10 @@ interface ComputerOptions {
   readonly teams?: ProjectTeams;
   /** Change the engine, for what real storage can't be made to do here. */
   readonly engine?: (engine: SyncEngine) => SyncEngine;
+  /** Whether the cloud is reachable, when the answer has to take its time. */
+  readonly available?: () => Promise<boolean>;
+  /** Delayed syncs run a thousand times sooner. */
+  readonly fastTimers?: boolean;
   readonly log?: (message: string, data?: Record<string, unknown>) => void;
 }
 
@@ -101,7 +105,7 @@ function computer(label: string, vault: ProjectVault, options?: ComputerOptions)
       const engine = (await import(/* @vite-ignore */ pathToFileURL(file).href)) as SyncEngine;
       return options?.engine ? options.engine(engine) : engine;
     },
-    available: async () => options?.cloud !== false,
+    available: options?.available ?? (async () => options?.cloud !== false),
     person: async () => options?.person ?? "Misha",
     turnRunning: async (projectId) => busy.has(projectId),
     vault,
@@ -113,7 +117,7 @@ function computer(label: string, vault: ProjectVault, options?: ComputerOptions)
       return id;
     },
     timers: {
-      setTimeout: (run, ms) => setTimeout(run, ms),
+      setTimeout: (run, ms) => setTimeout(run, options?.fastTimers ? ms / 1000 : ms),
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       now: () => Date.now() + clock.shift,
     },
@@ -311,6 +315,113 @@ describe("on by default", { timeout: 120_000 }, () => {
     await laptop.core.adoptNewProjects();
     expect((await laptop.core.entry(id)).enabled).toBe(false);
     laptop.core.stop();
+  });
+
+  describe("Only on this computer", () => {
+    /** Every call to the sync engine, by the folder or name it was asked about. */
+    const watchedEngine = () => {
+      const calls: string[] = [];
+      const engine = (real: SyncEngine) =>
+        Object.fromEntries(
+          Object.entries(real).map(([name, value]) => [
+            name,
+            typeof value === "function"
+              ? (input: { dir?: string; name?: string }, ...rest: unknown[]) => {
+                  calls.push(`${name} ${input?.dir ?? input?.name ?? ""}`);
+                  return (value as (...args: unknown[]) => unknown)(input, ...rest);
+                }
+              : value,
+          ]),
+        ) as unknown as SyncEngine;
+      return { calls, engine };
+    };
+    const cloudHolds = (name: string) =>
+      fs.existsSync(path.join(root, "cloud")) &&
+      fs
+        .readdirSync(path.join(root, "cloud"), { recursive: true })
+        .some((item) => String(item).includes(name));
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 3_000));
+
+    it("said while the project is being picked up: nothing goes to the cloud", async () => {
+      const { vault } = memoryVault();
+      const { calls, engine } = watchedEngine();
+      let answer: (() => void) | null = null;
+      let slow = false;
+      const laptop = computer("laptop", vault, {
+        engine,
+        fastTimers: true,
+        available: async () => {
+          if (slow) await new Promise<void>((resolve) => (answer = resolve));
+          return true;
+        },
+      });
+      await laptop.core.status();
+      const secret = laptop.addInProjects("private-notes", later());
+      const open = laptop.addInProjects("open-site", later());
+      fs.writeFileSync(path.join(secret.dir, "diary.md"), "only here\n");
+      fs.writeFileSync(path.join(open.dir, "index.html"), "hi\n");
+
+      // The project is created and picked up; the check of the cloud takes its time…
+      slow = true;
+      const adopting = laptop.core.adoptNewProjects();
+      await expect.poll(() => answer !== null).toBe(true);
+      // …and the dialog's "Only on this computer" lands in the middle of it.
+      await laptop.core.setEnabled(secret.id, false);
+      slow = false;
+      answer!();
+      await adopting;
+
+      expect(await laptop.core.entry(secret.id)).toMatchObject({ enabled: false, state: "off" });
+      expect((await laptop.core.entry(open.id)).enabled).toBe(true);
+      // The other project going out proves the delayed sync did run.
+      await expect.poll(async () => (await laptop.core.entry(open.id)).state).toBe("synced");
+      fs.writeFileSync(path.join(secret.dir, "diary.md"), "still only here\n");
+      await settle();
+      expect(calls.filter((call) => call.includes("private-notes"))).toEqual([]);
+      expect(cloudHolds("private-notes")).toBe(false);
+      expect(cloudHolds("open-site")).toBe(true);
+      laptop.core.stop();
+    });
+
+    it("said before the project exists: it is never picked up", async () => {
+      const { vault } = memoryVault();
+      const { calls, engine } = watchedEngine();
+      const laptop = computer("laptop", vault, { engine, fastTimers: true });
+      await laptop.core.status();
+      const id = "p-laptop-1";
+      expect(await laptop.core.setEnabled(id, false)).toMatchObject({ enabled: false });
+
+      const made = laptop.addInProjects("private-notes", later());
+      expect(made.id).toBe(id);
+      fs.writeFileSync(path.join(made.dir, "diary.md"), "only here\n");
+      await laptop.core.adoptNewProjects();
+      // As the dialog does: said once more now the project is there.
+      await laptop.core.setEnabled(id, false);
+      await settle();
+
+      expect(await laptop.core.entry(id)).toMatchObject({ enabled: false, state: "off" });
+      expect(calls.filter((call) => !call.startsWith("listCloudProjects"))).toEqual([]);
+      expect(cloudHolds("private-notes")).toBe(false);
+      expect((await laptop.core.status()).intro).toBeNull();
+      expect((await laptop.core.status()).askAbout).toEqual([]);
+      laptop.core.stop();
+    });
+
+    it("can still be turned on later from the project's settings", async () => {
+      const { vault } = memoryVault();
+      const laptop = computer("laptop", vault);
+      await laptop.core.status();
+      const id = "p-laptop-1";
+      await laptop.core.setEnabled(id, false);
+      const made = laptop.addInProjects("notes", later());
+      fs.writeFileSync(path.join(made.dir, "notes.md"), "hi\n");
+
+      expect(await laptop.core.setEnabled(id, true)).toMatchObject({
+        enabled: true,
+        state: "synced",
+      });
+      laptop.core.stop();
+    });
   });
 
   it("older projects get one question; no is final, nothing turns on silently", async () => {
@@ -594,6 +705,25 @@ describe("chats without a project", { timeout: 120_000 }, () => {
     await a.core.adoptNewProjects();
     expect((await a.core.entry("promoted")).enabled).toBe(true);
     expect((await a.core.entry("no-project")).enabled).toBe(false);
+    a.core.stop();
+  });
+
+  it("a chat without a project never syncs, however much it writes", async () => {
+    const { vault } = memoryVault();
+    const a = computer("a", vault);
+    await a.core.status();
+    const at = new Date(Date.now() + 60_000).toISOString();
+    const chats = path.join(a.home, "chats");
+    const folder = path.join(chats, "2026-10-30-a-chat-c3d4e5f6");
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, "notes.md"), "notes\n");
+    a.projects.push({ id: "no-project", title: "No project", workspaceRoot: chats, createdAt: at });
+
+    await a.core.adoptNewProjects();
+    a.core.touched("no-project", "turn-end");
+    const status = await a.core.status();
+    expect(status.projects).toEqual([]);
+    expect(status.askAbout).toEqual([]);
     a.core.stop();
   });
 });

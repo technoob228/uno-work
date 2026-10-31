@@ -429,6 +429,8 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     for (const project of fresh) {
       const dir = folderOf(project);
       if (!(await stat(dir).catch(() => null))?.isDirectory()) continue;
+      // The awaits above leave time for "Only on this computer" to arrive: it stands.
+      if (store[project.id]) continue;
       store[project.id] = { ...newEntry(dir), enabled: true, state: "empty", auto: true };
       pendingUpload.add(project.id);
       startWatch(project.id, dir);
@@ -663,11 +665,14 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     if (!(await deps.available())) throw new ProjectSyncFailure(UNAVAILABLE);
   };
 
+  /**
+   * Also for a project that doesn't exist yet: "Only on this computer" is said
+   * before it is created, so nothing ever finds it undecided and starts syncing it.
+   */
   const disable = async (projectId: string): Promise<ProjectSyncEntry> => {
     await load();
     const project = await projectOf(projectId);
-    if (!project) throw new ProjectSyncFailure("This project isn't on this computer.");
-    const entry: Stored = store[projectId] ?? newEntry(folderOf(project));
+    const entry: Stored = store[projectId] ?? newEntry(project ? folderOf(project) : "");
     store[projectId] = entry;
     entry.enabled = false;
     entry.state = "off";
