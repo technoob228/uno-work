@@ -5,12 +5,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import { selectPermissionOptionForDecision } from "./AcpAdapterSupport.ts";
 import {
   autoApprovedPermissionOption,
   discoverSessionModels,
   resolveHarnessCwd,
   resolveHarnessExecutable,
-  selectPermissionOptionForDecision,
 } from "./CustomAcpSupport.ts";
 
 const request = (

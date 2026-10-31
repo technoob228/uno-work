@@ -713,6 +713,64 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       }),
   );
 
+  for (const [decision, understood] of [
+    ["accept", "allowed: allow-once"],
+    ["acceptForSession", "allowed: allow-always"],
+    ["decline", "refused: reject-once"],
+  ] as const) {
+    it.effect(`answers a permission request with Cursor's own ids (${decision})`, () =>
+      Effect.gen(function* () {
+        const adapter = yield* CursorAdapter;
+        const serverSettings = yield* ServerSettingsService;
+        const threadId = ThreadId.make(`cursor-permission-${decision}`);
+        const wrapperPath = yield* Effect.promise(() =>
+          makeMockAgentWrapper({
+            T3_ACP_EMIT_TOOL_CALLS: "1",
+            T3_ACP_PERMISSION_OPTIONS: JSON.stringify([
+              { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+              { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
+              { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            ]),
+          }),
+        );
+        yield* serverSettings.updateSettings({
+          providers: { cursor: { binaryPath: wrapperPath } },
+        });
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+        });
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.threadId === threadId),
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const openedFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.threadId === threadId && event.type === "request.opened"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Effect.yieldNow;
+        const turnFiber = yield* adapter
+          .sendTurn({ threadId, input: "run a tool call", attachments: [] })
+          .pipe(Effect.forkChild);
+        const opened = yield* Fiber.join(openedFiber);
+        if (opened._tag !== "Some") return assert.fail("no permission request");
+        yield* adapter.respondToRequest(threadId, opened.value.requestId as never, decision);
+        yield* Fiber.join(turnFiber);
+        const text = Array.from(yield* Fiber.join(eventsFiber))
+          .flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : []))
+          .join("");
+        assert.include(text, understood);
+        yield* adapter.stopSession(threadId);
+      }),
+    );
+  }
+
   it.effect("segments assistant messages around ACP tool activity in full-access mode", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;

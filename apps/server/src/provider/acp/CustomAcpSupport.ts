@@ -5,9 +5,8 @@
  * Unlike the Cursor/Hermes helpers nothing here knows the agent: option ids,
  * model ids and modes come from what the agent itself advertises.
  *
- *   - permissions: our Approve / Approve for session / Deny are mapped onto
- *     the agent's `options[]` by their standard `kind`
- *     (allow_once / allow_always / reject_once / reject_always), never by id;
+ *   - permissions: mapped onto the agent's `options[]` by their standard `kind`
+ *     (AcpAdapterSupport), as for every ACP agent;
  *   - models: a `session/new` config option with `category: "model"`
  *     (set via `session/set_config_option`), else the unstable
  *     `models` state (set via `session/set_model`), else none;
@@ -21,11 +20,7 @@ import { access, stat } from "node:fs/promises";
 import os from "node:os";
 import nodePath from "node:path";
 
-import type {
-  CustomHarnessSettings,
-  ProviderApprovalDecision,
-  RuntimeMode,
-} from "@t3tools/contracts";
+import type { CustomHarnessSettings, RuntimeMode } from "@t3tools/contracts";
 import { isAbsoluteCommandPath } from "@t3tools/shared/customHarness";
 import { Effect, Layer, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -38,6 +33,7 @@ import {
   type AcpSessionRuntimeOptions,
   type AcpSessionRuntimeShape,
 } from "./AcpSessionRuntime.ts";
+import { optionOfKinds } from "./AcpAdapterSupport.ts";
 import { collectSessionConfigOptionValues, extractModelConfigId } from "./AcpRuntimeModel.ts";
 
 /** Same SIGTERM → SIGKILL deadline as Hermes / Cursor (one implementation in AcpSessionRuntime). */
@@ -135,41 +131,6 @@ export function resolveHarnessCwd(
 /* ------------------------------------------------------------------ *
  * Permissions
  * ------------------------------------------------------------------ */
-
-type PermissionKind = EffectAcpSchema.PermissionOptionKind;
-
-function optionOfKinds(
-  request: EffectAcpSchema.RequestPermissionRequest,
-  kinds: ReadonlyArray<PermissionKind>,
-): string | undefined {
-  for (const kind of kinds) {
-    const option = request.options.find((candidate) => candidate.kind === kind);
-    const id = option?.optionId?.trim();
-    if (id) return id;
-  }
-  return undefined;
-}
-
-/**
- * Our decision → the agent's option, by standard kind. `undefined` means
- * "answer `cancelled`" (the agent offered nothing matching, or the person
- * cancelled).
- */
-export function selectPermissionOptionForDecision(
-  request: EffectAcpSchema.RequestPermissionRequest,
-  decision: ProviderApprovalDecision,
-): string | undefined {
-  switch (decision) {
-    case "accept":
-      return optionOfKinds(request, ["allow_once", "allow_always"]);
-    case "acceptForSession":
-      return optionOfKinds(request, ["allow_always", "allow_once"]);
-    case "decline":
-      return optionOfKinds(request, ["reject_once", "reject_always"]);
-    default:
-      return undefined;
-  }
-}
 
 const EDIT_TOOL_KINDS = new Set(["edit", "delete", "move"]);
 

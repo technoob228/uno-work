@@ -22,6 +22,14 @@ const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 /** Never answer session/prompt and ignore session/cancel (wedged agent). */
 const hangPrompt = process.env.T3_ACP_HANG_PROMPT === "1";
+/**
+ * The options offered with a permission request (JSON), in place of the default
+ * ones. The reply then says what the agent understood, as a real agent would
+ * read the answer: an option it didn't offer is a refusal.
+ */
+const permissionOptions = process.env.T3_ACP_PERMISSION_OPTIONS
+  ? (JSON.parse(process.env.T3_ACP_PERMISSION_OPTIONS) as ReadonlyArray<AcpSchema.PermissionOption>)
+  : null;
 /** `session/load` answers without replaying any history (an empty session). */
 const loadWithoutReplay = process.env.T3_ACP_LOAD_WITHOUT_REPLAY === "1";
 const sessionId = "mock-session-1";
@@ -397,7 +405,7 @@ const program = Effect.gen(function* () {
               },
             ],
           },
-          options: [
+          options: permissionOptions ?? [
             { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
             { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
             { optionId: "reject-once", name: "Reject", kind: "reject_once" },
@@ -424,11 +432,21 @@ const program = Effect.gen(function* () {
           },
         });
 
+        const answer = permission.outcome;
+        const picked =
+          answer.outcome === "selected"
+            ? permissionOptions?.find((option) => option.optionId === answer.optionId)
+            : undefined;
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
           update: {
             sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "hello from mock" },
+            content: {
+              type: "text",
+              text: permissionOptions
+                ? `${picked?.kind.startsWith("allow") ? "allowed" : "refused"}: ${picked?.optionId ?? "nothing it offered"}`
+                : "hello from mock",
+            },
           },
         });
 

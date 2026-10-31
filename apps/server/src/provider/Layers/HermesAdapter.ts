@@ -62,7 +62,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import { acpPermissionResponse, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import { isUnoBillingFailureReply, normalizeUnoBillingErrorMessage } from "../unoBilling.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import {
@@ -908,15 +908,7 @@ export function makeHermesAdapter(
                     decision: resolved,
                   }),
                 );
-                return {
-                  outcome:
-                    resolved === "cancel"
-                      ? ({ outcome: "cancelled" } as const)
-                      : {
-                          outcome: "selected" as const,
-                          optionId: acpPermissionOutcome(resolved),
-                        },
-                };
+                return acpPermissionResponse(params, resolved);
               }),
             );
             return yield* acp.start();

@@ -10,6 +10,7 @@ import { TestClock } from "effect/testing";
 
 import {
   HermesSettings,
+  type ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -130,6 +131,98 @@ hermesAdapterTestLayer("HermesAdapterLive", (it) => {
     }),
   );
 });
+
+/** As Hermes offers them for a file edit (acp_adapter/edit_approval.py). */
+const HERMES_EDIT_OPTIONS = [
+  { optionId: "allow_once", name: "Allow edit", kind: "allow_once" },
+  { optionId: "deny", name: "Deny", kind: "reject_once" },
+];
+/** As it offers them for a command (acp_adapter/permissions.py). */
+const HERMES_COMMAND_OPTIONS = [
+  { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+  { optionId: "allow_session", name: "Allow for session", kind: "allow_always" },
+  { optionId: "allow_always", name: "Allow always", kind: "allow_always" },
+  { optionId: "deny", name: "Deny", kind: "reject_once" },
+  { optionId: "deny_always", name: "Deny always", kind: "reject_always" },
+];
+
+/** The turn up to the card; the person's answer; what the agent understood from it. */
+const askAndAnswer = (
+  adapter: HermesAdapterShape,
+  threadId: ThreadId,
+  decision: ProviderApprovalDecision,
+) =>
+  Effect.gen(function* () {
+    const eventsFiber = yield* adapter.streamEvents.pipe(
+      Stream.filter((event) => event.threadId === threadId),
+      Stream.takeUntil((event) => event.type === "turn.completed"),
+      Stream.runCollect,
+      Effect.forkChild,
+    );
+    const openedFiber = yield* adapter.streamEvents.pipe(
+      Stream.filter((event) => event.threadId === threadId && event.type === "request.opened"),
+      Stream.runHead,
+      Effect.forkChild,
+    );
+    yield* Effect.yieldNow;
+    yield* adapter.startSession({
+      threadId,
+      provider: ProviderDriverKind.make("hermes"),
+      cwd: process.cwd(),
+      runtimeMode: "approval-required",
+      modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "uno/smart" },
+    });
+    const turnFiber = yield* adapter
+      .sendTurn({ threadId, input: "change a file", attachments: [] })
+      .pipe(Effect.forkChild);
+    const opened = yield* Fiber.join(openedFiber);
+    assert.isTrue(opened._tag === "Some");
+    if (opened._tag !== "Some") return "";
+    yield* adapter.respondToRequest(threadId, opened.value.requestId as never, decision);
+    yield* Fiber.join(turnFiber);
+    const events = Array.from(yield* Fiber.join(eventsFiber));
+    yield* adapter.stopSession(threadId);
+    return events
+      .flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : []))
+      .join("");
+  });
+
+for (const [name, options, expected] of [
+  [
+    "a file edit",
+    HERMES_EDIT_OPTIONS,
+    {
+      accept: "allowed: allow_once",
+      acceptForSession: "allowed: allow_once",
+      decline: "refused: deny",
+    },
+  ],
+  [
+    "a command",
+    HERMES_COMMAND_OPTIONS,
+    {
+      accept: "allowed: allow_once",
+      acceptForSession: "allowed: allow_session",
+      decline: "refused: deny",
+    },
+  ],
+] as const) {
+  makeHermesAdapterTestLayer({
+    T3_ACP_EMIT_TOOL_CALLS: "1",
+    T3_ACP_PERMISSION_OPTIONS: JSON.stringify(options),
+  })(`HermesAdapterLive permission for ${name}`, (it) => {
+    for (const [decision, understood] of Object.entries(expected)) {
+      it.effect(`${decision} reaches the agent as ${understood}`, () =>
+        Effect.gen(function* () {
+          const adapter = yield* HermesAdapter;
+          const threadId = ThreadId.make(`hermes-permission-${name}-${decision}`);
+          const text = yield* askAndAnswer(adapter, threadId, decision as ProviderApprovalDecision);
+          assert.include(text, understood);
+        }),
+      );
+    }
+  });
+}
 
 // Hermes relays a non-retryable gateway 402 as the turn's reply text.
 makeHermesAdapterTestLayer({ T3_ACP_PROMPT_RESPONSE_TEXT: "HTTP 402: Insufficient LLM credits" })(

@@ -71,6 +71,7 @@ import {
   makeAcpRequestResolvedEvent,
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
+import { acpPermissionResponse } from "../acp/AcpAdapterSupport.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
@@ -83,7 +84,6 @@ import {
   makeTextTail,
   resolveHarnessCwd,
   resolveHarnessExecutable,
-  selectPermissionOptionForDecision,
 } from "../acp/CustomAcpSupport.ts";
 import { parseMcpJsonToAcpServers } from "../acp/HermesAcpSupport.ts";
 import type { ProviderAdapterError } from "../Errors.ts";
@@ -430,13 +430,7 @@ export function makeCustomHarnessAdapter(
                     decision: resolved,
                   }),
                 );
-                const optionId = selectPermissionOptionForDecision(params, resolved);
-                return {
-                  outcome:
-                    optionId === undefined
-                      ? ({ outcome: "cancelled" } as const)
-                      : ({ outcome: "selected", optionId } as const),
-                };
+                return acpPermissionResponse(params, resolved);
               }),
             );
             return yield* acp.start();

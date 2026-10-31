@@ -37,13 +37,13 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoAgentAccess } from "../../unoAgentAccess.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
+import { acpPermissionResponse } from "../acp/AcpAdapterSupport.ts";
 import {
   discoverSessionModels,
   harnessPath,
   makeCustomAcpRuntime,
   makeTextTail,
   resolveHarnessExecutable,
-  selectPermissionOptionForDecision,
 } from "../acp/CustomAcpSupport.ts";
 import { deriveProviderInstanceConfigMap } from "../Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
@@ -175,13 +175,7 @@ export const runHarnessTest = (target: HarnessTestTarget) =>
       yield* acp.handleRequestPermission((params) =>
         Effect.sync(() => {
           permissionRequested = true;
-          const optionId = selectPermissionOptionForDecision(params, "decline");
-          return {
-            outcome:
-              optionId === undefined
-                ? ({ outcome: "cancelled" } as const)
-                : ({ outcome: "selected", optionId } as const),
-          };
+          return acpPermissionResponse(params, "decline");
         }),
       );
       yield* acp.getEvents().pipe(
