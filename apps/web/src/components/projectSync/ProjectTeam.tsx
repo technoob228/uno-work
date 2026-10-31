@@ -202,7 +202,7 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
                   })
                 }
               >
-                Cancel
+                Remove
               </Button>
             </li>
           ))}
