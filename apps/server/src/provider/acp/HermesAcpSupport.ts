@@ -534,7 +534,7 @@ export const HERMES_DISPATCHER_COMPRESSION = {
  * session; the thread's recent conversation is handed over as for any new one.
  * Notes and the person's files are not in it — they change all the time.
  */
-const HERMES_DISPATCHER_PROMPT_SHAPE = 1;
+const HERMES_DISPATCHER_PROMPT_SHAPE = 2;
 
 export function dispatcherPromptStamp(agentsMd: string): string {
   const version =
@@ -686,6 +686,11 @@ export function buildHermesConfigYaml(input: {
   if (input.skillsExternalDirs && input.skillsExternalDirs.length > 0) {
     lines.push("skills:", "  external_dirs:");
     for (const dir of input.skillsExternalDirs) lines.push(`    - ${quote(dir)}`);
+  }
+  // Uno's dozen tools stay direct: Tool Search would hide them behind
+  // tool_search / tool_describe / tool_call, extra steps in a turn that has seconds.
+  if (input.mcpToolsInclude !== undefined) {
+    lines.push("tools:", "  tool_search:", `    enabled: "off"`);
   }
   if (input.mcpServers.length > 0) {
     lines.push("mcp_servers:");

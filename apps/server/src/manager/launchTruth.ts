@@ -40,6 +40,9 @@ const STATUS_TOOL_NAMES: ReadonlyArray<string> = [
   "list_threads",
 ];
 
+/** Hermes' Tool Search bridge: it runs the real tool named in its arguments. */
+const BRIDGE_TOOL_NAME = "tool_call";
+
 /** Origin component of the hidden launch check turn (`systemCommandOrigin`). */
 export const LAUNCH_CHECK_ORIGIN_COMPONENT = "launch-check";
 
@@ -70,11 +73,45 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const str = (value: unknown): string | null =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 
-/** `mcp__uno_work__chat_create` → `chat_create`; null when it is not a tool name we know. */
+/**
+ * `mcp__uno_work__chat_create`, `mcp_uno_work_chat_create` or Hermes' titled
+ * `mcp_uno_work_chat_create: …` → `chat_create`; null when it is not a tool
+ * name we know.
+ */
 const toolNameOf = (summary: string | undefined, names: ReadonlyArray<string>): string | null => {
-  const flat = (summary ?? "").trim();
+  const flat = (summary ?? "").split(":")[0]!.trim();
   for (const name of names) {
-    if (flat === name || flat.endsWith(`__${name}`) || flat.endsWith(`.${name}`)) return name;
+    if (flat === name || flat.endsWith(`_${name}`) || flat.endsWith(`.${name}`)) return name;
+  }
+  return null;
+};
+
+const rawInputOf = (payload: unknown): Record<string, unknown> => {
+  const data = isRecord(payload) ? payload.data : undefined;
+  return isRecord(data) && isRecord(data.rawInput) ? data.rawInput : {};
+};
+
+/**
+ * The tool an activity really ran. Hermes' Tool Search bridge records
+ * `tool_call {calls: [{name, arguments}]}`, so the name and the input of a
+ * bridged call are inside it (Telegram, 30.10: a real chat_create read as
+ * "nothing started").
+ */
+const calledTool = (
+  activity: LaunchActivity,
+  names: ReadonlyArray<string>,
+): { readonly tool: string; readonly input: Record<string, unknown> } | null => {
+  const rawInput = rawInputOf(activity.payload);
+  const direct = toolNameOf(activity.summary, names);
+  if (direct !== null) return { tool: direct, input: rawInput };
+  if (toolNameOf(activity.summary, [BRIDGE_TOOL_NAME]) === null) return null;
+  const calls = Array.isArray(rawInput.calls) ? rawInput.calls : [];
+  for (const call of calls) {
+    if (!isRecord(call)) continue;
+    const tool = toolNameOf(str(call.name) ?? undefined, names);
+    if (tool !== null) {
+      return { tool, input: isRecord(call.arguments) ? call.arguments : {} };
+    }
   }
   return null;
 };
@@ -106,15 +143,14 @@ export function launchesOfTurn(
   const facts: Array<LaunchFact> = [];
   for (const activity of activities) {
     if (activity.turnId !== turnId || activity.kind !== "tool.completed") continue;
-    const tool = toolNameOf(activity.summary, LAUNCH_TOOL_NAMES);
-    if (tool === null) continue;
+    const called = calledTool(activity, LAUNCH_TOOL_NAMES);
+    if (called === null) continue;
+    const { tool, input } = called;
     const payload = isRecord(activity.payload) ? activity.payload : {};
     if (payload.status === "failed") continue;
-    const flat = flatPayload(activity.payload);
-    const resultPart = flat.replace(/"rawInput"\s*:\s*\{[^{}]*\}/, "");
+    const { rawInput: _rawInput, ...resultData } = isRecord(payload.data) ? payload.data : {};
+    const resultPart = flatPayload({ ...payload, data: resultData });
     if (FAILED_RESULT.test(resultPart) && !/"ok"\s*:\s*true/.test(resultPart)) continue;
-    const data = isRecord(payload.data) ? payload.data : {};
-    const input = isRecord(data.rawInput) ? data.rawInput : {};
     const resultThreadId = new RegExp(`"threadId"\\s*:\\s*"(${UUID})"`, "i").exec(resultPart)?.[1];
     const resultTitle = /"title"\s*:\s*"([^"]{1,200})"/.exec(resultPart)?.[1];
     const provider = str(input.provider);
@@ -140,13 +176,13 @@ export function lookedAtChats(
     (activity) =>
       activity.turnId === turnId &&
       activity.kind.startsWith("tool.") &&
-      toolNameOf(activity.summary, STATUS_TOOL_NAMES) !== null,
+      calledTool(activity, STATUS_TOOL_NAMES) !== null,
   );
 }
 
 // ── The claim ────────────────────────────────────────────────────────────
 
-/** "I started it" in the first person, past tense — always a claim of this turn. */
+/** "I started it" in the first person, past tense — a claim of this turn unless it looked at chats. */
 const FIRST_PERSON_CLAIMS: ReadonlyArray<RegExp> = [
   /(?:пере)?запустил(?:а|и)?(?![а-яё])/giu,
   /отдал(?:а|и)?\s+(?:\S+\s+)?в\s+работу/giu,
@@ -169,12 +205,18 @@ const PASSIVE_CLAIMS: ReadonlyArray<RegExp> = [
 const NEGATED_BEFORE =
   /(?:(?:^|[^а-яё])(?:не|ни|нельзя)|\b(?:not|never|didn't|did not|haven't|have not|wasn't|was not|couldn't|could not|isn't))\s+(?:\S+\s+)?$/iu;
 
+/** The claim is about an earlier turn: «запустил раньше», "started it earlier". */
+const EARLIER_NEAR = /(?:^|[^а-яё])(?:раньше|ранее|до этого)(?![а-яё])|\b(?:earlier|before)\b/iu;
+
 const hasUnnegated = (text: string, patterns: ReadonlyArray<RegExp>): boolean => {
   for (const pattern of patterns) {
     pattern.lastIndex = 0;
     for (const match of text.matchAll(pattern)) {
-      const before = text.slice(Math.max(0, (match.index ?? 0) - 24), match.index ?? 0);
-      if (!NEGATED_BEFORE.test(before)) return true;
+      const start = match.index ?? 0;
+      const before = text.slice(Math.max(0, start - 24), start);
+      if (NEGATED_BEFORE.test(before)) continue;
+      const near = text.slice(Math.max(0, start - 16), start + match[0].length + 16);
+      if (!EARLIER_NEAR.test(near)) return true;
     }
   }
   return false;
@@ -182,17 +224,17 @@ const hasUnnegated = (text: string, patterns: ReadonlyArray<RegExp>): boolean =>
 
 /**
  * Whether an answer says work was started ("Принял, запустил «…»",
- * "отдал в работу", "launched", "started a chat"). A denial («не запустил»)
- * is not a claim; "запущен" is not one in a status answer (`statusTurn`).
+ * "отдал в работу", "launched", "started a chat"). Not a claim: a denial
+ * («не запустил»), a word about an earlier turn («запустил раньше»), and
+ * anything in an answer that looked at existing chats (`statusTurn`).
  */
 export function claimsLaunch(
   text: string,
   options: { readonly statusTurn?: boolean } = {},
 ): boolean {
   const flat = text.replace(/\s+/g, " ").trim();
-  if (flat.length === 0) return false;
-  if (hasUnnegated(flat, FIRST_PERSON_CLAIMS)) return true;
-  return options.statusTurn !== true && hasUnnegated(flat, PASSIVE_CLAIMS);
+  if (flat.length === 0 || options.statusTurn === true) return false;
+  return hasUnnegated(flat, FIRST_PERSON_CLAIMS) || hasUnnegated(flat, PASSIVE_CLAIMS);
 }
 
 export type LaunchTruthVerdict =
