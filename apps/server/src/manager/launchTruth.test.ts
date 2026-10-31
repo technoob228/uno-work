@@ -6,6 +6,7 @@ import {
   decideLaunchTruth,
   launchCheckPromptText,
   launchesOfTurn,
+  lookedAtChats,
   NOT_LAUNCHED_FACT,
   notLaunchedText,
   type LaunchActivity,
@@ -84,10 +85,15 @@ describe("claimsLaunch", () => {
     const status = "«Читать package.json» запущен в 01:11 и ещё работает.";
     expect(claimsLaunch(status, { statusTurn: true })).toBe(false);
     expect(claimsLaunch(status)).toBe(true);
-    // ...but a first-person claim is one even in a status turn.
-    expect(claimsLaunch("Проверил статус и запустил ещё один чат.", { statusTurn: true })).toBe(
-      true,
+    // A status answer tells about existing chats, in the first person too.
+    expect(claimsLaunch("Отчёт делает чат, я запустил его в 21:04.", { statusTurn: true })).toBe(
+      false,
     );
+  });
+
+  it("a word about an earlier turn is not a claim of this one", () => {
+    expect(claimsLaunch("Отчёт делает чат, я его запустил раньше, второго нет.")).toBe(false);
+    expect(claimsLaunch("I started a chat earlier, it is still running.")).toBe(false);
   });
 });
 
@@ -129,8 +135,51 @@ describe("launchesOfTurn", () => {
   });
 });
 
+const bridged = (turnId: string, name: string, args: unknown): LaunchActivity => ({
+  kind: "tool.completed",
+  summary: "tool_call: chat_create",
+  turnId,
+  payload: {
+    itemType: "dynamic_tool_call",
+    status: "completed",
+    detail: JSON.stringify({
+      result: JSON.stringify({ ok: true, threadId: "276a73aa-6dd7-423c-a99e-b6b5a47045d2" }),
+    }),
+    data: { rawInput: { calls: [{ name, arguments: args }] } },
+  },
+});
+
 describe("decideLaunchTruth", () => {
   const claim = "Принял, запустил «Читать README в shop-demo» — напишу, когда будет готово.";
+
+  it("a call through Hermes' Tool Search bridge is a real call", () => {
+    const launch = bridged("t1", "mcp_uno_work_chat_create", {
+      cwd: "~/projects/luckyip",
+      title: "Отчёт по выручке",
+      text: 'поле "error": "x" в задаче',
+    });
+    expect(launchesOfTurn([launch], "t1")).toEqual([
+      {
+        tool: "chat_create",
+        threadId: "276a73aa-6dd7-423c-a99e-b6b5a47045d2",
+        title: "Отчёт по выручке",
+        cwd: "~/projects/luckyip",
+        model: null,
+      },
+    ]);
+    expect(
+      decideLaunchTruth({ text: claim, activities: [launch], turnId: "t1", checksMade: 1 }),
+    ).toEqual({ kind: "ok" });
+    // A bridged look at the chats is a status turn, and a bridged read starts nothing.
+    const look = bridged("t2", "mcp_uno_manager_work_status", {});
+    expect(lookedAtChats([look], "t2")).toBe(true);
+    expect(launchesOfTurn([bridged("t3", "mcp_uno_manager_notes_read", {})], "t3")).toEqual([]);
+  });
+
+  it("Hermes' own tool title counts as the tool", () => {
+    const titled = { ...chatCreate("t1"), summary: "mcp_uno_work_chat_create: Читать README" };
+    expect(launchesOfTurn([titled], "t1")).toHaveLength(1);
+  });
 
   it("a claim backed by a call is fine", () => {
     expect(
