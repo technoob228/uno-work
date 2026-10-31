@@ -294,6 +294,10 @@ describe("buildHermesConfigYaml for the Uno dispatcher", () => {
     expect(yaml).not.toMatch(/include: \[[^\]]*"site_publish"/);
   });
 
+  it("keeps its tools direct: no Tool Search bridge", () => {
+    expect(yaml).toContain('tools:\n  tool_search:\n    enabled: "off"');
+  });
+
   it("compacts its context early, by the same model", () => {
     expect(yaml).toContain("compression:\n  enabled: true\n  threshold_tokens: 28000");
     expect(yaml).toContain(
