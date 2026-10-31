@@ -1,6 +1,7 @@
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import {
+  APPROVAL_EXPIRED_DECISION,
   ApprovalRequestId,
   isAssistantNoReply,
   isToolLifecycleItemType,
@@ -190,6 +191,13 @@ export type TimelineEntry =
       /** The chat moved to another agent: a quiet line. */
       id: string;
       kind: "agent-switch";
+      createdAt: string;
+      text: string;
+    }
+  | {
+      /** The agent stopped waiting for the person's OK: what the card turned into. */
+      id: string;
+      kind: "approval-expired";
       createdAt: string;
       text: string;
     };
@@ -632,6 +640,28 @@ export function deriveSupportDraftEntries(
           },
         ]
       : [];
+  });
+}
+
+export const APPROVAL_EXPIRED_LINE =
+  "No answer in time, so nothing was changed. Write “go ahead” if you still want this.";
+
+/** Where a question went unanswered: said in the chat, or the agent's "denied" reads as yours. */
+export function deriveApprovalExpiredEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): Extract<TimelineEntry, { kind: "approval-expired" }>[] {
+  return activities.flatMap((activity) => {
+    if (activity.kind !== "approval.resolved") return [];
+    const payload = activity.payload as { readonly decision?: unknown } | null;
+    if (payload?.decision !== APPROVAL_EXPIRED_DECISION) return [];
+    return [
+      {
+        id: `approval-expired:${activity.id}`,
+        kind: "approval-expired" as const,
+        createdAt: activity.createdAt,
+        text: APPROVAL_EXPIRED_LINE,
+      },
+    ];
   });
 }
 

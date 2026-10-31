@@ -1,4 +1,5 @@
 import {
+  type APPROVAL_EXPIRED_DECISION,
   type RuntimeEventRawSource,
   RuntimeItemId,
   type CanonicalRequestType,
@@ -116,7 +117,7 @@ export function makeAcpRequestResolvedEvent(input: {
   readonly turnId: TurnId | undefined;
   readonly requestId: RuntimeRequestId;
   readonly permissionRequest: AcpPermissionRequest;
-  readonly decision: ProviderApprovalDecision;
+  readonly decision: ProviderApprovalDecision | typeof APPROVAL_EXPIRED_DECISION;
 }): ProviderRuntimeEvent {
   return {
     type: "request.resolved",

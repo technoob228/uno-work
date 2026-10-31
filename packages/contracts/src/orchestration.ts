@@ -161,6 +161,9 @@ export const ProviderApprovalDecision = Schema.Literals([
   "cancel",
 ]);
 export type ProviderApprovalDecision = typeof ProviderApprovalDecision.Type;
+
+/** `approval.resolved` with this decision: nobody answered before the agent stopped waiting. */
+export const APPROVAL_EXPIRED_DECISION = "expired";
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 

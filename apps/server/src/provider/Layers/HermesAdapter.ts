@@ -17,6 +17,7 @@ import * as nodePath from "node:path";
 
 import {
   ApprovalRequestId,
+  APPROVAL_EXPIRED_DECISION,
   ASSISTANT_PROJECT_ID,
   type AssistantLlmProvider,
   type HermesSettings,
@@ -118,6 +119,15 @@ const HERMES_DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "anthropic/c
  */
 const HERMES_INTERRUPT_SETTLE_TIMEOUT_MS = 10_000;
 
+/**
+ * Hermes stops waiting for a permission answer on its own and refuses: after
+ * 60 s in 0.19 (hardcoded, in our images), after `approvals.timeout` (300 s by
+ * default) in newer ones. It doesn't tell the client, so the card would stay
+ * with an Allow nothing listens to and the agent's "denied" would read as the
+ * person's own. We end the wait first: the card closes and says what happened.
+ */
+const HERMES_PERMISSION_WAIT_MS = 55_000;
+
 export interface HermesAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /**
@@ -144,6 +154,8 @@ export interface HermesAdapterLiveOptions {
   readonly resolveSettings?: Effect.Effect<HermesSettings>;
   /** Test hook — see HERMES_INTERRUPT_SETTLE_TIMEOUT_MS. */
   readonly interruptSettleTimeoutMs?: number;
+  /** Test hook — see HERMES_PERMISSION_WAIT_MS. */
+  readonly permissionWaitMs?: number;
   /**
    * Where this session's LLM calls go, by the `llmProvider` option of its
    * model selection (Uno gateway by default, or a key the person brought).
@@ -336,6 +348,7 @@ export function makeHermesAdapter(
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("hermes");
     const interruptSettleTimeoutMs =
       options?.interruptSettleTimeoutMs ?? HERMES_INTERRUPT_SETTLE_TIMEOUT_MS;
+    const permissionWaitMs = options?.permissionWaitMs ?? HERMES_PERMISSION_WAIT_MS;
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const serverConfig = yield* Effect.service(ServerConfig);
@@ -895,7 +908,9 @@ export function makeHermesAdapter(
                     rawPayload: params,
                   }),
                 );
-                const resolved = yield* Deferred.await(decision);
+                const answered = yield* Deferred.await(decision).pipe(
+                  Effect.timeoutOption(permissionWaitMs),
+                );
                 pendingApprovals.delete(requestId);
                 yield* offerRuntimeEvent(
                   makeAcpRequestResolvedEvent({
@@ -905,10 +920,17 @@ export function makeHermesAdapter(
                     turnId: eventTurnId(ctx),
                     requestId: runtimeRequestId,
                     permissionRequest,
-                    decision: resolved,
+                    decision: Option.getOrElse(
+                      answered,
+                      (): ProviderApprovalDecision | typeof APPROVAL_EXPIRED_DECISION =>
+                        APPROVAL_EXPIRED_DECISION,
+                    ),
                   }),
                 );
-                return acpPermissionResponse(params, resolved);
+                return acpPermissionResponse(
+                  params,
+                  Option.getOrElse(answered, (): ProviderApprovalDecision => "cancel"),
+                );
               }),
             );
             return yield* acp.start();

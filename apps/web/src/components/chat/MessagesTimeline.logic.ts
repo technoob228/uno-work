@@ -74,6 +74,13 @@ export type MessagesTimelineRow =
       text: string;
     }
   | {
+      /** The agent stopped waiting for the person's OK. */
+      kind: "approval-expired";
+      id: string;
+      createdAt: string;
+      text: string;
+    }
+  | {
       /** A letter to support: the person reads it and sends it (Fix Work). */
       kind: "support-draft";
       id: string;
@@ -428,9 +435,9 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (timelineEntry.kind === "agent-switch") {
+    if (timelineEntry.kind === "agent-switch" || timelineEntry.kind === "approval-expired") {
       nextRows.push({
-        kind: "agent-switch",
+        kind: timelineEntry.kind,
         id: timelineEntry.id,
         createdAt: timelineEntry.createdAt,
         text: timelineEntry.text,
@@ -545,6 +552,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return htmlRenderReferencesEqual(a.htmlRender, (b as typeof a).htmlRender);
 
     case "agent-switch":
+    case "approval-expired":
       return a.text === (b as typeof a).text;
 
     case "support-draft":

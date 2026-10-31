@@ -8,6 +8,8 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  APPROVAL_EXPIRED_LINE,
+  deriveApprovalExpiredEntries,
   deriveHtmlRenderEntries,
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
@@ -47,6 +49,42 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("deriveApprovalExpiredEntries", () => {
+  const resolved = (id: string, decision: string) =>
+    makeActivity({
+      id,
+      createdAt: "2026-02-23T00:00:03.000Z",
+      kind: "approval.resolved",
+      summary: "Approval resolved",
+      tone: "info",
+      payload: { requestId: "req-1", decision },
+    });
+
+  it("says so in the chat when nobody answered", () => {
+    expect(deriveApprovalExpiredEntries([resolved("late", "expired")])).toEqual([
+      {
+        id: "approval-expired:late",
+        kind: "approval-expired",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        text: APPROVAL_EXPIRED_LINE,
+      },
+    ]);
+  });
+
+  it("stays quiet about a real answer, and the card closes either way", () => {
+    expect(deriveApprovalExpiredEntries([resolved("no", "decline")])).toEqual([]);
+    const opened = makeActivity({
+      id: "open",
+      createdAt: "2026-02-23T00:00:01.000Z",
+      kind: "approval.requested",
+      summary: "File-change approval requested",
+      tone: "approval",
+      payload: { requestId: "req-1", requestKind: "file-change" },
+    });
+    expect(derivePendingApprovals([opened, resolved("late", "expired")])).toEqual([]);
+  });
+});
 
 describe("derivePendingApprovals", () => {
   it("tracks open approvals and removes resolved ones", () => {

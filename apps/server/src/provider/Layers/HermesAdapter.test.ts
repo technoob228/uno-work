@@ -41,7 +41,10 @@ async function makeMockHermes() {
   return { wrapperPath, hermesHome: path.join(dir, "home") };
 }
 
-const makeHermesAdapterTestLayer = (environment: Record<string, string> = {}) =>
+const makeHermesAdapterTestLayer = (
+  environment: Record<string, string> = {},
+  options?: { readonly permissionWaitMs?: number },
+) =>
   it.layer(
     Layer.effect(
       HermesAdapter,
@@ -49,7 +52,7 @@ const makeHermesAdapterTestLayer = (environment: Record<string, string> = {}) =>
         const mock = yield* Effect.promise(() => makeMockHermes());
         return yield* makeHermesAdapter(
           Schema.decodeSync(HermesSettings)({ binaryPath: mock.wrapperPath }),
-          { environment: { HERMES_HOME: mock.hermesHome, ...environment } },
+          { environment: { HERMES_HOME: mock.hermesHome, ...environment }, ...options },
         );
       }),
     ).pipe(
@@ -223,6 +226,72 @@ for (const [name, options, expected] of [
     }
   });
 }
+
+// Hermes gives up on an unanswered request by itself and tells nobody.
+makeHermesAdapterTestLayer(
+  {
+    T3_ACP_EMIT_TOOL_CALLS: "1",
+    T3_ACP_PERMISSION_OPTIONS: JSON.stringify(HERMES_EDIT_OPTIONS),
+  },
+  { permissionWaitMs: 55_000 },
+)("HermesAdapterLive unanswered permission", (it) => {
+  it.effect("closes the card before the agent gives up, and a late click finds nothing", () =>
+    Effect.gen(function* () {
+      const adapter = yield* HermesAdapter;
+      const threadId = ThreadId.make("hermes-permission-unanswered");
+      const eventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.takeUntil((event) => event.type === "turn.completed"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      const openedFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "request.opened"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      let closed = false;
+      yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === threadId && event.type === "request.resolved"),
+        Stream.runForEach(() => Effect.sync(() => (closed = true))),
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("hermes"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "uno/smart" },
+      });
+      const turnFiber = yield* adapter
+        .sendTurn({ threadId, input: "change a file", attachments: [] })
+        .pipe(Effect.forkChild);
+      const opened = yield* Fiber.join(openedFiber);
+      if (opened._tag !== "Some") return assert.fail("no permission request");
+
+      // The wait starts a moment after the card opens: the clock moves until it's over.
+      for (let tick = 0; tick < 100 && !closed; tick += 1) {
+        yield* TestClock.adjust("55 seconds");
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      }
+      yield* Fiber.join(turnFiber);
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const resolved = events.find((event) => event.type === "request.resolved");
+      assert.strictEqual(resolved?.payload.decision, "expired");
+      const text = events
+        .flatMap((event) => (event.type === "content.delta" ? [event.payload.delta] : []))
+        .join("");
+      assert.include(text, "refused");
+
+      const late = yield* adapter
+        .respondToRequest(threadId, opened.value.requestId as never, "accept")
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(late));
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+});
 
 // Hermes relays a non-retryable gateway 402 as the turn's reply text.
 makeHermesAdapterTestLayer({ T3_ACP_PROMPT_RESPONSE_TEXT: "HTTP 402: Insufficient LLM credits" })(

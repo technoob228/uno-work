@@ -865,6 +865,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
         </div>
       )}
 
+      {row.kind === "approval-expired" && (
+        <div className="px-1" data-testid="approval-expired-line">
+          <p className="text-sm text-muted-foreground">{row.text}</p>
+        </div>
+      )}
+
       {row.kind === "support-draft" && (
         <div className="min-w-0">
           <SupportDraftCard draft={row.draft} />
