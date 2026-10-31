@@ -279,6 +279,8 @@ import {
   placeShown,
   groupSidebarChats,
   isComputerDimmed,
+  chatPassesFilters,
+  chatProjectFilterAction,
   livePicks,
   orderComputers,
   passes,
@@ -1325,6 +1327,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           role="button"
           tabIndex={0}
           data-testid="sidebar-row-d"
+          data-open-chat={props.isActive ? "" : undefined}
           data-sidebar-section={section}
           data-thread-mark={mark ?? undefined}
           data-menu-open={snoozeMenuOpen ? "" : undefined}
@@ -2522,6 +2525,16 @@ export default function Sidebar() {
     [dComputerIds, dMultiComputer, dSpace, dStoredComputerPicks],
   );
   const dComputersInView = dComputerPicks ?? dComputerIds;
+  // What the funnel offers: the projects on the computers in view.
+  const dFilterProjectKeys = useMemo(
+    () =>
+      dProjectKeys.filter(
+        (key) =>
+          key === HOME_FOLDER_GROUP_KEY ||
+          dProjectInfo.get(key)?.computers.some((computer) => passes(dComputerPicks, computer)),
+      ),
+    [dComputerPicks, dProjectInfo, dProjectKeys],
+  );
   // Computer drops out of the grouping while one computer is in view.
   const dLevels = useMemo(
     () => effectiveLevels(dLevelsChosen, dMultiComputer ? dComputersInView.length : 1),
@@ -2550,9 +2563,15 @@ export default function Sidebar() {
   // The live chats the filters let through (the chip under the title says so).
   // Only mine keeps the open chat and pinned ones in view, and counts the rest.
   const { dShownChats, dHiddenAgentChats } = useMemo(() => {
-    const placed = dLiveChats.filter(
-      (thread) =>
-        passes(dProjectPicks, dGroupOf(thread).key) && passes(dComputerPicks, thread.environmentId),
+    const placed = dLiveChats.filter((thread) =>
+      chatPassesFilters({
+        projectPicks: dProjectPicks,
+        computerPicks: dComputerPicks,
+        projectKey: dGroupOf(thread).key,
+        computer: thread.environmentId,
+        isOpen: threadKeyOf(thread) === routeThreadKey,
+        inSpace: dSpace !== null,
+      }),
     );
     if (!dOnlyMine) return { dShownChats: placed, dHiddenAgentChats: 0 };
     const mine = placed.filter(
@@ -2571,9 +2590,30 @@ export default function Sidebar() {
     dLiveChats,
     dOnlyMine,
     dProjectPicks,
+    dSpace,
     routeThreadKey,
     startedBy.byKey,
   ]);
+  // A filter change must not leave hidden rows in the selection (as with the scope).
+  const dProjectPicksKey = dProjectPicks?.join("\n") ?? null;
+  useEffect(() => {
+    clearSelection();
+  }, [clearSelection, dProjectPicksKey]);
+  // ⌘K, a link or history can open a chat the filters would hide: the list
+  // keeps it (chatPassesFilters), wherever it landed, and scrolls to it.
+  const dOpenChatOutsideFilters = dLiveChats.some(
+    (thread) =>
+      threadKeyOf(thread) === routeThreadKey &&
+      !(
+        passes(dProjectPicks, dGroupOf(thread).key) && passes(dComputerPicks, thread.environmentId)
+      ),
+  );
+  useEffect(() => {
+    if (!dOpenChatOutsideFilters) return;
+    document
+      .querySelector('[data-testid="sidebar-d-chats"] [data-open-chat]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [dOpenChatOutsideFilters, routeThreadKey]);
   // The groups, in the order picked; null — one list, newest first.
   const dTree = useMemo(
     () =>
@@ -3437,6 +3477,15 @@ export default function Sidebar() {
           homeFolder: await resolveHomeFolder(thread.environmentId),
           isAssistantChat: thread.assistantRole === "chat",
         });
+        const projectFilter =
+          sidebarD && sidebarViewMenu
+            ? chatProjectFilterAction({
+                picked: dProjectPicks,
+                project:
+                  project === null || isAssistantProjectId(project.id) ? null : dGroupOf(thread),
+                all: dFilterProjectKeys,
+              })
+            : null;
         const lifecycleItems: ContextMenuItem[] = [];
         if (supportsSettlement) {
           lifecycleItems.push(
@@ -3477,6 +3526,7 @@ export default function Sidebar() {
               ...(thread.assistantRole === "chat"
                 ? []
                 : [{ id: "regenerate-title", label: "Regenerate title" }]),
+              ...(projectFilter ? [{ id: "filter-by-project", label: projectFilter.label }] : []),
               ...(projectOffer
                 ? [
                     {
@@ -3529,6 +3579,9 @@ export default function Sidebar() {
             return;
           case "regenerate-title":
             void regenerateThreadTitle(threadRef);
+            return;
+          case "filter-by-project":
+            if (projectFilter) setDProjectPicks(projectFilter.picks);
             return;
           case "turn-into-project":
             if (projectOffer?.kind === "pick-folder") {
@@ -3623,15 +3676,21 @@ export default function Sidebar() {
       confirmThreadDelete,
       copyPathToClipboard,
       copyThreadIdToClipboard,
+      dFilterProjectKeys,
+      dGroupOf,
+      dProjectPicks,
       deleteThread,
       devMode,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      setDProjectPicks,
       setThreadReadAt,
       openSnoozePicker,
       projectByKey,
       setThreadPinned,
       showErrorToast,
+      sidebarD,
+      sidebarViewMenu,
       startThreadRename,
     ],
   );
@@ -4448,11 +4507,28 @@ export default function Sidebar() {
         })
       : dRenderNodes(dTree);
   // The title menu's picks: projects (with where they live), computers.
-  const dProjectOptions: ReadonlyArray<SidebarDPickOption> = dProjectKeys.map((key) => ({
-    key,
-    label: dProjectName(key),
-    adornment: dRowChips(dProjectInfo.get(key)?.computers ?? [], false),
-  }));
+  const dProjectOptions: ReadonlyArray<SidebarDPickOption> = dProjectKeys.map((key) => {
+    const members = dProjectInfo.get(key)?.members ?? [];
+    const iconProject = members.find((member) => member.environmentId === dThisComputer);
+    const project = iconProject ?? members[0];
+    const label = dProjectName(key);
+    return {
+      key,
+      label,
+      adornment: dRowChips(dProjectInfo.get(key)?.computers ?? [], false),
+      projectIcon: (className: string) =>
+        project ? (
+          <ProjectFavicon
+            environmentId={project.environmentId}
+            cwd={project.cwd}
+            name={label}
+            className={className}
+          />
+        ) : (
+          <HouseIcon className={cn(className, "text-muted-foreground")} />
+        ),
+    };
+  });
   const dComputerOptions: ReadonlyArray<SidebarDPickOption> = dOrderedComputers.flatMap(
     (computer) =>
       computer.environmentId === null
@@ -4635,6 +4711,9 @@ export default function Sidebar() {
                   void updateSidebarSettings({ sidebarGroupLevels: [...levels] })
                 }
                 projects={dProjectOptions}
+                filterProjects={dProjectOptions.filter((option) =>
+                  dFilterProjectKeys.includes(option.key),
+                )}
                 pickedProjects={dProjectPicks}
                 onProjectsChange={setDProjectPicks}
                 computers={dComputerOptions}

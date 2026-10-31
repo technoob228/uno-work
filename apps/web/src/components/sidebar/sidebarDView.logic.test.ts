@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  chatPassesFilters,
+  chatProjectFilterAction,
   chatRowShowsComputer,
   effectiveLevels,
   headerPresetOf,
@@ -197,5 +199,64 @@ describe("groupSidebarChats", () => {
     })!;
     expect(tree.map((node) => node.id)).toEqual(["needs-you", "working", "idle"]);
     expect(tree[0]!.children!.map((node) => node.id)).toEqual(["landing"]);
+  });
+});
+
+describe("chatPassesFilters", () => {
+  const chat = {
+    projectPicks: ["landing"],
+    computerPicks: null,
+    projectKey: "api",
+    computer: "mac",
+    isOpen: false,
+    inSpace: false,
+  };
+
+  it("lets through what the picks let through", () => {
+    expect(chatPassesFilters(chat)).toBe(false);
+    expect(chatPassesFilters({ ...chat, projectKey: "landing" })).toBe(true);
+    expect(chatPassesFilters({ ...chat, projectPicks: null })).toBe(true);
+    expect(chatPassesFilters({ ...chat, projectPicks: null, computerPicks: ["cloud"] })).toBe(
+      false,
+    );
+  });
+
+  it("keeps the open chat out of any filter", () => {
+    expect(chatPassesFilters({ ...chat, isOpen: true })).toBe(true);
+    expect(chatPassesFilters({ ...chat, computerPicks: ["cloud"], isOpen: true })).toBe(true);
+  });
+
+  it("in a space the open chat beats the project filter, not the computer", () => {
+    const inSpace = { ...chat, computerPicks: ["mac"], isOpen: true, inSpace: true };
+    expect(chatPassesFilters(inSpace)).toBe(true);
+    expect(chatPassesFilters({ ...inSpace, computer: "cloud" })).toBe(false);
+  });
+});
+
+describe("chatProjectFilterAction", () => {
+  const all = ["landing", "api"];
+  const landing = { key: "landing", name: "landing" };
+
+  it("offers the chat's project while all are shown", () => {
+    expect(chatProjectFilterAction({ picked: null, project: landing, all })).toEqual({
+      label: "Filter by landing",
+      picks: ["landing"],
+    });
+  });
+
+  it("goes back to all while any filter is on, from any chat", () => {
+    const back = { label: "Show all projects", picks: null };
+    expect(chatProjectFilterAction({ picked: ["api"], project: landing, all })).toEqual(back);
+    expect(chatProjectFilterAction({ picked: ["api"], project: null, all })).toEqual(back);
+  });
+
+  it("offers nothing with one project, or for a chat in none", () => {
+    expect(
+      chatProjectFilterAction({ picked: null, project: landing, all: ["landing"] }),
+    ).toBeNull();
+    expect(chatProjectFilterAction({ picked: null, project: null, all })).toBeNull();
+    expect(
+      chatProjectFilterAction({ picked: null, project: { key: "gone", name: "gone" }, all }),
+    ).toBeNull();
   });
 });

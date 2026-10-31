@@ -14,6 +14,10 @@
  * "Chats assistants started" went into it). A filter is said in the title
  * only, with × next to it to clear.
  *
+ * The funnel by the title (Misha 31.10, as in T3 Code) is the short way to
+ * the same project filter: two clicks to one project in any grouping. It and
+ * the Projects submenu edit one choice, so each shows what the other did.
+ *
  * Where grouping is picked is a switch of the mock (`sidebarViewSwitch`):
  * "header" — in this menu; "settings" — only in Settings (the menu says so and
  * keeps the filters).
@@ -25,19 +29,44 @@
 import {
   ArrowDownIcon,
   ArrowUpIcon,
+  CheckIcon,
   ChevronDownIcon,
   CircleDashedIcon,
   FolderIcon,
   FolderPlusIcon,
   LaptopIcon,
+  ListFilterIcon,
   SearchIcon,
   SquarePenIcon,
   XIcon,
 } from "lucide-react";
-import { useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import {
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ComponentProps,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { create } from "zustand";
 
+import { cn } from "../../lib/utils";
+import {
+  filterSidebarProjectScopeItems,
+  reduceSidebarProjectScopeMenuState,
+} from "../Sidebar.logic";
 import { Checkbox } from "../ui/checkbox";
+import {
+  Combobox,
+  ComboboxEmpty,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxPopup,
+  ComboboxSearchInput,
+  ComboboxTrigger,
+  useComboboxFilter,
+} from "../ui/combobox";
 import {
   Menu,
   MenuCheckboxItem,
@@ -64,7 +93,7 @@ import {
 } from "./sidebarDView.logic";
 
 const BAR_BUTTON_CLASS =
-  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring";
+  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover data-popup-open:text-foreground";
 
 /** "New chat ⌘N" — or plain "New chat" when nothing is bound. */
 export function newChatTooltipLabel(shortcutLabel: string | null): string {
@@ -77,29 +106,36 @@ export const useSidebarDViewMenu = create<{
   readonly setOpen: (open: boolean) => void;
 }>((set) => ({ open: false, setOpen: (open) => set({ open }) }));
 
-function BarButton(props: {
+/** Spreads the rest so it can also be a popup trigger's render target. */
+function BarButton({
+  label,
+  tooltip,
+  testId,
+  className,
+  children,
+  ...rest
+}: {
   label: string;
   tooltip: string;
   testId: string;
-  onClick: (event: ReactMouseEvent) => void;
-  children: ReactNode;
-}) {
+  children?: ReactNode;
+} & Omit<ComponentProps<"button">, "children" | "aria-label">) {
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <button
             type="button"
-            aria-label={props.label}
-            data-testid={props.testId}
-            onClick={props.onClick}
-            className={BAR_BUTTON_CLASS}
+            aria-label={label}
+            data-testid={testId}
+            {...rest}
+            className={cn(BAR_BUTTON_CLASS, className)}
           />
         }
       >
-        {props.children}
+        {children}
       </TooltipTrigger>
-      <TooltipPopup side="top">{props.tooltip}</TooltipPopup>
+      <TooltipPopup side="top">{tooltip}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -150,6 +186,8 @@ export interface SidebarDPickOption {
   readonly adornment?: ReactNode;
   /** A computer's icon. */
   readonly icon?: ReactNode;
+  /** A project's icon at a given size, for the funnel (the Projects submenu lists none). */
+  readonly projectIcon?: (className: string) => ReactNode;
 }
 
 const LEVEL_ICON: Readonly<Record<SidebarGroupLevel, ReactNode>> = {
@@ -295,6 +333,207 @@ function PickSubmenu(props: {
   );
 }
 
+/** The funnel's first row; `filterSidebarProjectScopeItems` knows it by this value. */
+const ALL_PROJECTS = "all";
+/** One to three projects are read at a glance: the search stays out of sight. */
+const FUNNEL_SEARCH_FROM = 4;
+
+/**
+ * The funnel: a row keeps only its project and closes, two clicks in all; the
+ * tick at the row's end adds or takes away and stays open, on a phone too;
+ * Shift+click and Shift+Enter do what the tick does. Held by the caller: the
+ * same picks as the Projects submenu, changed by the same `toggleFilter`.
+ */
+function ProjectFilter(props: {
+  options: ReadonlyArray<SidebarDPickOption>;
+  picked: ReadonlyArray<string> | null;
+  onChange: (picked: ReadonlyArray<string> | null) => void;
+}) {
+  const { options, picked, onChange } = props;
+  const [menu, dispatchMenu] = useReducer(reduceSidebarProjectScopeMenuState, {
+    open: false,
+    query: "",
+  });
+  const highlightedRef = useRef<string | null>(null);
+  const filter = useComboboxFilter();
+  const items = useMemo(
+    () => [
+      { value: ALL_PROJECTS, label: "All projects" },
+      ...options.map((option) => ({ value: option.key, label: option.label })),
+    ],
+    [options],
+  );
+  const filteredItems = useMemo(
+    () =>
+      filterSidebarProjectScopeItems({
+        items,
+        query: menu.query,
+        matches: (item, query) => filter.contains(item, query, (candidate) => candidate.label),
+      }),
+    [filter, items, menu.query],
+  );
+  const shownPicks = options.filter((option) => picked?.includes(option.key));
+  const toggle = (key: string) =>
+    onChange(
+      toggleFilter(
+        picked,
+        key,
+        options.map((option) => option.key),
+      ),
+    );
+  // Several picks are no single value: every row then answers to a click.
+  const value =
+    picked === null
+      ? items[0]
+      : picked.length === 1
+        ? items.find((item) => item.value === picked[0])
+        : undefined;
+  const label =
+    shownPicks.length > 0
+      ? `Filter by project: ${shownPicks.map((option) => option.label).join(", ")}`
+      : "Filter by project";
+  return (
+    <Combobox
+      items={items}
+      filteredItems={filteredItems}
+      autoHighlight
+      itemToStringLabel={(item) => item.label}
+      isItemEqualToValue={(a, b) => a.value === b.value}
+      open={menu.open}
+      onOpenChange={(open, details) => {
+        if (details.isCanceled) return;
+        dispatchMenu({ type: "open-changed", open });
+      }}
+      onItemHighlighted={(item) => {
+        highlightedRef.current = item?.value ?? null;
+      }}
+      value={value ?? null}
+      onValueChange={(item, details) => {
+        if (!item) return;
+        if (item.value === ALL_PROJECTS) {
+          onChange(null);
+        } else if (details.event instanceof MouseEvent && details.event.shiftKey) {
+          // Canceling skips Base UI's commit and its close.
+          details.cancel();
+          toggle(item.value);
+        } else {
+          onChange([item.value]);
+        }
+      }}
+    >
+      <ComboboxTrigger
+        render={<BarButton label={label} tooltip={label} testId="sidebar-d-project-filter" />}
+      >
+        {shownPicks.length > 1 ? (
+          <span className="flex shrink-0 -space-x-1.5" data-testid="sidebar-d-project-filter-icons">
+            {shownPicks.slice(0, 2).map((option) => (
+              // Monograms are see-through: each sits on the bar's own colour.
+              <span
+                key={option.key}
+                className="flex shrink-0 rounded-[3px] bg-sidebar ring-1 ring-sidebar"
+              >
+                {option.projectIcon?.("size-3.5")}
+              </span>
+            ))}
+          </span>
+        ) : shownPicks[0] ? (
+          <span className="flex shrink-0" data-testid="sidebar-d-project-filter-icons">
+            {shownPicks[0].projectIcon?.("size-4")}
+          </span>
+        ) : (
+          <ListFilterIcon className="size-3.5" data-testid="sidebar-d-project-filter-funnel" />
+        )}
+      </ComboboxTrigger>
+      <ComboboxPopup
+        align="start"
+        className="w-64 overflow-hidden"
+        data-testid="sidebar-d-project-filter-popup"
+      >
+        {/* Out of sight, not gone: the keys go through this field. */}
+        <div
+          data-testid="sidebar-d-project-filter-search"
+          className={options.length < FUNNEL_SEARCH_FROM ? "sr-only" : undefined}
+        >
+          <ComboboxSearchInput
+            aria-label="Search projects"
+            placeholder="Search projects"
+            value={menu.query}
+            onChange={(event) => dispatchMenu({ type: "query-changed", query: event.target.value })}
+            onKeyDown={(event) => {
+              // Base UI leaves Enter with Shift alone.
+              if (event.key !== "Enter" || !event.shiftKey) return;
+              if (event.nativeEvent.isComposing) return;
+              const key = highlightedRef.current;
+              if (key === null || key === ALL_PROJECTS) return;
+              event.preventDefault();
+              toggle(key);
+            }}
+          />
+        </div>
+        <ComboboxEmpty>No matching projects</ComboboxEmpty>
+        <ComboboxList className="p-1" scrollAreaClassName="max-h-72" aria-multiselectable>
+          {(item: (typeof items)[number]) => {
+            const option = options.find((candidate) => candidate.key === item.value);
+            const selected = option ? (picked?.includes(option.key) ?? false) : picked === null;
+            return (
+              <ComboboxItem
+                key={item.value}
+                hideIndicator
+                value={item}
+                aria-selected={selected}
+                // The tick marks selection; Base UI's single value would shade one row.
+                data-selected={undefined}
+                data-testid={
+                  option
+                    ? `sidebar-d-project-filter-${option.label}`
+                    : "sidebar-d-project-filter-all"
+                }
+                className="h-8 min-h-8 py-0 pe-1 max-sm:h-10"
+                contentClassName="flex min-w-0 items-center gap-2"
+              >
+                {option?.projectIcon?.("size-4") ?? (
+                  <FolderIcon className="size-4 text-muted-foreground" />
+                )}
+                <span className="min-w-0 flex-1 truncate text-sm">{item.label}</span>
+                {option?.adornment}
+                {option ? (
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-label={`${selected ? "Remove" : "Add"} ${option.label}`}
+                    aria-pressed={selected}
+                    data-testid={`sidebar-d-project-filter-tick-${option.label}`}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggle(option.key);
+                    }}
+                    className={cn(
+                      "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-sm max-sm:size-9",
+                      selected
+                        ? "text-foreground"
+                        : "text-muted-foreground/35 hover:text-muted-foreground",
+                    )}
+                  >
+                    <CheckIcon className="size-3.5" />
+                  </button>
+                ) : selected ? (
+                  <span
+                    aria-hidden
+                    className="inline-flex size-6 shrink-0 items-center justify-center max-sm:size-9"
+                  >
+                    <CheckIcon className="size-3.5" />
+                  </span>
+                ) : null}
+              </ComboboxItem>
+            );
+          }}
+        </ComboboxList>
+      </ComboboxPopup>
+    </Combobox>
+  );
+}
+
 export function SidebarDChatsBar(props: {
   /** Which chats are shown: "All chats", "Chats · landing". */
   title: string;
@@ -312,6 +551,8 @@ export function SidebarDChatsBar(props: {
   onShowSnoozed: () => void;
   onOpenArchive: () => void;
   projects: ReadonlyArray<SidebarDPickOption>;
+  /** The funnel's list: the projects in view, with icons. One or none: no funnel. */
+  filterProjects: ReadonlyArray<SidebarDPickOption>;
   pickedProjects: ReadonlyArray<string> | null;
   onProjectsChange: (picked: ReadonlyArray<string> | null) => void;
   computers: ReadonlyArray<SidebarDPickOption>;
@@ -450,6 +691,13 @@ export function SidebarDChatsBar(props: {
             </MenuItem>
           </MenuPopup>
         </Menu>
+        {props.filterProjects.length > 1 ? (
+          <ProjectFilter
+            options={props.filterProjects}
+            picked={props.pickedProjects}
+            onChange={props.onProjectsChange}
+          />
+        ) : null}
         {filtered ? (
           <Tooltip>
             <TooltipTrigger

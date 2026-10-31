@@ -160,6 +160,44 @@ export function passes(picked: ReadonlyArray<string> | null, id: string): boolea
   return picked === null || picked.includes(id);
 }
 
+/**
+ * Whether a live chat stays in the list. The open chat stays whatever the
+ * filters say, as with Only mine: a chat opened from ⌘K or a link never leaves
+ * the list empty-handed, and nothing is written over the person's filter. A
+ * space is not a filter: it never shows another computer.
+ */
+export function chatPassesFilters(input: {
+  readonly projectPicks: ReadonlyArray<string> | null;
+  readonly computerPicks: ReadonlyArray<string> | null;
+  readonly projectKey: string;
+  readonly computer: string;
+  readonly isOpen: boolean;
+  readonly inSpace: boolean;
+}): boolean {
+  if (input.isOpen) return !input.inSpace || passes(input.computerPicks, input.computer);
+  return (
+    passes(input.projectPicks, input.projectKey) && passes(input.computerPicks, input.computer)
+  );
+}
+
+/**
+ * The line a chat's right-click menu adds for the project filter: back to all
+ * while a filter is on; otherwise only this project, when there is more than
+ * one to choose from. Null: nothing to offer.
+ */
+export function chatProjectFilterAction(input: {
+  readonly picked: ReadonlyArray<string> | null;
+  /** The chat's project; null: a chat that is in no project. */
+  readonly project: { readonly key: string; readonly name: string } | null;
+  readonly all: ReadonlyArray<string>;
+}): { readonly label: string; readonly picks: ReadonlyArray<string> | null } | null {
+  if (input.picked !== null) return { label: "Show all projects", picks: null };
+  if (input.project === null || input.all.length < 2 || !input.all.includes(input.project.key)) {
+    return null;
+  }
+  return { label: `Filter by ${input.project.name}`, picks: [input.project.key] };
+}
+
 // ── What the title says ──────────────────────────────────────────────────
 
 /**

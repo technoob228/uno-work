@@ -10,6 +10,7 @@ const base = {
   multiComputer: false,
   onLevelsChange: () => {},
   projects: [],
+  filterProjects: [],
   pickedProjects: null,
   onProjectsChange: () => {},
   computers: [],
@@ -54,6 +55,7 @@ describe("LegacySidebarDChatsBar (Sidebar view menu off, as in 0.0.137)", () => 
     );
     expect(html).toContain(">Chats<");
     expect(html).not.toContain("sidebar-d-view-trigger");
+    expect(html).not.toContain("sidebar-d-project-filter");
     expect(html.match(/<button/g)?.length).toBe(2);
   });
 });
@@ -88,6 +90,19 @@ describe("SidebarDChatsBar (Sidebar view menu on)", () => {
     );
     expect(html).toContain('data-testid="sidebar-d-clear-filter"');
     expect(html).toContain("My chats");
+  });
+
+  it("has the funnel by the title only with something to filter", () => {
+    const one = [{ key: "landing", label: "landing" }];
+    const two = [...one, { key: "api", label: "api" }];
+    const funnel = 'data-testid="sidebar-d-project-filter"';
+    expect(renderToStaticMarkup(<SidebarDChatsBar {...base} />)).not.toContain(funnel);
+    expect(renderToStaticMarkup(<SidebarDChatsBar {...base} filterProjects={one} />)).not.toContain(
+      funnel,
+    );
+    const html = renderToStaticMarkup(<SidebarDChatsBar {...base} filterProjects={two} />);
+    expect(html.indexOf(funnel)).toBeGreaterThan(html.indexOf("sidebar-d-view-trigger"));
+    expect(html.indexOf(funnel)).toBeLessThan(html.indexOf("sidebar-d-add-project"));
   });
 
   it("names the shortcut in the tooltip only when one is bound", () => {
