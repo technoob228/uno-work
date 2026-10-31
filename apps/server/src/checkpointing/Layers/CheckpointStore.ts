@@ -10,6 +10,8 @@
  * @module CheckpointStoreLive
  */
 import { randomUUID } from "node:crypto";
+import os from "node:os";
+import nodePath from "node:path";
 
 import { Effect, Layer, FileSystem, Path } from "effect";
 
@@ -24,6 +26,20 @@ const CHECKPOINT_DIFF_MAX_OUTPUT_BYTES = 10_000_000;
 
 /** Subdirectory of the daemon temp dir that holds per-capture scratch dirs. */
 export const CHECKPOINT_TEMP_SUBDIR = "checkpoints";
+
+/**
+ * What a turn changed, for a chat in the home folder: hidden files and folders
+ * there are the computer's own (caches, logs, agents' state), and everything
+ * running on it rewrites them. Counted, a one-word answer "changed 477 files".
+ */
+export function checkpointDiffPathspec(
+  cwd: string,
+  home: string = os.homedir(),
+): ReadonlyArray<string> {
+  return nodePath.resolve(cwd) === nodePath.resolve(home)
+    ? ["--", ".", ":(exclude,glob).*", ":(exclude,glob).*/**"]
+    : [];
+}
 
 const makeCheckpointStore = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -293,6 +309,7 @@ const makeCheckpointStore = Effect.gen(function* () {
         ...(input.ignoreWhitespace ? ["--ignore-all-space"] : []),
         fromCommitOid,
         toCommitOid,
+        ...checkpointDiffPathspec(input.cwd),
       ];
 
       const result = yield* vcs.execute({

@@ -1,6 +1,7 @@
 import type { AppAiApp, UnoComputerInstalledApp, UnoMachineApp } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
+import { notetakerTileState } from "./notetakerApp";
 import {
   buildProgramTiles,
   canHideProgram,
@@ -407,6 +408,47 @@ describe("apps built on this computer, and hiding found programs", () => {
       codeDir: "~/projects/notes",
       codeDirKeepReason: null,
     });
+  });
+
+  it("a failed install doesn't hide the program that runs: Notetaker opens, no Add", () => {
+    const manifest = app({
+      id: "manifest:notetaker",
+      source: "manifest",
+      name: "Notetaker",
+      port: 8430,
+      composeProject: "uno-notetaker",
+    });
+    const failed: UnoComputerInstalledApp = {
+      ...store,
+      name: "Notetaker",
+      templateId: "notetaker",
+      state: "failed",
+      url: null,
+      composeProject: "uno-notetaker",
+      webPort: 8430,
+    };
+    const tiles = buildProgramTiles({
+      machineApps: [manifest],
+      storeApps: [failed],
+      installs: [],
+      browserOnMachine: false,
+      computerOn: true,
+    });
+    expect(tiles.some((t) => t.machineApp === manifest)).toBe(true);
+    const state = notetakerTileState({
+      loading: false,
+      linked: true,
+      hasBox: true,
+      computerOn: true,
+      templates: [],
+      tiles,
+      installs: [],
+      starting: null,
+      confirm: null,
+      startError: null,
+      asked: false,
+    });
+    expect(state.kind).toBe("installed");
   });
 
   it("an App Store app's own manifest stays the store's: no second Remove", () => {

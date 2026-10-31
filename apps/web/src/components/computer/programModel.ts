@@ -308,6 +308,8 @@ export function storeFootprint(
   const projects = new Set<string>();
   const ports = new Set<number>();
   for (const app of storeApps) {
+    // A failed install holds nothing: a program running here stays on the desktop.
+    if (app.state === "failed") continue;
     if (app.templateId) {
       templateIds.add(app.templateId);
       projects.add(`uno-${app.templateId}`);

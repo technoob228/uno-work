@@ -6,7 +6,11 @@ import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
 import { describe, expect } from "vitest";
 
 import { checkpointRefForThreadTurn } from "../Utils.ts";
-import { CHECKPOINT_TEMP_SUBDIR, CheckpointStoreLive } from "./CheckpointStore.ts";
+import {
+  CHECKPOINT_TEMP_SUBDIR,
+  checkpointDiffPathspec,
+  CheckpointStoreLive,
+} from "./CheckpointStore.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
@@ -83,6 +87,14 @@ function initRepoWithCommit(
   });
 }
 
+describe("checkpointDiffPathspec", () => {
+  it("leaves hidden files out only in the home folder", () => {
+    expect(checkpointDiffPathspec("/home/u", "/home/u")).toContain(":(exclude,glob).*");
+    expect(checkpointDiffPathspec("/home/u/", "/home/u")).toContain(":(exclude,glob).*");
+    expect(checkpointDiffPathspec("/home/u/projects/site", "/home/u")).toEqual([]);
+  });
+});
+
 function buildLargeText(lineCount = 5_000): string {
   return Array.from({ length: lineCount }, (_, index) => `line ${String(index).padStart(5, "0")}`)
     .join("\n")
@@ -154,6 +166,44 @@ it.layer(TestLayer)("CheckpointStoreLive", (it) => {
   });
 
   describe("diffCheckpoints", () => {
+    it.effect("in the home folder a turn's diff leaves the computer's own files out", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const threadId = ThreadId.make("thread-checkpoint-home");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+        yield* fileSystem.makeDirectory(path.join(tmp, ".local", "share"), { recursive: true });
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: fromCheckpointRef });
+
+        yield* writeTextFile(path.join(tmp, ".local", "share", "log.jsonl"), "noise\n");
+        yield* writeTextFile(path.join(tmp, ".claude.json"), "{}\n");
+        yield* writeTextFile(path.join(tmp, "report.md"), "the chat's work\n");
+        yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef: toCheckpointRef });
+
+        const diff = (cwd: string) =>
+          checkpointStore.diffCheckpoints({
+            cwd,
+            fromCheckpointRef,
+            toCheckpointRef,
+            ignoreWhitespace: false,
+          });
+        const everything = yield* diff(tmp);
+        expect(everything).toContain(".local/share/log.jsonl");
+
+        const home = process.env.HOME;
+        process.env.HOME = tmp;
+        const files = yield* diff(tmp).pipe(
+          Effect.ensuring(Effect.sync(() => void (process.env.HOME = home))),
+        );
+        expect(files).toContain("report.md");
+        expect(files).not.toContain(".local/share/log.jsonl");
+        expect(files).not.toContain(".claude.json");
+      }),
+    );
+
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
