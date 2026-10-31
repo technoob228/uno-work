@@ -20,6 +20,7 @@ function dialogState() {
 }
 
 const barProps = {
+  filterProjects: [],
   title: "All chats",
   groupInHeader: true,
   levels: [],
