@@ -238,6 +238,8 @@ export const HTML_RENDER_THEME_GUIDE = [
   "--background, --foreground, --muted, --card, --popover, --secondary, --border, --ring, --primary, --accent, --destructive, --warning, --success, --info, --code-background",
   "(most have a matching -foreground; accent, destructive, and warning also have -surface),",
   "--chart-1 to --chart-6, --radius, --font-sans, --font-mono.",
+  "Text and chart labels: --foreground, or --muted-foreground for quiet text.",
+  "--muted, --card, --secondary are surfaces: a text in those colors can't be read.",
   "The base sheet sets background, text, and font.",
 ].join(" ");
 
@@ -517,10 +519,19 @@ const FRAME_RELAY_SCRIPT = `(function(){var f=document.getElementById("page");wi
 const PAGE_GUARD_SCRIPT = `(function(){["RTCPeerConnection","webkitRTCPeerConnection"].forEach(function(n){try{Object.defineProperty(window,n,{value:undefined,writable:false,configurable:false})}catch(e){}});var q="iframe,frame,object,embed";new MutationObserver(function(r){r.forEach(function(m){m.addedNodes.forEach(function(n){if(n.nodeType!==1)return;if(n.matches(q))n.remove();else n.querySelectorAll(q).forEach(function(c){c.remove()})})})}).observe(document,{childList:true,subtree:true});})();`;
 
 /**
+ * `color: var(--muted)`, how hand-made pages name their quiet text. Here --muted
+ * is a surface, 4 % of black: chart labels written that way can't be seen (qa-2,
+ * 31.10). The page's CSS, inline styles, SVG attributes and chart code.
+ */
+const MUTED_AS_TEXT =
+  /((?<![\w-])(?:color|fill)(?:\s*[:=]\s*["'`]?|["'`]\s*,\s*["'`])\s*var\(\s*)--muted(?=\s*[,)])/gi;
+
+/**
  * The stored page with the reader's theme in place of the default one, so it
  * paints right the first time. Later changes arrive as messages.
  */
-export function withHtmlRenderTheme(html: string, theme: HtmlRenderTheme): string {
+export function withHtmlRenderTheme(page: string, theme: HtmlRenderTheme): string {
+  const html = page.replace(MUTED_AS_TEXT, "$1--muted-foreground");
   const open = '<style id="t3-theme">';
   const start = html.indexOf(open);
   if (start === -1) return html;

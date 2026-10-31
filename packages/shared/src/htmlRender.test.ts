@@ -5,6 +5,7 @@ import {
   HTML_RENDER_ACTIVITY_KIND,
   HTML_RENDER_CSP,
   HTML_RENDER_SANDBOX,
+  HTML_RENDER_THEME_GUIDE,
   htmlRenderFrameDocument,
   htmlRenderTheme,
   injectHtmlRenderBootstrap,
@@ -14,6 +15,40 @@ import {
   withHtmlRenderTheme,
 } from "./htmlRender.ts";
 import { UNO_LIGHT_THEME_COLORS } from "./themePalettes.ts";
+
+describe("withHtmlRenderTheme and quiet text", () => {
+  const theme = htmlRenderTheme(UNO_LIGHT_THEME_COLORS, "light");
+  const themed = (page: string) => withHtmlRenderTheme(injectHtmlRenderBootstrap(page), theme);
+
+  it("makes labels written in the surface color readable", () => {
+    // As the sales chart from the walkthrough had them.
+    const page = themed(`<style>.day{fill:var(--muted);font-size:12px}
+      .sub { color: var(--muted, #888) }</style>
+      <p style="color:var(--muted)">в рублях</p>
+      <svg><text fill="var(--muted)">Пн</text></svg>
+      <script>bar.attr("fill", "var(--muted)"); chart({ color: 'var(--muted)' })</script>`);
+    expect(page).toContain(".day{fill:var(--muted-foreground);");
+    expect(page).toContain("color: var(--muted-foreground, #888)");
+    expect(page).toContain('style="color:var(--muted-foreground)"');
+    expect(page).toContain('<text fill="var(--muted-foreground)">');
+    expect(page).toContain('bar.attr("fill", "var(--muted-foreground)")');
+    expect(page).toContain("color: 'var(--muted-foreground)'");
+  });
+
+  it("leaves --muted as a surface alone", () => {
+    const page = themed(`<style>.card{background:var(--muted);background-color:var(--muted);
+      border-color:var(--muted);box-shadow:0 0 0 1px var(--muted)}
+      .ok{color:var(--muted-foreground)}</style>`);
+    expect(page).toContain(".card{background:var(--muted);background-color:var(--muted);");
+    expect(page).toContain("border-color:var(--muted);");
+    expect(page).toContain(".ok{color:var(--muted-foreground)}");
+    expect(page).not.toContain("--muted-foreground-foreground");
+  });
+
+  it("tells the agent which tokens are for text", () => {
+    expect(HTML_RENDER_THEME_GUIDE).toContain("--muted-foreground for quiet text");
+  });
+});
 
 describe("injectHtmlRenderBootstrap", () => {
   it("puts the theme ahead of the page's own head content", () => {
