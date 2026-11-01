@@ -37,6 +37,7 @@ export type YourTurnInput = ThreadOwnerInput &
       | "readAt"
       | "projectId"
       | "spawnedByThreadId"
+      | "source"
     >
   >;
 
@@ -62,9 +63,14 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   ) {
     return false;
   }
-  if (!isLatestTurnSettled(thread.latestTurn, session)) return false;
-  const completedAtMs = Date.parse(thread.latestTurn?.completedAt ?? "");
-  if (Number.isNaN(completedAtMs) || completedAtMs < YOUR_TURN_SINCE_MS) return false;
+  // An imported chat has no turns here: it stopped on the computer, and that
+  // counts as its last turn however long ago it was.
+  const importedAt = thread.source?.lastActiveAt ?? null;
+  if (importedAt === null && !isLatestTurnSettled(thread.latestTurn, session)) return false;
+  const completedAt = importedAt ?? thread.latestTurn?.completedAt;
+  const completedAtMs = Date.parse(completedAt ?? "");
+  if (Number.isNaN(completedAtMs)) return false;
+  if (importedAt === null && completedAtMs < YOUR_TURN_SINCE_MS) return false;
   // The person already wrote again: that turn is on its way, not on them.
   const userMessageMs = Date.parse(thread.latestUserMessageAt ?? "");
   if (!Number.isNaN(userMessageMs) && userMessageMs > completedAtMs) return false;
@@ -77,7 +83,7 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
     if (Number.isNaN(settledAtMs) || settledAtMs >= completedAtMs) return false;
   }
   // Read: seen, and no turn finished since.
-  if (isTurnRead(thread.readAt, thread.latestTurn?.completedAt)) return false;
+  if (isTurnRead(thread.readAt, completedAt)) return false;
   return !isThreadSnoozed(thread, now);
 }
 
@@ -89,6 +95,8 @@ export function countChatsWaitingOnYou(
   let count = 0;
   for (const thread of threads) {
     if (thread.archivedAt !== null) continue;
+    // An import of a hundred chats is not a hundred things waiting on the person.
+    if (thread.source != null) continue;
     if (threadNeedsUser(thread) || isYourTurn(thread, now)) count += 1;
   }
   return count;

@@ -11,7 +11,7 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection, ThreadPullRequest } from "@t3tools/contracts";
+import { ModelSelection, ThreadPullRequest, ThreadSource } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
@@ -19,6 +19,7 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     pullRequests: Schema.optional(
       Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
     ),
+    source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -63,6 +64,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_called_at,
           person_called_by_thread_id,
           person_call_reason,
+          source_json,
           latest_user_message_at,
           pending_approval_count,
           pending_user_input_count,
@@ -102,6 +104,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.personCalledAt ?? null},
           ${row.personCalledByThreadId ?? null},
           ${row.personCallReason ?? null},
+          ${row.source ? JSON.stringify(row.source) : null},
           ${row.latestUserMessageAt},
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
@@ -141,6 +144,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_called_at = excluded.person_called_at,
           person_called_by_thread_id = excluded.person_called_by_thread_id,
           person_call_reason = excluded.person_call_reason,
+          source_json = excluded.source_json,
           latest_user_message_at = excluded.latest_user_message_at,
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
@@ -187,6 +191,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_called_at AS "personCalledAt",
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
+          source_json AS "source",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -235,6 +240,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_called_at AS "personCalledAt",
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
+          source_json AS "source",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",

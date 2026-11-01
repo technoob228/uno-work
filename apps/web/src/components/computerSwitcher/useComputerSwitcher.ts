@@ -319,6 +319,7 @@ export function useComputerSwitcher(onDone?: () => void, chatEnvironmentId?: Env
       onDone?.();
       setAddEnvOpen(true);
     },
+    closeMenu: () => onDone?.(),
     goAllComputers: () => {
       onDone?.();
       void navigate({ to: "/my-uno" });

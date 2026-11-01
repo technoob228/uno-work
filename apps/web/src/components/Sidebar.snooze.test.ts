@@ -1,8 +1,10 @@
+import { SNOOZED_UNTIL_OPENED } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
   canSnoozeThread,
   formatSnoozePickerValue,
+  isSnoozedUntilOpened,
   parseSnoozePickerValue,
   resolveSnoozePresets,
   snoozeWakeLabel,
@@ -85,5 +87,14 @@ describe("canSnoozeThread", () => {
     expect(canSnoozeThread({ ...idle, latestUserMessageAt: "2026-09-13T11:59:30.000Z" }, NOW)).toBe(
       false,
     );
+  });
+});
+
+describe("isSnoozedUntilOpened", () => {
+  it("tells the no-timer mode from a wake time", () => {
+    expect(isSnoozedUntilOpened(SNOOZED_UNTIL_OPENED)).toBe(true);
+    expect(isSnoozedUntilOpened("2026-10-31T12:00:00.000Z")).toBe(false);
+    expect(isSnoozedUntilOpened(null)).toBe(false);
+    expect(isSnoozedUntilOpened(undefined)).toBe(false);
   });
 });

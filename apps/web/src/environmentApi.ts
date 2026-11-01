@@ -105,6 +105,18 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       listLogins: () => rpcClient.vault.list(),
       fillLogin: (payload) => rpcClient.vault.fill(payload),
     },
+    myComputer: {
+      status: () => rpcClient.myComputer.status(),
+      pair: () => rpcClient.myComputer.pair(),
+      pairStatus: rpcClient.myComputer.pairStatus,
+      disconnect: (input) => rpcClient.myComputer.disconnect(input).then(() => undefined),
+      activity: rpcClient.myComputer.activity,
+      importStatus: rpcClient.myComputer.importStatus,
+      importScan: rpcClient.myComputer.importScan,
+      importStart: rpcClient.myComputer.importStart,
+      importDecline: rpcClient.myComputer.importDecline,
+      chatHistory: rpcClient.myComputer.chatHistory,
+    },
     projectSync: {
       status: () => rpcClient.projectSync.status(),
       setEnabled: rpcClient.projectSync.setEnabled,

@@ -305,17 +305,30 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Веб.** `chatAgentLock`, `agentsForStartedChat`, `agentMoveTarget` в `ChatView.logic.ts`. `lockedProvider` теперь только у ассистентов, `chatProvider` — на чём чат идёт сейчас. Без выбора в черновике чат остаётся на своём агенте, даже если тот вышел из входа: иначе сообщение молча ушло бы другому.
 - **Демо:** `demoBoot.ts` `recordAgentSwitch`, скриншоты `demo-e2e/handoff-shots.mjs`.
 
+### 13. «Connect my computer» (вехи M1–M3)
+
+- Компьютер человека (ноутбук) подключается через консоль: `apps/server/src/myComputer/`. Демон ходит в пять роутов `/api/v1/work/computers…` токеном `settings.uno.boxToken`, без него фича выключена. План и контракт кадров: `knowledge/connect-my-computer-plan-2026-10-31.md` в uno-project.
+- Канал: глобальный `WebSocket` рантайма с `{ headers }`, без зависимости `ws`. Проверено на Node 22 и 26 и на Bun. Node 22 при отказе upgrade шлёт `error` без `close`.
+- Инструменты `my_computer*` видны в `tools/list`, только когда компьютер подключён (`hiddenTools` в `mcpJsonRpc.ts`), но вызываются всегда: чат со старым списком получает понятную ошибку. Отмена: `notifications/cancelled` в `unoWork/http.ts`, обрыв запроса тоже доходит до `kill`.
+- Новый уровень гейта `command` в `unoWork/policy.ts`: команда выполняется сразу только при full-access. `UNO_WORK_MCP_TOOL_TIMEOUT_SEC` поднят до 1860 с под команды до 30 минут.
+- Веб: один диалог на всё приложение, `components/localComputer/ConnectComputerDialog.tsx`, смонтирован в `routes/__root.tsx`; открывается из меню компьютера (`ComputerSwitcherList.tsx`), Settings и шага Connectors. Стор экранов `localComputer/localComputerStore.ts`, запросы и опрос `localComputer/useMyComputers.ts`, логика без React `components/localComputer/connectComputer.logic.ts`. Правки в чужих файлах одной строкой: `closeMenu` в `useComputerSwitcher.ts`, вид `computer` в `connectorsCatalog.logic.ts`.
+- Опрос идёт только пока экран открыт и вкладка видна; `status` с ошибкой или `enabled:false` значит, что фичи нет нигде. «Подключено» говорит только онлайн в `status`: `claimed` приходит раньше, чем поднят туннель. `message` из `pairStatus` пришёл с компьютера человека, показывать только текстом.
+- Импорт чатов (веха M3): `apps/server/src/myComputer/import/`, форматы и устройство описаны в плане. Вся логика в демоне, помощник остаётся туннелем. Что читается, решает `chatPaths.ts` (белый список); файлы логина туда не попадают, `opencode.db` наружу не выносится, только SELECT на компьютере.
+- Импортированный чат: обычный тред с полем `source` (`ThreadSource`, тип `computer`), колонка `projection_threads.source_json` (миграция 059), новая команда `thread.source.update` и событие `thread.source-updated`. Создаётся штатной командой `thread.create` с origin `system`, id детерминирован (компьютер + программа + id сессии), поэтому повторный скан не плодит дубли. `source` может задать только система (`imported_chat_daemon_only`); `thread.turn.start` и `thread.message.user.append` в таком треде отказывают (`imported_chat_read_only`), M5/M6 снимут это условие.
+- Сообщений в событиях нет: история читается с компьютера при открытии (`myComputer.chatHistory`) и лежит файлом в `<stateDir>/my-computer/<id>/history/`. В логи и журнал она не пишется. `ChatView` подменяет `serverMessages` на историю и вместо `ChatComposer` показывает `ImportedChatNote`; `MessagesTimeline` получил пропс `emptyText`.
+- Snoozed без таймера: `SNOOZED_UNTIL_OPENED` (дата 9999 года в обычном `snoozedUntil`), снимается `thread.unsnooze` при открытии (`useImportedChat`). Импортированный чат в сайдбаре считается завершённым ходом на `source.lastActiveAt` (`Sidebar.yourTurn.ts`), в счётчик Dock не входит.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:
 
 - `apps/web/src/components/chat/ChatHeader.tsx` — мы добавили devMode + порядок кнопок.
-- `apps/web/src/components/ChatView.tsx` — onOpenTurnDiff, импорты preview.
+- `apps/web/src/components/ChatView.tsx` — onOpenTurnDiff, импорты preview, импортированный чат (`importedSource`: подмена `serverMessages`, `ImportedChatNote` вместо композера).
 - `apps/web/src/routes/_chat.$environmentId.$threadId.tsx` — mutual exclusion.
 - `apps/web/src/branding.ts`, `apps/desktop/src/appBranding*.ts`, `apps/desktop/package.json`, `electron-launcher.mjs`, `apps/desktop/src/main.ts` — наш бренд.
 - `scripts/build-desktop-artifact.ts` — `appId`, `artifactName`, description/author.
-- `packages/contracts/src/{filesystem,rpc,ipc}.ts` — новые методы для preview.
+- `packages/contracts/src/{filesystem,rpc,ipc}.ts` — новые методы для preview и `myComputer.*`.
 - `apps/web/src/components/Sidebar.tsx` / `LegacySidebar.tsx` — наш `Sidebar.tsx` написан заново по структуре апстримного v2 на данных нашего стора (у апстрима client-runtime атомы), при мердже переносить правки поштучно, не резолвить построчно; `LegacySidebar.tsx` у нас и у апстрима — разные файлы (наш — бывший форковый `Sidebar.tsx`). `Sidebar.logic.ts` — функции v2 под апстримными именами, внизу файла. `sidebar/SidebarThreadHeader.tsx` — почти дословная копия.
-- `apps/server/src/orchestration/decider.ts`, `packages/contracts/src/orchestration.ts` — settle/snooze порт; миграции 043/045 у нас, у апстрима 033/034.
+- `apps/server/src/orchestration/decider.ts`, `packages/contracts/src/orchestration.ts` — settle/snooze порт; миграции 043/045 у нас, у апстрима 033/034. Там же `source` и `thread.source.update` (импорт чатов), проекторы и `ProjectionThreads`: миграция 053.
 
 Перед мерджем: запустить `bun typecheck` после resolve. После: `bun dev:desktop` и проверить, что (а) логотип «Work», (б) dev-toggle переключает кнопки, (в) preview pane открывается на md/html, (г) клик по changed file роутит правильно.

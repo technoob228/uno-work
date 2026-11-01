@@ -2,6 +2,7 @@ import {
   EnvironmentId,
   ProjectId,
   ProviderDriverKind,
+  SNOOZED_UNTIL_OPENED,
   ThreadId,
   TurnId,
   type OrchestrationLatestTurn,
@@ -180,6 +181,50 @@ describe("Your turn in the sidebar sections", () => {
       settledAt: ago(9 * DAY_MS),
     });
     expect(resolveSidebarThreadSection(answeredDone, NOW)).toBe("settled");
+  });
+});
+
+describe("a chat imported from a computer", () => {
+  const source = (lastActiveAt: string) => ({
+    kind: "computer" as const,
+    computerId: "c1",
+    computerName: "MacBook",
+    tool: "claude" as const,
+    sessionId: "session-1",
+    path: "~/.claude/projects/a/session-1.jsonl",
+    cwd: "/Users/me/app",
+    lastActiveAt,
+  });
+  const imported = (overrides: Partial<SidebarThreadSummary> = {}) =>
+    makeThread({
+      session: null,
+      latestTurn: null,
+      latestUserMessageAt: null,
+      source: source(ago(HOUR_MS)),
+      ...overrides,
+    });
+
+  it("is Ready: it finished where it was, on the computer", () => {
+    expect(isYourTurn(imported(), NOW)).toBe(true);
+    expect(resolveSidebarThreadSection(imported(), NOW)).toBe("active");
+  });
+
+  it("stops being Ready the usual way", () => {
+    const settled = imported({ settledOverride: "settled", settledAt: ago(MINUTE_MS) });
+    expect(isYourTurn(settled, NOW)).toBe(false);
+  });
+
+  it("stays on the shelf while snoozed until opened", () => {
+    const shelved = imported({
+      source: source(ago(3 * DAY_MS)),
+      snoozedUntil: SNOOZED_UNTIL_OPENED,
+      snoozedAt: ago(MINUTE_MS),
+    });
+    expect(resolveSidebarThreadSection(shelved, NOW)).toBe("snoozed");
+  });
+
+  it("doesn't add to the count of chats waiting on you", () => {
+    expect(countChatsWaitingOnYou([imported(), makeThread()], NOW)).toBe(1);
   });
 });
 

@@ -118,6 +118,9 @@ import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRu
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
+import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
+import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
+import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import {
   BrowserTraceCollector,
@@ -394,6 +397,7 @@ const buildAppUnderTest = (options?: {
     providerRegistry?: Partial<ProviderRegistryShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     credentialsVault?: Partial<CredentialsVaultShape>;
+    myComputer?: Partial<MyComputerShape>;
     open?: Partial<OpenShape>;
     vcsDriver?: Partial<VcsDriver.VcsDriverShape>;
     vcsDriverRegistry?: Partial<VcsDriverRegistry.VcsDriverRegistryShape>;
@@ -630,16 +634,25 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProjectSyncService)({
-          status: Effect.succeed({
-            available: false,
-            unavailableReason: null,
-            projects: [],
-            elsewhere: [],
+        Layer.mergeAll(
+          Layer.mock(ChatImportService)({}),
+          Layer.mock(MyComputerService)({
+            core: {} as MyComputerCore,
+            status: Effect.succeed({ enabled: false, computers: [] }),
+            toolsVisible: Effect.succeed(false),
+            ...options?.layers?.myComputer,
           }),
-          opened: () => Effect.void,
-          secretWritten: () => Effect.void,
-        }),
+          Layer.mock(ProjectSyncService)({
+            status: Effect.succeed({
+              available: false,
+              unavailableReason: null,
+              projects: [],
+              elsewhere: [],
+            }),
+            opened: () => Effect.void,
+            secretWritten: () => Effect.void,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mergeAll(
@@ -1207,6 +1220,85 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         response.headers.get("location"),
         "http://127.0.0.1:5173/foo/bar?token=test-token",
       );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("uno-work MCP: my_computer_* show with a computer, and a cancel stops the call", () =>
+    Effect.gen(function* () {
+      let visible = false;
+      const stopped = yield* Deferred.make<void>();
+      const started = yield* Deferred.make<void>();
+      const computer = {
+        id: "c1",
+        name: "Work laptop",
+        os: "darwin",
+        arch: "arm64",
+        online: true,
+        connectedAt: null,
+        lastSeenAt: null,
+        helperVersion: null,
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          myComputer: {
+            toolsVisible: Effect.sync(() => visible),
+            status: Effect.succeed({ enabled: true, computers: [computer] }),
+            list: () =>
+              Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Effect.never),
+                Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
+              ),
+          },
+        },
+      });
+      const url = yield* getHttpServerUrl("/api/uno-work/mcp");
+      const token = threadBridgeToken();
+      const post = (body: unknown, bearer = token) =>
+        fetch(url, {
+          method: "POST",
+          headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const listed = Effect.promise(async () => {
+        const response = await post({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+        const body = (await response.json()) as {
+          result: { tools: ReadonlyArray<{ name: string }> };
+        };
+        return body.result.tools.map((tool) => tool.name);
+      });
+
+      assert.isFalse((yield* listed).includes("my_computer_run"));
+      visible = true;
+      assert.isTrue((yield* listed).includes("my_computer_run"));
+
+      const call = post({
+        jsonrpc: "2.0",
+        id: 42,
+        method: "tools/call",
+        params: { name: "my_computer_list_files", arguments: { path: "~" } },
+      });
+      yield* Deferred.await(started);
+
+      // Someone else's token and someone else's id stop nothing.
+      const cancel = (requestId: number, bearer?: string) =>
+        Effect.promise(() =>
+          post(
+            { jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId } },
+            bearer,
+          ),
+        );
+      assert.equal((yield* cancel(42, "not-the-token")).status, 401);
+      assert.equal((yield* cancel(7)).status, 202);
+      assert.isFalse(yield* Deferred.isDone(stopped));
+
+      assert.equal((yield* cancel(42)).status, 202);
+      yield* Deferred.await(stopped);
+      const answer = yield* Effect.promise(async () => (await (await call).json()) as unknown);
+      assert.deepEqual(answer, {
+        jsonrpc: "2.0",
+        id: 42,
+        error: { code: -32800, message: "Request cancelled" },
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

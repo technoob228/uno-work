@@ -64,6 +64,18 @@ const rpcClientMock = {
     setEnabled: vi.fn(),
     setPluginEnabled: vi.fn(),
   },
+  myComputer: {
+    status: vi.fn(),
+    pair: vi.fn(),
+    pairStatus: vi.fn(),
+    disconnect: vi.fn(),
+    activity: vi.fn(),
+    importStatus: vi.fn(),
+    importScan: vi.fn(),
+    importStart: vi.fn(),
+    importDecline: vi.fn(),
+    chatHistory: vi.fn(),
+  },
   projectSync: {
     status: vi.fn(),
     setEnabled: vi.fn(),

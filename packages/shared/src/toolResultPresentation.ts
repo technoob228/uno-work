@@ -381,6 +381,31 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     },
     "Couldn't free disk space",
   ],
+  my_computers_list: [
+    "Looking at your computers…",
+    (c) => countOf(c, "computers", "connected computers", ["name"]),
+    "Couldn't look at your computers",
+  ],
+  my_computer_run: [
+    "Running a command on your computer…",
+    "Ran a command on your computer",
+    "Couldn't run the command on your computer",
+  ],
+  my_computer_read_file: [
+    "Reading a file on your computer…",
+    (c) => named("Read", baseName(text(c.args, "path")), "Read a file on your computer"),
+    "Couldn't read the file on your computer",
+  ],
+  my_computer_write_file: [
+    "Writing a file on your computer…",
+    (c) => named("Wrote", baseName(text(c.args, "path")), "Wrote a file on your computer"),
+    "Couldn't write the file on your computer",
+  ],
+  my_computer_list_files: [
+    "Looking through a folder on your computer…",
+    "Looked through a folder on your computer",
+    "Couldn't look through the folder on your computer",
+  ],
   apps_list: ["Looking at your apps…", (c) => countOf(c, "apps", "apps"), "Couldn't read the apps"],
   app_start: [
     "Starting the app…",

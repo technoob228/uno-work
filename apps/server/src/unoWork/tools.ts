@@ -113,6 +113,8 @@ import { appServerTools } from "./appServerTools.ts";
 import { mailTools, type MailOwner } from "./mailTools.ts";
 import { automationChatTools } from "../automations/chatTools.ts";
 import type { AutomationChatTools } from "../automations/AutomationsService.ts";
+import type { MyComputerShape } from "../myComputer/MyComputerService.ts";
+import { myComputerTools } from "../myComputer/myComputerTools.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
@@ -479,6 +481,8 @@ export interface UnoWorkToolDeps {
   readonly spark?: {
     readonly request: (input: SparkRequest) => Effect.Effect<SparkReply, UnoWorkToolError>;
   };
+  /** The person's own computers. Absent (tests, older wiring): the tools say they can't reach them. */
+  readonly myComputer?: MyComputerShape;
   /**
    * Pictures from the Uno gateway (`POST /v1/images/generations`) with the
    * harness key. Absent (tests, older wiring): `image_generate` says so.
@@ -640,6 +644,7 @@ export type UnoWorkGroup =
   | "databases"
   | "account"
   | "mail"
+  | "my-computer"
   | "settings"
   | "docs";
 
@@ -4257,6 +4262,14 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   githubPrCommentTool({ fail: toolError }),
   ...automationChatTools({ fail: toolError }),
 
+  // The person's own computer, through the Uno console (myComputer/)
+  ...myComputerTools({
+    resolvePath: (raw, deps) => resolveUserPath(raw, deps),
+    displayPath: (absolute, home) => displayPath(absolute, home),
+    requireAccess: requireAccountAccess,
+    fail: toolError,
+  }),
+
   // Account
   {
     name: "account_overview",
@@ -4580,6 +4593,8 @@ const WORKER_TOOLS: ReadonlySet<string> = new Set([
   "computer_create",
   "computer_cleanup",
   "drive_save",
+  "my_computer_run",
+  "my_computer_write_file",
 ]);
 
 /** Reading a page is fine for a quick look; acting on it is a chat's job. */
@@ -4810,7 +4825,8 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
           tool.group === "sites" ||
           tool.group === "databases" ||
           tool.group === "account" ||
-          tool.group === "mail",
+          tool.group === "mail" ||
+          tool.group === "my-computer",
       },
       run: (deps: UnoWorkToolDeps, args: unknown) =>
         runUnoWorkTool(tool, deps, args).pipe(
@@ -4829,15 +4845,18 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
 /**
  * The server with the person's connected tools added (their names come from
  * the console already prefixed: drive_*, gmail_*, calendar_*, notion_*,
- * github_*). A connector tool never shadows a built-in one.
+ * github_*). A connector tool never shadows a built-in one. `hiddenTools`
+ * stay out of `tools/list` (nothing to reach yet) but answer when called.
  */
 export function buildUnoWorkMcpServer(
   connectorTools: ReadonlyArray<ConnectorTool>,
+  hiddenTools: ReadonlySet<string> = new Set(),
 ): McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError> {
-  if (connectorTools.length === 0) return UNO_WORK_MCP_SERVER;
+  const base = hiddenTools.size > 0 ? { ...UNO_WORK_MCP_SERVER, hiddenTools } : UNO_WORK_MCP_SERVER;
+  if (connectorTools.length === 0) return base;
   const builtIn = new Set(UNO_WORK_MCP_SERVER.tools.map((tool) => tool.name));
   return {
-    ...UNO_WORK_MCP_SERVER,
+    ...base,
     tools: [
       ...UNO_WORK_MCP_SERVER.tools,
       ...connectorTools.filter((tool) => !builtIn.has(tool.name)).map(connectorMcpTool),

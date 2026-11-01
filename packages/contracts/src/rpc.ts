@@ -379,6 +379,21 @@ import {
   ProjectSyncStartRepositoryInput,
 } from "./projectSync.ts";
 import {
+  MyComputerActivity,
+  MyComputerActivityInput,
+  MyComputerChatHistory,
+  MyComputerChatHistoryInput,
+  MyComputerDisconnectInput,
+  MyComputerError,
+  MyComputerImportInput,
+  MyComputerImportStartInput,
+  MyComputerImportStatus,
+  MyComputerPairing,
+  MyComputerPairStatus,
+  MyComputerPairStatusInput,
+  MyComputerStatus,
+} from "./myComputer.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -518,6 +533,18 @@ export const WS_METHODS = {
   projectSecretsList: "projectSecrets.list",
   projectSecretsSet: "projectSecrets.set",
   projectSecretsRemove: "projectSecrets.remove",
+
+  // "Connect my computer" (myComputer/): the person's own computers
+  myComputerStatus: "myComputer.status",
+  myComputerPair: "myComputer.pair",
+  myComputerPairStatus: "myComputer.pairStatus",
+  myComputerDisconnect: "myComputer.disconnect",
+  myComputerActivity: "myComputer.activity",
+  myComputerImportStatus: "myComputer.importStatus",
+  myComputerImportScan: "myComputer.importScan",
+  myComputerImportStart: "myComputer.importStart",
+  myComputerImportDecline: "myComputer.importDecline",
+  myComputerChatHistory: "myComputer.chatHistory",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -788,6 +815,65 @@ export const WsVaultSyncRpc = Rpc.make(WS_METHODS.vaultSync, {
   payload: CredentialSyncPayload,
   success: CredentialSyncResult,
   error: CredentialsVaultError,
+});
+
+export const WsMyComputerStatusRpc = Rpc.make(WS_METHODS.myComputerStatus, {
+  payload: Schema.Struct({}),
+  success: MyComputerStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerPairRpc = Rpc.make(WS_METHODS.myComputerPair, {
+  payload: Schema.Struct({}),
+  success: MyComputerPairing,
+  error: MyComputerError,
+});
+
+export const WsMyComputerPairStatusRpc = Rpc.make(WS_METHODS.myComputerPairStatus, {
+  payload: MyComputerPairStatusInput,
+  success: MyComputerPairStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerDisconnectRpc = Rpc.make(WS_METHODS.myComputerDisconnect, {
+  payload: MyComputerDisconnectInput,
+  error: MyComputerError,
+});
+
+export const WsMyComputerActivityRpc = Rpc.make(WS_METHODS.myComputerActivity, {
+  payload: MyComputerActivityInput,
+  success: MyComputerActivity,
+  error: MyComputerError,
+});
+
+export const WsMyComputerImportStatusRpc = Rpc.make(WS_METHODS.myComputerImportStatus, {
+  payload: MyComputerImportInput,
+  success: MyComputerImportStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerImportScanRpc = Rpc.make(WS_METHODS.myComputerImportScan, {
+  payload: MyComputerImportInput,
+  success: MyComputerImportStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerImportStartRpc = Rpc.make(WS_METHODS.myComputerImportStart, {
+  payload: MyComputerImportStartInput,
+  success: MyComputerImportStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerImportDeclineRpc = Rpc.make(WS_METHODS.myComputerImportDecline, {
+  payload: MyComputerImportInput,
+  success: MyComputerImportStatus,
+  error: MyComputerError,
+});
+
+export const WsMyComputerChatHistoryRpc = Rpc.make(WS_METHODS.myComputerChatHistory, {
+  payload: MyComputerChatHistoryInput,
+  success: MyComputerChatHistory,
+  error: MyComputerError,
 });
 
 export const WsProjectSyncStatusRpc = Rpc.make(WS_METHODS.projectSyncStatus, {
@@ -2444,6 +2530,16 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultImportRpc,
   WsVaultFillRpc,
   WsVaultSyncRpc,
+  WsMyComputerStatusRpc,
+  WsMyComputerPairRpc,
+  WsMyComputerPairStatusRpc,
+  WsMyComputerDisconnectRpc,
+  WsMyComputerActivityRpc,
+  WsMyComputerImportStatusRpc,
+  WsMyComputerImportScanRpc,
+  WsMyComputerImportStartRpc,
+  WsMyComputerImportDeclineRpc,
+  WsMyComputerChatHistoryRpc,
   WsProjectSyncStatusRpc,
   WsProjectSyncSetEnabledRpc,
   WsProjectSyncSyncNowRpc,

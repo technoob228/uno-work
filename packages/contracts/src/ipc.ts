@@ -21,6 +21,20 @@ import type {
   ProjectSyncStartRepositoryInput,
 } from "./projectSync.ts";
 import type {
+  MyComputerActivity,
+  MyComputerActivityInput,
+  MyComputerChatHistory,
+  MyComputerChatHistoryInput,
+  MyComputerDisconnectInput,
+  MyComputerImportInput,
+  MyComputerImportStartInput,
+  MyComputerImportStatus,
+  MyComputerPairing,
+  MyComputerPairStatus,
+  MyComputerPairStatusInput,
+  MyComputerStatus,
+} from "./myComputer.ts";
+import type {
   SkillsAddInput,
   SkillsAddResult,
   SkillsInstallInput,
@@ -1038,6 +1052,19 @@ export interface EnvironmentApi {
     secretsList: (input: ProjectSyncProjectInput) => Promise<ProjectSecretsList>;
     secretsSet: (input: ProjectSecretSetInput) => Promise<ProjectSecretsList>;
     secretsRemove: (input: ProjectSecretRemoveInput) => Promise<ProjectSecretsList>;
+  };
+  /** "Connect my computer": the person's own computers, reached through the Uno console. */
+  myComputer: {
+    status: () => Promise<MyComputerStatus>;
+    pair: () => Promise<MyComputerPairing>;
+    pairStatus: (input: MyComputerPairStatusInput) => Promise<MyComputerPairStatus>;
+    disconnect: (input: MyComputerDisconnectInput) => Promise<void>;
+    activity: (input: MyComputerActivityInput) => Promise<MyComputerActivity>;
+    importStatus: (input: MyComputerImportInput) => Promise<MyComputerImportStatus>;
+    importScan: (input: MyComputerImportInput) => Promise<MyComputerImportStatus>;
+    importStart: (input: MyComputerImportStartInput) => Promise<MyComputerImportStatus>;
+    importDecline: (input: MyComputerImportInput) => Promise<MyComputerImportStatus>;
+    chatHistory: (input: MyComputerChatHistoryInput) => Promise<MyComputerChatHistory>;
   };
   workspace: {
     getState: () => Promise<WorkspaceState>;

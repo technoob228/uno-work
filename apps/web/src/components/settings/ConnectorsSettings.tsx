@@ -10,17 +10,21 @@ import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 
 import { DEMO_PROTOTYPE } from "../../demo/demoFlag";
+import { usePrimaryEnvironmentId } from "../../environments/primary";
+import { useMyComputers } from "../../localComputer/useMyComputers";
 import { AssistantAvatar, avatarImageOf } from "../assistants/AssistantAvatar";
 import { accessOf, connectorsLine } from "../assistants/assistantTeam.logic";
 import { useConnectorItems } from "../assistants/TeammateAccess";
 import { useAssistantTeam } from "../assistants/useAssistantTeam";
-import { connectedSummary } from "../connectors/connectorsCatalog.logic";
+import { computerConnectorItems, connectedSummary } from "../connectors/connectorsCatalog.logic";
+import { LocalComputerConnector } from "../localComputer/LocalComputerConnector";
 import { ConnectorsList } from "../setup/steps/ConnectorsStep";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 
 export function ConnectorsSettings() {
   const navigate = useNavigate();
   const { items, loading } = useConnectorItems();
+  const myComputers = useMyComputers(usePrimaryEnvironmentId());
   const team = useAssistantTeam().filter((member) => !member.revoked);
   const [details, setDetails] = useState(false);
   const connected = items.filter((item) => item.connected);
@@ -39,6 +43,12 @@ export function ConnectorsSettings() {
           the app’s own page and can disconnect any time.
         </p>
       </div>
+
+      {myComputers.enabled ? (
+        <SettingsSection title="Your computer">
+          <LocalComputerConnector />
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection title={loading ? "Apps" : `Apps · ${connectedSummary(items)}`}>
         <ConnectorsList className="rounded-none border-0" />
@@ -120,7 +130,7 @@ export function ConnectorsSettings() {
               Not covered: a chat can still use the <code className="font-mono">gh</code> CLI or a
               key from the terminal — that goes by Keys & tokens, not by these levels.
             </p>
-            {items.map((item) => (
+            {[...items, ...computerConnectorItems(myComputers.computers)].map((item) => (
               <div key={item.id} className="flex gap-2">
                 <span className="w-32 shrink-0 truncate">{item.name}</span>
                 <span className="min-w-0 truncate font-mono text-muted-foreground">

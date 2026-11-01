@@ -19,6 +19,7 @@ import { accountTransport } from "../../account/unoAccount";
 import { cn } from "../../lib/utils";
 import { MACHINE_KIND_GROUP_LABELS } from "../../plainLanguage";
 import { AddEnvModal } from "../AddEnvModal";
+import { LocalComputerMenuItems } from "../localComputer/LocalComputerConnector";
 import { MACHINE_KIND_ICON } from "../machineKindIcons";
 import { STATUS_DOT_CLASS, type ComputerSwitcher } from "./useComputerSwitcher";
 
@@ -178,6 +179,7 @@ export function ComputerSwitcherList({ switcher }: { switcher: ComputerSwitcher 
           </div>
         </button>
       ) : null}
+      <LocalComputerMenuItems onOpen={switcher.closeMenu} />
       {accountTransport() !== "none" ? (
         <button
           type="button"

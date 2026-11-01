@@ -24,6 +24,7 @@ import {
   ProjectId,
   ThreadId,
   ThreadPullRequest,
+  ThreadSource,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -78,6 +79,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     pullRequests: Schema.optional(
       Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
     ),
+    source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -444,6 +446,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_called_at AS "personCalledAt",
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
+          source_json AS "source",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -748,6 +751,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_called_at AS "personCalledAt",
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
+          source_json AS "source",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -1170,6 +1174,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 personCalledAt: row.personCalledAt ?? null,
                 personCalledByThreadId: row.personCalledByThreadId ?? null,
                 personCallReason: row.personCallReason ?? null,
+                source: row.source ?? null,
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1388,6 +1393,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   personCalledAt: row.personCalledAt ?? null,
                   personCalledByThreadId: row.personCalledByThreadId ?? null,
                   personCallReason: row.personCallReason ?? null,
+                  source: row.source ?? null,
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1536,6 +1542,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     personCalledAt: row.personCalledAt ?? null,
                     personCalledByThreadId: row.personCalledByThreadId ?? null,
                     personCallReason: row.personCallReason ?? null,
+                    source: row.source ?? null,
                     session: sessionByThread.get(row.threadId) ?? null,
                     latestUserMessageAt: row.latestUserMessageAt,
                     hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -1769,6 +1776,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         personCalledAt: threadRow.value.personCalledAt ?? null,
         personCalledByThreadId: threadRow.value.personCalledByThreadId ?? null,
         personCallReason: threadRow.value.personCallReason ?? null,
+        source: threadRow.value.source ?? null,
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -1883,6 +1891,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         personCalledAt: threadRow.value.personCalledAt ?? null,
         personCalledByThreadId: threadRow.value.personCalledByThreadId ?? null,
         personCallReason: threadRow.value.personCallReason ?? null,
+        source: threadRow.value.source ?? null,
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {

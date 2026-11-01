@@ -19,6 +19,13 @@ const ACCOUNT_KEY = "uno_usr_q1w2e3r4t5y6u7i8o9p0";
 afterEach(() => resetKnownSecretsForTest());
 
 describe("redactSecretsInText", () => {
+  it("masks the token of a connected computer", () => {
+    const token = "uno_cmp_q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
+    const out = redactSecretsInText(`Authorization ${token}`);
+    expect(out).not.toContain(token);
+    expect(out).toContain("uno_cmp_");
+  });
+
   it("masks Uno tokens by prefix and keeps the prefix readable", () => {
     const text = `{"uno":{"apiKey":"${GATEWAY_KEY}","boxToken":"${BOX_TOKEN}"}}\nUNO_API_KEY=${ACCOUNT_KEY}`;
     const out = redactSecretsInText(text);

@@ -279,6 +279,8 @@ import {
   type OutboxTurnStartCommand,
 } from "~/outbox/outboxStore";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import { ImportedChatNote } from "./localComputer/ImportedChatNote";
+import { importedChatMessages, useImportedChat } from "../localComputer/useChatImport";
 import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
 import { Button } from "./ui/button";
 import { useSidebar } from "./ui/sidebar";
@@ -1708,7 +1710,20 @@ export default function ChatView(props: ChatViewProps) {
       return next;
     });
   }, []);
-  const serverMessages = activeThread?.messages;
+  // A chat imported from a computer has no messages of its own: they stay on
+  // that computer until the chat is opened (see `useImportedChat`).
+  const importedSource = activeThread?.source ?? null;
+  const importedChat = useImportedChat({
+    environmentId,
+    threadId: activeThread?.id ?? null,
+    imported: importedSource !== null,
+  });
+  const importedMessages = useMemo(
+    () => importedChatMessages(importedChat.data),
+    [importedChat.data],
+  );
+  const threadMessages = activeThread?.messages;
+  const serverMessages = importedSource !== null ? importedMessages : threadMessages;
   useEffect(() => {
     if (typeof Image === "undefined" || !serverMessages || serverMessages.length === 0) {
       return;
@@ -5076,6 +5091,7 @@ export default function ChatView(props: ChatViewProps) {
                   key={activeThread.id}
                   isWorking={isWorking}
                   messagesLoaded={!isServerThread || serverThreadDetailLoaded}
+                  {...(importedSource !== null ? { emptyText: "" } : {})}
                   activeTurnInProgress={isWorking || !latestTurnSettled}
                   activeTurnId={activeLatestTurn?.turnId ?? null}
                   activeTurnStartedAt={activeWorkStartedAt}
@@ -5334,89 +5350,98 @@ export default function ChatView(props: ChatViewProps) {
                     />
                   ) : null}
                   <div className="relative z-10">
-                    <ChatComposer
-                      ref={composerRef}
-                      composerDraftTarget={composerDraftTarget}
-                      environmentId={environmentId}
-                      routeKind={routeKind}
-                      routeThreadRef={routeThreadRef}
-                      draftId={draftId}
-                      onDropFolder={onDropFolder}
-                      activeThreadId={activeThreadId}
-                      activeThreadEnvironmentId={activeThread?.environmentId}
-                      activeThread={activeThread}
-                      isServerThread={isServerThread}
-                      isLocalDraftThread={isLocalDraftThread}
-                      forceCompact={isPreviewFocusMode}
-                      inDock={isChatDockMode}
-                      hideRuntimeModeControl={isEmbedded}
-                      phase={phase}
-                      isConnecting={isConnecting}
-                      isSendBusy={isSendBusy}
-                      isPreparingWorktree={isPreparingWorktree}
-                      environmentUnavailable={
-                        // Existing chats stay writable offline: sends go to the outbox.
-                        isServerThread ? null : activeEnvironmentUnavailableState
-                      }
-                      activePendingApproval={activePendingApproval}
-                      pendingApprovals={pendingApprovals}
-                      pendingUserInputs={pendingUserInputs}
-                      activePendingProgress={activePendingProgress}
-                      activePendingResolvedAnswers={activePendingResolvedAnswers}
-                      activePendingIsResponding={activePendingIsResponding}
-                      activePendingDraftAnswers={activePendingDraftAnswers}
-                      activePendingQuestionIndex={activePendingQuestionIndex}
-                      respondingRequestIds={respondingRequestIds}
-                      showPlanFollowUpPrompt={showPlanFollowUpPrompt}
-                      activeProposedPlan={activeProposedPlan}
-                      activePlan={activePlan as { turnId?: TurnId } | null}
-                      sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
-                      planSidebarLabel={planSidebarLabel}
-                      planSidebarOpen={planSidebarOpen}
-                      runtimeMode={runtimeMode}
-                      interactionMode={interactionMode}
-                      lockedProvider={lockedProvider}
-                      chatProvider={chatProvider}
-                      holdsOutsideText={outsideText}
-                      providerStatuses={providerStatuses as ServerProvider[]}
-                      activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
-                      activeThreadModelSelection={activeThread?.modelSelection}
-                      activeThreadActivities={activeThread?.activities}
-                      resolvedTheme={resolvedTheme}
-                      settings={settings}
-                      keybindings={keybindings}
-                      terminalOpen={Boolean(terminalState.terminalOpen)}
-                      gitCwd={gitCwd}
-                      promptRef={promptRef}
-                      composerImagesRef={composerImagesRef}
-                      composerVideosRef={composerVideosRef}
-                      composerTerminalContextsRef={composerTerminalContextsRef}
-                      shouldAutoScrollRef={isAtEndRef}
-                      scheduleStickToBottom={scrollToEnd}
-                      isEmbedded={isEmbedded}
-                      onSend={onComposerSend}
-                      onInterrupt={onInterrupt}
-                      onImplementPlanInNewThread={onImplementPlanInNewThread}
-                      onRespondToApproval={onRespondToApproval}
-                      onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
-                      onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
-                      onAnswerActivePendingUserInput={onAnswerActivePendingUserInput}
-                      onPreviousActivePendingUserInputQuestion={
-                        onPreviousActivePendingUserInputQuestion
-                      }
-                      onChangeActivePendingUserInputCustomAnswer={
-                        onChangeActivePendingUserInputCustomAnswer
-                      }
-                      onProviderModelSelect={onProviderModelSelect}
-                      toggleInteractionMode={toggleInteractionMode}
-                      handleRuntimeModeChange={handleRuntimeModeChange}
-                      handleInteractionModeChange={handleInteractionModeChange}
-                      togglePlanSidebar={togglePlanSidebar}
-                      focusComposer={focusComposer}
-                      scheduleComposerFocus={scheduleComposerFocus}
-                      setThreadError={setThreadError}
-                      onExpandImage={onExpandTimelineImage}
-                    />
+                    {importedSource !== null ? (
+                      <ImportedChatNote
+                        source={importedSource}
+                        history={importedChat.data}
+                        loading={importedChat.isFetching}
+                        onRetry={() => void importedChat.refetch()}
+                      />
+                    ) : (
+                      <ChatComposer
+                        ref={composerRef}
+                        composerDraftTarget={composerDraftTarget}
+                        environmentId={environmentId}
+                        routeKind={routeKind}
+                        routeThreadRef={routeThreadRef}
+                        draftId={draftId}
+                        onDropFolder={onDropFolder}
+                        activeThreadId={activeThreadId}
+                        activeThreadEnvironmentId={activeThread?.environmentId}
+                        activeThread={activeThread}
+                        isServerThread={isServerThread}
+                        isLocalDraftThread={isLocalDraftThread}
+                        forceCompact={isPreviewFocusMode}
+                        inDock={isChatDockMode}
+                        hideRuntimeModeControl={isEmbedded}
+                        phase={phase}
+                        isConnecting={isConnecting}
+                        isSendBusy={isSendBusy}
+                        isPreparingWorktree={isPreparingWorktree}
+                        environmentUnavailable={
+                          // Existing chats stay writable offline: sends go to the outbox.
+                          isServerThread ? null : activeEnvironmentUnavailableState
+                        }
+                        activePendingApproval={activePendingApproval}
+                        pendingApprovals={pendingApprovals}
+                        pendingUserInputs={pendingUserInputs}
+                        activePendingProgress={activePendingProgress}
+                        activePendingResolvedAnswers={activePendingResolvedAnswers}
+                        activePendingIsResponding={activePendingIsResponding}
+                        activePendingDraftAnswers={activePendingDraftAnswers}
+                        activePendingQuestionIndex={activePendingQuestionIndex}
+                        respondingRequestIds={respondingRequestIds}
+                        showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+                        activeProposedPlan={activeProposedPlan}
+                        activePlan={activePlan as { turnId?: TurnId } | null}
+                        sidebarProposedPlan={sidebarProposedPlan as { turnId?: TurnId } | null}
+                        planSidebarLabel={planSidebarLabel}
+                        planSidebarOpen={planSidebarOpen}
+                        runtimeMode={runtimeMode}
+                        interactionMode={interactionMode}
+                        lockedProvider={lockedProvider}
+                        chatProvider={chatProvider}
+                        holdsOutsideText={outsideText}
+                        providerStatuses={providerStatuses as ServerProvider[]}
+                        activeProjectDefaultModelSelection={activeProject?.defaultModelSelection}
+                        activeThreadModelSelection={activeThread?.modelSelection}
+                        activeThreadActivities={activeThread?.activities}
+                        resolvedTheme={resolvedTheme}
+                        settings={settings}
+                        keybindings={keybindings}
+                        terminalOpen={Boolean(terminalState.terminalOpen)}
+                        gitCwd={gitCwd}
+                        promptRef={promptRef}
+                        composerImagesRef={composerImagesRef}
+                        composerVideosRef={composerVideosRef}
+                        composerTerminalContextsRef={composerTerminalContextsRef}
+                        shouldAutoScrollRef={isAtEndRef}
+                        scheduleStickToBottom={scrollToEnd}
+                        isEmbedded={isEmbedded}
+                        onSend={onComposerSend}
+                        onInterrupt={onInterrupt}
+                        onImplementPlanInNewThread={onImplementPlanInNewThread}
+                        onRespondToApproval={onRespondToApproval}
+                        onSelectActivePendingUserInputOption={onSelectActivePendingUserInputOption}
+                        onAdvanceActivePendingUserInput={onAdvanceActivePendingUserInput}
+                        onAnswerActivePendingUserInput={onAnswerActivePendingUserInput}
+                        onPreviousActivePendingUserInputQuestion={
+                          onPreviousActivePendingUserInputQuestion
+                        }
+                        onChangeActivePendingUserInputCustomAnswer={
+                          onChangeActivePendingUserInputCustomAnswer
+                        }
+                        onProviderModelSelect={onProviderModelSelect}
+                        toggleInteractionMode={toggleInteractionMode}
+                        handleRuntimeModeChange={handleRuntimeModeChange}
+                        handleInteractionModeChange={handleInteractionModeChange}
+                        togglePlanSidebar={togglePlanSidebar}
+                        focusComposer={focusComposer}
+                        scheduleComposerFocus={scheduleComposerFocus}
+                        setThreadError={setThreadError}
+                        onExpandImage={onExpandTimelineImage}
+                      />
+                    )}
                   </div>
                 </div>
                 {devMode && isGitRepo && !isEmbedded && (

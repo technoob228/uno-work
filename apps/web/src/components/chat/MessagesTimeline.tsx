@@ -165,6 +165,8 @@ const TIMELINE_LIST_FOOTER = <div className="h-8" />;
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  /** What an empty chat says. Imported chats aren't waiting for a first message. */
+  emptyText?: string;
   isWorking: boolean;
   /**
    * False while a chat's messages are still on their way from the computer:
@@ -241,6 +243,7 @@ function MessagesLoadingNote() {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  emptyText = "Send a message to start the conversation.",
   isWorking,
   messagesLoaded = true,
   activeTurnInProgress,
@@ -456,9 +459,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
         {messagesLoaded ? (
-          <p className="text-sm text-muted-foreground/30">
-            Send a message to start the conversation.
-          </p>
+          <p className="text-sm text-muted-foreground/30">{emptyText}</p>
         ) : (
           <MessagesLoadingNote />
         )}

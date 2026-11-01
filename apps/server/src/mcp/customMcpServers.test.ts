@@ -66,7 +66,7 @@ describe("custom MCP servers", () => {
 });
 
 describe("mcpToolTimeoutsSec", () => {
-  it("gives uno-work its 15-minute tool timeout (for Hermes' config.yaml)", () => {
+  it("gives uno-work a tool timeout past the longest command on a computer (for Hermes' config.yaml)", () => {
     const servers = sessionMcpServers({
       bridgeEnvironment: {
         UNO_WORK_BRIDGE_URL: "http://127.0.0.1:3773",
@@ -74,7 +74,7 @@ describe("mcpToolTimeoutsSec", () => {
       },
       custom: [docs],
     });
-    expect(mcpToolTimeoutsSec(servers)).toEqual({ "uno-work": 900 });
+    expect(mcpToolTimeoutsSec(servers)).toEqual({ "uno-work": 1_860 });
   });
 });
 

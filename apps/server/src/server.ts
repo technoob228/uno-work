@@ -120,6 +120,8 @@ import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import { ServerSettingsLive } from "./serverSettings.ts";
 import { CredentialsVaultLive } from "./credentialsVault.ts";
 import { ProjectSyncServiceLive } from "./projectSync/ProjectSyncService.ts";
+import { ChatImportServiceLive } from "./myComputer/import/ChatImportService.ts";
+import { MyComputerServiceLive } from "./myComputer/MyComputerService.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -516,6 +518,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // "On all my computers": projects synced through the Uno cloud, keys
       // through the Uno vault (projectSync/); listens to agents' turns.
       ProjectSyncServiceLive,
+      // "Connect my computer": the person's own computers through the console,
+      // and their chats from Claude Code, Codex and OpenCode through that tunnel.
+      ChatImportServiceLive.pipe(Layer.provideMerge(MyComputerServiceLive)),
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,

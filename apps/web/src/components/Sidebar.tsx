@@ -197,6 +197,7 @@ import {
   formatSnoozePickerValue,
   parseSnoozePickerValue,
   resolveSnoozePresets,
+  isSnoozedUntilOpened,
   snoozeWakeDescription,
   snoozeWakeLabel,
   threadNeedsUser,
@@ -1553,7 +1554,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           {machineMark}
           <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
             <span className="inline-flex justify-end tabular-nums text-secondary-label transition-opacity group-hover/sidebar-row:opacity-0">
-              {isSnoozedRow && thread.snoozedUntil != null ? (
+              {isSnoozedRow &&
+              thread.snoozedUntil != null &&
+              !isSnoozedUntilOpened(thread.snoozedUntil) ? (
                 // Snoozed rows show when they come back, not when last touched.
                 <span
                   className="text-xs text-blue-600 tabular-nums dark:text-blue-400"

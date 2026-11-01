@@ -1,6 +1,8 @@
 // Snooze rules for the sidebar inbox. Ported from upstream T3 Code
 // (packages/client-runtime/src/state/threadSettled.ts + Sidebar.snooze.ts),
 // adapted to our SidebarThreadSummary shape and plain-language copy.
+import { SNOOZED_UNTIL_OPENED } from "@t3tools/contracts";
+
 import type { SidebarThreadSummary } from "../types";
 
 const MINUTE_MS = 60 * 1_000;
@@ -8,6 +10,11 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 const EVENING_HOUR = 18;
 const MORNING_HOUR = 9;
+
+/** An imported chat: Snoozed until the person opens it, no timer to show. */
+export function isSnoozedUntilOpened(snoozedUntil: string | null | undefined): boolean {
+  return snoozedUntil === SNOOZED_UNTIL_OPENED;
+}
 
 /**
  * A queued turn start lives for at most this long: session adoption takes

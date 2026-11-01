@@ -55,7 +55,13 @@ const switcher = {
   setAddEnvOpen: vi.fn(),
   openAddComputer,
   goAllComputers: vi.fn(),
+  closeMenu: vi.fn(),
 } as unknown as ComputerSwitcher;
+
+// "Connect my computer" asks its own daemon; LocalComputerSurfaces.browser.tsx covers it.
+vi.mock("../../localComputer/LocalComputerConnector", () => ({
+  LocalComputerMenuItems: () => null,
+}));
 
 vi.mock("../../computerSwitcher/useComputerSwitcher", async (importOriginal) => ({
   ...(await importOriginal<object>()),

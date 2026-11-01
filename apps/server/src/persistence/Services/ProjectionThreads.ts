@@ -19,6 +19,7 @@ import {
   ThreadPullRequest,
   ThreadStartedBy,
   TurnId,
+  ThreadSource,
 } from "@t3tools/contracts";
 import { Option, Schema, Context } from "effect";
 import type { Effect } from "effect";
@@ -71,6 +72,9 @@ export const ProjectionThread = Schema.Struct({
   personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
+  // Where the chat came from, when not Uno Work (migration 059). Optional for
+  // the same reason; absent persists as NULL.
+  source: Schema.optional(Schema.NullOr(ThreadSource)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

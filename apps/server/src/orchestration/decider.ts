@@ -185,6 +185,24 @@ function activityRaisesHand(kind: string): boolean {
   return kind === "approval.requested" || kind === "user-input.requested";
 }
 
+/**
+ * Writing into an imported chat comes with M5 and M6 (continue on the computer
+ * or in the cloud). Until then the composer is gone from such a chat, and this
+ * stops anything else that tries: an agent's tool, an old tab.
+ */
+function requireNotImportedChat(input: {
+  readonly command: OrchestrationCommand;
+  readonly thread: Pick<OrchestrationThread, "id" | "source">;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (input.thread.source == null) return Effect.void;
+  return Effect.fail(
+    new OrchestrationCommandInvariantError({
+      commandType: input.command.type,
+      detail: `imported_chat_read_only: Chat '${input.thread.id}' was imported from a computer and cannot continue here yet.`,
+    }),
+  );
+}
+
 function unsnoozedByActivityEvent(input: {
   readonly thread: Pick<OrchestrationThread, "id" | "snoozedUntil">;
   readonly commandId: OrchestrationCommand["commandId"];
@@ -480,11 +498,19 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           });
         }
       }
+      // An imported chat's dates come from the computer: `createdAt` is when it
+      // began there, which says nothing about when this event happened.
+      if (command.source !== undefined && origin?.kind !== "system") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `imported_chat_daemon_only: Only the daemon may import chat '${command.threadId}'.`,
+        });
+      }
       return {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
-          occurredAt: command.createdAt,
+          occurredAt: command.source !== undefined ? nowIso() : command.createdAt,
           commandId: command.commandId,
         }),
         type: "thread.created",
@@ -506,8 +532,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           ...(spawnedByThreadId !== undefined ? { spawnedByThreadId } : {}),
           ...(command.assistantRole !== undefined ? { assistantRole: command.assistantRole } : {}),
+          ...(command.source !== undefined ? { source: command.source } : {}),
           createdAt: command.createdAt,
-          updatedAt: command.createdAt,
+          updatedAt: command.source?.lastActiveAt ?? command.createdAt,
         },
       };
     }
@@ -681,6 +708,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.source.update": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (origin?.kind !== "system" || thread.source == null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `imported_chat_daemon_only: Only the daemon may update imported chat '${command.threadId}'.`,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: nowIso(),
+          commandId: command.commandId,
+        }),
+        type: "thread.source-updated",
+        payload: {
+          threadId: command.threadId,
+          source: command.source,
+          ...(command.title !== undefined ? { title: command.title } : {}),
+          updatedAt: command.source.lastActiveAt,
+        },
+      };
+    }
+
     case "thread.snooze": {
       const thread = yield* requireThreadNotArchived({
         readModel,
@@ -728,7 +784,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           snoozedUntil: command.snoozedUntil,
           snoozedAt: existingSnoozedAt ?? occurredAt,
-          updatedAt: existingSnoozedAt !== null ? thread.updatedAt : occurredAt,
+          // An imported chat's time is its last activity on the computer.
+          updatedAt:
+            existingSnoozedAt !== null || thread.source != null ? thread.updatedAt : occurredAt,
         },
       };
     }
@@ -755,7 +813,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           reason: command.reason,
-          updatedAt: occurredAt,
+          updatedAt: thread.source != null ? thread.updatedAt : occurredAt,
         },
       };
     }
@@ -1153,6 +1211,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      yield* requireNotImportedChat({ command, thread: targetThread });
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1533,11 +1592,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.user.append": {
-      yield* requireThread({
+      const appendThread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      yield* requireNotImportedChat({ command, thread: appendThread });
       return {
         ...withEventBase({
           aggregateKind: "thread",

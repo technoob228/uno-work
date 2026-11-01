@@ -279,6 +279,19 @@ export interface WsRpcClient {
     readonly fill: RpcUnaryMethod<typeof WS_METHODS.vaultFill>;
     readonly sync: RpcUnaryMethod<typeof WS_METHODS.vaultSync>;
   };
+  /** "Connect my computer": the person's own computers, through this daemon. */
+  readonly myComputer: {
+    readonly status: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerStatus>;
+    readonly pair: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerPair>;
+    readonly pairStatus: RpcUnaryMethod<typeof WS_METHODS.myComputerPairStatus>;
+    readonly disconnect: RpcUnaryMethod<typeof WS_METHODS.myComputerDisconnect>;
+    readonly activity: RpcUnaryMethod<typeof WS_METHODS.myComputerActivity>;
+    readonly importStatus: RpcUnaryMethod<typeof WS_METHODS.myComputerImportStatus>;
+    readonly importScan: RpcUnaryMethod<typeof WS_METHODS.myComputerImportScan>;
+    readonly importStart: RpcUnaryMethod<typeof WS_METHODS.myComputerImportStart>;
+    readonly importDecline: RpcUnaryMethod<typeof WS_METHODS.myComputerImportDecline>;
+    readonly chatHistory: RpcUnaryMethod<typeof WS_METHODS.myComputerChatHistory>;
+  };
   /** "On all my computers" on this daemon: sync status and choices, the projects' keys. */
   readonly projectSync: {
     readonly status: RpcUnaryNoArgMethod<typeof WS_METHODS.projectSyncStatus>;
@@ -754,6 +767,26 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
       import: (input) => transport.request((client) => client[WS_METHODS.vaultImport](input)),
       fill: (input) => transport.request((client) => client[WS_METHODS.vaultFill](input)),
       sync: (input) => transport.request((client) => client[WS_METHODS.vaultSync](input)),
+    },
+    myComputer: {
+      status: () => transport.request((client) => client[WS_METHODS.myComputerStatus]({})),
+      pair: () => transport.request((client) => client[WS_METHODS.myComputerPair]({})),
+      pairStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerPairStatus](input)),
+      disconnect: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerDisconnect](input)),
+      activity: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerActivity](input)),
+      importStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerImportStatus](input)),
+      importScan: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerImportScan](input)),
+      importStart: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerImportStart](input)),
+      importDecline: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerImportDecline](input)),
+      chatHistory: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerChatHistory](input)),
     },
     projectSync: {
       status: () => transport.request((client) => client[WS_METHODS.projectSyncStatus]({})),

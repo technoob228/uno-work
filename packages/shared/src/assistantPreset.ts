@@ -258,7 +258,8 @@ export type AsksFirstCategory =
   | "share"
   | "delete"
   | "create"
-  | "connected-apps";
+  | "connected-apps"
+  | "my-computer";
 
 export const ASKS_FIRST_CATEGORY_LABEL: Readonly<Record<AsksFirstCategory, string>> = {
   email: "Sending email",
@@ -268,6 +269,7 @@ export const ASKS_FIRST_CATEGORY_LABEL: Readonly<Record<AsksFirstCategory, strin
   delete: "Deleting apps or Sparks, or cleaning up files",
   create: "Creating databases, computers or other assistants",
   "connected-apps": "Changing things in your connected apps (Gmail, Drive, Notion, GitHub)",
+  "my-computer": "Running commands or changing files on your own computer",
 };
 
 export const ASKS_FIRST_CATEGORIES: ReadonlyArray<AsksFirstCategory> = [
@@ -278,6 +280,7 @@ export const ASKS_FIRST_CATEGORIES: ReadonlyArray<AsksFirstCategory> = [
   "delete",
   "create",
   "connected-apps",
+  "my-computer",
 ];
 
 /** `uno-work` tools (and `assistant_create`) that act outward, by category. */
@@ -300,6 +303,8 @@ const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
   computer_create: "create",
   assistant_create: "create",
   github_pr_comment: "connected-apps",
+  my_computer_run: "my-computer",
+  my_computer_write_file: "my-computer",
 };
 
 /**

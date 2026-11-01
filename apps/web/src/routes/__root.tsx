@@ -20,6 +20,8 @@ import { SplashScreen } from "../components/SplashScreen";
 import { StaleBundleNotice } from "../components/StaleBundleNotice";
 import { CommandPalette } from "../components/CommandPalette";
 import { SetupTourCoach } from "../components/setup/SetupTour";
+import { ConnectComputerDialog } from "../components/localComputer/ConnectComputerDialog";
+import { ImportProgress } from "../components/localComputer/ImportScreens";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
 import { ProjectUploadsPanel } from "../components/newProject/ProjectUploadsPanel";
 import { WorkIntentBridge } from "../components/newProject/uploadAndAsk";
@@ -240,6 +242,8 @@ function RootRouteView() {
           <Outlet />
         </AppSidebarLayout>
         <NewProjectDialog />
+        <ConnectComputerDialog />
+        <ImportProgress />
         <ProjectUploadsPanel />
         <ScreenRecordingBar />
         <WorkIntentBridge />

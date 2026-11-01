@@ -25,6 +25,7 @@ import {
   ThreadMetaUpdatedPayload,
   ThreadPersonCalledPayload,
   ThreadPersonReleasedPayload,
+  ThreadSourceUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
@@ -303,6 +304,7 @@ export function projectEvent(
             personCalledAt: null,
             personCalledByThreadId: null,
             personCallReason: null,
+            source: payload.source ?? null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -373,6 +375,18 @@ export function projectEvent(
             ...(payload.agentsClosedAt !== undefined
               ? { agentsClosedAt: payload.agentsClosedAt }
               : {}),
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.source-updated":
+      return decodeForEvent(ThreadSourceUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            ...(payload.title !== undefined ? { title: payload.title } : {}),
+            source: payload.source,
             updatedAt: payload.updatedAt,
           }),
         })),

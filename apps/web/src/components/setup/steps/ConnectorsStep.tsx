@@ -22,6 +22,8 @@
  *   (`settings.mcpServers`, see customMcpServers.ts on the daemon).
  * - `AssistantMcpForm`: the same, for ONE assistant (`/api/manager/assistant/mcp`):
  *   only its chats get the tools, also in its sandbox.
+ * - The person's own computer, on top of the list in this step, for an account
+ *   with the feature (`localComputer/`).
  */
 import {
   type EnvironmentId,
@@ -58,8 +60,10 @@ import {
 } from "../../../lib/setupApi";
 import { useSourceControlDiscovery } from "../../../lib/sourceControlDiscoveryState";
 import { cn } from "../../../lib/utils";
+import { useMyComputers } from "../../../localComputer/useMyComputers";
 import { GitHubIcon } from "../../Icons";
 import { CopyButton } from "../../computer/computerUi";
+import { LocalComputerConnector } from "../../localComputer/LocalComputerConnector";
 import { Button } from "../../ui/button";
 import {
   Dialog,
@@ -1081,6 +1085,8 @@ export function ConnectorsList(
     readonly className?: string;
     readonly environmentId?: EnvironmentId | null;
     readonly ownServers?: boolean;
+    /** The person's own computer as the first row. */
+    readonly computer?: boolean;
   } = {},
 ) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
@@ -1111,6 +1117,7 @@ export function ConnectorsList(
       className={cn("overflow-hidden rounded-2xl border border-border", props.className)}
       data-testid="setup-connectors"
     >
+      {props.computer ? <LocalComputerConnector className="border-b border-border" /> : null}
       {environmentId !== null && mailbox !== null ? (
         <AgentMailRow environmentId={environmentId} mailbox={mailbox} />
       ) : null}
@@ -1145,9 +1152,10 @@ export function ConnectorsStep() {
   const environmentId = usePrimaryEnvironmentId();
   const servers = useSettings((settings) => settings.mcpServers);
   const connectors = useConnectors(environmentId);
-  const connectedCount = (connectors.data?.connectors ?? []).filter(
-    (connector) => connector.connected,
-  ).length;
+  const { computers } = useMyComputers(environmentId);
+  const connectedCount =
+    computers.length +
+    (connectors.data?.connectors ?? []).filter((connector) => connector.connected).length;
   return (
     <SetupShell
       step="connectors"
@@ -1160,7 +1168,7 @@ export function ConnectorsStep() {
         title="Connect your tools"
         lead="Let your AI read and work where your stuff already is. You approve each one, and can disconnect any time."
       />
-      <ConnectorsList />
+      <ConnectorsList computer />
     </SetupShell>
   );
 }

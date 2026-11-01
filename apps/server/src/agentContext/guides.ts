@@ -31,6 +31,7 @@ export const UNO_WORK_GUIDE_TOPICS = [
   "databases",
   "app-servers",
   "account",
+  "my-computer",
   "plugins",
 ] as const;
 export type UnoWorkGuideTopic = (typeof UNO_WORK_GUIDE_TOPICS)[number];
@@ -270,6 +271,14 @@ export function buildUnoWorkGuide(
         "## The Uno account",
         "`account_overview` shows the plan, what it allows, the upgrade link and the account's computers. It needs Settings, Uno account, Agent access to be Read only or Manage. `computer_create` (always asks the person) makes a new cloud Uno Work computer and needs Manage; `computer_create_status` follows it. You can never pay, change the plan, see keys or delete computers.",
         section(bridge, "Инфраструктура через Uno"),
+      ].join("\n\n");
+    case "my-computer":
+      return [
+        "## The person's own computer",
+        "`my_computer_*` reach the laptop or desktop the person connected to Uno Work: not this cloud computer, not a server. Only when they want something done there: their local files, an app that runs only there, a local network. Everything else belongs on this computer. The tools show once a computer is connected; connecting is one command in a terminal, the person does it in Uno Work.",
+        "`my_computers_list` shows them; `details: true` adds the home folder and shell. With one computer leave `computer` out; with several, name one, or the tool answers with the list. Offline means the laptop is asleep or closed: ask the person to open it, don't retry in a loop.",
+        "`my_computer_run` runs a command in its login shell: 120 s by default, `timeoutSeconds` up to 1800. Output comes back up to 64 KiB, start and end. Stopping the turn stops the command. `my_computer_read_file` reads text into the chat in parts (`offset`), `saveTo` copies any file to this computer. `my_computer_write_file` takes `content`, or `fromFile` for a file from here. Files go up to 50 MiB; bigger ones go through their Uno Drive.",
+        "It is their real machine, with their real files and accounts. Before anything destructive (deleting, overwriting, installing, changing settings) get their OK in the chat, even in a chat that runs freely. Keep secrets out of commands. Each action shows in a journal they can read: what ran, not the output. They can disconnect a computer at any moment: then stop, and don't look for another way in.",
       ].join("\n\n");
     case "plugins":
       return buildPluginInstructions(options.pluginsDir ?? "~/.t3/plugins");

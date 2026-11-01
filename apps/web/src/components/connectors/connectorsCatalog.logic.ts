@@ -3,15 +3,16 @@
  * four apps of the Uno account (OAuth, the console keeps the grant; tools in
  * the built-in `uno-work` MCP server) and servers of your own
  * (`settings.mcpServers`). Each with a plain line for everyone and a
- * technical one under "Details".
+ * technical one under "Details". The person's own computers are connectors of
+ * Settings only: a teammate's access doesn't reach them yet.
  *
  * Pure part only.
  */
 
-export type ConnectorKind = "app" | "own";
+export type ConnectorKind = "app" | "own" | "computer";
 
 export interface ConnectorItem {
-  /** "github" for an app, "mcp:<name>" for a server of your own. */
+  /** "github" for an app, "mcp:<name>" for a server of your own, "computer:<id>" for a computer. */
   readonly id: string;
   readonly kind: ConnectorKind;
   readonly name: string;
@@ -97,6 +98,27 @@ export function connectorItems(input: {
         tech: `MCP · ${maskServerUrl(server.url)} · every chat on this computer`,
       })),
   ];
+}
+
+export const COMPUTER_ID_PREFIX = "computer:";
+
+export function computerConnectorItems(
+  computers: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly online: boolean;
+    readonly helperVersion: string | null;
+  }>,
+): ReadonlyArray<ConnectorItem> {
+  return computers.map((computer) => ({
+    id: `${COMPUTER_ID_PREFIX}${computer.id}`,
+    kind: "computer",
+    name: computer.name,
+    connected: computer.online,
+    account: null,
+    plain: "Your own computer. Agents can use it while it’s on.",
+    tech: `Uno Connect ${computer.helperVersion ?? "helper"} · MCP uno-work › my_computer_*`,
+  }));
 }
 
 /** "GitHub and Google Drive are connected" / "Nothing connected yet". */

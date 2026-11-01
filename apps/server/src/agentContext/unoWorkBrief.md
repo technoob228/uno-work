@@ -19,7 +19,8 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - Your own mailbox (`mail_address`): `mail_list`, `mail_read`, `mail_attachment_save`, `mail_send`: sign-ups, codes; the person's mail only via the Gmail connector
 - Account: `account_overview`, `computer_create`, `computer_create_status`, `settings_read`
 - Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear here: use them, don't ask to copy things over. A project's `materials/README.md` sums up their files: read it first.
-- Details: `uno_guide` with a topic: `computer`, `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `spark`, `databases`, `app-servers`, `account`, `plugins`
+- The person's own computer, once connected: `my_computers_list`, `my_computer_run`, `my_computer_read_file`, `my_computer_write_file`, `my_computer_list_files`: their real laptop, not this one: `uno_guide("my-computer")`
+- Details: `uno_guide` with a topic: `computer`, `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `browser`, `chats`, `secrets`, `sites`, `spark`, `databases`, `app-servers`, `account`, `my-computer`, `plugins`
 
 Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.
 

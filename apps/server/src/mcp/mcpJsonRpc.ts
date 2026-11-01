@@ -49,6 +49,11 @@ export interface McpServerDefinition<Ctx, E> {
   /** Sent in `initialize` — clients that support it add it to the model's context. */
   readonly instructions?: string;
   readonly tools: ReadonlyArray<McpToolDefinition<Ctx, E>>;
+  /**
+   * Left out of `tools/list`, still callable: a chat that learned a tool
+   * earlier reads the tool's own error, not "Unknown tool".
+   */
+  readonly hiddenTools?: ReadonlySet<string>;
   /** Text the model sees when a tool fails. */
   readonly errorText: (error: E) => string;
   /** A successful result as MCP content text (default: JSON). */
@@ -152,7 +157,11 @@ export function handleMcpMessage<Ctx, E>(
       case "tools/list": {
         return {
           kind: "response",
-          body: jsonRpcResult(id, { tools: server.tools.map(describeMcpTool) }),
+          body: jsonRpcResult(id, {
+            tools: server.tools
+              .filter((tool) => server.hiddenTools?.has(tool.name) !== true)
+              .map(describeMcpTool),
+          }),
         } as const;
       }
       case "tools/call": {

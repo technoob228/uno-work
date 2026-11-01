@@ -19,6 +19,7 @@ import type {
   RuntimeMode,
   ThreadAssistantRole,
   ThreadStartedBy,
+  ThreadSource,
   ThreadController,
   ThreadPullRequest,
 } from "@t3tools/contracts";
@@ -159,6 +160,8 @@ export interface Thread {
   agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
+  /** Where the chat came from, when it did not start in Uno Work. */
+  source?: ThreadSource | null | undefined;
 }
 
 export interface ThreadShell {
@@ -186,6 +189,8 @@ export interface ThreadShell {
   agentsClosedAt?: string | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
+  /** Where the chat came from, when it did not start in Uno Work. */
+  source?: ThreadSource | null | undefined;
 }
 
 export interface ThreadTurnState {
@@ -241,6 +246,8 @@ export interface SidebarThreadSummary {
   personCalledAt?: string | null | undefined;
   personCalledByThreadId?: ThreadId | null | undefined;
   personCallReason?: string | null | undefined;
+  /** Where the chat came from, when it did not start in Uno Work. */
+  source?: ThreadSource | null | undefined;
 }
 
 export interface ThreadSession {

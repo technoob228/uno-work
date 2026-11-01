@@ -187,8 +187,12 @@ export function partitionSidebarThreads<T extends SidebarSectionThread>(
   return {
     pinned: sortThreadsPinnedFirst(buckets.pinned, input.sortOrder),
     active: [...needsUser, ...rest],
+    // Chats snoozed until opened share a wake time: newest first among them.
     snoozed: buckets.snoozed.toSorted(
-      (left, right) => wakeMs(left) - wakeMs(right) || left.id.localeCompare(right.id),
+      (left, right) =>
+        wakeMs(left) - wakeMs(right) ||
+        (toSortableTimestamp(right.updatedAt) ?? 0) - (toSortableTimestamp(left.updatedAt) ?? 0) ||
+        left.id.localeCompare(right.id),
     ),
     settled: buckets.settled.toSorted(
       (left, right) => settledMs(right) - settledMs(left) || right.id.localeCompare(left.id),

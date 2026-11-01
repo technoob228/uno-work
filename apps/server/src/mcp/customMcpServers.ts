@@ -184,8 +184,12 @@ export const customMcpServersGetter: Effect.Effect<CustomMcpServersGetter> = Eff
 
 // ── The built-in uno-work server ───────────────────────────────────────
 
-/** Seconds a harness may wait on one uno-work tool call (approvals wait for a person). */
-export const UNO_WORK_MCP_TOOL_TIMEOUT_SEC = 900;
+/**
+ * Seconds a harness may wait on one uno-work tool call: approvals wait for a
+ * person, and `my_computer_run` runs up to 30 minutes (the extra minute lets
+ * its own timeout answer first).
+ */
+export const UNO_WORK_MCP_TOOL_TIMEOUT_SEC = 1_860;
 
 /** The session's uno-work server, from its bridge env; null without a thread token. */
 export function unoWorkMcpServer(

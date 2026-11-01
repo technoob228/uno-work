@@ -555,6 +555,37 @@ export const ThreadPullRequest = Schema.Struct({
 });
 export type ThreadPullRequest = typeof ThreadPullRequest.Type;
 
+// Where a chat came from when it did not start in Uno Work. Today the only
+// source is a program on the person's connected computer (Connect my computer).
+// The chat's history stays there and on this computer's disk as plain files;
+// it never enters the orchestration events. `computerId` + `tool` + `sessionId`
+// identify the chat: the same session scanned again is the same chat.
+export const ImportedChatTool = Schema.Literals(["claude", "codex", "opencode"]);
+export type ImportedChatTool = typeof ImportedChatTool.Type;
+
+export const ThreadComputerSource = Schema.Struct({
+  kind: Schema.Literal("computer"),
+  computerId: TrimmedNonEmptyString,
+  computerName: TrimmedNonEmptyString,
+  tool: ImportedChatTool,
+  sessionId: TrimmedNonEmptyString,
+  // The session's file on the computer; for OpenCode, its database.
+  path: TrimmedNonEmptyString,
+  // The folder the chat ran in on the computer, when the session says.
+  cwd: Schema.NullOr(TrimmedNonEmptyString),
+  // Last activity on the computer. An imported chat's `updatedAt` follows it.
+  lastActiveAt: IsoDateTime,
+});
+export type ThreadComputerSource = typeof ThreadComputerSource.Type;
+
+export const ThreadSource = ThreadComputerSource;
+export type ThreadSource = typeof ThreadSource.Type;
+
+// The wake time of a chat snoozed "until opened": no timer, it comes back when
+// the person opens it or something happens in it. Compare with it instead of
+// inventing a far date; the decider only needs it to be in the future.
+export const SNOOZED_UNTIL_OPENED = "9999-12-31T23:59:59.000Z";
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -622,6 +653,8 @@ export const OrchestrationThread = Schema.Struct({
   personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
+  // See ThreadSource. Absent or null: the chat started in Uno Work.
+  source: Schema.optional(Schema.NullOr(ThreadSource)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -706,6 +739,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   personCalledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   personCalledByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
+  // See ThreadSource. Absent or null: the chat started in Uno Work.
+  source: Schema.optional(Schema.NullOr(ThreadSource)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -841,6 +876,10 @@ const ThreadCreateCommand = Schema.Struct({
   // rejects it from a person's command): `spawned` needs a manager origin,
   // `chat` needs an assistant / system origin and no other assistant chat.
   assistantRole: Schema.optional(ThreadAssistantRole),
+  // See ThreadSource. Only the daemon's import sets it (the decider rejects it
+  // from anyone else). With it, `createdAt` is when the chat began on the
+  // computer and `updatedAt` follows `source.lastActiveAt`.
+  source: Schema.optional(ThreadSource),
   createdAt: IsoDateTime,
 });
 
@@ -891,6 +930,17 @@ const ThreadProjectAdoptCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   projectId: ProjectId,
+});
+
+// A re-scan found the chat changed on the computer. Daemon-only, like
+// ThreadCreateCommand.source. No history here: only what the chat list shows.
+const ThreadSourceUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.source.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  source: ThreadSource,
+  // Omitted leaves the title alone (the person may have renamed the chat).
+  title: Schema.optional(TrimmedNonEmptyString),
 });
 
 // Wire-compatible with upstream T3 Code's thread.snooze / thread.unsnooze.
@@ -1105,6 +1155,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
   ThreadProjectAdoptCommand,
+  ThreadSourceUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
@@ -1136,6 +1187,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUnarchiveCommand,
   ThreadMetaUpdateCommand,
   ThreadProjectAdoptCommand,
+  ThreadSourceUpdateCommand,
   ThreadSnoozeCommand,
   ThreadUnsnoozeCommand,
   ThreadSettleCommand,
@@ -1297,6 +1349,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.archived",
   "thread.unarchived",
   "thread.meta-updated",
+  "thread.source-updated",
   "thread.snoozed",
   "thread.unsnoozed",
   "thread.settled",
@@ -1372,6 +1425,8 @@ export const ThreadCreatedPayload = Schema.Struct({
   spawnedByThreadId: Schema.optional(ThreadId),
   // See ThreadAssistantRole; absent for regular chats.
   assistantRole: Schema.optional(ThreadAssistantRole),
+  // See ThreadSource; absent for chats that started in Uno Work.
+  source: Schema.optional(ThreadSource),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1404,6 +1459,13 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   // See ThreadMetaUpdateCommand.agentsClosedAt.
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadSourceUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  source: ThreadSource,
+  title: Schema.optional(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
 
@@ -1762,6 +1824,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.meta-updated"),
     payload: ThreadMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.source-updated"),
+    payload: ThreadSourceUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

@@ -135,6 +135,14 @@ describe("two modes (Misha 23.10)", () => {
     }
   });
 
+  it("'Cautious' asks before a command or a write on the person's own computer, not a read", () => {
+    expect(asksFirstCategory("my_computer_run", {})).toBe("my-computer");
+    expect(asksFirstCategory("my_computer_write_file", {})).toBe("my-computer");
+    expect(asksFirstCategory("my_computer_read_file", {})).toBeNull();
+    expect(asksFirstCategory("my_computer_list_files", {})).toBeNull();
+    expect(asksFirstCategory("my_computers_list", {})).toBeNull();
+  });
+
   it("the 'Cautious' copy lists every category the daemon checks, and no payments", () => {
     const details = ASSISTANT_MODE_COPY["asks-first"].details.join(" ");
     for (const category of ASKS_FIRST_CATEGORIES) {

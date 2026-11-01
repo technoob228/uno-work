@@ -9,6 +9,9 @@
  *                 agent's own mailbox). Follows the chat's mode
  *                 like any other tool: in Ask mode ("approval-required") the
  *                 person allows it first; in the other modes it runs.
+ * - `command`   — runs a command on the person's own computer. Like a shell
+ *                 in the chat: only full access runs it; in Ask mode and in
+ *                 "Edits run freely; commands ask" the person allows it first.
  * - `sensitive` — exposes something beyond a plain site, deletes, or creates
  *                 something billable (show an app on the internet, share
  *                 link, remove a site's password, form answers to an outside
@@ -26,14 +29,15 @@
  * every call that acts outward (`asksFirstCategory` in
  * `@t3tools/shared/assistantPreset`: email out, sites, putting things on the
  * internet, share links, deleting, creating databases / computers /
- * assistants, writes to connected apps) asks, whatever the level and mode.
+ * assistants, writes to connected apps, commands and writes on the person's
+ * own computer) asks, whatever the level and mode.
  *
  * The gate lives in the daemon, not in each harness, so Claude, Codex,
  * OpenCode, Uno, Cursor, Hermes and any custom ACP harness behave the same.
  */
 import type { RuntimeMode } from "@t3tools/contracts";
 
-export type UnoWorkToolLevel = "safe" | "change" | "sensitive";
+export type UnoWorkToolLevel = "safe" | "change" | "command" | "sensitive";
 
 export type UnoWorkGateDecision = "run" | "ask";
 
@@ -49,6 +53,8 @@ export function decideUnoWorkGate(
       return "run";
     case "change":
       return runtimeMode === "approval-required" ? "ask" : "run";
+    case "command":
+      return runtimeMode === "full-access" ? "run" : "ask";
     case "sensitive":
       return "ask";
   }

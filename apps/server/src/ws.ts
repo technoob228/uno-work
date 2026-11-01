@@ -120,6 +120,8 @@ import {
 } from "./unoPersonalAi.ts";
 import { CredentialsVaultService } from "./credentialsVault.ts";
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
+import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
+import { MyComputerService } from "./myComputer/MyComputerService.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
@@ -307,6 +309,8 @@ const makeWsRpcLayer = (
       const textGeneration = yield* TextGeneration;
       const credentialsVault = yield* CredentialsVaultService;
       const projectSync = yield* ProjectSyncService;
+      const myComputer = yield* MyComputerService;
+      const chatImport = yield* ChatImportService;
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -1649,6 +1653,46 @@ const makeWsRpcLayer = (
         [WS_METHODS.vaultFill]: (input) =>
           observeRpcEffect(WS_METHODS.vaultFill, fillCredentialInBrowser(input), {
             "rpc.aggregate": "vault",
+          }),
+        [WS_METHODS.myComputerStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.myComputerStatus, myComputer.status, {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerPair]: (_input) =>
+          observeRpcEffect(WS_METHODS.myComputerPair, myComputer.pair, {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerPairStatus]: ({ code }) =>
+          observeRpcEffect(WS_METHODS.myComputerPairStatus, myComputer.pairStatus(code), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerDisconnect]: ({ computerId }) =>
+          observeRpcEffect(WS_METHODS.myComputerDisconnect, myComputer.disconnect(computerId), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerImportStatus]: ({ computerId }) =>
+          observeRpcEffect(WS_METHODS.myComputerImportStatus, chatImport.status(computerId), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerImportScan]: ({ computerId }) =>
+          observeRpcEffect(WS_METHODS.myComputerImportScan, chatImport.scan(computerId), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerImportStart]: ({ computerId, tools }) =>
+          observeRpcEffect(WS_METHODS.myComputerImportStart, chatImport.start(computerId, tools), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerImportDecline]: ({ computerId }) =>
+          observeRpcEffect(WS_METHODS.myComputerImportDecline, chatImport.decline(computerId), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerChatHistory]: ({ threadId }) =>
+          observeRpcEffect(WS_METHODS.myComputerChatHistory, chatImport.history(threadId), {
+            "rpc.aggregate": "myComputer",
+          }),
+        [WS_METHODS.myComputerActivity]: ({ computerId, limit }) =>
+          observeRpcEffect(WS_METHODS.myComputerActivity, myComputer.activity(computerId, limit), {
+            "rpc.aggregate": "myComputer",
           }),
         [WS_METHODS.projectSyncStatus]: (_input) =>
           observeRpcEffect(WS_METHODS.projectSyncStatus, projectSync.status, {

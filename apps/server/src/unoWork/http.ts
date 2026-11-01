@@ -54,7 +54,7 @@ import { replyButtons } from "../manager/connectorButtons.ts";
 import { SUPPORT_DRAFT_ACTIVITY_KIND } from "@t3tools/shared/supportDraft";
 import { redactForSupport } from "../fixWork/fixWorkReport.ts";
 import { storePage } from "../htmlRender/htmlRender.ts";
-import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
+import { handleMcpMessage, jsonRpcError } from "../mcp/mcpJsonRpc.ts";
 import { ServerBrowser } from "../serverBrowser.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -81,6 +81,9 @@ import { readMailLedger, recordMailSent } from "../assistants/mailLedger.ts";
 import { readTeam } from "../assistants/teamStore.ts";
 import { assistantPresetAllows, presetAsksFirst } from "@t3tools/shared/assistantPreset";
 import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
+import { makeCancellableCalls } from "../myComputer/cancelCalls.ts";
+import { MyComputerService } from "../myComputer/MyComputerService.ts";
+import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
   buildUnoWorkGuide,
@@ -215,6 +218,12 @@ function bearerToken(header: string | undefined): string {
   return header?.replace(/^Bearer\s+/i, "").trim() ?? "";
 }
 
+const isMethod = (body: unknown, method: string) =>
+  body !== null &&
+  typeof body === "object" &&
+  !Array.isArray(body) &&
+  (body as { method?: unknown }).method === method;
+
 /** The `tools/call` arguments object of a JSON-RPC message, if it is one. */
 function toolCallArguments(body: unknown): Record<string, unknown> | undefined {
   if (body === null || typeof body !== "object" || Array.isArray(body)) return undefined;
@@ -241,17 +250,36 @@ function sharedServerCaller(
   body: unknown,
   envDir: string,
 ): { readonly token: string; readonly isCall: boolean } {
-  const isCall =
-    body !== null &&
-    typeof body === "object" &&
-    !Array.isArray(body) &&
-    (body as { method?: unknown }).method === "tools/call";
+  const isCall = isMethod(body, "tools/call");
   const sessionId = toolCallArguments(body)?.[UNO_WORK_MCP_SESSION_ARG];
   const token =
     typeof sessionId === "string"
       ? (readOpenCodeSessionEnv(envDir, sessionId)?.[BROWSER_BRIDGE_TOKEN_ENV] ?? "")
       : "";
   return { token, isCall };
+}
+
+/** The running `my_computer_*` calls, for `notifications/cancelled`. */
+const myComputerCalls = makeCancellableCalls();
+
+const NO_HIDDEN_TOOLS: ReadonlySet<string> = new Set();
+
+/** The request a `notifications/cancelled` names, if the body is one. */
+function cancelledRequestId(body: unknown): string | number | null {
+  if (!isMethod(body, "notifications/cancelled")) return null;
+  const id = (body as { params?: { requestId?: unknown } }).params?.requestId;
+  return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
+/** A `tools/call` of a `my_computer_*` tool: its JSON-RPC id, else null. */
+function myComputerCallId(body: unknown): string | number | null {
+  if (!isMethod(body, "tools/call")) return null;
+  const message = body as { id?: unknown; params?: { name?: unknown } };
+  const { id } = message;
+  return MY_COMPUTER_TOOL_NAMES.has(String(message.params?.name)) &&
+    (typeof id === "string" || typeof id === "number")
+    ? id
+    : null;
 }
 
 /** Everything the tools use, bound to the calling thread. */
@@ -395,6 +423,7 @@ const makeDeps = (input: {
     const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
     const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+    const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
@@ -483,6 +512,7 @@ const makeDeps = (input: {
               ),
             ),
       },
+      ...(myComputer ? { myComputer } : {}),
       // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
       ...(projectSync
         ? {
@@ -915,9 +945,26 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     // The person's connected tools join the built-in ones (cached; none off a
     // cloud computer). Resolved only for authorized calls.
     const connectorsService = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
-    const mcpServer = connectorsService
-      ? connectorsService.tools.pipe(Effect.map(buildUnoWorkMcpServer))
-      : Effect.succeed(buildUnoWorkMcpServer([]));
+    const connectorTools = connectorsService ? connectorsService.tools : Effect.succeed([]);
+    // The person's computers only show once one is connected. Only `tools/list`
+    // asks: a chat that knew these tools still gets their own clear error.
+    const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
+    const hiddenTools = !isMethod(body, "tools/list")
+      ? Effect.succeed(NO_HIDDEN_TOOLS)
+      : (myComputer?.toolsVisible ?? Effect.succeed(false)).pipe(
+          Effect.map((visible) => (visible ? NO_HIDDEN_TOOLS : MY_COMPUTER_TOOL_NAMES)),
+        );
+    const mcpServer = Effect.all([connectorTools, hiddenTools]).pipe(
+      Effect.map(([tools, hidden]) => buildUnoWorkMcpServer(tools, hidden)),
+    );
+    // The header's token, not the session's: a cancel names no session, and a
+    // request id is unique only per client. The token also keeps one client
+    // from cancelling another's call.
+    const clientKey = bearerToken(request.headers["authorization"]);
+    const cancelledId = cancelledRequestId(body);
+    if (authorization && cancelledId !== null) {
+      myComputerCalls.cancel(`${clientKey}:${cancelledId}`);
+    }
     // A shared uno-code/OpenCode server (one process for every chat) holds
     // one token for all of them; each tool call names its OpenCode session
     // and the thread is the one the daemon wrote that session's token for.
@@ -956,7 +1003,14 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
       threadId: thread.threadId,
       cwd: thread.context.cwd,
     });
-    const outcome = yield* handleMcpMessage(yield* mcpServer, deps, body);
+    const handled = handleMcpMessage(yield* mcpServer, deps, body);
+    const callId = myComputerCallId(body);
+    const outcome = yield* callId === null
+      ? handled
+      : myComputerCalls.run(`${clientKey}:${callId}`, handled, {
+          kind: "response" as const,
+          body: jsonRpcError(callId, -32800, "Request cancelled"),
+        });
     if (outcome.kind === "accepted") {
       return HttpServerResponse.empty({ status: 202 });
     }
