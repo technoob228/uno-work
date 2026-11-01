@@ -165,7 +165,8 @@ describe("TraceSink backpressure", () => {
         try {
           const sink = yield* makeTraceSink({
             filePath: tracePath,
-            maxBytes: 1024,
+            // Above a directory's own size: at 1024 ext4's 4096 rotates it away.
+            maxBytes: 1024 * 1024,
             maxFiles: 2,
             batchWindowMs: 10_000,
           });
