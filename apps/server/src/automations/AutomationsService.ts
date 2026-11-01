@@ -685,7 +685,8 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
           const executor =
             input.executor === undefined ? undefined : yield* checkExecutor(input.executor);
           if (executor !== undefined) {
-            const trigger = input.trigger ?? (yield* client.list).find((a) => a.id === id)?.trigger;
+            const trigger =
+              input.trigger ?? (yield* listAvailable).find((a) => a.id === id)?.trigger;
             if (trigger !== undefined) yield* checkHoldsOutsideText(trigger, executor);
           }
           return yield* client.update(id, {
