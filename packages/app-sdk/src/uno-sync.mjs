@@ -88,7 +88,7 @@ const MAX_LOCAL_ENTRIES = 200;
 export const SECRET_PATTERN = new RegExp(
   [
     // Uno: gateway key, user/agent/box tokens, GPU, refresh.
-    String.raw`\b(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa)_|unor_)[A-Za-z0-9_\-]{12,}`,
+    String.raw`\b(unollm_|uno_(?:usr|agt|box|gpu|gpc|gps|gpa|cmp)_|unor_)[A-Za-z0-9_\-]{12,}`,
     // Anthropic / OpenRouter / OpenAI project keys.
     String.raw`\b(sk-ant-|sk-or-v1-|sk-proj-)[A-Za-z0-9_\-]{16,}`,
     // GitHub.

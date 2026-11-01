@@ -91,6 +91,7 @@ describe("orchestration projector", () => {
         archivedAt: null,
         deletedAt: null,
         pinnedAt: null,
+        source: null,
         snoozedUntil: null,
         lastVisitedAt: null,
         readAt: null,
