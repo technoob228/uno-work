@@ -93,7 +93,7 @@ export function historyNotice(input: {
   switch (history.kind) {
     case "offline":
       return {
-        text: `${history.computerName} is offline. Turn it on to open this chat.`,
+        text: `${history.computerName} is offline. Open it or connect it again to read this chat.`,
         retry: true,
       };
     case "gone":

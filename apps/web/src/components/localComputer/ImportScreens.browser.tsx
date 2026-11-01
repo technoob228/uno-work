@@ -320,7 +320,7 @@ describe("an imported chat instead of the message box", () => {
     await note({ kind: "offline", computerName: laptop.name }, onRetry);
     await expect
       .element(page.getByTestId("imported-chat-notice"))
-      .toHaveTextContent("mikhail-mbp is offline. Turn it on to open this chat.");
+      .toHaveTextContent("mikhail-mbp is offline. Open it or connect it again to read this chat.");
     await page.getByRole("button", { name: "Try again" }).click();
     expect(onRetry).toHaveBeenCalledOnce();
   });

@@ -138,7 +138,10 @@ describe("an imported chat's notice", () => {
   it("explains an offline computer and offers another try", () => {
     expect(
       historyNotice({ ...base, history: { kind: "offline", computerName: "MacBook" } }),
-    ).toEqual({ text: "MacBook is offline. Turn it on to open this chat.", retry: true });
+    ).toEqual({
+      text: "MacBook is offline. Open it or connect it again to read this chat.",
+      retry: true,
+    });
   });
 
   it("doesn't offer to retry a chat that's gone", () => {
