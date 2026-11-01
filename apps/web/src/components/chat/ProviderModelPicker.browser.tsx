@@ -524,6 +524,42 @@ describe("ProviderModelPicker", () => {
     }
   });
 
+  it("leaves the search unfocused on a touch screen, so no keyboard covers the list", async () => {
+    const realMatchMedia = window.matchMedia.bind(window);
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+      if (query !== "(pointer: coarse)") return realMatchMedia(query);
+      return {
+        matches: true,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      } as unknown as MediaQueryList;
+    });
+    const mounted = await mountPicker({
+      activeInstanceId: CLAUDE_INSTANCE_ID,
+      model: "claude-opus-4-6",
+      lockedProvider: null,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-model-picker-provider="codex"]')).not.toBeNull();
+      });
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+
+      const searchInput = document.querySelector<HTMLInputElement>(
+        'input[placeholder="Search models..."]',
+      );
+      expect(searchInput).not.toBeNull();
+      expect(document.activeElement).not.toBe(searchInput);
+    } finally {
+      await mounted.cleanup();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("shows locked provider header and only its models in locked mode", async () => {
     localStorage.setItem(
       "t3code:client-settings:v1",

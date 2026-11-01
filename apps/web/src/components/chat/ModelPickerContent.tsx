@@ -21,6 +21,7 @@ import { ModelListRow } from "./ModelListRow";
 import { unoGatewayModelId } from "./unoModelIds";
 import { premiumCreditHeading } from "./PremiumCreditNotice";
 import { useAiStatus } from "../../lib/aiStatusReactQuery";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { modelCannotRunCodingAgent, modelMatchesCapabilityFilter } from "./modelCapabilities";
 import { ModelPickerSidebar, type ModelPickerSidebarPaneState } from "./ModelPickerSidebar";
@@ -387,9 +388,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const setUnoProviderFilter = useModelPickerFilterStore((state) => state.setUnoProviderFilter);
   const setUnoSortMode = useModelPickerFilterStore((state) => state.setUnoSortMode);
 
+  // On a touch screen focus opens the on-screen keyboard right over the list,
+  // so there the search waits for a tap.
+  const isTouchInput = useMediaQuery({ pointer: "coarse" });
   const focusSearchInput = useCallback(() => {
+    if (isTouchInput) return;
     searchInputRef.current?.focus({ preventScroll: true });
-  }, []);
+  }, [isTouchInput]);
 
   const searchTokens = useMemo(() => getModelPickerSearchTokens(searchQuery), [searchQuery]);
 
