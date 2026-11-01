@@ -177,6 +177,7 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset> {
  * up so a still-hidden snooze never reads "0m".
  */
 export function snoozeWakeLabel(snoozedUntil: string, now: string): string {
+  if (isSnoozedUntilOpened(snoozedUntil)) return "opened";
   const wakeMs = Date.parse(snoozedUntil);
   const nowMs = Date.parse(now);
   if (Number.isNaN(wakeMs) || Number.isNaN(nowMs)) return "now";
@@ -192,6 +193,7 @@ export function snoozeWakeLabel(snoozedUntil: string, now: string): string {
  * "Mon 9:00", "Sep 30, 9:00".
  */
 export function snoozeWakeDescription(snoozedUntil: string, now: Date): string {
+  if (isSnoozedUntilOpened(snoozedUntil)) return "opened";
   const wake = new Date(snoozedUntil);
   if (Number.isNaN(wake.getTime())) return "";
   const time = wake.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });

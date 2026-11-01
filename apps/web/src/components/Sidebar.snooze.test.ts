@@ -7,6 +7,7 @@ import {
   isSnoozedUntilOpened,
   parseSnoozePickerValue,
   resolveSnoozePresets,
+  snoozeWakeDescription,
   snoozeWakeLabel,
 } from "./Sidebar.snooze";
 
@@ -91,6 +92,13 @@ describe("canSnoozeThread", () => {
 });
 
 describe("isSnoozedUntilOpened", () => {
+  it("has no date to show: the far wake time stays out of every label", () => {
+    expect(snoozeWakeDescription(SNOOZED_UNTIL_OPENED, new Date("2026-10-31T12:00:00.000Z"))).toBe(
+      "opened",
+    );
+    expect(snoozeWakeLabel(SNOOZED_UNTIL_OPENED, "2026-10-31T12:00:00.000Z")).toBe("opened");
+  });
+
   it("tells the no-timer mode from a wake time", () => {
     expect(isSnoozedUntilOpened(SNOOZED_UNTIL_OPENED)).toBe(true);
     expect(isSnoozedUntilOpened("2026-10-31T12:00:00.000Z")).toBe(false);
