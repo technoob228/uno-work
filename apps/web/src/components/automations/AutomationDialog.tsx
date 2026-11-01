@@ -33,7 +33,7 @@ import {
   WebhookIcon,
   ZapIcon,
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { getAssistantCalls } from "../../lib/assistantCallsApi";
 import { AutomationApiError, listAutomationRepos } from "../../lib/automationsApi";
@@ -437,6 +437,11 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
   const [nameTouched, setNameTouched] = useState(editing !== null);
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<AutomationApiError | null>(null);
+  const failureRef = useRef<HTMLDivElement>(null);
+  // The form is taller than the dialog: Create is at the bottom, so is the reason.
+  useEffect(() => {
+    if (failure !== null) failureRef.current?.scrollIntoView({ block: "nearest" });
+  }, [failure]);
   const actions = useAutomationActions(environmentId ?? "");
   const timezone = useMemo(() => browserTimeZone(), []);
   const set = (patch: Partial<AutomationDraft>) => {
@@ -891,6 +896,7 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
 
         {failure ? (
           <div
+            ref={failureRef}
             className="flex flex-wrap items-center gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive"
             data-testid="automation-dialog-error"
             data-code={failure.code}
