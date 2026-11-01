@@ -497,6 +497,30 @@ describe("outside triggers: what an agent may not do", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("moving a webhook to a chat that can't ask is refused; a schedule moves freely", async () => {
+    const hook = automation({
+      id: 11,
+      assistant: "",
+      trigger: { kind: "webhook" },
+      executor: { kind: "chat", thread_id: "thread-7" },
+    });
+    const daily = automation({
+      id: 12,
+      assistant: "",
+      trigger: { kind: "schedule", cron: "0 9 * * *", timezone: "UTC", label: "Daily" },
+      executor: { kind: "chat", thread_id: "thread-7" },
+    });
+    const { calls, run } = setup((method) =>
+      method === "GET" ? json(200, { automations: [hook, daily] }) : json(200, daily),
+    );
+    const executor = { kind: "chat", threadId: "thread-hermes" };
+    const refused = await run((service) => service.update(11, { executor }));
+    expect(refused._tag).toBe("Failure");
+    expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+    const moved = await run((service) => service.update(12, { executor }));
+    expect(moved._tag).toBe("Success");
+  });
+
   it("a schedule on that chat is fine: no stranger's text in it", async () => {
     const { calls, run } = setup(() => json(201, automation()));
     const made = await run((service) =>
