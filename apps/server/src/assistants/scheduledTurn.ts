@@ -46,7 +46,7 @@ import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistant
 import { assistantProjectOfCaller } from "./schedules.ts";
 
 export const OUTSIDE_TEXT_REFUSED =
-  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or uno · Smart on Hermes, which runs commands without asking). Pick a chat on Uno Code, Claude or Codex.";
+  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or uno · Smart on Hermes, which runs commands without asking). Open a chat on Uno Code, Claude or Codex and set it up there: a new chat from this one stays on this agent.";
 
 /**
  * Ask mode must hold for a stranger's text. It doesn't in an assistant's
