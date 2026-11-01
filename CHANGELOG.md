@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.173 — 2026-11-01
+
+- Groundwork for connecting your own computer to Uno Work. Nothing changes for you yet.
+
 ## v0.0.172 — 2026-11-01
 
 - A calmer start: a new chat opens with one field in the middle, where you pick the project and the computer. Home works the same way, with dictation and video right in the field. A chat can start a new project and choose how it syncs.
