@@ -8,6 +8,21 @@
 
 ---
 
+## v0.0.172 — 2026-11-01
+
+- A calmer start: a new chat opens with one field in the middle, where you pick the project and the computer. Home works the same way, with dictation and video right in the field. A chat can start a new project and choose how it syncs.
+- Chats read cleaner: no frames, thin tables, time on hover. Agents can answer with HTML pages and diagrams, and files they mention open on the right.
+- Messages wait in a queue while the agent works. Send in the background with ⌘Enter, keep a draft with ⌘S, quote part of an answer with a note, and a big paste arrives as a file.
+- Move a started chat to another agent with its history. A chat picks up on its own after a usage limit resets, and limits show right in the chat.
+- Search everything: messages with ⌘K, inside a chat with ⌘F, files across the computer. Copy any attachment to Cloud storage from the chat.
+- The sidebar shows Pinned chats and last activity, can hide working chats, and has a funnel to filter projects while chats are grouped by status.
+- Automations run in a chat or by an assistant: on a schedule, on a pull request, on a secret URL or on a form on your site. Work from a URL or a form waits for your Allow. Terminal is back in the chat header, and Automations live in the Panel.
+- A project keeps its history and keys on every computer. A file with a key inside stays on this computer.
+- Update all brings your agents up to date with one button. Fix Work starts a repair chat or leads you to a person, and /goal keeps an agent going until the goal is met.
+- Faster: fewer requests, less log growth, no flicker on load.
+
+---
+
 ## v0.0.171 — 2026-10-31
 
 - A new chat survives a reload: it keeps its project, no longer asks to "Sign in to Codex", and your message sends. A draft that was already broken repairs itself.
