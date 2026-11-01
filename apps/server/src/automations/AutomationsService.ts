@@ -31,6 +31,11 @@ import {
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
 import { memberName } from "../assistants/assistantTeam.ts";
+import {
+  canHoldOutsideText,
+  newChatTemplate,
+  OUTSIDE_TEXT_REFUSED,
+} from "../assistants/scheduledTurn.ts";
 import { assistantProjectOfCaller } from "../assistants/schedules.ts";
 import { readTeam } from "../assistants/teamStore.ts";
 import { ServerConfig } from "../config.ts";
@@ -305,6 +310,32 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
         }
       });
 
+    /**
+     * A run with a stranger's text is refused in a chat that can't ask first.
+     * Say so while it's being set up, not on the first form a visitor sends.
+     */
+    const checkHoldsOutsideText = (trigger: AutomationTrigger, executor: AutomationExecutor) =>
+      Effect.gen(function* () {
+        if (trigger.kind !== "webhook" && trigger.kind !== "site.form") return;
+        if (trigger.ask === false || executor.kind === "assistant") return;
+        const snapshot = yield* projections
+          .getShellSnapshot()
+          .pipe(Effect.orElseSucceed(() => null));
+        if (snapshot === null) return;
+        const chat =
+          executor.kind === "chat"
+            ? snapshot.threads.find((t) => t.id === executor.threadId)
+            : newChatTemplate(snapshot.threads, executor.projectId, executor.fromThreadId);
+        const projectId = executor.kind === "chat" ? chat?.projectId : executor.projectId;
+        const modelSelection =
+          chat?.modelSelection ??
+          snapshot.projects.find((p) => p.id === projectId)?.defaultModelSelection;
+        if (projectId === undefined || !modelSelection) return;
+        if (!canHoldOutsideText(projectId, modelSelection)) {
+          return yield* badExecutor(OUTSIDE_TEXT_REFUSED);
+        }
+      });
+
     const createWith = (input: AutomationCreateInput) =>
       Effect.gen(function* () {
         const executor = input.executor ?? { kind: "assistant" as const };
@@ -320,6 +351,7 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
           );
         }
         const checked = yield* checkExecutor(executor);
+        yield* checkHoldsOutsideText(input.trigger, checked);
         const automation = yield* client.create({
           assistant: input.assistant ?? "",
           assistantName: "",
@@ -652,6 +684,10 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
           const input = yield* decode(AutomationUpdateInput, args);
           const executor =
             input.executor === undefined ? undefined : yield* checkExecutor(input.executor);
+          if (executor !== undefined) {
+            const trigger = input.trigger ?? (yield* client.list).find((a) => a.id === id)?.trigger;
+            if (trigger !== undefined) yield* checkHoldsOutsideText(trigger, executor);
+          }
           return yield* client.update(id, {
             ...input,
             ...(executor !== undefined ? { executor } : {}),

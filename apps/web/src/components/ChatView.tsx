@@ -4517,8 +4517,12 @@ export default function ChatView(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // Try again stays on this chat's agent. With a broken agent the composer
+    // falls back to another one; that's not the person's choice.
     const modelSelection =
-      composerRef.current?.getSendContext()?.selectedModelSelection ?? activeThread.modelSelection;
+      (composerActiveProvider !== null
+        ? composerRef.current?.getSendContext()?.selectedModelSelection
+        : undefined) ?? activeThread.modelSelection;
 
     sendInFlightRef.current = true;
     beginLocalDispatch({ preparingWorktree: false });
@@ -4565,6 +4569,7 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [
     activeThread,
+    composerActiveProvider,
     beginLocalDispatch,
     environmentId,
     interactionMode,

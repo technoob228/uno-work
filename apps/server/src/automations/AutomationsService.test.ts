@@ -64,9 +64,17 @@ const PROJECTS: Record<string, string> = {
   "proj-site": "site",
 };
 
-const THREADS: Record<string, { title: string; projectId: string }> = {
+const THREADS: Record<
+  string,
+  { title: string; projectId: string; modelSelection?: { instanceId: string } }
+> = {
   "thread-7": { title: "Release notes", projectId: "proj-site" },
   "thread-8": { title: "Other chat", projectId: "proj-site" },
+  "thread-hermes": {
+    title: "On Hermes",
+    projectId: "proj-site",
+    modelSelection: { instanceId: "hermes" },
+  },
 };
 
 function setup(answer: (method: string, path: string, body: unknown) => Response) {
@@ -467,6 +475,43 @@ describe("outside triggers: what an agent may not do", () => {
     );
     expect(off._tag).toBe("Success");
     expect(calls.some((call) => call.method === "DELETE")).toBe(true);
+  });
+
+  it("a chat that can't ask refuses a form and a webhook at setup, naming where it works", async () => {
+    const { calls, run } = setup(() => json(201, automation()));
+    const hermes = { threadId: "thread-hermes", assistant: Effect.succeed(null) };
+    for (const chatKind of ["this_chat", "new_chat"] as const) {
+      const form = await run((service) =>
+        service.chatTools(hermes).siteForm({ slug: "report", chat: chatKind }),
+      );
+      expect(form._tag).toBe("Failure");
+      expect(JSON.stringify(form)).toContain("Uno Code");
+    }
+    const hook = await run((service) =>
+      service.chatTools(hermes).create({
+        instruction: "Read it",
+        trigger: { kind: "webhook" },
+      }),
+    );
+    expect(hook._tag).toBe("Failure");
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a schedule on that chat is fine: no stranger's text in it", async () => {
+    const { calls, run } = setup(() => json(201, automation()));
+    const made = await run((service) =>
+      service.chatTools({ threadId: "thread-hermes", assistant: Effect.succeed(null) }).create({
+        instruction: "Morning summary",
+        trigger: {
+          kind: "schedule",
+          cron: "0 9 * * *",
+          timezone: "Europe/Berlin",
+          label: "Daily at 09:00",
+        },
+      }),
+    );
+    expect(made._tag).toBe("Success");
+    expect(calls).toHaveLength(1);
   });
 
   it("an assistant's own conversation can't take a form", async () => {

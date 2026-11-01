@@ -45,8 +45,8 @@ import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurn
 import { assistantAccessDepsOption, readAssistantRuntimeMode } from "./assistantAccess.ts";
 import { assistantProjectOfCaller } from "./schedules.ts";
 
-const OUTSIDE_TEXT_REFUSED =
-  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or Hermes, which runs commands without asking). Pick a chat on Claude, Codex or OpenCode.";
+export const OUTSIDE_TEXT_REFUSED =
+  "A stranger's text can't run here: this chat can't ask before it acts (an assistant's chat, or uno · Smart on Hermes, which runs commands without asking). Pick a chat on Uno Code, Claude or Codex.";
 
 /**
  * Ask mode must hold for a stranger's text. It doesn't in an assistant's
@@ -58,6 +58,23 @@ export function canHoldOutsideText(
   modelSelection: { readonly instanceId: string },
 ): boolean {
   return !isAssistantProjectId(projectId) && askHoldsOnAgent(modelSelection);
+}
+
+/** Model and mode of a new chat: the one it was set up from, else the project's newest. */
+export function newChatTemplate<
+  T extends {
+    readonly id: string;
+    readonly projectId: string;
+    readonly archivedAt: string | null;
+    readonly createdAt: string;
+  },
+>(threads: ReadonlyArray<T>, projectId: string, fromThreadId: string | undefined): T | undefined {
+  return (
+    threads.find((t) => t.id === fromThreadId) ??
+    threads
+      .filter((t) => t.projectId === projectId && t.archivedAt === null)
+      .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+  );
 }
 
 /** Title of the thread scheduled turns run in for a non-default assistant. */
@@ -471,13 +488,7 @@ export const makeAssistantScheduledTurns = (options?: { readonly pollMs?: number
             "The project this automation opens chats in isn't on this computer any more.",
           );
         }
-        // Model and mode: the chat it was set up from, else the project's
-        // newest chat, else the project's default model.
-        const template =
-          snapshot.threads.find((t) => t.id === target.fromThreadId) ??
-          snapshot.threads
-            .filter((t) => t.projectId === project.id && t.archivedAt === null)
-            .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+        const template = newChatTemplate(snapshot.threads, project.id, target.fromThreadId);
         const modelSelection = template?.modelSelection ?? project.defaultModelSelection;
         if (modelSelection === null || modelSelection === undefined) {
           return yield* turnError(

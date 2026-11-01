@@ -25,7 +25,7 @@ import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import { latestAgentSwitch } from "../handoff.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
-import { isGitRepository } from "../../git/Utils.ts";
+import { isCheckpointWorkspace } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { WorkspaceEntries } from "../../workspace/Services/WorkspaceEntries.ts";
 
@@ -149,7 +149,7 @@ const make = Effect.gen(function* () {
     return project ? [project] : [];
   });
 
-  const isGitWorkspace = (cwd: string) => isGitRepository(cwd);
+  const isGitWorkspace = (cwd: string) => isCheckpointWorkspace(cwd);
 
   // Resolves the workspace CWD for checkpoint operations, preferring the
   // active provider session CWD and falling back to the thread/project config.
