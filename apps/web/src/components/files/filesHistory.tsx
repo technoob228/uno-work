@@ -5,7 +5,7 @@
  * Files only (never out of the page); up goes to the folder above.
  */
 import { ArrowLeftIcon, ArrowRightIcon, ArrowUpIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "../ui/button";
 import type { FilesRouteSearch } from "./filesRouteSearch";
@@ -46,7 +46,13 @@ export function useFilesHistory(
 ): FilesHistory {
   const [stack, setStack] = useState<Stack>({ entries: [], index: -1 });
   const key = filesPlaceKey(search);
-  useEffect(() => setStack((current) => visitPlace(current, key)), [key]);
+  // A path belongs to its computer: another computer starts a new walk.
+  const computer = useRef(search.computer);
+  useEffect(() => {
+    const moved = computer.current !== search.computer;
+    computer.current = search.computer;
+    setStack((current) => (moved ? { entries: [key], index: 0 } : visitPlace(current, key)));
+  }, [key, search.computer]);
 
   const step = useCallback(
     (delta: -1 | 1) => {

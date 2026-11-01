@@ -112,7 +112,7 @@ import { isElectron } from "../../env";
 import { untitledFileName } from "./untitledName";
 import { CloudBrowser } from "./CloudBrowser";
 import { CopyToCloudDialog } from "./CopyToCloudDialog";
-import { FilesLocationSwitch } from "./FilesLocationSwitch";
+import { FilesLocationSwitch, useFilesComputers } from "./FilesLocationSwitch";
 import {
   FilesSearchField,
   filesSearchScope,
@@ -231,7 +231,7 @@ export interface FilesInPanel {
 
 export function FilesBrowser({
   search,
-  setSearch,
+  setSearch: setPlace,
   panel,
 }: {
   search: FilesRouteSearch;
@@ -240,9 +240,23 @@ export function FilesBrowser({
 }) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
-  const environmentId = panel
-    ? (panel.environmentId ?? activeEnvironmentId ?? primaryEnvironmentId)
-    : (activeEnvironmentId ?? primaryEnvironmentId);
+  const computers = useFilesComputers();
+  // A link can name a computer that is gone: then Files follows the app's, as without one.
+  const pickedComputer =
+    computers.find((computer) => computer.environmentId === search.computer)?.environmentId ?? null;
+  const environmentId =
+    pickedComputer ??
+    (panel
+      ? (panel.environmentId ?? activeEnvironmentId ?? primaryEnvironmentId)
+      : (activeEnvironmentId ?? primaryEnvironmentId));
+  // Every step inside Files stays on the picked computer.
+  const setSearch = useCallback(
+    (next: FilesRouteSearch) =>
+      setPlace(pickedComputer && !next.computer ? { ...next, computer: pickedComputer } : next),
+    [pickedComputer, setPlace],
+  );
+  // A path belongs to its computer: a new computer opens at its home folder.
+  const pickComputer = useCallback((computer: EnvironmentId) => setPlace({ computer }), [setPlace]);
   // Leaving for another screen (a new Office document) — the panel's Files too.
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -493,6 +507,7 @@ export function FilesBrowser({
         compactSwitch={isMobile}
         onOpenHome={() => openFolder(undefined)}
         onOpenCloud={() => setSearch({ cloud: "1" })}
+        onPickComputer={pickComputer}
         onCreate={(kind) =>
           kind === "folder" ? setDialog({ type: "newFolder" }) : void createUntitled(kind)
         }
@@ -513,6 +528,7 @@ export function FilesBrowser({
             uploads={uploads}
             narrow={isMobile}
             onOpenComputer={() => openFolder(undefined)}
+            onPickComputer={pickComputer}
             onNavigate={(bucket, prefix) =>
               setSearch({
                 cloud: "1",
@@ -560,6 +576,7 @@ export function FilesBrowser({
             narrow={isMobile}
             projectFolder={panel ? preview.currentChatProjectCwd : null}
             onOpenFolder={openFolder}
+            onPickComputer={pickComputer}
             onOpenFile={pickFile}
             uploads={uploads}
             onDialog={setDialog}
@@ -696,6 +713,7 @@ function FolderBrowser({
   narrow,
   projectFolder,
   onOpenFolder,
+  onPickComputer,
   onOpenFile,
   uploads,
   onDialog,
@@ -712,6 +730,7 @@ function FolderBrowser({
   /** The chat's project, when Files sits beside a chat: search covers all of it. */
   projectFolder: string | null;
   onOpenFolder: (path: string | undefined) => void;
+  onPickComputer: (environmentId: EnvironmentId) => void;
   onOpenFile: (entry: FilesEntry) => void;
   uploads: ReturnType<typeof useFilesUploads>;
   onDialog: (dialog: DialogState) => void;
@@ -965,6 +984,8 @@ function FolderBrowser({
           <FilesNavButtons history={history} onUp={onUp} />
           <FilesLocationSwitch
             location="computer"
+            environmentId={environmentId}
+            onPickComputer={onPickComputer}
             onComputer={() => onOpenFolder(undefined)}
             onCloud={() => onOpenCloud()}
             narrow={narrow}

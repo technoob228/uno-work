@@ -166,12 +166,15 @@ export function MemoryBlock({
   projectId = ASSISTANT_PROJECT_ID,
   waking,
   onWake,
+  jobFirst = false,
 }: {
   name: string;
   environmentId: EnvironmentId | null;
   projectId?: string;
   waking: boolean;
   onWake: () => void;
+  /** Opens on what it should do, for the page's Role & instructions. */
+  jobFirst?: boolean;
 }) {
   if (!environmentId) {
     return (
@@ -180,7 +183,14 @@ export function MemoryBlock({
       </Block>
     );
   }
-  return <AwakeMemory name={name} environmentId={environmentId} projectId={projectId} />;
+  return (
+    <AwakeMemory
+      name={name}
+      environmentId={environmentId}
+      projectId={projectId}
+      jobFirst={jobFirst}
+    />
+  );
 }
 
 function AsleepLine({
@@ -211,12 +221,14 @@ function AwakeMemory({
   name,
   environmentId,
   projectId,
+  jobFirst,
 }: {
   name: string;
   environmentId: EnvironmentId;
   projectId: string;
+  jobFirst: boolean;
 }) {
-  const [tab, setTab] = useState<MemoryTab>("notes");
+  const [tab, setTab] = useState<MemoryTab>(jobFirst ? "soul" : "notes");
   const notes = useAssistantFile(environmentId, projectId, "NOTES.md");
   const user = useAssistantFile(environmentId, projectId, "USER.md");
   const soul = useAssistantFile(environmentId, projectId, "SOUL.md");
@@ -232,13 +244,19 @@ function AwakeMemory({
         role="tablist"
         className="mb-3 inline-flex rounded-lg border border-border bg-muted/40 p-0.5"
       >
-        {(
-          [
-            ["notes", `What ${name} remembers`],
-            ["user", "About you"],
-            ["soul", `Who ${name} is`],
-            ["instructions", "Instructions"],
-          ] as const
+        {(jobFirst
+          ? ([
+              ["soul", "What it should do"],
+              ["instructions", "Instructions"],
+              ["notes", `What ${name} remembers`],
+              ["user", "About you"],
+            ] as const)
+          : ([
+              ["notes", `What ${name} remembers`],
+              ["user", "About you"],
+              ["soul", `Who ${name} is`],
+              ["instructions", "Instructions"],
+            ] as const)
         ).map(([id, label]) => (
           <button
             key={id}

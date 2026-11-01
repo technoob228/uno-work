@@ -61,6 +61,10 @@ export interface AssistWorld {
    * for the reset, Settings can add a second account on uno-work.
    */
   readonly plans?: "none" | "full" | "accounts";
+  /** Five more cloud computers, asleep: an account with many (Misha's own, 01.11). */
+  readonly fleet?: "off" | "on";
+  /** The console's "Connect my computer" for this account (a flag there). */
+  readonly pair?: "off" | "on";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -146,6 +150,8 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     gh: take("gh", ["ok", "norepo", "noperm", "off"] as const) ?? start.gh,
     assistants: take("assistants", ["on", "off"] as const) ?? start.assistants ?? "on",
     plans: take("plans", ["none", "full", "accounts"] as const) ?? start.plans ?? "none",
+    fleet: take("fleet", ["off", "on"] as const) ?? start.fleet ?? "off",
+    pair: take("pair", ["off", "on"] as const) ?? start.pair ?? "off",
   };
   return touched ? next : null;
 }

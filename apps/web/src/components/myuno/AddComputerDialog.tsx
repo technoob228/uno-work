@@ -41,6 +41,8 @@ import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../acco
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { isWebLite, liteLinks, openCloudWork } from "../../lite/webLite";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
+import { localComputer } from "../../localComputer/localComputerStore";
+import { useMyComputers } from "../../localComputer/useMyComputers";
 import { cn } from "../../lib/utils";
 import { normalizeUnoBoxName } from "../../unoBoxCreation";
 import { CreateUnoBoxSection } from "../CreateUnoBoxSection";
@@ -177,6 +179,7 @@ export function AddComputerDialog({
 }) {
   const queryClient = useQueryClient();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const { enabled: canPair } = useMyComputers(primaryEnvironmentId);
   const switchEnvironment = useSwitchEnvironment();
   const [role, setRole] = useState<ComputerRole | null>(null);
   const [name, setName] = useState("");
@@ -316,6 +319,19 @@ export function AddComputerDialog({
                   </li>
                 ))}
               </ul>
+              {canPair ? (
+                <button
+                  type="button"
+                  data-testid="add-computer-pair"
+                  onClick={() => {
+                    onOpenChange(false);
+                    localComputer.openConnect();
+                  }}
+                  className="mt-3 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  Connect a computer you already own →
+                </button>
+              ) : null}
             </DialogPanel>
           </>
         ) : role === "workspace" ? (

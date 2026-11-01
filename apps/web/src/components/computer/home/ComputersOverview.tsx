@@ -3,8 +3,9 @@
  * Settings — see spaces.ts; the spaces rail reuses useLive, dotClass… from here).
  *
  * Variant C of several computers (Misha 28.10): no "current computer" in the
- * header — the top-right chip shows every computer at once (a mark each: its
- * kind, a status dot, a tiny CPU bar), and its menu is "Your computers": a row
+ * header — the top-right chip shows every computer at once (on Home a status
+ * dot each, Misha 01.11: a kind, a name and a bar per computer was too much),
+ * and its menu is "Your computers": a row
  * per computer with the status in words, live CPU / memory / disk and what it
  * is doing; a row opens into that computer's details (the old menu, for the
  * page's own computer). Misha: "they keep falling off" — the link is said
@@ -514,8 +515,9 @@ export function ComputersPill(props: {
   const switchSpace = useSwitchSpace();
   const thisId = props.focusId ?? spaceScope ?? primaryId;
   const thisWord = spaceScope ? "this space" : inChat ? "this chat" : null;
-  // Home has no computer of its own: all are named, none set apart.
+  // Home has no computer of its own: all are dots, none set apart.
   const focused = thisWord !== null;
+  const dotsOnly = !focused;
   const chatComputer = inChat
     ? props.computers.find((computer) => computer.environmentId === thisId)
     : undefined;
@@ -552,7 +554,8 @@ export function ComputersPill(props: {
               }
               title={chatComputer ? `This chat runs on ${chatComputer.label}` : undefined}
               className={cn(
-                "flex shrink-0 items-center gap-2.5 rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                "flex shrink-0 items-center rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                dotsOnly ? "gap-1.5" : "gap-2.5",
                 props.fit === "home"
                   ? "h-8 max-w-[34rem] pr-2.5 pl-3"
                   : "h-7 max-w-[26rem] px-2.5 sm:h-6",
@@ -564,11 +567,11 @@ export function ComputersPill(props: {
                     key={computer.key}
                     computer={computer}
                     current={focused && computer.environmentId === thisId}
-                    quiet={focused && computer.environmentId !== thisId}
+                    quiet={dotsOnly || computer.environmentId !== thisId}
                     lead={chatComputer === computer ? "This chat runs on " : ""}
                   />
                 ) : (
-                  <Mark key={computer.key} computer={computer} live={null} quiet={focused} />
+                  <Mark key={computer.key} computer={computer} live={null} quiet />
                 ),
               )}
               <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />

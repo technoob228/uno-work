@@ -16,18 +16,20 @@ export interface SettingsMember {
   readonly revoked: boolean;
 }
 
-/** The tabs of an assistant's page (Misha 29.10: "a lot to scroll — tabs"). */
+/**
+ * The tabs of an assistant's page (Misha 29.10: "a lot to scroll — tabs";
+ * 01.11: what it does, where it works, how it connects, what it has done).
+ */
 export const ASSISTANT_PROFILE_TABS = [
-  { id: "general", label: "General" },
-  { id: "where", label: "Where it works" },
-  { id: "apps", label: "Apps & Telegram" },
-  { id: "memory", label: "Memory & instructions" },
+  { id: "general", label: "Role & instructions" },
+  { id: "where", label: "Environment" },
+  { id: "apps", label: "Connections" },
   { id: "tasks", label: "Tasks & automations" },
 ] as const;
 
 export type AssistantProfileTab = (typeof ASSISTANT_PROFILE_TABS)[number]["id"];
 
-/** The tab an address asks for; anything else is General. */
+/** The tab an address asks for; anything else, an old "memory" link too, is the first one. */
 export function assistantProfileTab(value: unknown): AssistantProfileTab {
   return ASSISTANT_PROFILE_TABS.find((entry) => entry.id === value)?.id ?? "general";
 }

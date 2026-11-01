@@ -5,9 +5,11 @@
  * chat, as it does there) and with the chosen permissions. The chat sends the
  * task itself (the same send as Enter in a chat).
  *
- * Under the box one row of light pills (Misha 01.10, "simple hint buttons"):
- * the starters (a click fills the box and focuses it — never sends), then
- * "I have a project" (`onUploadProject`). A folder / .zip dropped anywhere on
+ * Under a newcomer's box one row of light pills (Misha 01.10, "simple hint
+ * buttons"; 01.11: only for those who just signed in): the starters (a click
+ * fills the box and focuses it — never sends), then "I have a project"
+ * (`onUploadProject`). After that the folder chip brings a project in and the
+ * box keeps its Record button. A folder / .zip dropped anywhere on
  * the box is taken too (`onDropProject`) — or, when a task is already typed,
  * it becomes the chip's folder (like "Upload a folder…") and the text stays.
  * Pictures are not a project: a screenshot pasted, dropped or picked with the
@@ -82,7 +84,6 @@ import {
   resolveAppModelSelectionForInstance,
 } from "../../../modelSelection";
 import { openFolderForChat } from "../../../navigation/newProjectStore";
-import { PERMISSION_MODES, PERMISSION_MODE_ORDER } from "../../../plainLanguage";
 import { dataTransferHasFolderOrZip, readDroppedUploadFiles } from "../../../projectUploadPickers";
 import {
   deriveProviderInstanceEntries,
@@ -107,12 +108,16 @@ import {
   useSwitcherMachines,
 } from "../../computerSwitcher/useComputerSwitcher";
 import { useSpacesOn } from "../../../spaces";
+import { HomeComposerSettings } from "./HomeComposerSettings";
 import { useStore } from "../../../store";
 import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
-import { TraitsPicker } from "../../chat/TraitsPicker";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../../ui/select";
+import {
+  TraitsMenuContent,
+  TraitsPicker,
+  shouldRenderTraitsControls,
+} from "../../chat/TraitsPicker";
 import { Skeleton } from "../../ui/skeleton";
 import { FIRST_SNAPSHOT_MAX_WAIT_MS } from "../../../lib/firstSnapshot";
 import { Spinner } from "../../ui/spinner";
@@ -126,12 +131,6 @@ import type { HomeStarter } from "./homeStarters";
 
 const carriesFiles = (event: DragEvent) =>
   Array.from(event.dataTransfer?.types ?? []).includes("Files");
-
-const RUNTIME_MODE_ICON: Record<RuntimeMode, LucideIcon> = {
-  "approval-required": LockIcon,
-  "auto-accept-edits": PenLineIcon,
-  "full-access": LockOpenIcon,
-};
 
 export interface HomeStartOptions {
   /** The computer to start on (the box's computer pick); absent = Home's computer. */
@@ -717,55 +716,47 @@ export function HomeComposer({
                 />
               ) : null}
               {picker.selection && selectedEntry && !assistant ? (
-                <TraitsPicker
-                  provider={selectedEntry.driverKind}
-                  models={selectedEntry.models}
-                  model={picker.selection.model}
-                  modelOptions={picker.selection.options}
-                  prompt={text}
-                  onPromptChange={setText}
-                  onModelOptionsChange={picker.setOptions}
-                  triggerVariant="ghost"
-                  triggerClassName="h-7 rounded-full text-xs"
-                />
+                minimal ? (
+                  <TraitsPicker
+                    provider={selectedEntry.driverKind}
+                    models={selectedEntry.models}
+                    model={picker.selection.model}
+                    modelOptions={picker.selection.options}
+                    prompt={text}
+                    onPromptChange={setText}
+                    onModelOptionsChange={picker.setOptions}
+                    triggerVariant="ghost"
+                    triggerClassName="h-7 rounded-full text-xs"
+                  />
+                ) : null
               ) : null}
               {minimal || assistant ? null : (
-                <Select value={runtimeMode} onValueChange={(value) => setRuntimeMode(value!)}>
-                  <SelectTrigger
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 w-auto shrink-0 rounded-full px-2.5 text-xs text-muted-foreground hover:text-foreground"
-                    aria-label="Permissions"
-                    title={PERMISSION_MODES[runtimeMode].consequence}
-                    data-testid="home-permissions"
-                  >
-                    {(() => {
-                      const Icon = RUNTIME_MODE_ICON[runtimeMode];
-                      return <Icon className="size-3.5" />;
-                    })()}
-                    <span className="hidden min-[440px]:inline">
-                      <SelectValue>{PERMISSION_MODES[runtimeMode].label}</SelectValue>
-                    </span>
-                  </SelectTrigger>
-                  <SelectPopup alignItemWithTrigger={false}>
-                    {PERMISSION_MODE_ORDER.map((mode) => {
-                      const Icon = RUNTIME_MODE_ICON[mode];
-                      return (
-                        <SelectItem key={mode} value={mode} className="min-w-64 py-2">
-                          <div className="grid min-w-0 gap-0.5">
-                            <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
-                              {PERMISSION_MODES[mode].label}
-                            </span>
-                            <span className="text-xs leading-4 text-muted-foreground">
-                              {PERMISSION_MODES[mode].consequence}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectPopup>
-                </Select>
+                <HomeComposerSettings
+                  traits={
+                    picker.selection &&
+                    selectedEntry &&
+                    shouldRenderTraitsControls({
+                      provider: selectedEntry.driverKind,
+                      models: selectedEntry.models,
+                      model: picker.selection.model,
+                      prompt: text,
+                      modelOptions: picker.selection.options,
+                      allowPromptInjectedEffort: true,
+                    }) ? (
+                      <TraitsMenuContent
+                        provider={selectedEntry.driverKind}
+                        models={selectedEntry.models}
+                        model={picker.selection.model}
+                        modelOptions={picker.selection.options}
+                        prompt={text}
+                        onPromptChange={setText}
+                        onModelOptionsChange={picker.setOptions}
+                      />
+                    ) : null
+                  }
+                  runtimeMode={runtimeMode}
+                  onRuntimeModeChange={setRuntimeMode}
+                />
               )}
             </div>
           }
@@ -849,7 +840,7 @@ export function HomeComposer({
           onPickComputer={pickComputer}
         />
       )}
-      {starters.length > 0 || onUploadProject || (recordingSupported && recordingKey) ? (
+      {starters.length > 0 || onUploadProject ? (
         // One row of light pills; on a narrow screen they wrap (no sideways scroll).
         <div
           className={cn("flex flex-wrap gap-2", minimal && "justify-center")}

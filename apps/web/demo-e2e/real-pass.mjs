@@ -173,9 +173,9 @@ if (step === "home") {
   // Home's "Show the agent": record, Done, the card and the words in Home's
   // box. Stops before Enter (that would start a real agent on this machine).
   await page.getByText("Home", { exact: true }).first().click();
-  await page.getByTestId("home-show-agent").waitFor({ timeout: 60_000 });
+  await page.getByTestId("record-button").waitFor({ timeout: 60_000 });
   await shot(page, "home-01");
-  await page.getByTestId("home-show-agent").click();
+  await page.getByTestId("record-button").click();
   await page.getByTestId("record-popup").waitFor();
   await page.getByTestId("record-start").click();
   await page.waitForTimeout(Number(process.env.SECONDS ?? 12) * 1000);
@@ -203,17 +203,17 @@ if (step === "pointing") {
   // Newer builds open on Home and have no "Home" item to click.
   if (
     !(await page
-      .getByTestId("home-show-agent")
+      .getByTestId("record-button")
       .isVisible()
       .catch(() => false))
   ) {
     await page.getByText("Home", { exact: true }).first().click();
   }
-  await page.getByTestId("home-show-agent").waitFor({ timeout: 60_000 });
-  const target = page.getByTestId("home-upload-project");
+  await page.getByTestId("record-button").waitFor({ timeout: 60_000 });
+  const target = page.getByTestId("home-folder-chip");
   await page.addStyleTag({
     content:
-      '[data-testid="home-upload-project"]{transform:rotate(7deg) translateY(7px);outline:2px dashed #e11d48}',
+      '[data-testid="home-folder-chip"]{transform:rotate(7deg) translateY(7px);outline:2px dashed #e11d48}',
   });
   if (process.env.SHIM) {
     await page.evaluate(async (shim) => {
@@ -243,7 +243,7 @@ if (step === "pointing") {
   const cx = box.x + box.width / 2;
   const cy = box.y + box.height / 2;
   await page.mouse.move(300, 300);
-  await page.getByTestId("home-show-agent").click();
+  await page.getByTestId("record-button").click();
   await page.getByTestId("record-popup").waitFor();
   await page.getByTestId("record-source-tab").click();
   const started = Date.now();

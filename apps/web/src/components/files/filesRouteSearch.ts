@@ -2,7 +2,8 @@
  * `/files?path=<folder>&file=<file>` — the folder being browsed and, when set,
  * the file open on top of it. Both absolute paths on the computer. Links from
  * elsewhere (the home screen, "This computer") can open a folder or a file
- * directly: `/files?file=/home/unowork/Documents/report.docx`.
+ * directly: `/files?file=/home/unowork/Documents/report.docx`. `computer` is
+ * the computer picked in the location menu; without it Files follows the app's.
  */
 export interface FilesRouteSearch {
   readonly path?: string;
@@ -12,6 +13,8 @@ export interface FilesRouteSearch {
   readonly bucket?: number;
   /** Folder inside the bucket, ending in "/". */
   readonly prefix?: string;
+  /** Environment id of the computer picked in Files. */
+  readonly computer?: string;
 }
 
 function pathParam(value: unknown): string | undefined {
@@ -21,16 +24,21 @@ function pathParam(value: unknown): string | undefined {
 }
 
 export function parseFilesRouteSearch(search: Record<string, unknown>): FilesRouteSearch {
+  const computer =
+    typeof search["computer"] === "string" && search["computer"]
+      ? { computer: search["computer"] }
+      : {};
   if (search["cloud"] === "1" || search["cloud"] === 1 || search["cloud"] === true) {
     const bucket = Number(search["bucket"]);
     const prefix = typeof search["prefix"] === "string" ? search["prefix"] : "";
     return {
       cloud: "1",
+      ...computer,
       ...(Number.isInteger(bucket) && bucket > 0 ? { bucket } : {}),
       ...(prefix && prefix.endsWith("/") && !prefix.includes("..") ? { prefix } : {}),
     };
   }
   const path = pathParam(search["path"]);
   const file = pathParam(search["file"]);
-  return { ...(path ? { path } : {}), ...(file ? { file } : {}) };
+  return { ...computer, ...(path ? { path } : {}), ...(file ? { file } : {}) };
 }

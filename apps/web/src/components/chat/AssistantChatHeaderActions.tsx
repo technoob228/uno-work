@@ -129,7 +129,6 @@ export function AssistantChatHeaderActions({
             view: "profile",
             env: uno.environmentId,
             project: uno.projectId,
-            tab: "memory",
           },
         })
       : devMode

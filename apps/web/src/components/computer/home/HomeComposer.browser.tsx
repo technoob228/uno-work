@@ -183,6 +183,23 @@ describe("Home's first screen after signing in to Claude", () => {
     await expect.element(screen.getByTestId("home-permissions")).not.toBeInTheDocument();
   });
 
+  it("after the first screen: reasoning and permissions fold into one icon", async () => {
+    providers.list = [
+      uno,
+      claudeWith({ status: "authenticated", type: "max", label: "Claude Max Subscription" }),
+    ];
+    const { screen } = await mountHome();
+    const chips = screen.getByTestId("home-composer-chips");
+    await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
+    await expect.element(chips.getByText(/High/)).not.toBeInTheDocument();
+    await screen.getByTestId("home-composer-settings").click();
+    await expect.element(screen.getByText("Reasoning")).toBeVisible();
+    await expect.element(screen.getByTestId("home-permission-full-access")).toBeVisible();
+    // Open, its portal outlives the page's cleanup and breaks the next test.
+    await userEvent.keyboard("{Escape}");
+    await expect.element(screen.getByTestId("home-permission-full-access")).not.toBeInTheDocument();
+  });
+
   it("without a Claude plan: Uno · Smart, and the model can still be changed", async () => {
     providers.list = [uno, claudeWith({ status: "authenticated", type: "unoAi", label: "Uno AI" })];
     const screen = await mountFirstScreen();

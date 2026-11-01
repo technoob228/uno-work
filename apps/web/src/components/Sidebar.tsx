@@ -2297,30 +2297,29 @@ export default function Sidebar() {
   const { updateSettings: updateSidebarSettings } = useUpdateSettings();
   // Computers are only spoken of when the sidebar shows more than one.
   const dThisComputer: string | null = activeEnvironmentId ?? primaryEnvironmentId;
+  const dKnownComputers = useSidebarDComputers();
+  // Every connected computer, with projects here or not (Misha 01.11: "show them all").
   const dComputerIds = useMemo(
     () => [
-      ...new Set(
-        projects
+      ...new Set([
+        ...dKnownComputers.flatMap((computer) =>
+          computer.environmentId === null ? [] : [computer.environmentId as EnvironmentId],
+        ),
+        ...projects
           .filter((project) => !isAssistantProjectId(project.id))
           .map((project) => project.environmentId),
-      ),
+      ]),
     ],
-    [projects],
+    [dKnownComputers, projects],
   );
-  const dMultiComputer = machineScope.kind === "all-environments" && dComputerIds.length > 1;
-  const dKnownComputers = useSidebarDComputers();
-  // Group by computer: every computer with projects here, and the ones asleep.
+  // Group by computer: every computer, the ones asleep too.
   const dComputers = useMemo(() => {
-    const listed = dKnownComputers.filter((computer) =>
-      computer.environmentId === null
-        ? computer.status === "sleeping"
-        : dComputerIds.includes(computer.environmentId as EnvironmentId),
-    );
     const missing = dComputerIds.filter(
-      (environmentId) => !listed.some((computer) => computer.environmentId === environmentId),
+      (environmentId) =>
+        !dKnownComputers.some((computer) => computer.environmentId === environmentId),
     );
     return [
-      ...listed,
+      ...dKnownComputers,
       ...missing.map((environmentId) => ({
         environmentId,
         key: environmentId,
@@ -2329,6 +2328,7 @@ export default function Sidebar() {
       })),
     ];
   }, [dComputerIds, dKnownComputers, resolveEnvironmentLabel]);
+  const dMultiComputer = machineScope.kind === "all-environments" && dComputers.length > 1;
   // Only the view menu asks the other computers for their home folders.
   const dHomePaths = useHomeFolderPaths(sidebarViewMenu ? dComputerIds : NO_ENVIRONMENT_IDS);
   // A computer's home folder: its chats are the "Home folder" group, not a project.
@@ -2527,7 +2527,7 @@ export default function Sidebar() {
           : null,
     [dComputerIds, dMultiComputer, dSpace, dStoredComputerPicks],
   );
-  const dComputersInView = dComputerPicks ?? dComputerIds;
+  const dComputersInView = dComputerPicks ?? dComputers;
   // What the funnel offers: the projects on the computers in view.
   const dFilterProjectKeys = useMemo(
     () =>

@@ -185,7 +185,7 @@ describe("sidebar: '+' opens the gallery", () => {
 });
 
 describe("its page", () => {
-  it("links its own Telegram bot on Apps & Telegram", async () => {
+  it("links its own Telegram bot on Connections", async () => {
     tabInUrl = "apps";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
@@ -220,12 +220,13 @@ describe("its page", () => {
       .toHaveTextContent("Sees everything on this computer");
   });
 
-  it("the permission level is changed in one place: General", async () => {
+  it("the permission level is changed in one place: Environment", async () => {
+    tabInUrl = "where";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
     await expect
-      .element(screen.getByTestId("assistant-profile-tab-general"))
+      .element(screen.getByTestId("assistant-profile-tab-where"))
       .toHaveAttribute("aria-selected", "true");
     await expect.element(screen.getByTestId("assistant-mode-switch")).toBeInTheDocument();
     expect(screen.getByTestId("assistant-profile-access").query()).toBeNull();
@@ -236,10 +237,10 @@ describe("its page", () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );
-    await screen.getByTestId("assistant-profile-tab-memory").click();
+    await screen.getByTestId("assistant-profile-tab-apps").click();
     expect(navigate).toHaveBeenCalledWith({
       to: "/assistants",
-      search: { view: "profile", env: "env-1", project: "assistant-scout", tab: "memory" },
+      search: { view: "profile", env: "env-1", project: "assistant-scout", tab: "apps" },
       replace: true,
     });
   });
@@ -269,11 +270,9 @@ describe("its page", () => {
       .toBeInTheDocument();
     await expect.element(screen.getByTestId("assistant-profile-where")).toBeInTheDocument();
     await expect.element(screen.getByText("The AI it runs on")).toBeInTheDocument();
-    expect(screen.getByTestId("assistant-mode-switch").query()).toBeNull();
   });
 
-  it("Memory & instructions: edited on its own tab, not on another page", async () => {
-    tabInUrl = "memory";
+  it("Role & instructions: edited on the first tab, not on another page", async () => {
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
     );

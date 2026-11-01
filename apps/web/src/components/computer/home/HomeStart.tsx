@@ -97,7 +97,9 @@ import {
   useStore,
 } from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
+import { AddEnvModal } from "../../AddEnvModal";
 import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
+import { ConnectChoiceDialog } from "./ConnectChoiceDialog";
 import type { ProjectUploadFile } from "../../../projectUpload";
 import { readDroppedUploadFiles } from "../../../projectUploadPickers";
 import { AssistantQuiz } from "../../assistants/AssistantQuiz";
@@ -297,6 +299,8 @@ export function HomeStart({
     [openUpload],
   );
   const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);
+  const [connectChoice, setConnectChoice] = useState(false);
+  const [addComputer, setAddComputer] = useState(false);
   // "An AI assistant": the quiz → the "Your assistant" card → "Set it up"
   // sends the answers to Uno on this computer ("set yourself up from these").
   const [assistantQuiz, setAssistantQuiz] = useState(false);
@@ -568,14 +572,6 @@ export function HomeStart({
   };
 
   if (!devMode) {
-    // The same row of pills as the first screen: their own hints (from their
-    // chats, files, sites — or, with few projects, how to get on board) when
-    // there are some, else the three examples.
-    const personalStarters = (
-      setupHome.starters.length > 0 ? setupHome.starters : homeStarters
-    ).filter((starter) => starter.source !== "generic");
-    const simpleStarters =
-      personalStarters.length > 0 ? personalStarters.slice(0, 3) : FIRST_SCREEN_EXAMPLES;
     const widgetBlocks = shown.filter((id) => !isHomeFixedBlockId(id));
     const waiting = attentionThreads(threads, now, skippedQuestions);
     // A newcomer (no chats yet) gets one box, the pills and one quiet line, nothing else:
@@ -605,23 +601,32 @@ export function HomeStart({
       <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
         <button
           type="button"
-          onClick={() => setOwnTools("agent")}
+          onClick={() => setConnectChoice(true)}
           className="hover:text-foreground hover:underline"
-          data-testid="home-own-agent"
+          data-testid="home-connect-choice"
         >
-          Give this computer to your local agent →
+          Connect your AI or other computers →
         </button>
       </p>
     );
     const ownToolsDialog = (
-      <OwnToolsDialog
-        open={ownTools !== null}
-        tab={ownTools ?? "agent"}
-        onTabChange={setOwnTools}
-        onOpenChange={(open) => {
-          if (!open) setOwnTools(null);
-        }}
-      />
+      <>
+        <ConnectChoiceDialog
+          open={connectChoice}
+          onOpenChange={setConnectChoice}
+          onUseFromAi={() => setOwnTools("agent")}
+          onAddComputer={() => setAddComputer(true)}
+        />
+        <AddEnvModal open={addComputer} onOpenChange={setAddComputer} />
+        <OwnToolsDialog
+          open={ownTools !== null}
+          tab={ownTools ?? "agent"}
+          onTabChange={setOwnTools}
+          onOpenChange={(open) => {
+            if (!open) setOwnTools(null);
+          }}
+        />
+      </>
     );
     if (assistantQuiz) {
       return (
@@ -724,12 +729,10 @@ export function HomeStart({
         <div className="flex flex-col gap-3">
           <HomeComposer
             environmentId={environmentId}
-            starters={simpleStarters}
-            onStarter={onStarter}
+            starters={[]}
             defaultFolder={setupHome.project}
             onStart={onStartTask}
             placeholder="What do you want to build?"
-            onUploadProject={() => openUpload()}
             onDropProject={dropProject}
           />
           {ownAgentLine}

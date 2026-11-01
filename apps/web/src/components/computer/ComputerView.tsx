@@ -52,7 +52,6 @@ import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
 import { ComputerCloudStorageRow } from "./ComputerCloudStorageRow";
 import { ComputerHero } from "./ComputerHero";
 import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
-import { computerPowerState } from "./computerFormat";
 import {
   appAiQueryKey,
   appAiQueryOptions,
@@ -401,12 +400,6 @@ export function ComputerView() {
         </Notice>
       ) : null}
       {stateQuery.isSuccess && !computer?.linked ? <UnlinkedNote /> : null}
-      {stateQuery.isSuccess && box === null && (computer?.candidates.length ?? 0) > 0 ? (
-        <CloudComputers
-          candidates={computer?.candidates ?? []}
-          onPick={(id) => setPickedBoxId(id)}
-        />
-      ) : null}
     </>
   );
 
@@ -749,52 +742,6 @@ function Notice({ title, children }: { title: string; children: React.ReactNode 
       </div>
       <h1 className="mt-4 text-xl font-semibold tracking-tight">{title}</h1>
       <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">{children}</p>
-    </div>
-  );
-}
-
-const PICKABLE_COMPUTERS_SHOWN = 3;
-
-/**
- * Cloud computers this one can switch to: archived ones can't be opened from
- * here (they stay in the Uno console), so only live ones show, "on" first, the
- * rest behind "N more" (15.10: a long wall of archived chips said nothing).
- */
-function CloudComputers({
-  candidates,
-  onPick,
-}: {
-  candidates: ReadonlyArray<{ id: number; name: string; status: string }>;
-  onPick: (boxId: number) => void;
-}) {
-  const [showAll, setShowAll] = useState(false);
-  const pickable = candidates
-    .filter((candidate) => candidate.status !== "archived" && candidate.status !== "deleted")
-    .toSorted(
-      (a, b) =>
-        Number(computerPowerState(b.status) === "on") -
-        Number(computerPowerState(a.status) === "on"),
-    );
-  if (pickable.length === 0) return null;
-  const shown = showAll ? pickable : pickable.slice(0, PICKABLE_COMPUTERS_SHOWN);
-  const hidden = pickable.length - shown.length;
-  return (
-    <div className="-mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-      <span>Your Uno computers:</span>
-      {shown.map((candidate) => (
-        <Button key={candidate.id} size="xs" variant="outline" onClick={() => onPick(candidate.id)}>
-          <MonitorIcon />
-          {candidate.name}
-          <span className="text-muted-foreground">
-            · {computerPowerState(candidate.status) === "on" ? "on" : candidate.status}
-          </span>
-        </Button>
-      ))}
-      {hidden > 0 ? (
-        <Button size="xs" variant="ghost" onClick={() => setShowAll(true)}>
-          {hidden} more
-        </Button>
-      ) : null}
     </div>
   );
 }

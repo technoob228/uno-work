@@ -137,24 +137,18 @@ export const flows = [
 
   flow("home-show-the-agent", async ({ page, url, step, shot }) => {
     await step("open Home", () => openDemoHome(page, url));
-    await step("the chip sits next to Add a project", async () => {
-      const chips = await page
-        .getByTestId("home-starters")
-        .locator("button")
-        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
-      const at = chips.indexOf("home-upload-project");
-      if (at === -1 || chips[at + 1] !== "home-show-agent")
-        throw new Error(`chips: ${chips.join(", ")}`);
+    await step("no pills under the box once there are chats", async () => {
+      if (await page.getByTestId("home-starters").count()) throw new Error("pills under the box");
     });
-    await step("the chip opens the same popover", async () => {
-      await page.getByTestId("home-show-agent").click();
+    await step("the box's button opens the popover", async () => {
+      await page.getByTestId("record-button").click();
       await page.getByTestId("record-popup").waitFor();
       await sleep(400);
     });
     await shot("popover");
     await page.keyboard.press("Escape");
     await step("record a few seconds", async () => {
-      await startRecording(page, { trigger: "home-show-agent" });
+      await startRecording(page);
       await sleep(3000);
       await page.getByTestId("recording-stop").click();
     });

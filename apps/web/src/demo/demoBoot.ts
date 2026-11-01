@@ -325,6 +325,21 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
       return serverConfigFor(machine);
     case WS_METHODS.serverGetSettings:
       return serverConfigFor(machine).settings;
+    case WS_METHODS.myComputerStatus:
+      return { enabled: WORLD.pair === "on", computers: [] };
+    case WS_METHODS.myComputerPair:
+      return {
+        code: "7KQ2-M9XD",
+        url: "https://uno.place/connect",
+        commands: {
+          mac: "curl -fsSL https://uno.place/connect.sh | sh -s 7KQ2-M9XD",
+          linux: "curl -fsSL https://uno.place/connect.sh | sh -s 7KQ2-M9XD",
+          windows: "irm https://uno.place/connect.ps1 | iex",
+        },
+        expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
+      };
+    case WS_METHODS.myComputerPairStatus:
+      return { state: "waiting", step: null, message: null, computerId: null };
     case WS_METHODS.filesystemBrowse: {
       const partial = typeof body.partialPath === "string" ? body.partialPath : "~";
       const base = partial.startsWith("~") ? machine.home + partial.slice(1) : partial;
@@ -594,8 +609,13 @@ function accountBoxes() {
     wire(MACHINES.work.boxId!, MACHINES.work.label, "running"),
     wire(MACHINES.product.boxId!, MACHINES.product.label, "running"),
     wire(SLEEPING_BOX.id, SLEEPING_BOX.name, "sleeping"),
+    ...(WORLD.fleet === "on"
+      ? FLEET.map((name, index) => wire(9100 + index, name, "sleeping"))
+      : []),
   ];
 }
+
+const FLEET = ["kinship", "stage-work", "outreach", "qa-demo", "work-build"];
 
 function cloudState() {
   return {
@@ -620,6 +640,9 @@ function cloudState() {
                   // Multi-computer variants: `__mcDemo.wake("product")` wakes it.
                   isWoken("product") ? "running" : "sleeping",
                 ),
+                ...(WORLD.fleet === "on"
+                  ? FLEET.map((name, index) => box(9100 + index, name, "sleeping"))
+                  : []),
               ]
             : []),
         ]

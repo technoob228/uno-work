@@ -4,17 +4,15 @@
  * click Telegram, done"):
  *
  * - who it is: its face (click → Upload / Emoji / Persona), name, status;
- * - the one next step: Connect Telegram (@BotFather, paste the token, then
- *   Start in Telegram) until a bot is linked; Slack and its email are small
- *   rows under it;
- * - its permission level (one switch), where it can look (its projects,
- *   changed right there), where it works, the apps it
- *   may open and the AI (one per computer) — in plain sight (29.10);
- * - its chats and what is on it now, its memory and instructions (edited
- *   right on the page);
- * - Advanced, folded: its email rules, role, routines,
- *   the team and "Set up again";
- * - its automations (28.10): what it does on a schedule or on an event.
+ * - Role & instructions (Misha 01.11): its role, what it should do, its memory,
+ *   routines and team, edited right on the page;
+ * - Environment: its computer, its projects, its permission level and the AI
+ *   (one per computer);
+ * - Connections: how you reach it (the one next step: Connect Telegram until a
+ *   bot is linked; Slack, MCP, email) and what it can use (apps, MCP servers,
+ *   skills, saved logins);
+ * - Tasks & automations: what it does on a schedule or on an event (28.10), its
+ *   chats and what is on it now.
  *
  * Everything here reads and changes what its computer keeps. The mock's page
  * (`?demo=w0138`) is `AssistantProfilePage.tsx`.
@@ -29,6 +27,7 @@ import {
   MailIcon,
   MessageCircleIcon,
   PencilIcon,
+  PlugIcon,
   RotateCcwIcon,
   SendIcon,
   SlackIcon,
@@ -37,15 +36,18 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
+import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { getAssistant, getAssistantMail } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
+import { useStore } from "../../store";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { SidebarThreadSummary } from "../../types";
 import { resolveSidebarThreadStatus } from "../Sidebar.logic";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { TelegramWizard } from "../assistant/TelegramWizard";
+import { OwnToolsDialog, type OwnToolsTab } from "../setup/OwnToolsDialog";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
@@ -169,6 +171,12 @@ function TalkRow(props: {
 function WhereYouTalk(props: { readonly member: TeamMember }) {
   const { member } = props;
   const [connecting, setConnecting] = useState<ConnectChannel | null>(null);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpTab, setMcpTab] = useState<OwnToolsTab>("agent");
+  // The key is made for the computer open here: another computer's goes from there.
+  const openComputer = useStore((state) => state.activeEnvironmentId);
+  const primaryComputer = usePrimaryEnvironmentId();
+  const onOpenComputer = member.environmentId === (openComputer ?? primaryComputer);
   const telegram = member.summary?.telegram;
   const slack = member.summary?.slack;
   const mail = useQuery({
@@ -227,6 +235,27 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
         }
         testId="assistant-talk-slack"
       />
+      <TalkRow
+        icon={<PlugIcon className="size-3.5" />}
+        label="MCP · its computer in Claude, ChatGPT, Cursor"
+        value={
+          member.revoked ? (
+            "not linked"
+          ) : onOpenComputer ? (
+            <button
+              type="button"
+              onClick={() => setMcpOpen(true)}
+              className="cursor-pointer text-primary hover:underline"
+              data-testid="assistant-talk-mcp-link"
+            >
+              Connect
+            </button>
+          ) : (
+            "from its computer"
+          )
+        }
+        testId="assistant-talk-mcp"
+      />
       {view?.available && view.address ? (
         <TalkRow
           icon={<MailIcon className="size-3.5" />}
@@ -239,6 +268,12 @@ function WhereYouTalk(props: { readonly member: TeamMember }) {
         icon={<MessageCircleIcon className="size-3.5" />}
         label="Here in Uno Work"
         value="always"
+      />
+      <OwnToolsDialog
+        open={mcpOpen}
+        tab={mcpTab}
+        onTabChange={setMcpTab}
+        onOpenChange={setMcpOpen}
       />
       <ConnectChannelDialog
         environmentId={member.environmentId as EnvironmentId}
@@ -567,12 +602,7 @@ export function AssistantProfileSimple(props: {
                 role="tabpanel"
                 data-testid="assistant-profile-panel-general"
               >
-                <Section title="Permission level" testId="assistant-profile-mode">
-                  <div className="p-2">
-                    <AssistantModeSwitch member={member} />
-                  </div>
-                </Section>
-                <Section title="Role and routines">
+                <Section title="Role">
                   <Row label="Role">
                     <div className="flex flex-wrap items-center gap-1">
                       {profile.roles.length > 0 ? (
@@ -593,6 +623,26 @@ export function AssistantProfileSimple(props: {
                     </div>
                   </Row>
                   <TeamRoutines member={member} machine={homeMachine} />
+                </Section>
+
+                <Section
+                  title={
+                    member.isUno
+                      ? "Instructions and memory · shared with your helpers"
+                      : "Instructions and memory · shared with Uno"
+                  }
+                >
+                  {/* Edited right here (29.10): "Edit" used to open an older page of it. */}
+                  <div className="px-3 py-2" data-testid="assistant-profile-memory-editor">
+                    <MemoryBlock
+                      name={name}
+                      environmentId={member.environmentId as EnvironmentId}
+                      projectId={member.projectId}
+                      waking={false}
+                      onWake={() => undefined}
+                      jobFirst
+                    />
+                  </div>
                 </Section>
 
                 <Section
@@ -696,10 +746,16 @@ export function AssistantProfileSimple(props: {
                   <TeamWorksOn member={member} />
                 </Section>
 
-                {/* Its projects are changed right here; the level has its one switch above (29.10). */}
-                <Section title="Where it can look" testId="assistant-profile-where">
+                {/* Its projects are changed right here; the level has its one switch below (29.10). */}
+                <Section title="Its projects" testId="assistant-profile-where">
                   <div className="px-3 py-2.5">
                     <TeamPresetEditor member={member} nameOf={nameOf} projectsOnly />
+                  </div>
+                </Section>
+
+                <Section title="Permission level" testId="assistant-profile-mode">
+                  <div className="p-2">
+                    <AssistantModeSwitch member={member} />
                   </div>
                 </Section>
 
@@ -727,13 +783,17 @@ export function AssistantProfileSimple(props: {
                 role="tabpanel"
                 data-testid="assistant-profile-panel-apps"
               >
-                {/* The one next step, then the other ways to reach it. */}
-                {!member.revoked && !telegramLinked && member.isUno ? (
-                  <ConnectTelegramCard member={member} />
-                ) : null}
-                <WhereYouTalk member={member} />
+                {/* How you reach it: the one next step, then the other ways. */}
+                <Section title="How you reach it" testId="assistant-profile-reach">
+                  <div className="flex flex-col gap-3 p-2">
+                    {!member.revoked && !telegramLinked && member.isUno ? (
+                      <ConnectTelegramCard member={member} />
+                    ) : null}
+                    <WhereYouTalk member={member} />
+                  </div>
+                </Section>
                 <Section
-                  title="Apps it can open"
+                  title="What it can use"
                   testId="assistant-profile-can-use"
                   action={
                     <button
@@ -746,6 +806,26 @@ export function AssistantProfileSimple(props: {
                   }
                 >
                   <TeamConnectors member={member} place={place} nameOf={nameOf} />
+                  <Row label="Skills">
+                    <button
+                      type="button"
+                      onClick={() => void navigate({ to: "/settings/skills" })}
+                      className="cursor-pointer text-xs text-primary hover:underline"
+                      data-testid="assistant-profile-skills"
+                    >
+                      Manage skills
+                    </button>
+                  </Row>
+                  <Row label="Passwords">
+                    <button
+                      type="button"
+                      onClick={() => void navigate({ to: "/settings/vault" })}
+                      className="cursor-pointer text-xs text-primary hover:underline"
+                      data-testid="assistant-profile-logins"
+                    >
+                      Saved logins and keys
+                    </button>
+                  </Row>
                 </Section>
 
                 {!member.revoked ? (
@@ -763,30 +843,6 @@ export function AssistantProfileSimple(props: {
                     </Section>
                   )}
                 />
-              </div>
-            ) : null}
-            {tab === "memory" ? (
-              <div
-                className="flex flex-col gap-6"
-                role="tabpanel"
-                data-testid="assistant-profile-panel-memory"
-              >
-                <Section
-                  title={
-                    member.isUno ? "Memory · shared with your helpers" : "Memory · shared with Uno"
-                  }
-                >
-                  {/* Edited right here (29.10): "Edit" used to open an older page of it. */}
-                  <div className="px-3 py-2" data-testid="assistant-profile-memory-editor">
-                    <MemoryBlock
-                      name={name}
-                      environmentId={member.environmentId as EnvironmentId}
-                      projectId={member.projectId}
-                      waking={false}
-                      onWake={() => undefined}
-                    />
-                  </div>
-                </Section>
               </div>
             ) : null}
             {tab === "tasks" ? (

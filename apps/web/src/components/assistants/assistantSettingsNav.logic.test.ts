@@ -33,15 +33,16 @@ describe("one page for an assistant's settings", () => {
   });
 
   it("opens a tab by the address; General when none or unknown", () => {
-    expect(assistantSettingsSearch(mia, "memory")).toEqual({
+    expect(assistantSettingsSearch(mia, "apps")).toEqual({
       view: "profile",
       env: "env-cloud",
       project: "assistant-mia",
-      tab: "memory",
+      tab: "apps",
     });
     expect(assistantSettingsSearch(mia, "general")).not.toHaveProperty("tab");
     expect(assistantProfileTab("apps")).toBe("apps");
     expect(assistantProfileTab("nope")).toBe("general");
+    expect(assistantProfileTab("memory")).toBe("general");
     expect(assistantProfileTab(undefined)).toBe("general");
   });
 

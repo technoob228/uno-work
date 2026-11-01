@@ -19,6 +19,8 @@ import type {
 
 import { APP_BASE_NAME } from "../branding";
 import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
+import { localComputer } from "../localComputer/localComputerStore";
+import { useMyComputers } from "../localComputer/useMyComputers";
 import { readHostedPairingRequest } from "../hostedPairing";
 import { trackBringYourOwnClick } from "../lib/funnel";
 import { cn } from "../lib/utils";
@@ -66,6 +68,8 @@ interface AddEnvModalProps {
 }
 type SavedBackendMode = "remote" | "ssh";
 
+const CHOICE_CARD =
+  "flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-accent";
 const ITEM_ROW_CLASSNAME = "border-t border-border/60 px-4 py-4 first:border-t-0 sm:px-5";
 const ITEM_ROW_INNER_CLASSNAME =
   "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between";
@@ -240,6 +244,12 @@ export function AddEnvModal({ open, onOpenChange, initialStep }: AddEnvModalProp
 }
 
 function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step: Step) => void }) {
+  // One command instead of SSH or a network route, while the account has it.
+  const { enabled: canPair } = useMyComputers(usePrimaryEnvironmentId());
+  const bringYourOwn = () => {
+    trackBringYourOwnClick();
+    setStep("custom");
+  };
   return (
     <>
       <div className="flex flex-col gap-1 border-b border-border p-6">
@@ -248,12 +258,11 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
             <PlusIcon className="size-4" />
           </div>
           <div>
-            <DialogPrimitive.Title className="flex items-center gap-2 font-heading font-semibold text-lg leading-none">
-              Add a machine
-              <Explain term="machine" technical />
+            <DialogPrimitive.Title className="flex items-center gap-2 font-heading font-semibold text-lg leading-tight">
+              Add a computer
             </DialogPrimitive.Title>
             <DialogPrimitive.Description className="mt-1 text-muted-foreground text-sm">
-              Where should the agent run? A machine is where your files and agents actually run.
+              Your agents, files and apps run on it.
             </DialogPrimitive.Description>
           </div>
         </div>
@@ -261,44 +270,70 @@ function ChoiceStep({ onClose, setStep }: { onClose: () => void; setStep: (step:
       <div className="grid grid-cols-2 gap-3 p-6">
         <button
           type="button"
+          data-testid="add-env-cloud"
           onClick={() => setStep("uno")}
-          className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/4"
+          className={CHOICE_CARD}
         >
           <div className="grid size-9 place-items-center rounded-lg bg-primary/12 text-primary">
             <CloudIcon className="size-4" />
           </div>
-          <div className="font-medium text-sm">Uno box</div>
+          <div className="font-medium text-sm">New cloud computer</div>
           <div className="text-muted-foreground text-xs leading-relaxed">
-            A ready-made machine in the Uno cloud, up in about 30 seconds. Agents pre-installed,
-            billed by Uno.
+            Always online, agents already installed. Billed by Uno.
           </div>
           <Badge variant="outline" className="mt-auto self-start text-[10px]">
             Recommended
           </Badge>
         </button>
-        <button
-          type="button"
-          data-testid="add-env-bring-your-own"
-          onClick={() => {
-            trackBringYourOwnClick();
-            setStep("custom");
-          }}
-          className="flex flex-col gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-primary/4"
-        >
-          <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
-            <LaptopIcon className="size-4" />
-          </div>
-          <div className="font-medium text-sm">Your own machine</div>
-          <div className="text-muted-foreground text-xs leading-relaxed">
-            Connect a computer or server you run. You need SSH or a direct network route: Uno
-            doesn't provide a tunnel. Updates and backups are on you.
-          </div>
-          <Badge variant="outline" className="mt-auto self-start text-[10px] text-muted-foreground">
-            Bring your own
-          </Badge>
-        </button>
+        {canPair ? (
+          <button
+            type="button"
+            data-testid="add-env-pair"
+            onClick={() => {
+              onClose();
+              localComputer.openConnect();
+            }}
+            className={CHOICE_CARD}
+          >
+            <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
+              <LaptopIcon className="size-4" />
+            </div>
+            <div className="font-medium text-sm">A computer you own</div>
+            <div className="text-muted-foreground text-xs leading-relaxed">
+              Mac, Windows or Linux. Paste one command, disconnect any time.
+            </div>
+          </button>
+        ) : (
+          <button
+            type="button"
+            data-testid="add-env-bring-your-own"
+            onClick={bringYourOwn}
+            className={CHOICE_CARD}
+          >
+            <div className="grid size-9 place-items-center rounded-lg bg-muted text-muted-foreground">
+              <LaptopIcon className="size-4" />
+            </div>
+            <div className="font-medium text-sm">A computer you own</div>
+            <div className="text-muted-foreground text-xs leading-relaxed">
+              Connect a computer or server you run. You need SSH or a direct network route: Uno
+              doesn't provide a tunnel. Updates and backups are on you.
+            </div>
+          </button>
+        )}
       </div>
-      <div className="flex justify-end gap-2 border-t border-border bg-muted/40 px-6 py-4">
+      <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/40 px-6 py-4">
+        {canPair ? (
+          <button
+            type="button"
+            data-testid="add-env-bring-your-own"
+            onClick={bringYourOwn}
+            className="text-muted-foreground text-xs hover:text-foreground hover:underline"
+          >
+            Connect by SSH or address
+          </button>
+        ) : (
+          <span />
+        )}
         <Button variant="outline" size="sm" onClick={onClose}>
           Cancel
         </Button>

@@ -113,6 +113,7 @@ export function CloudBrowser({
   uploads,
   onNavigate,
   onOpenComputer,
+  onPickComputer,
   embedded,
   onShare,
   narrow = false,
@@ -123,6 +124,7 @@ export function CloudBrowser({
   uploads: ReturnType<typeof useFilesUploads>;
   onNavigate: (bucketId: number | null, prefix: string) => void;
   onOpenComputer: () => void;
+  onPickComputer?: ((environmentId: EnvironmentId) => void) | undefined;
   /** Inside another app (Uno Drive): its own leading control, a name for the root. */
   embedded?: { readonly rootLabel: string; readonly leading?: React.ReactNode };
   /** A phone or the panel's column: names of buttons give way to the path. */
@@ -293,6 +295,8 @@ export function CloudBrowser({
         ) : (
           <FilesLocationSwitch
             location="cloud"
+            environmentId={environmentId}
+            onPickComputer={onPickComputer}
             onComputer={onOpenComputer}
             onCloud={() => onNavigate(null, "")}
             narrow={narrow}

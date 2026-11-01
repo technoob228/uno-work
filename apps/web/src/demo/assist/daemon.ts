@@ -744,6 +744,10 @@ export function accountHandlers(): HttpHandler[] {
     const list = [wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier)];
     if (live())
       list.push(wire(MACHINES.product.boxId!, MACHINES.product.label, "sleeping", "free"));
+    if (live() && world.fleet === "on")
+      ["kinship", "stage-work", "outreach", "qa-demo", "work-build"].forEach((name, index) =>
+        list.push(wire(9100 + index, name, "sleeping", "plus")),
+      );
     return withOwnComputer(list);
   };
   return [

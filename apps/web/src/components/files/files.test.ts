@@ -54,6 +54,18 @@ describe("file kinds and paths", () => {
     });
     expect(parseFilesRouteSearch({ path: "relative", file: 3 })).toEqual({});
   });
+
+  it("keeps the computer picked in Files, on a computer and in Cloud storage", () => {
+    expect(parseFilesRouteSearch({ computer: "env-1", path: "/home/u" })).toEqual({
+      computer: "env-1",
+      path: "/home/u",
+    });
+    expect(parseFilesRouteSearch({ computer: "env-1", cloud: "1" })).toEqual({
+      cloud: "1",
+      computer: "env-1",
+    });
+    expect(parseFilesRouteSearch({ computer: 7 })).toEqual({});
+  });
 });
 
 describe("file openers", () => {

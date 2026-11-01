@@ -31,7 +31,12 @@ import {
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
-import { usePrimaryEnvironmentDescriptor } from "../../environments/primary";
+import {
+  usePrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentId,
+} from "../../environments/primary";
+import { localComputer } from "../../localComputer/localComputerStore";
+import { useMyComputers } from "../../localComputer/useMyComputers";
 import {
   removeSavedEnvironment,
   useSavedEnvironmentRegistryStore,
@@ -378,7 +383,9 @@ export function WorkspaceSettings() {
   );
 
   const openAddBox = () => setAddModal({ open: true, step: "uno" });
-  const openConnectComputer = () => setAddModal({ open: true, step: "custom" });
+  const { enabled: canPair } = useMyComputers(usePrimaryEnvironmentId());
+  const openConnectComputer = () =>
+    canPair ? localComputer.openConnect() : setAddModal({ open: true, step: "custom" });
 
   const addModalElement = (
     <AddEnvModal

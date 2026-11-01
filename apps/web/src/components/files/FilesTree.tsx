@@ -206,6 +206,7 @@ export const FilesTree = memo(function FilesTree(props: {
   compactSwitch?: boolean | undefined;
   onOpenCloud: () => void;
   onOpenHome: () => void;
+  onPickComputer: (environmentId: EnvironmentId) => void;
   onCreate: (kind: FilesCreateKind) => void;
   onUpload: (files: UploadFiles) => void;
   children?: ReactNode;
@@ -295,6 +296,8 @@ export const FilesTree = memo(function FilesTree(props: {
           <SidebarShowButton />
           <FilesLocationSwitch
             location="computer"
+            environmentId={props.environmentId}
+            onPickComputer={props.onPickComputer}
             onComputer={props.onOpenHome}
             onCloud={props.onOpenCloud}
           />
