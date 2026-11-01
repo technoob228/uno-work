@@ -3280,6 +3280,29 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc of both groups on one socket", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          myComputer: { status: Effect.succeed({ enabled: true, computers: [] }) },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [computers, config] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all([
+            client[WS_METHODS.myComputerStatus]({}),
+            client[WS_METHODS.serverGetConfig]({}),
+          ]),
+        ),
+      );
+
+      assert.deepEqual(computers, { enabled: true, computers: [] });
+      assert.isDefined(config.cwd);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.searchEntries", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

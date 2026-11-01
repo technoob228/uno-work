@@ -308,6 +308,7 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 ### 13. «Connect my computer» (вехи M1–M3)
 
 - Компьютер человека (ноутбук) подключается через консоль: `apps/server/src/myComputer/`. Демон ходит в пять роутов `/api/v1/work/computers…` токеном `settings.uno.boxToken`, без него фича выключена. План и контракт кадров: `knowledge/connect-my-computer-plan-2026-10-31.md` в uno-project.
+- RPC `myComputer.*` живут отдельной группой `WsMyComputerRpcGroup` и слоем `myComputer/wsHandlers.ts`, `WsRpcGroup` собирается из неё и `WsMainRpcGroup`. Причина: основная группа упёрлась в лимит инстанцирования TypeScript, ещё десять методов дают TS2589 на чистом `tsc`. Инкрементальный запуск на машине разработчика этого не показывает, проверять надо без `tsbuildinfo` (`tsc --noEmit --composite false --incremental false`).
 - Канал: глобальный `WebSocket` рантайма с `{ headers }`, без зависимости `ws`. Проверено на Node 22 и 26 и на Bun. Node 22 при отказе upgrade шлёт `error` без `close`.
 - Инструменты `my_computer*` видны в `tools/list`, только когда компьютер подключён (`hiddenTools` в `mcpJsonRpc.ts`), но вызываются всегда: чат со старым списком получает понятную ошибку. Отмена: `notifications/cancelled` в `unoWork/http.ts`, обрыв запроса тоже доходит до `kill`.
 - Новый уровень гейта `command` в `unoWork/policy.ts`: команда выполняется сразу только при full-access. `UNO_WORK_MCP_TOOL_TIMEOUT_SEC` поднят до 1860 с под команды до 30 минут.

@@ -2514,7 +2514,25 @@ export const WsUnoComputerResourceActionRpc = Rpc.make(WS_METHODS.unoComputerRes
   error: UnoCloudRpcError,
 });
 
-export const WsRpcGroup = RpcGroup.make(
+/**
+ * "Connect my computer" apart from the main group: what `toLayer` costs the
+ * compiler grows with the square of the methods, and ten more in one group
+ * pass TypeScript's instantiation limit (TS2589 on a clean, non-incremental tsc).
+ */
+export const WsMyComputerRpcGroup = RpcGroup.make(
+  WsMyComputerStatusRpc,
+  WsMyComputerPairRpc,
+  WsMyComputerPairStatusRpc,
+  WsMyComputerDisconnectRpc,
+  WsMyComputerActivityRpc,
+  WsMyComputerImportStatusRpc,
+  WsMyComputerImportScanRpc,
+  WsMyComputerImportStartRpc,
+  WsMyComputerImportDeclineRpc,
+  WsMyComputerChatHistoryRpc,
+);
+
+export const WsMainRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
   WsServerReportClientActivityRpc,
@@ -2530,16 +2548,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsVaultImportRpc,
   WsVaultFillRpc,
   WsVaultSyncRpc,
-  WsMyComputerStatusRpc,
-  WsMyComputerPairRpc,
-  WsMyComputerPairStatusRpc,
-  WsMyComputerDisconnectRpc,
-  WsMyComputerActivityRpc,
-  WsMyComputerImportStatusRpc,
-  WsMyComputerImportScanRpc,
-  WsMyComputerImportStartRpc,
-  WsMyComputerImportDeclineRpc,
-  WsMyComputerChatHistoryRpc,
   WsProjectSyncStatusRpc,
   WsProjectSyncSetEnabledRpc,
   WsProjectSyncSyncNowRpc,
@@ -2759,3 +2767,5 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
 );
+
+export const WsRpcGroup = WsMainRpcGroup.merge(WsMyComputerRpcGroup);

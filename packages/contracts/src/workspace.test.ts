@@ -81,4 +81,16 @@ describe("legacy registry commands (migration 038)", () => {
     assert.isTrue(served.has(WS_METHODS.workspaceSyncMachines));
     assert.isTrue(served.has(WS_METHODS.workspaceSetInstructions));
   });
+
+  it("serves the computer methods, which live in a group of their own", () => {
+    const served = new Set<string>(WsRpcGroup.requests.keys());
+    const computer = Object.values(WS_METHODS).filter((method) => method.startsWith("myComputer."));
+    assert.lengthOf(computer, 10);
+    assert.deepEqual(
+      computer.filter((method) => !served.has(method)),
+      [],
+    );
+    // The main group's methods stay next to them.
+    assert.isTrue(served.has(WS_METHODS.serverGetConfig));
+  });
 });
