@@ -158,6 +158,15 @@ await step("sidebar", async ({ page, shot }) => {
   await shot();
 });
 
+await step("funnel", async ({ page, shot }) => {
+  await home(page);
+  await page.getByTestId("sidebar-d-project-filter").click();
+  await page.getByTestId("sidebar-d-computer-filter").waitFor();
+  await page.waitForTimeout(300);
+  await shot();
+  return `${await page.getByTestId("sidebar-d-computer-filter").getByRole("button").count()} rows`;
+});
+
 await step("assistant", async ({ page, shot }) => {
   await page.evaluate(() => {
     location.hash = "#/assistants?view=profile&env=env-demo-uno-work&project=assistant-mia";

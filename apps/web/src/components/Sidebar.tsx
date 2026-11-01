@@ -4544,6 +4544,18 @@ export default function Sidebar() {
             },
           ],
   );
+  const dAsleepComputerOptions: ReadonlyArray<SidebarDPickOption> = dOrderedComputers.flatMap(
+    (computer) =>
+      computer.environmentId === null
+        ? [
+            {
+              key: computer.key,
+              label: computer.label,
+              icon: <SidebarDComputerIcon computer={computer} />,
+            },
+          ]
+        : [],
+  );
   // Flag off: the 0.0.137 lists — Projects then Recents, or chats by status.
   const dLegacyProjectList = (
     <>
@@ -4720,6 +4732,7 @@ export default function Sidebar() {
                 pickedProjects={dProjectPicks}
                 onProjectsChange={setDProjectPicks}
                 computers={dComputerOptions}
+                asleepComputers={dAsleepComputerOptions}
                 pickedComputers={dComputerPicks}
                 onComputersChange={setDComputerPicks}
                 onlyMine={dOnlyMine}

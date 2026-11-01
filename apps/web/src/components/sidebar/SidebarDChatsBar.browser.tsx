@@ -82,6 +82,57 @@ afterEach(() => {
   cleanup();
 });
 
+function BarWithComputers() {
+  const [computers, setComputers] = useState<ReadonlyArray<string> | null>(null);
+  return (
+    <TooltipProvider>
+      <ul className="w-72">
+        <SidebarDChatsBar
+          title={sidebarDTitle({ projectNames: null, computerNames: computers })}
+          groupInHeader
+          levels={["project"]}
+          multiComputer
+          onLevelsChange={() => {}}
+          onOpenSettings={() => {}}
+          snoozedCount={0}
+          onShowSnoozed={() => {}}
+          onOpenArchive={() => {}}
+          projects={THREE}
+          filterProjects={[]}
+          pickedProjects={null}
+          onProjectsChange={() => {}}
+          computers={[option("MacBook"), option("uno-work")]}
+          asleepComputers={[option("kinship")]}
+          pickedComputers={computers}
+          onComputersChange={setComputers}
+          onlyMine={false}
+          onOnlyMineChange={() => {}}
+          onClearFilters={() => setComputers(null)}
+          onNewChat={() => {}}
+          newChatShortcutLabel={null}
+          onAddProject={() => {}}
+        />
+      </ul>
+    </TooltipProvider>
+  );
+}
+
+describe("the funnel's computers", () => {
+  const computer = (name: string) => page.getByTestId(`sidebar-d-computer-filter-${name}`);
+
+  it("lists every computer, one click keeps it and closes, asleep ones stay grey", async () => {
+    await render(<BarWithComputers />);
+    await openFunnel();
+    await expect.element(computer("kinship")).toBeDisabled();
+    await computer("MacBook").click();
+    await expect.element(popup()).not.toBeInTheDocument();
+    await expect.element(title()).toHaveTextContent("Chats · MacBook");
+    await openFunnel();
+    await computer("All computers").click();
+    await expect.element(title()).toHaveTextContent("All chats");
+  });
+});
+
 describe("the funnel", () => {
   it("a click keeps one project and closes: two clicks in all", async () => {
     await render(<Bar projects={THREE} />);

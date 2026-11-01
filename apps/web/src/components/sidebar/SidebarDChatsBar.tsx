@@ -17,6 +17,9 @@
  * The funnel by the title (Misha 31.10, as in T3 Code) is the short way to
  * the same project filter: two clicks to one project in any grouping. It and
  * the Projects submenu edit one choice, so each shows what the other did.
+ * Every computer is at the top of the funnel (Misha 01.11: "the computers as
+ * on the Mac, together with the funnel"): one click, the same choice as the
+ * Computers submenu; the ones asleep are listed grey, they have no chats here.
  *
  * Where grouping is picked is a switch of the mock (`sidebarViewSwitch`):
  * "header" — in this menu; "settings" — only in Settings (the menu says so and
@@ -348,8 +351,13 @@ function ProjectFilter(props: {
   options: ReadonlyArray<SidebarDPickOption>;
   picked: ReadonlyArray<string> | null;
   onChange: (picked: ReadonlyArray<string> | null) => void;
+  /** Two or more, or nothing: then the funnel is about projects alone. */
+  computers: ReadonlyArray<SidebarDPickOption>;
+  asleepComputers: ReadonlyArray<SidebarDPickOption>;
+  pickedComputers: ReadonlyArray<string> | null;
+  onComputersChange: (picked: ReadonlyArray<string> | null) => void;
 }) {
-  const { options, picked, onChange } = props;
+  const { options, picked, onChange, computers } = props;
   const [menu, dispatchMenu] = useReducer(reduceSidebarProjectScopeMenuState, {
     open: false,
     query: "",
@@ -388,10 +396,11 @@ function ProjectFilter(props: {
       : picked.length === 1
         ? items.find((item) => item.value === picked[0])
         : undefined;
+  const noun = computers.length > 0 ? "computer or project" : "project";
   const label =
     shownPicks.length > 0
-      ? `Filter by project: ${shownPicks.map((option) => option.label).join(", ")}`
-      : "Filter by project";
+      ? `Filter by ${noun}: ${shownPicks.map((option) => option.label).join(", ")}`
+      : `Filter by ${noun}`;
   return (
     <Combobox
       items={items}
@@ -449,6 +458,17 @@ function ProjectFilter(props: {
         className="w-64 overflow-hidden"
         data-testid="sidebar-d-project-filter-popup"
       >
+        {computers.length > 0 ? (
+          <ComputerFilterRows
+            computers={computers}
+            asleep={props.asleepComputers}
+            picked={props.pickedComputers}
+            onChange={(next) => {
+              props.onComputersChange(next);
+              dispatchMenu({ type: "open-changed", open: false });
+            }}
+          />
+        ) : null}
         {/* Out of sight, not gone: the keys go through this field. */}
         <div
           data-testid="sidebar-d-project-filter-search"
@@ -534,6 +554,73 @@ function ProjectFilter(props: {
   );
 }
 
+/** The funnel's computers: a row keeps only its computer and closes. */
+function ComputerFilterRows(props: {
+  computers: ReadonlyArray<SidebarDPickOption>;
+  asleep: ReadonlyArray<SidebarDPickOption>;
+  picked: ReadonlyArray<string> | null;
+  onChange: (picked: ReadonlyArray<string> | null) => void;
+}) {
+  const row = (input: {
+    key: string;
+    label: string;
+    icon: ReactNode;
+    selected: boolean;
+    asleep?: boolean;
+    onClick?: () => void;
+  }) => (
+    <button
+      key={input.key}
+      type="button"
+      disabled={input.asleep}
+      title={input.asleep ? `${input.label} is asleep` : undefined}
+      aria-pressed={input.selected}
+      data-testid={`sidebar-d-computer-filter-${input.label}`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={input.onClick}
+      className={cn(
+        "flex h-8 w-full cursor-pointer items-center gap-2 rounded-sm px-2 text-left text-sm max-sm:h-10",
+        input.asleep
+          ? "cursor-default text-muted-foreground/60"
+          : "hover:bg-accent hover:text-accent-foreground",
+      )}
+    >
+      {input.icon}
+      <span className="min-w-0 flex-1 truncate">{input.label}</span>
+      {input.selected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
+    </button>
+  );
+  return (
+    <div className="border-b border-border/70 p-1" data-testid="sidebar-d-computer-filter">
+      {row({
+        key: "all",
+        label: "All computers",
+        icon: <LaptopIcon className="size-4 text-muted-foreground" />,
+        selected: props.picked === null,
+        onClick: () => props.onChange(null),
+      })}
+      {props.computers.map((computer) =>
+        row({
+          key: computer.key,
+          label: computer.label,
+          icon: computer.icon,
+          selected: props.picked?.includes(computer.key) ?? false,
+          onClick: () => props.onChange([computer.key]),
+        }),
+      )}
+      {props.asleep.map((computer) =>
+        row({
+          key: computer.key,
+          label: computer.label,
+          icon: computer.icon,
+          selected: false,
+          asleep: true,
+        }),
+      )}
+    </div>
+  );
+}
+
 export function SidebarDChatsBar(props: {
   /** Which chats are shown: "All chats", "Chats · landing". */
   title: string;
@@ -556,6 +643,8 @@ export function SidebarDChatsBar(props: {
   pickedProjects: ReadonlyArray<string> | null;
   onProjectsChange: (picked: ReadonlyArray<string> | null) => void;
   computers: ReadonlyArray<SidebarDPickOption>;
+  /** Computers nothing is connected to: grey in the funnel, no chats to pick. */
+  asleepComputers?: ReadonlyArray<SidebarDPickOption>;
   pickedComputers: ReadonlyArray<string> | null;
   onComputersChange: (picked: ReadonlyArray<string> | null) => void;
   /** Only the chats that are the person's now; off — every chat (the default). */
@@ -691,11 +780,15 @@ export function SidebarDChatsBar(props: {
             </MenuItem>
           </MenuPopup>
         </Menu>
-        {props.filterProjects.length > 1 ? (
+        {props.filterProjects.length > 1 || showComputers ? (
           <ProjectFilter
             options={props.filterProjects}
             picked={props.pickedProjects}
             onChange={props.onProjectsChange}
+            computers={showComputers ? props.computers : []}
+            asleepComputers={props.asleepComputers ?? []}
+            pickedComputers={props.pickedComputers}
+            onComputersChange={props.onComputersChange}
           />
         ) : null}
         {filtered ? (
