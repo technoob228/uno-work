@@ -35,7 +35,8 @@ import {
 } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
-import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
+import { parseUnoWorkNote, UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
+import { isRestartCutOffError, tryAgainNoteBody } from "@t3tools/shared/turnErrorRetry";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -296,6 +297,7 @@ import {
   nextQueuedMessageToSend,
   shouldQueueSend,
   type QueuedChatMessage,
+  QUEUE_AFTER_RESTART_DELAY_MS,
   useQueuedMessages,
   useQueuedMessageStore,
 } from "../queuedMessageStore";
@@ -4003,12 +4005,22 @@ export default function ChatView(props: ChatViewProps) {
   // itself once the agent is done and nothing else needs the person.
   const queuedMessages = useQueuedMessages(routeThreadKey);
   const [messagesViewport, setMessagesViewport] = useState<HTMLDivElement | null>(null);
+  // A restart stops nothing the person decided: the daemon continues the turn
+  // itself, and if it doesn't, what waits in the queue goes on from there.
+  const cutOffByRestart = isRestartCutOffError(activeThread?.error);
+  const [restartWaitOver, setRestartWaitOver] = useState(false);
+  useEffect(() => {
+    setRestartWaitOver(false);
+    if (!cutOffByRestart) return;
+    const timer = window.setTimeout(() => setRestartWaitOver(true), QUEUE_AFTER_RESTART_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [cutOffByRestart, routeThreadKey]);
   const nextQueued = nextQueuedMessageToSend({
     queue: queuedMessages,
     phase,
     busy: isSendBusy || isConnecting || activeEnvironmentUnavailable,
     waitingForPerson: activePendingApproval !== null || pendingUserInputs.length > 0,
-    hasError: Boolean(activeThread?.error),
+    hasError: Boolean(activeThread?.error) && !restartWaitOver,
   });
   useEffect(() => {
     if (!nextQueued || sendInFlightRef.current) return;
@@ -4446,7 +4458,13 @@ export default function ChatView(props: ChatViewProps) {
     const messages = activeThread?.messages ?? [];
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index]!;
-      if (message.role === "user" && message.text.trim().length > 0) return message.text;
+      if (
+        message.role === "user" &&
+        message.text.trim().length > 0 &&
+        parseUnoWorkNote(message.text) === null
+      ) {
+        return message.text;
+      }
     }
     return null;
   }, [activeThread?.messages]);
@@ -4544,6 +4562,8 @@ export default function ChatView(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // A note, not the message again: the chat gets no copy of it.
+    const retryText = `${UNO_WORK_NOTE_PREFIX}${tryAgainNoteBody(lastUserMessageText)}`;
     // Try again stays on this chat's agent. With a broken agent the composer
     // falls back to another one; that's not the person's choice.
     const modelSelection =
@@ -4560,7 +4580,7 @@ export default function ChatView(props: ChatViewProps) {
       {
         id: messageIdForSend,
         role: "user",
-        text: lastUserMessageText,
+        text: retryText,
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -4573,7 +4593,7 @@ export default function ChatView(props: ChatViewProps) {
         message: {
           messageId: messageIdForSend,
           role: "user",
-          text: lastUserMessageText,
+          text: retryText,
           attachments: [],
         },
         modelSelection,

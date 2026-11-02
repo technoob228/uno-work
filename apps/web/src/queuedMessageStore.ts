@@ -48,6 +48,9 @@ const EMPTY_QUEUE: ReadonlyArray<QueuedChatMessage> = [];
 
 export const QUEUED_MESSAGES_STORAGE_KEY = "uno.queued-messages.v1";
 
+/** After a restart cut a turn off, how long the daemon gets to continue it itself. */
+export const QUEUE_AFTER_RESTART_DELAY_MS = 20_000;
+
 /** Older than this at a reload: waits for "Send now". */
 export const QUEUED_MESSAGE_HOLD_AFTER_MS = 30 * 60_000;
 

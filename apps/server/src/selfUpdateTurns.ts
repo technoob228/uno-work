@@ -21,8 +21,13 @@
  * 4. **Continue them.** The new daemon, started by that update
  *    ({@link isSelfUpdateRestart}), sends each of those chats one short
  *    continuation ({@link threadsToContinue}) — once per chat per update.
- *    A crash or a manual restart continues nothing: the chat shows
- *    "Stopped by a restart" and the person decides.
+ *
+ * Any other clean stop works the same way: the stopping daemon remembers who
+ * was working ({@link readRestartTurns}) and the next one continues them,
+ * unless it came back too late or just did that for the chat
+ * ({@link restartTurnsToContinue}). A crash leaves nothing to read: the chat
+ * shows "Stopped by a restart" and the person decides. A turn that brings the
+ * daemon down can't loop this way.
  *
  * Pure decisions and the small state files live here; the daemon loop and
  * the dispatch are in selfUpdateTurnsRuntime.ts.
@@ -49,6 +54,13 @@ const CLOCK_SLACK_MS = 5_000;
 const DEFERRED_FILE = "self-update-deferred.json";
 const SNAPSHOT_FILE = "self-update-working-turns.json";
 const CONTINUED_FILE = "self-update-continued.json";
+const RESTART_TURNS_FILE = "restart-working-turns.json";
+const RESTART_CONTINUED_FILE = "restart-continued.json";
+
+/** Back later than this, nobody expects the turn to go on by itself. */
+export const RESTART_CONTINUE_MAX_AGE_MS = 30 * 60_000;
+/** One continuation per chat in this long: restarts in a row don't restart the work. */
+export const RESTART_CONTINUE_COOLDOWN_MS = 10 * 60_000;
 
 // ── Who is working ──────────────────────────────────────────────────────
 
@@ -205,6 +217,29 @@ export function threadsToContinue(input: {
   });
 }
 
+/**
+ * The chats to continue after a clean restart: {@link threadsToContinue}, with
+ * nothing when the daemon came back too late and without the chats continued
+ * a moment ago. `continuedAt`: chat id → when it was last continued.
+ */
+export function restartTurnsToContinue(input: {
+  readonly snapshot: TurnsSnapshot;
+  readonly threads: ReadonlyArray<TurnThreadView>;
+  readonly continuedAt: Readonly<Record<string, number>>;
+  readonly now: number;
+}): ReadonlyArray<WorkingTurn> {
+  const taken = Date.parse(input.snapshot.takenAt);
+  if (!Number.isFinite(taken) || input.now - taken > RESTART_CONTINUE_MAX_AGE_MS) return [];
+  const recent = Object.entries(input.continuedAt)
+    .filter(([, at]) => input.now - at < RESTART_CONTINUE_COOLDOWN_MS)
+    .map(([threadId]) => threadId);
+  return threadsToContinue({
+    snapshot: input.snapshot,
+    threads: input.threads,
+    alreadyContinued: new Set(recent),
+  });
+}
+
 // ── State files (the daemon's state dir) ────────────────────────────────
 
 async function readJson(path: string): Promise<Record<string, unknown> | null> {
@@ -245,7 +280,10 @@ export async function clearDeferredUpdate(stateDir: string): Promise<void> {
 }
 
 export async function readTurnsSnapshot(stateDir: string): Promise<TurnsSnapshot | null> {
-  const raw = await readJson(join(stateDir, SNAPSHOT_FILE));
+  return parseTurnsSnapshot(await readJson(join(stateDir, SNAPSHOT_FILE)));
+}
+
+function parseTurnsSnapshot(raw: Record<string, unknown> | null): TurnsSnapshot | null {
   const takenAt = text(raw?.["takenAt"]);
   const turns = raw?.["turns"];
   if (!takenAt || !Array.isArray(turns)) return null;
@@ -273,6 +311,42 @@ export function writeTurnsSnapshot(
 
 export async function clearTurnsSnapshot(stateDir: string): Promise<void> {
   await rm(join(stateDir, SNAPSHOT_FILE), { force: true });
+}
+
+/** Who was working when this daemon was told to stop. */
+export function writeRestartTurns(
+  stateDir: string,
+  turns: ReadonlyArray<WorkingTurn>,
+  now: number,
+): Promise<void> {
+  return writeJson(stateDir, RESTART_TURNS_FILE, {
+    takenAt: new Date(now).toISOString(),
+    turns,
+  } satisfies TurnsSnapshot);
+}
+
+/** What the daemon before this one remembered; read once, it is gone after that. */
+export async function readRestartTurns(stateDir: string): Promise<TurnsSnapshot | null> {
+  const path = join(stateDir, RESTART_TURNS_FILE);
+  const snapshot = parseTurnsSnapshot(await readJson(path));
+  await rm(path, { force: true });
+  return snapshot;
+}
+
+export async function readRestartContinued(stateDir: string): Promise<Record<string, number>> {
+  const raw = await readJson(join(stateDir, RESTART_CONTINUED_FILE));
+  return Object.fromEntries(
+    Object.entries(raw ?? {}).filter(
+      (entry): entry is [string, number] => typeof entry[1] === "number",
+    ),
+  );
+}
+
+export function writeRestartContinued(
+  stateDir: string,
+  continuedAt: Readonly<Record<string, number>>,
+): Promise<void> {
+  return writeJson(stateDir, RESTART_CONTINUED_FILE, continuedAt);
 }
 
 /** The chats already continued in the update run `runKey`. */

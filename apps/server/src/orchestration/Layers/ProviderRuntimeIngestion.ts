@@ -37,6 +37,7 @@ import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
+import { isDaemonStopping } from "../../daemonStopping.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { redactSecretsInText } from "../../secretRedaction.ts";
 import {
@@ -1859,8 +1860,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* turnAutoRetry.start();
       yield* Effect.forkScoped(
+        // A stopping daemon takes the agents with it: their exits say nothing
+        // about the turn, which the next daemon picks up (selfUpdateTurns.ts).
         Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: "runtime", event }),
+          isDaemonStopping() ? Effect.void : worker.enqueue({ source: "runtime", event }),
         ),
       );
       yield* Effect.forkScoped(

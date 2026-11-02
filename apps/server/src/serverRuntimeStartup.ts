@@ -37,7 +37,13 @@ import { ServerSettingsService } from "./serverSettings.ts";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment.ts";
 import { UnoBoxIdentity } from "./unoBoxIdentity.ts";
 import { reportSelfUpdateAfterStartToConsole } from "./selfUpdateHttp.ts";
-import { continueTurnsAfterSelfUpdate, runSelfUpdateWatcher } from "./selfUpdateTurnsRuntime.ts";
+import {
+  continueTurnsAfterRestart,
+  continueTurnsAfterSelfUpdate,
+  rememberWorkingTurnsAtStop,
+  runSelfUpdateWatcher,
+} from "./selfUpdateTurnsRuntime.ts";
+import { isDaemonStopping, watchDaemonStop } from "./daemonStopping.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "./persistence/Layers/ManagerConnectorPendingReplies.ts";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { ServerAuth } from "./auth/Services/ServerAuth.ts";
@@ -445,6 +451,7 @@ export const reconcileProviderSessions = Effect.gen(function* () {
 );
 
 export const makeServerRuntimeStartup = Effect.gen(function* () {
+  watchDaemonStop();
   const serverConfig = yield* ServerConfig;
   const keybindings = yield* Keybindings;
   const orchestrationReactor = yield* OrchestrationReactor;
@@ -548,12 +555,16 @@ export const makeServerRuntimeStartup = Effect.gen(function* () {
       runStartupPhase(
         "self-update.continue",
         continueTurnsAfterSelfUpdate.pipe(
+          Effect.andThen(continueTurnsAfterRestart),
           Effect.provide(ManagerConnectorPendingReplyRepositoryLive),
           Effect.ignore,
         ),
       ),
     );
     yield* Effect.forkScoped(runSelfUpdateWatcher.pipe(Effect.ignore));
+    yield* Effect.addFinalizer(() =>
+      isDaemonStopping() ? rememberWorkingTurnsAtStop.pipe(Effect.ignore) : Effect.void,
+    );
 
     // Логины из аккаунта Uno: новый бокс/новая машина подхватывает сохранённые
     // входы сама, не дожидаясь, пока пользователь введёт их заново. Работает

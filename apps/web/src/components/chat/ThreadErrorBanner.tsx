@@ -18,7 +18,14 @@ import {
   classifyTurnError,
   isInternalTurnFailure,
   isRestartCutOffError,
+  type TurnErrorKind,
 } from "./turnErrorNotice";
+
+function noticeLine(kind: TurnErrorKind, error: string): string {
+  if (kind === "busy") return COPY.stillBusy;
+  if (kind === "no-answer") return COPY.noAnswer;
+  return kind === "agent-stopped" ? COPY.agentStopped : error;
+}
 
 /**
  * A failed turn above the composer.
@@ -148,8 +155,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   }
 
   if (placement === "feed") {
-    const lineText =
-      notice.kind === "busy" ? COPY.stillBusy : notice.kind === "no-answer" ? COPY.noAnswer : error;
+    const lineText = noticeLine(notice.kind, error);
     // Red only for an error with nothing to try again; the rest is calm (flows v2, I1).
     const alarming = notice.kind === "other" && !onRetry;
     const Icon = notice.kind === "busy" ? HourglassIcon : alarming ? CircleAlertIcon : RotateCwIcon;
@@ -211,8 +217,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
     );
   }
 
-  const text =
-    notice.kind === "busy" ? COPY.stillBusy : notice.kind === "no-answer" ? COPY.noAnswer : error;
+  const text = noticeLine(notice.kind, error);
 
   return (
     <div className="pt-3 mx-auto max-w-3xl">

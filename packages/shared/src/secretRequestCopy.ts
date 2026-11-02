@@ -11,7 +11,7 @@
 
 import { ACCOUNT_SWITCH_NOTE_BODY, PLAN_RESUME_NOTE_BODY } from "./planLimitRules.ts";
 import { goalNoteLine } from "./threadGoal.ts";
-import { turnAutoRetryNoteLine, updateRestartNoteLine } from "./turnErrorRetry.ts";
+import { tryAgainNoteLine, turnAutoRetryNoteLine, updateRestartNoteLine } from "./turnErrorRetry.ts";
 
 /** Marks a message the computer (not the person) put into a chat for its agent. */
 export const UNO_WORK_NOTE_PREFIX = "(Uno Work) ";
@@ -234,6 +234,8 @@ export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   const body = text.slice(UNO_WORK_NOTE_PREFIX.length);
   const autoRetry = turnAutoRetryNoteLine(body);
   if (autoRetry !== null) return { kind: "auto-retry", text: autoRetry };
+  const tryAgain = tryAgainNoteLine(body);
+  if (tryAgain !== null) return { kind: "auto-retry", text: tryAgain };
   const goal = goalNoteLine(body);
   if (goal !== null) return { kind: "goal", text: goal };
   if (body === PLAN_RESUME_NOTE_BODY) {
