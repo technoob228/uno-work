@@ -7,11 +7,13 @@
 //
 // One mechanism for code and documents, no git for the person:
 //
-//   - A folder without git: Uno keeps a hidden snapshot repository OUTSIDE the
-//     folder (~/.uno/sync/<name>.git, the folder is its work tree), commits
-//     what changed ("Saved on <computer>") and moves it through the same
-//     `uno::<name>` remote git-remote-uno serves. The person's folder gets no
-//     .git and no hidden files.
+//   - A folder without git: Uno keeps a hidden snapshot repository in the
+//     folder (`<folder>/.uno-git` since 22.10, the folder is its work tree;
+//     before that ~/.uno/sync/<name>.git), commits what changed ("Saved on
+//     <computer>") and moves it through the same `uno::<name>` remote
+//     git-remote-uno serves. The person's folder gets no .git. Parallel chats
+//     (apps/server/src/parallelChats/) add linked worktrees and
+//     `refs/uno/parallel/*` to it; only `main` travels.
 //   - A folder with its own git: the same path on its own repository (remote
 //     `uno`, added next to its GitHub one), committed work only — Uno never
 //     commits for the person there. A project started on GitHub or GitLab from

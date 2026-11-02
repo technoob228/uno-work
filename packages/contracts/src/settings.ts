@@ -898,7 +898,19 @@ export const ProjectSettingsOverrides = Schema.Struct({
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
+/**
+ * Parallel chats in one project (apps/server/src/parallelChats/): a chat that
+ * starts while another one works in the project folder gets its own copy, and
+ * its work joins the folder when its turn ends. "off": as before, no copies.
+ * "nogit": projects synced without git of their own (`.uno-git`). "all" is
+ * reserved for projects with their own git (not done yet: same as "nogit").
+ * Not in the UI; `UNO_WORK_PARALLEL_CHATS` overrides it.
+ */
+export const ParallelChatsMode = Schema.Literals(["off", "nogit", "all"]);
+export type ParallelChatsMode = typeof ParallelChatsMode.Type;
+
 export const ServerSettings = Schema.Struct({
+  parallelChats: ParallelChatsMode.pipe(Schema.withDecodingDefault(Effect.succeed("off" as const))),
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // The first-run setup was finished or skipped on this machine. Kept on the
   // machine, not in the browser: one computer is opened from app.uno4.work,
@@ -1203,6 +1215,7 @@ export const ClientSettingsPatch = Schema.Struct({
   newChatModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
   planLimitSwitch: Schema.optionalKey(PlanLimitSwitch),
+  parallelChats: Schema.optionalKey(ParallelChatsMode),
   unoLastModelRoute: Schema.optionalKey(UnoModelRoute),
   favorites: Schema.optionalKey(
     Schema.Array(

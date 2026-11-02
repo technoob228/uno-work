@@ -1,4 +1,6 @@
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
+
+import { ParallelChats } from "../../parallelChats/ParallelChats.ts";
 
 import {
   OrchestrationReactor,
@@ -14,12 +16,14 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const providerCommandReactor = yield* ProviderCommandReactor;
   const checkpointReactor = yield* CheckpointReactor;
   const threadDeletionReactor = yield* ThreadDeletionReactor;
+  const parallelChats = Option.getOrUndefined(yield* Effect.serviceOption(ParallelChats));
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* providerRuntimeIngestion.start();
     yield* providerCommandReactor.start();
     yield* checkpointReactor.start();
     yield* threadDeletionReactor.start();
+    if (parallelChats !== undefined) yield* parallelChats.start();
   });
 
   return {

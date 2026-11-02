@@ -42,6 +42,7 @@ import {
 
 import { NO_PROJECT_FOLDER } from "@t3tools/shared/noProject";
 
+import { projectFolderOfCopy } from "../parallelChats/parallelGit.ts";
 import { secretNameProblem, upsertEnvContent } from "../secretsEnv.ts";
 import {
   MAX_WAIT_FOR_TURNS_MS,
@@ -1317,7 +1318,9 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     secretWritten: async (input: { cwd: string; file: string; name: string; value: string }) => {
       await load();
       if (input.file !== ".env") return;
-      const cwd = path.resolve(expandHome(deps.home, input.cwd));
+      // A chat working in its own copy of the project (parallelChats/): the project's key.
+      const asked = path.resolve(expandHome(deps.home, input.cwd));
+      const cwd = (await projectFolderOfCopy(asked)) ?? asked;
       const found = Object.entries(store).find(
         ([, entry]) => entry.enabled && entry.name && !entry.team && entry.dir === cwd,
       );
@@ -1339,7 +1342,8 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     /** The synced project a folder belongs to (agents' `project_keys`). */
     projectForFolder: async (cwd: string) => {
       await load();
-      const folder = path.resolve(expandHome(deps.home, cwd));
+      const asked = path.resolve(expandHome(deps.home, cwd));
+      const folder = (await projectFolderOfCopy(asked)) ?? asked;
       for (const project of await deps.projects()) {
         const dir = path.resolve(expandHome(deps.home, project.workspaceRoot));
         if (folder === dir || folder.startsWith(`${dir}${path.sep}`)) return project.id;

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -49,6 +50,8 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeParallelChatsLayer } from "../../parallelChats/ParallelChats.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import {
@@ -141,6 +144,10 @@ describe("ProviderCommandReactor", () => {
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     /** The assistant sandbox decision for every chat (absent: no policy). */
     readonly sandboxDecision?: HarnessSandboxDecision;
+    /** The project's folder (default `/tmp/provider-project`). */
+    readonly workspaceRoot?: string;
+    /** With the parallel chats service (parallelChats/), on real git. */
+    readonly parallelChats?: boolean;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
@@ -340,6 +347,13 @@ describe("ProviderCommandReactor", () => {
               runtimeCeiling: () => Effect.succeed(null),
             }),
       ),
+      Layer.provideMerge(
+        input?.parallelChats === true
+          ? makeParallelChatsLayer({ lowDisk: Effect.succeed(false) }).pipe(
+              Layer.provide(GitVcsDriver.layer),
+            )
+          : Layer.empty,
+      ),
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
@@ -382,7 +396,7 @@ describe("ProviderCommandReactor", () => {
         commandId: CommandId.make("cmd-project-create"),
         projectId: asProjectId("project-1"),
         title: "Provider Project",
-        workspaceRoot: "/tmp/provider-project",
+        workspaceRoot: input?.workspaceRoot ?? "/tmp/provider-project",
         defaultModelSelection: modelSelection,
         createdAt: now,
       }),
@@ -422,6 +436,135 @@ describe("ProviderCommandReactor", () => {
       reactor,
     };
   }
+
+  describe("parallel chats", () => {
+    /** A project synced without git (`.uno-git`), as uno-sync sets it up. */
+    const syncedProject = () => {
+      const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "t3code-parallel-")));
+      createdBaseDirs.add(dir);
+      const root = path.join(dir, "site");
+      fs.mkdirSync(root);
+      const gitDir = path.join(root, ".uno-git");
+      execFileSync("git", ["init", "-q", "--bare", gitDir]);
+      execFileSync("git", ["--git-dir", gitDir, "config", "core.bare", "false"]);
+      fs.mkdirSync(path.join(gitDir, "info"), { recursive: true });
+      fs.writeFileSync(path.join(gitDir, "info", "exclude"), ".uno-git/\n.env\n");
+      fs.writeFileSync(path.join(root, "index.html"), "<h1>Site</h1>\n");
+      const env = {
+        ...process.env,
+        GIT_DIR: gitDir,
+        GIT_WORK_TREE: root,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@x",
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@x",
+      };
+      execFileSync("git", ["add", "-A"], { cwd: root, env });
+      execFileSync("git", ["commit", "-qm", "Saved"], { cwd: root, env });
+      return { dir, root };
+    };
+
+    const startTwoChats = async (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      options: { readonly together?: boolean } = {},
+    ) => {
+      const now = new Date().toISOString();
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-thread-create-2"),
+          threadId: ThreadId.make("thread-2"),
+          projectId: asProjectId("project-1"),
+          title: "Second",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+        }),
+      );
+      for (const [index, threadId] of ["thread-1", "thread-2"].entries()) {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-parallel-turn-${index}`),
+            threadId: ThreadId.make(threadId),
+            message: {
+              messageId: asMessageId(`parallel-message-${index}`),
+              role: "user",
+              text: `task ${index}`,
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "full-access",
+            createdAt: now,
+          }),
+        );
+        if (options.together !== true) {
+          await waitFor(() => harness.sendTurn.mock.calls.length === index + 1);
+        }
+      }
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    };
+
+    it("on: the second chat next to a busy one starts in its own copy and its prompt says so", async () => {
+      const { root } = syncedProject();
+      process.env.UNO_WORK_PARALLEL_CHATS = "nogit";
+      try {
+        const harness = await createHarness({ workspaceRoot: root, parallelChats: true });
+        await startTwoChats(harness);
+        const cwds = harness.startSession.mock.calls.map(
+          (call) => (call[1] as { readonly cwd?: string }).cwd,
+        );
+        expect(cwds[0]).toBe(root);
+        expect(cwds[1]).toContain(`${path.sep}site${path.sep}uno-auto-thread2`);
+        expect(fs.readFileSync(path.join(cwds[1]!, "index.html"), "utf8")).toBe("<h1>Site</h1>\n");
+        const second = harness.sendTurn.mock.calls[1]?.[0] as { readonly input?: string };
+        expect(second.input).toContain("task 1");
+        expect(second.input).toContain("You are working in a temporary copy of this project");
+        const first = harness.sendTurn.mock.calls[0]?.[0] as { readonly input?: string };
+        expect(first.input).not.toContain("temporary copy");
+        const thread = (await harness.readModel()).threads.find((t) => t.id === "thread-2");
+        expect(thread?.worktreePath).toBe(cwds[1]);
+        expect(thread?.branch).toBeNull();
+        // The stored message stays the person's own.
+        expect(thread?.messages.find((m) => m.role === "user")?.text).toBe("task 1");
+      } finally {
+        delete process.env.UNO_WORK_PARALLEL_CHATS;
+      }
+    });
+
+    it("on: two chats sent at the same moment — one takes the folder, the other a copy", async () => {
+      const { root } = syncedProject();
+      process.env.UNO_WORK_PARALLEL_CHATS = "nogit";
+      try {
+        const harness = await createHarness({ workspaceRoot: root, parallelChats: true });
+        await startTwoChats(harness, { together: true });
+        const cwds = harness.startSession.mock.calls
+          .map((call) => (call[1] as { readonly cwd?: string }).cwd)
+          .toSorted();
+        expect(cwds.filter((cwd) => cwd === root)).toHaveLength(1);
+        expect(cwds.filter((cwd) => cwd?.includes("uno-auto-"))).toHaveLength(1);
+      } finally {
+        delete process.env.UNO_WORK_PARALLEL_CHATS;
+      }
+    });
+
+    it("off (the default): both chats start in the project folder, no copy is made", async () => {
+      const { root, dir } = syncedProject();
+      const baseDir = path.join(dir, "base");
+      const harness = await createHarness({ workspaceRoot: root, parallelChats: true, baseDir });
+      await startTwoChats(harness);
+      const cwds = harness.startSession.mock.calls.map(
+        (call) => (call[1] as { readonly cwd?: string }).cwd,
+      );
+      expect(cwds).toEqual([root, root]);
+      const worktrees = path.join(baseDir, "worktrees");
+      expect(fs.existsSync(worktrees) ? fs.readdirSync(worktrees) : []).toEqual([]);
+      expect(fs.readdirSync(path.join(root, ".uno-git"))).not.toContain("worktrees");
+    });
+  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();
