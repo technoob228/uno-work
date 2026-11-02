@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { GitLabCliError, type GitLabCliShape } from "./GitLabCli.ts";
@@ -18,6 +18,8 @@ import {
   parseNotes,
   parseRowFacts,
 } from "./gitLabPullRequestHost.ts";
+
+const isCliError = Schema.is(GitLabCliError);
 
 const mergeRequest = (overrides: Record<string, unknown> = {}) => ({
   iid: 12,
@@ -60,7 +62,8 @@ function fakeGitLab(answers: ReadonlyArray<readonly [string, unknown]> = []) {
     });
     const joined = input.args.join(" ");
     const answer = answers.find(([piece]) => joined.includes(piece));
-    if (answer?.[1] instanceof GitLabCliError) return Effect.fail(answer[1]);
+    const failed = answer?.[1];
+    if (isCliError(failed)) return Effect.fail(failed);
     return Effect.succeed({
       exitCode: 0 as never,
       stdout: JSON.stringify(answer?.[1] ?? {}),

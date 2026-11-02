@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { BitbucketApiError, type BitbucketApiShape } from "./BitbucketApi.ts";
@@ -19,6 +19,8 @@ import {
   repositoryPath,
   strategyFor,
 } from "./bitbucketPullRequestHost.ts";
+
+const isCliError = Schema.is(BitbucketApiError);
 
 const pullRequest = (overrides: Record<string, unknown> = {}) => ({
   id: 7,
@@ -104,7 +106,7 @@ function fakeBitbucket(answers: ReadonlyArray<readonly [string, unknown]> = []) 
     });
     const found = answers.find(([piece]) => input.url.includes(piece))?.[1];
     const answer = found instanceof Sequence ? found.take() : found;
-    if (answer instanceof BitbucketApiError) return Effect.fail(answer);
+    if (isCliError(answer)) return Effect.fail(answer);
     const reply = answer instanceof Reply ? answer : new Reply(200, answer);
     return Effect.succeed({
       status: reply.status,

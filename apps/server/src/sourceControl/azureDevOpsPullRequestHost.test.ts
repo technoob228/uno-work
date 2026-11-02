@@ -3,7 +3,7 @@
  * GitPullRequestCommentThread, GitCommitRef; Policy: PolicyEvaluationRecord), as
  * `az … --output json` prints them. No live organization was used.
  */
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { AzureDevOpsCliError, type AzureDevOpsCliShape } from "./AzureDevOpsCli.ts";
@@ -21,6 +21,8 @@ import {
   parseThreads,
   reviewDecisionOf,
 } from "./azureDevOpsPullRequestHost.ts";
+
+const isCliError = Schema.is(AzureDevOpsCliError);
 
 const ORG = "https://dev.azure.com/acme";
 const target = { organizationUrl: ORG, project: "Platform", name: "app" };
@@ -83,7 +85,7 @@ function fakeAz(
     const joined = input.args.join(" ");
     const found = answers.find(([piece]) => joined.includes(piece))?.[1];
     const answer = typeof found === "function" ? (found as () => unknown)() : found;
-    if (answer instanceof AzureDevOpsCliError) return Effect.fail(answer);
+    if (isCliError(answer)) return Effect.fail(answer);
     return Effect.succeed({
       exitCode: 0 as never,
       stdout: answer === undefined ? "" : JSON.stringify(answer),

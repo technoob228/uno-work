@@ -418,10 +418,10 @@ function originOf(value: string): string | null {
 }
 
 /** Stops an oversized diff as it arrives instead of holding all of it and then cutting. */
-function collectCapped(
-  stream: Stream.Stream<Uint8Array, unknown>,
+function collectCapped<E>(
+  stream: Stream.Stream<Uint8Array, E>,
   maxBytes: number,
-): Effect.Effect<{ readonly body: string; readonly truncated: boolean }, unknown> {
+): Effect.Effect<{ readonly body: string; readonly truncated: boolean }, E> {
   const decoder = new TextDecoder();
   let body = "";
   let bytes = 0;
