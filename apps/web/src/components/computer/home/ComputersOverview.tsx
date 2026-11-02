@@ -219,6 +219,7 @@ function LiveMark(props: {
   current: boolean;
   quiet: boolean;
   lead: string;
+  fit: "home" | "chat";
   /** Folded into "+N": still watched, so trouble can surface beside the count. */
   hidden: boolean;
   onReport: (key: string, report: MarkReport) => void;
@@ -240,6 +241,7 @@ function Mark({
   current = false,
   quiet = false,
   lead = "",
+  fit = "home",
 }: {
   computer: SidebarDComputer;
   live: Live | null;
@@ -249,6 +251,8 @@ function Mark({
   quiet?: boolean;
   /** The tooltip's start, "This chat runs on " in a chat. */
   lead?: string;
+  /** In a chat the name folds away when the header is short of room (Misha 02.11). */
+  fit?: "home" | "chat";
 }) {
   const asleep = computer.status === "sleeping" && !live;
   const title = markTitle(computer, live, lead);
@@ -273,12 +277,18 @@ function Mark({
         className={cn(
           "truncate text-[11px]",
           current ? "max-w-40 font-medium" : "max-w-20",
+          fit === "chat" && "hidden max-w-28 @3xl/header-actions:inline",
           live?.up ? "text-foreground/90" : "text-muted-foreground",
         )}
       >
         {computer.label}
       </span>
-      {live?.up && live.cpu !== null ? <Meter value={live.cpu} className="h-1 w-5" /> : null}
+      {live?.up && live.cpu !== null ? (
+        <Meter
+          value={live.cpu}
+          className={cn("h-1 w-5", fit === "chat" && "hidden @6xl/header-actions:block")}
+        />
+      ) : null}
     </span>
   );
 }
@@ -655,6 +665,7 @@ export function ComputersPill(props: {
                       current={named === computer}
                       quiet={named !== computer}
                       lead={chatComputer === computer ? "This chat runs on " : ""}
+                      fit={props.fit}
                       hidden={!shown.has(computer.key)}
                       onReport={onReport}
                     />

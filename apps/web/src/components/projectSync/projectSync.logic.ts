@@ -249,7 +249,7 @@ export function arrivalWords(
       outcome === "waiting"
         ? sharedWaitingLine(name)
         : outcome === "taken"
-          ? "Get it here from Projects on your other computers."
+          ? "Get it here from “projects on other computers” at the bottom of the sidebar."
           : "Open it from one of your computers to get it there.",
   };
 }

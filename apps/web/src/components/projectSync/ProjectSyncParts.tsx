@@ -7,6 +7,7 @@
  */
 import type { EnvironmentId, ProjectSyncElsewhere, ProjectSyncEntry } from "@t3tools/contracts";
 import {
+  ChevronRightIcon,
   CircleAlertIcon,
   CloudCheckIcon,
   CloudDownloadIcon,
@@ -95,6 +96,9 @@ export function ProjectSyncMark(props: { entry: ProjectSyncEntry | null; onOpen:
 /**
  * "Projects on your other computers": cloud projects this computer doesn't
  * have yet. `arrivingTeam`: the shared project coming here by itself right now.
+ *
+ * Misha 02.11: the list only took room — folded into one quiet line that opens
+ * on a click. A shared project on its way here opens it by itself.
  */
 export function ProjectsElsewhere(props: {
   environmentId: EnvironmentId;
@@ -103,7 +107,10 @@ export function ProjectsElsewhere(props: {
 }) {
   const refresh = useRefreshProjectSync();
   const [busy, setBusy] = useState<string | null>(null);
+  const [opened, setOpened] = useState(false);
   if (props.projects.length === 0) return null;
+  const open = opened || props.arrivingTeam !== null || busy !== null;
+  const count = props.projects.length;
   const rowOf = (project: ProjectSyncElsewhere) =>
     project.team ? `team:${project.team.id}` : project.name;
   const getHere = async (project: ProjectSyncElsewhere) => {
@@ -136,13 +143,24 @@ export function ProjectsElsewhere(props: {
   };
   return (
     <>
-      <li
-        aria-hidden
-        className="list-none px-2.5 pt-3 pb-1 text-xs font-medium text-sidebar-muted-foreground/70"
-      >
-        Projects on your other computers
+      <li className="list-none pt-2">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpened((value) => !value)}
+          className="flex h-7 w-full cursor-pointer items-center gap-1 rounded-md px-2.5 text-xs text-sidebar-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+          data-testid="sidebar-projects-elsewhere-toggle"
+        >
+          <span className="truncate">
+            {count} project{count === 1 ? "" : "s"} on other computers
+          </span>
+          <ChevronRightIcon
+            className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")}
+            aria-hidden
+          />
+        </button>
       </li>
-      {props.projects.map((project) => (
+      {(open ? props.projects : []).map((project) => (
         <li
           key={rowOf(project)}
           className="group/elsewhere list-none"

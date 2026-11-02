@@ -68,8 +68,13 @@ export function FilesLocationSwitch({
         : "text-muted-foreground hover:text-foreground",
     );
   // Under 400 px the open name goes too: it pushed Recent off the row.
+  // `not-sr-only` brings back `white-space: normal`, so a long computer name
+  // wrapped onto two lines in the panel (Misha 02.11): kept on one, cut short.
   const label = (active: boolean) =>
-    narrow ? (active ? "sr-only min-[400px]:not-sr-only" : "sr-only") : "hidden sm:inline";
+    cn(
+      narrow ? (active ? "sr-only min-[400px]:not-sr-only" : "sr-only") : "hidden sm:inline",
+      "whitespace-nowrap!",
+    );
   return (
     <div
       className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/70 p-0.5"
@@ -142,7 +147,7 @@ function ComputerMenu({
         data-testid="files-computer-menu"
       >
         <HardDriveIcon className="size-3.5" />
-        <span className={cn(labelClassName, "max-w-40 truncate")}>{name}</span>
+        <span className={cn(labelClassName, "min-w-0 max-w-40 truncate")}>{name}</span>
         <ChevronDownIcon className="size-3 opacity-60" />
       </MenuTrigger>
       <MenuPopup align="start" className="min-w-56">
