@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.176 — 2026-11-02
+
+- Your assistant in Telegram no longer answers "Done." when it did nothing. If its session got lost after a restart, it starts a new one by itself and answers; a message it really could not answer gets "I couldn't finish this one" instead.
+
+---
+
 ## v0.0.175 — 2026-11-02
 
 - An update or a restart no longer loses the task: in the cloud the agent goes on where it stopped, and the Up next queue moves on by itself. Try again repeats the task instead of copying your message.
