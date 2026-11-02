@@ -220,7 +220,10 @@ export function PullRequestFilesTab(props: {
             />
           </label>
           {detail.capabilities.viewedFiles && commit === null ? (
-            <p className="text-[11px] text-muted-foreground" data-testid="pull-request-viewed-count">
+            <p
+              className="text-[11px] text-muted-foreground"
+              data-testid="pull-request-viewed-count"
+            >
               {viewedCount} of {inCommit.length} viewed
             </p>
           ) : null}

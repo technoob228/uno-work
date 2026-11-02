@@ -650,7 +650,11 @@ layer("ThreadPullRequestService", (it) => {
     Effect.gen(function* () {
       const world = newWorld();
       world.clients = false;
-      world.shell = { ...world.shell, runtimeMode: "approval-required", interactionMode: "default" };
+      world.shell = {
+        ...world.shell,
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+      };
       world.detail = detailOf({ checks: [failedCheck] });
       yield* seed({ pullRequests: [watched()] });
       const service = yield* serviceFor(world);
@@ -729,10 +733,7 @@ layer("ThreadPullRequestService", (it) => {
       yield* seed({ pullRequests: [watched()] });
       const closed = yield* serviceFor(closing);
       yield* pass(closing, closed);
-      assert.include(
-        (wakes(closing)[0]?.message as { readonly text: string }).text,
-        "was closed",
-      );
+      assert.include((wakes(closing)[0]?.message as { readonly text: string }).text, "was closed");
     }),
   );
 
@@ -833,13 +834,18 @@ layer("ThreadPullRequestService", (it) => {
       assert.deepEqual(syncedLinks(world), []);
 
       const wrongHost = yield* Effect.flip(
-        service.link({ threadId, reference: "https://gitlab.com/acme/app/-/merge_requests/3" } as never),
+        service.link({
+          threadId,
+          reference: "https://gitlab.com/acme/app/-/merge_requests/3",
+        } as never),
       );
       assert.include(wrongHost.detail, "github.com");
       world.detailFails = true;
       const typo = yield* Effect.flip(service.link({ threadId, reference: "#404" } as never));
       assert.equal(typo.reason, "not-found");
-      const garbage = yield* Effect.flip(service.link({ threadId, reference: "nonsense" } as never));
+      const garbage = yield* Effect.flip(
+        service.link({ threadId, reference: "nonsense" } as never),
+      );
       assert.include(garbage.detail, "Paste a link");
     }),
   );

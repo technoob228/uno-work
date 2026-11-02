@@ -110,7 +110,9 @@ export interface PullRequestsShape {
   readonly list: (
     input: PullRequestListInput,
   ) => Effect.Effect<PullRequestListResult, PullRequestError>;
-  readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetailView, PullRequestError>;
+  readonly detail: (
+    input: PullRequestRef,
+  ) => Effect.Effect<PullRequestDetailView, PullRequestError>;
   readonly diff: (
     input: PullRequestDiffInput,
   ) => Effect.Effect<PullRequestDiffResult, PullRequestError>;

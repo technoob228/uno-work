@@ -9,7 +9,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - This computer: `computer_status`, `computer_cleanup`, `apps_list`, `app_start`, `app_stop`, `app_logs`, `app_show_on_internet`, `app_hide_from_internet`, `app_remove`
 - Apps and widgets: `app_register`, `app_add_widget`
 - Files and cloud: `files_list`, `cloud_list`, `file_open`, `file_share_link`; Uno Drive (cloud storage): `drive_find`, `drive_get`, `drive_save`, `drive_share_link`; frames of a screen recording: `recording_frames`; a project's keys: `project_keys`
-- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`, `chat_call_person`, `chat_person_not_needed`; PR review: `github_pr_comment`
+- Chats: `chats_list`, `chat_create`, `chat_message`, `chat_status`, `chat_call_person`, `chat_person_not_needed`; PR review: `github_pr_comment`, `watch_pull_request`
 - Repeating work ("every day at 9"): `automation_create` (never cron), `automations_list`, `automation_update`, `automation_delete`, `automation_run_now`
 - The person: `notify` (Inbox), `messenger_send` (their Telegram/Slack, buttons), `open_in_panel` (app, URL or file, right panel), `html_render` (a page in the chat), `support_draft` (letter to support), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_open_link`, `site_forms_get`, `site_forms_set` (answers go to email or a chat); `report_publish` (Markdown/HTML file → private link)

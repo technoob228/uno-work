@@ -2,7 +2,13 @@
 import type { PullRequestComment, PullRequestDetailView, PullRequestRef } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, CircleCheckIcon, CircleDotIcon, CircleXIcon, ExternalLinkIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  CircleCheckIcon,
+  CircleDotIcon,
+  CircleXIcon,
+  ExternalLinkIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import ChatMarkdown, { RemoteImagesOffContext } from "../ChatMarkdown";

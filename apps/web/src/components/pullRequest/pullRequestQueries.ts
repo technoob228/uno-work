@@ -61,7 +61,11 @@ export function usePullRequestAction(environmentId: string) {
     mutationFn: (input: PullRequestActionInput) => pullRequestsApi(environmentId).runAction(input),
     onSettled: () => queryClient.invalidateQueries({ queryKey: [ROOT_KEY] }),
     onError: (error) =>
-      toastManager.add({ type: "error", title: "Didn't go through", description: errorText(error) }),
+      toastManager.add({
+        type: "error",
+        title: "Didn't go through",
+        description: errorText(error),
+      }),
   });
 }
 

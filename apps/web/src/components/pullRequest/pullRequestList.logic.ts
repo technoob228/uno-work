@@ -182,7 +182,9 @@ export function sortPullRequestGroups<Entry extends PullRequestListEntry>(
     groups.map((group) => ({ ...group, entries: rank(group.entries) }));
 
   if (sort === "ready") {
-    return searchText.trim().length === 0 ? sortWithinGroups(rankPullRequestsByMergeReadiness) : groups;
+    return searchText.trim().length === 0
+      ? sortWithinGroups(rankPullRequestsByMergeReadiness)
+      : groups;
   }
   if (sort === "blocked") {
     if (searchText.trim().length > 0) return groups;

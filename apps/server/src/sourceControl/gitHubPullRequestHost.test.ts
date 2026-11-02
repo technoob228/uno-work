@@ -373,7 +373,9 @@ describe("actions", () => {
     const github = {
       execute: (input: { readonly args: ReadonlyArray<string> }) =>
         input.args[0] === "pr"
-          ? Effect.fail({ detail: "HTTP 406: Sorry, the diff exceeded the maximum number of files" })
+          ? Effect.fail({
+              detail: "HTTP 406: Sorry, the diff exceeded the maximum number of files",
+            })
           : Effect.succeed({
               stdout: JSON.stringify({
                 data: {

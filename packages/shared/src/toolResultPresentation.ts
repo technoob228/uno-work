@@ -629,6 +629,11 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => named("Checked the forms of site", text(c.args, "slug"), "Checked the site's forms"),
     "Couldn't read the site's forms",
   ],
+  watch_pull_request: [
+    "Starting to watch the pull request…",
+    "Watching the pull request",
+    "Couldn't watch the pull request",
+  ],
   site_forms_set: [
     "Setting up the site's forms…",
     (c) => named("Set up the forms of site", text(c.args, "slug"), "Set up the site's forms"),

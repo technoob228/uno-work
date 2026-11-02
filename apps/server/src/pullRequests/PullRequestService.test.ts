@@ -33,9 +33,9 @@ describe("errors for the person", () => {
   });
 
   it("never repeats a token", () => {
-    expect(hostErrorLine("bad credentials for ghp_abcdefghijklmnopqrstuvwxyz0123456789")).not.toContain(
-      "ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-    );
+    expect(
+      hostErrorLine("bad credentials for ghp_abcdefghijklmnopqrstuvwxyz0123456789"),
+    ).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
   });
 
   it("stays one short line", () => {

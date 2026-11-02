@@ -629,10 +629,7 @@ export function makeGitHubPullRequestHost(
             "-f",
             `${key}=${value}`,
           ]),
-          ...Object.entries(input.typed ?? {}).flatMap(([key, value]) => [
-            "-F",
-            `${key}=${value}`,
-          ]),
+          ...Object.entries(input.typed ?? {}).flatMap(([key, value]) => ["-F", `${key}=${value}`]),
         ],
       })
       .pipe(
@@ -648,18 +645,20 @@ export function makeGitHubPullRequestHost(
               }),
           }),
         ),
-        Effect.flatMap((parsed): Effect.Effect<Record<string, unknown>, SourceControlProviderError> => {
-          const data = isRecord(parsed) ? parsed.data : null;
-          return isRecord(data)
-            ? Effect.succeed(data)
-            : Effect.fail(
-                new SourceControlProviderError({
-                  provider: "github",
-                  operation: input.operation,
-                  detail: "GitHub sent no data.",
-                }),
-              );
-        }),
+        Effect.flatMap(
+          (parsed): Effect.Effect<Record<string, unknown>, SourceControlProviderError> => {
+            const data = isRecord(parsed) ? parsed.data : null;
+            return isRecord(data)
+              ? Effect.succeed(data)
+              : Effect.fail(
+                  new SourceControlProviderError({
+                    provider: "github",
+                    operation: input.operation,
+                    detail: "GitHub sent no data.",
+                  }),
+                );
+          },
+        ),
       );
 
   const repositoryOf = (
@@ -815,19 +814,21 @@ export function makeGitHubPullRequestHost(
       }).pipe(
         Effect.flatMap((data) =>
           repositoryOf(data, "getPullRequestDetail").pipe(
-            Effect.flatMap((repository): Effect.Effect<PullRequestHostDetail, SourceControlProviderError> => {
-              const viewer = isRecord(data.viewer) ? text(data.viewer.login) : null;
-              const detail = parseDetail(repository, viewer, hostname, input.repository);
-              return detail !== null
-                ? Effect.succeed(detail)
-                : Effect.fail(
-                    new SourceControlProviderError({
-                      provider: "github",
-                      operation: "getPullRequestDetail",
-                      detail: "Pull request not found.",
-                    }),
-                  );
-            }),
+            Effect.flatMap(
+              (repository): Effect.Effect<PullRequestHostDetail, SourceControlProviderError> => {
+                const viewer = isRecord(data.viewer) ? text(data.viewer.login) : null;
+                const detail = parseDetail(repository, viewer, hostname, input.repository);
+                return detail !== null
+                  ? Effect.succeed(detail)
+                  : Effect.fail(
+                      new SourceControlProviderError({
+                        provider: "github",
+                        operation: "getPullRequestDetail",
+                        detail: "Pull request not found.",
+                      }),
+                    );
+              },
+            ),
           ),
         ),
       ),

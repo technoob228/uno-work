@@ -49,7 +49,11 @@ export const autoPullCheckout = (process: VcsProcessShape, cwd: string) => {
       );
   return Effect.gen(function* () {
     const branch = yield* git("branch", ["symbolic-ref", "--short", "-q", "HEAD"]);
-    const origin = yield* git("defaultBranch", ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+    const origin = yield* git("defaultBranch", [
+      "symbolic-ref",
+      "--short",
+      "refs/remotes/origin/HEAD",
+    ]);
     const status = yield* git("status", ["status", "--porcelain"]);
     const ahead = yield* git("ahead", ["rev-list", "--count", "@{upstream}..HEAD"]);
     const state: AutoPullState = {
