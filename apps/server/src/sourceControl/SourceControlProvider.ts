@@ -18,6 +18,20 @@ export interface SourceControlProviderContext {
   readonly remoteUrl: string;
 }
 
+/** The host a remote's provider lives on, as the pull request page groups them. */
+export function providerHostname(
+  context: SourceControlProviderContext | undefined,
+  fallback: string,
+): string {
+  const baseUrl = context?.provider.baseUrl;
+  if (baseUrl === undefined) return fallback;
+  try {
+    return new URL(baseUrl).hostname || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export interface SourceControlRefSelector {
   readonly refName: string;
   readonly owner?: string;

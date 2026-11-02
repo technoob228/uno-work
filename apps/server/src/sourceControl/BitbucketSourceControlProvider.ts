@@ -2,6 +2,7 @@ import { Effect, Layer, Option } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
 import * as BitbucketApi from "./BitbucketApi.ts";
+import { makeBitbucketPullRequestHost } from "./bitbucketPullRequestHost.ts";
 import * as BitbucketPullRequests from "./bitbucketPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import type * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
@@ -63,6 +64,11 @@ export const make = Effect.fn("makeBitbucketSourceControlProvider")(function* ()
           Effect.mapError((error) => providerError("listChangeRequests", error)),
         );
     },
+    pullRequestHost: (context) =>
+      makeBitbucketPullRequestHost(
+        bitbucket,
+        SourceControlProvider.providerHostname(context, "bitbucket.org"),
+      ),
     getChangeRequest: (input) =>
       bitbucket.getPullRequest(input).pipe(
         Effect.map(toChangeRequest),
