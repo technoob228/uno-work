@@ -12,6 +12,7 @@ import {
   planProviderForDriver,
   planResumeLine,
   planRoomPercent,
+  planRoomScope,
   planStartedOnLine,
   poolPlans,
   type PlanComputer,
@@ -101,6 +102,90 @@ describe("planAtLimit / planRoomPercent", () => {
   it("room is what the fullest window has left; no numbers — null", () => {
     expect(planRoomPercent(claude("a@x.io", 35, 60), NOW)).toBe(40);
     expect(planRoomPercent(claude("a@x.io", 0, 0, { windows: [] }), NOW)).toBeNull();
+  });
+});
+
+describe("a limit on one model", () => {
+  // Misha's plan on 01.11: 89% of the week used, Fable's own week all gone.
+  const fableOut = claude("a@x.io", 1, 89, {
+    windows: [
+      { id: "five_hour", kind: "session", label: "5-hour", usedPercent: 1, resetsAt: at(150) },
+      { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 89, resetsAt: at(3000) },
+      {
+        id: "seven_day_fable",
+        kind: "weekly",
+        label: "Weekly · Fable",
+        usedPercent: 100,
+        resetsAt: at(3000),
+        scope: "Fable",
+      },
+    ],
+  });
+
+  it("doesn't stop the plan as a whole", () => {
+    expect(planAtLimit(fableOut, NOW)).toBeNull();
+    expect(planRoomPercent(fableOut, NOW)).toBe(11);
+    expect(planRoomScope(fableOut, NOW)).toBeNull();
+  });
+
+  it("doesn't stop another model", () => {
+    expect(planAtLimit(fableOut, NOW, "claude-opus-5-5")).toBeNull();
+    expect(planRoomPercent(fableOut, NOW, "claude-opus-5-5")).toBe(11);
+  });
+
+  it("stops the model itself, and says whose limit it is", () => {
+    expect(planAtLimit(fableOut, NOW, "claude-fable-5-1")?.window.id).toBe("seven_day_fable");
+    expect(planRoomPercent(fableOut, NOW, "claude-fable-5-1")).toBe(0);
+    expect(planRoomScope(fableOut, NOW, "claude-fable-5-1")).toBe("Fable");
+  });
+
+  it("a tie is the whole plan's", () => {
+    const tied = claude("a@x.io", 1, 100, {
+      windows: [
+        {
+          id: "seven_day_fable",
+          kind: "weekly",
+          label: "Weekly · Fable",
+          usedPercent: 100,
+          scope: "Fable",
+        },
+        { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 100 },
+      ],
+    });
+    expect(planRoomScope(tied, NOW, "claude-fable-5-1")).toBeNull();
+  });
+
+  it("a new chat: full on that model only, and the way out keeps to it", () => {
+    const computers = [
+      computer(WORK, "uno-work", [fableOut]),
+      computer(MAC, "MacBook", [claude("work@company.com", 35)]),
+    ];
+    const pick = (model: string) =>
+      pickComputerForNewChat({
+        currentEnvironmentId: WORK,
+        provider: "claude",
+        model,
+        computers,
+        now: NOW,
+      });
+    expect(pick("claude-opus-5-5").kind).toBe("ok");
+    const room = pick("claude-fable-5-1");
+    expect(room.kind === "full" && room.alternative?.computerName).toBe("MacBook");
+  });
+
+  it("a chat stopped on Opus isn't held by Fable's limit", () => {
+    const stopped = (model: string, stopText: string) =>
+      chatPlanLimit({
+        driver: "claudeAgent",
+        model,
+        stopText,
+        stoppedAt: at(-30),
+        currentEnvironmentId: WORK,
+        computers: [computer(WORK, "uno-work", [fableOut])],
+        now: NOW,
+      });
+    expect(stopped("claude-opus-5-5", "You've hit your limit")).toBeNull();
+    expect(stopped("claude-fable-5-1", "You've hit your limit")?.resetsAt).toBe(at(3000));
   });
 });
 

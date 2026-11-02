@@ -1062,6 +1062,7 @@ export const ChatComposer = memo(
       environmentId,
       driver: selectedProvider,
       instanceId: selectedInstanceId,
+      model: selectedModel,
     });
 
     const composerProviderState = useMemo(

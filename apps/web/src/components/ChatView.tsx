@@ -181,6 +181,7 @@ import {
   finalizePromotedDraftThreadByRef,
   restorePromotingDraftThread,
   useComposerDraftStore,
+  useEffectiveComposerModelState,
   type DraftId,
 } from "../composerDraftStore";
 import { acceptsChatDrop } from "./chat/chatDrop";
@@ -2025,6 +2026,17 @@ export default function ChatView(props: ChatViewProps) {
     pickedInstanceId: composerActiveProvider,
     selectedDriver: selectedProvider,
     providers: providerStatuses,
+  });
+  const { selectedModel: composerSelectedModel } = useEffectiveComposerModelState({
+    threadRef: composerDraftTarget,
+    providers: providerStatuses,
+    selectedProvider,
+    selectedInstanceId:
+      composerActiveProvider ??
+      (activeProviderInstanceId ? ProviderInstanceId.make(activeProviderInstanceId) : null),
+    threadModelSelection: activeThread?.modelSelection,
+    projectModelSelection: activeProject?.defaultModelSelection,
+    settings,
   });
   const activeProviderStatus = useMemo(() => {
     if (activeProviderInstanceId) {
@@ -5481,6 +5493,7 @@ export default function ChatView(props: ChatViewProps) {
                     draftId={draftId}
                     driver={selectedProvider}
                     instanceId={composerActiveProvider ?? activeProviderInstanceId}
+                    model={composerSelectedModel}
                     smartTarget={smartTargetHere}
                     onUseModel={(selection) =>
                       onProviderModelSelect(selection.instanceId, selection.model)

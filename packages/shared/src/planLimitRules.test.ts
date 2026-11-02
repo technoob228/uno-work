@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACCOUNT_SWITCH_NOTE_BODY,
+  blocksWork,
   PLAN_RESUME_ENDED_ACTIVITY,
   PLAN_RESUME_GRACE_MS,
   PLAN_RESUME_NOTE_BODY,
@@ -29,6 +30,7 @@ describe("planResumeTime", () => {
   it("takes the reset from the plan's numbers first, a little after it", () => {
     const time = planResumeTime({
       account: account(),
+      model: null,
       stopText: "You've hit your limit · resets 3pm",
       now: NOW,
     });
@@ -46,6 +48,7 @@ describe("planResumeTime", () => {
           { id: "five_hour", kind: "session", label: "5-hour", usedPercent: 91, resetsAt: at(90) },
         ],
       }),
+      model: null,
       stopText: "You've hit your usage limit. Try again in 2 hours",
       now: NOW,
     });
@@ -57,7 +60,12 @@ describe("planResumeTime", () => {
 
   it("doesn't guess: no time said, no schedule", () => {
     expect(
-      planResumeTime({ account: null, stopText: "You've hit your usage limit.", now: NOW }),
+      planResumeTime({
+        account: null,
+        model: null,
+        stopText: "You've hit your usage limit.",
+        now: NOW,
+      }),
     ).toEqual({ kind: "unknown" });
   });
 
@@ -69,6 +77,7 @@ describe("planResumeTime", () => {
           { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 100, resetsAt: at(600) },
         ],
       }),
+      model: null,
       stopText: "limit reached",
       now: NOW,
     });
@@ -90,10 +99,70 @@ describe("planResumeTime", () => {
             },
           ],
         }),
+        model: null,
         stopText: "limit",
         now: NOW,
       }),
     ).toEqual({ kind: "too-far" });
+  });
+});
+
+describe("a limit on one model", () => {
+  const scoped = (scope: string) =>
+    ({
+      id: "seven_day_x",
+      kind: "weekly",
+      label: `Weekly · ${scope}`,
+      usedPercent: 100,
+      scope,
+    }) as const;
+
+  it("stops that model, by its family, and no other", () => {
+    expect(blocksWork(scoped("Fable"), "claude-fable-5-1")).toBe(true);
+    expect(blocksWork(scoped("Sonnet 5"), "claude-sonnet-5-5")).toBe(true);
+    expect(blocksWork(scoped("Sonnet 5"), "sonnet")).toBe(true);
+    expect(blocksWork(scoped("GPT-5.3-Codex-Spark"), "gpt-5.3-codex-spark")).toBe(true);
+    expect(blocksWork(scoped("Fable"), "claude-opus-5-5")).toBe(false);
+    expect(blocksWork(scoped("GPT-5.3-Codex-Spark"), "gpt-5.5")).toBe(false);
+  });
+
+  it("isn't a wall for the plan as a whole; spend never is", () => {
+    expect(blocksWork(scoped("Fable"))).toBe(false);
+    expect(blocksWork(scoped("Fable"), null)).toBe(false);
+    expect(blocksWork({ id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 100 })).toBe(
+      true,
+    );
+    expect(
+      blocksWork(
+        { id: "monthly_spend", kind: "monthly", label: "Extra", usedPercent: 100 },
+        "claude-opus-5-5",
+      ),
+    ).toBe(false);
+  });
+
+  it("a stop on Opus resumes with the 5-hour limit, not with Fable's week", () => {
+    const windows = [
+      { id: "five_hour", kind: "session", label: "5-hour", usedPercent: 100, resetsAt: at(90) },
+      {
+        id: "seven_day_fable",
+        kind: "weekly",
+        label: "Weekly · Fable",
+        usedPercent: 100,
+        resetsAt: at(3000),
+        scope: "Fable",
+      },
+    ] as const;
+    const resumeAt = (model: string) => {
+      const time = planResumeTime({
+        account: account({ windows }),
+        model,
+        stopText: "limit reached",
+        now: NOW,
+      });
+      return time.kind === "at" ? Date.parse(time.resumeAt) : null;
+    };
+    expect(resumeAt("claude-opus-5-5")).toBe(Date.parse(at(90)) + PLAN_RESUME_GRACE_MS);
+    expect(resumeAt("claude-fable-5-1")).toBe(Date.parse(at(3000)) + PLAN_RESUME_GRACE_MS);
   });
 });
 

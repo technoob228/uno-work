@@ -30,9 +30,29 @@ export function planProviderForDriver(driver: string | null | undefined): PlanPr
   return driver ? (PLAN_PROVIDER_BY_DRIVER[driver] ?? null) : null;
 }
 
-/** Extra usage (pay-as-you-go spend) isn't a wall: the plan itself still runs. */
-export function blocksWork(window: PlanLimitsWindow): boolean {
-  return window.id !== "monthly_spend";
+const modelWords = (name: string): string =>
+  `-${name
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join("-")}-`;
+
+/** "Fable" is `claude-fable-5-1`, "Sonnet 5" also the alias `sonnet`. */
+function scopeCoversModel(scope: string, model: string | null | undefined): boolean {
+  if (!model) return false;
+  const family = scope.trim().split(/\s+/)[0] ?? "";
+  return modelWords(model).includes(modelWords(family));
+}
+
+/**
+ * Does this window stop work on `model`? Extra usage (pay-as-you-go spend)
+ * isn't a wall: the plan itself still runs. A limit on one model ("Weekly ·
+ * Fable") stops that model only; with no model named, the question is about
+ * the plan as a whole, which it doesn't stop.
+ */
+export function blocksWork(window: PlanLimitsWindow, model?: string | null): boolean {
+  if (window.id === "monthly_spend") return false;
+  return window.scope === undefined || scopeCoversModel(window.scope, model);
 }
 
 function resetMs(window: PlanLimitsWindow): number | null {
@@ -55,11 +75,16 @@ export interface PlanLimitHit {
 /**
  * Is this account at its limit now (upstream `exhaustedUsageWindow`)? Every
  * window at 100% that hasn't reset yet; work goes on when the last of them
- * resets — a full weekly window outlasts a full 5-hour one.
+ * resets — a full weekly window outlasts a full 5-hour one. `model`: for that
+ * model, whose own limit counts too; without it, for the plan as a whole.
  */
-export function planAtLimit(account: PlanLimitsAccount, now: number): PlanLimitHit | null {
+export function planAtLimit(
+  account: PlanLimitsAccount,
+  now: number,
+  model?: string | null,
+): PlanLimitHit | null {
   const full = account.windows.filter(
-    (window) => blocksWork(window) && usedNow(window, now) >= 100,
+    (window) => blocksWork(window, model) && usedNow(window, now) >= 100,
   );
   if (full.length === 0) return null;
   let latest: PlanLimitsWindow | null = null;
@@ -181,10 +206,12 @@ export type PlanResumeTime =
  */
 export function planResumeTime(input: {
   readonly account: PlanLimitsAccount | null;
+  /** The chat's model: another model's full limit doesn't hold it back. */
+  readonly model: string | null;
   readonly stopText: string;
   readonly now: number;
 }): PlanResumeTime {
-  const hit = input.account ? planAtLimit(input.account, input.now) : null;
+  const hit = input.account ? planAtLimit(input.account, input.now, input.model) : null;
   const fromPlan = hit?.resetsAt ?? null;
   const reset = fromPlan ?? planLimitResetFromText(input.stopText, input.now);
   if (reset === null) return { kind: "unknown" };
