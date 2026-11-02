@@ -1,7 +1,7 @@
 /**
  * Pull requests in Dev mode: every open pull request of this person's projects,
  * sorted by what can merge or what waits on them; opening one reads it inside
- * Work. Pull requests live on GitHub and GitLab; this page reads and acts on
+ * Work. Pull requests live on GitHub, GitLab, Bitbucket and Azure DevOps; this page reads and acts on
  * them through the services the person connected.
  */
 import { isAssistantProjectId, type PullRequestInvolvement } from "@t3tools/contracts";

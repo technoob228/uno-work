@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
+import { makeAzureDevOpsPullRequestHost } from "./azureDevOpsPullRequestHost.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 
@@ -99,6 +100,11 @@ export const make = Effect.fn("makeAzureDevOpsSourceControlProvider")(function* 
           Effect.mapError((error) => providerError("listChangeRequests", error)),
         );
     },
+    pullRequestHost: (context) =>
+      makeAzureDevOpsPullRequestHost(
+        azure,
+        SourceControlProvider.providerHostname(context, "dev.azure.com"),
+      ),
     getChangeRequest: (input) =>
       azure.getPullRequest(input).pipe(
         Effect.map(toChangeRequest),

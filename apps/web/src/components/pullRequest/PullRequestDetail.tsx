@@ -250,23 +250,55 @@ export function PullRequestDetail(props: {
           ) : null}
           {active === "commits" ? (
             <div className="flex flex-col">
-              {detail.commits.map((item) => (
-                <button
-                  type="button"
-                  key={item.oid}
-                  className="flex items-baseline gap-2 rounded-sm px-1 py-1 text-left text-sm hover:bg-accent"
-                  onClick={() => {
-                    setCommit(item.oid);
-                    setTab("files");
-                  }}
-                  data-testid="pull-request-commit"
-                >
-                  <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                    {item.oid.slice(0, 7)}
-                  </span>
-                  <span className="truncate">{item.messageHeadline}</span>
-                </button>
-              ))}
+              {detail.commits.map((item) => {
+                const line = (
+                  <>
+                    <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                      {item.oid.slice(0, 7)}
+                    </span>
+                    <span className="truncate">{item.messageHeadline}</span>
+                  </>
+                );
+                const rowClass =
+                  "flex items-baseline gap-2 rounded-sm px-1 py-1 text-left text-sm hover:bg-accent";
+                // Without changes read here, a commit opens on the host's site.
+                if (!detail.capabilities.diff) {
+                  return item.url ? (
+                    <a
+                      key={item.oid}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className={rowClass}
+                      data-testid="pull-request-commit"
+                    >
+                      {line}
+                    </a>
+                  ) : (
+                    <div
+                      key={item.oid}
+                      className="flex items-baseline gap-2 px-1 py-1 text-sm"
+                      data-testid="pull-request-commit"
+                    >
+                      {line}
+                    </div>
+                  );
+                }
+                return (
+                  <button
+                    type="button"
+                    key={item.oid}
+                    className={rowClass}
+                    onClick={() => {
+                      setCommit(item.oid);
+                      setTab("files");
+                    }}
+                    data-testid="pull-request-commit"
+                  >
+                    {line}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
           {active === "comments" ? (
