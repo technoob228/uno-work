@@ -84,16 +84,6 @@ export const discovery = {
     "Install the GitLab command-line tool (`glab`) from https://gitlab.com/gitlab-org/cli or your package manager (for example `brew install glab`).",
 } satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
-function gitLabHostname(context: SourceControlProvider.SourceControlProviderContext | undefined) {
-  const baseUrl = context?.provider.baseUrl;
-  if (baseUrl === undefined) return "gitlab.com";
-  try {
-    return new URL(baseUrl).hostname;
-  } catch {
-    return "gitlab.com";
-  }
-}
-
 export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
   const gitlab = yield* GitLabCli.GitLabCli;
 
@@ -128,7 +118,10 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           branches: input.branches,
         })
         .pipe(Effect.mapError((error) => providerError("readChangeRequestStatuses", error))),
-    pullRequestHost: (context) => makeGitLabPullRequestHost(gitlab, gitLabHostname(context)),
+    pullRequestHost: (context) => makeGitLabPullRequestHost(
+        gitlab,
+        SourceControlProvider.providerHostname(context, "gitlab.com"),
+      ),
     createChangeRequest: (input) => {
       const source = SourceControlProvider.sourceControlRefFromInput(input);
       return gitlab
