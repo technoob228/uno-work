@@ -35,7 +35,7 @@ import {
 } from "@t3tools/shared/model";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
-import { parseUnoWorkNote, UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
+import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { isRestartCutOffError, tryAgainNoteBody } from "@t3tools/shared/turnErrorRetry";
 import { fileEditorOwnsSave } from "../lib/editableFocus";
 import { truncate } from "@t3tools/shared/String";
@@ -4475,7 +4475,7 @@ export default function ChatView(props: ChatViewProps) {
       if (
         message.role === "user" &&
         message.text.trim().length > 0 &&
-        parseUnoWorkNote(message.text) === null
+        !message.text.startsWith(UNO_WORK_NOTE_PREFIX)
       ) {
         return message.text;
       }
