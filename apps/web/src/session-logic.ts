@@ -16,6 +16,11 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import {
+  PARALLEL_CHATS_ACTIVITY_KIND,
+  parallelChatsLine,
+  readParallelChatsLine,
+} from "@t3tools/shared/parallelChats";
+import {
   AGENT_SWITCH_ACTIVITY_KIND,
   agentSwitchLine,
   readAgentSwitch,
@@ -616,6 +621,7 @@ export function deriveWorkLogEntries(
     .filter((activity) => !activity.kind.startsWith("plan-limit."))
     .filter((activity) => activity.kind !== HTML_RENDER_ACTIVITY_KIND)
     .filter((activity) => activity.kind !== AGENT_SWITCH_ACTIVITY_KIND)
+    .filter((activity) => activity.kind !== PARALLEL_CHATS_ACTIVITY_KIND)
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .filter((activity) => !isPlanBoundaryToolActivity(activity))
     .filter((activity) => !isClaudeBookkeepingWarning(activity))
@@ -667,11 +673,28 @@ export function deriveApprovalExpiredEntries(
   });
 }
 
-/** Where the chat moved to another agent, every time it did. */
+/**
+ * Quiet centre lines: where the chat moved to another agent, every time it
+ * did, and what happened to its work next to another chat (parallel chats:
+ * "Joins the project when the other chat finishes." and the like).
+ */
 export function deriveAgentSwitchEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): Extract<TimelineEntry, { kind: "agent-switch" }>[] {
   return activities.flatMap((activity) => {
+    if (activity.kind === PARALLEL_CHATS_ACTIVITY_KIND) {
+      const line = readParallelChatsLine(activity.payload);
+      return line === null
+        ? []
+        : [
+            {
+              id: `parallel-chats:${activity.id}`,
+              kind: "agent-switch" as const,
+              createdAt: activity.createdAt,
+              text: parallelChatsLine(line),
+            },
+          ];
+    }
     if (activity.kind !== AGENT_SWITCH_ACTIVITY_KIND) return [];
     const move = readAgentSwitch(activity.payload);
     if (!move || move.silent === true) return [];

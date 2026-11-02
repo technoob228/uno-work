@@ -113,6 +113,7 @@ import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationRe
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { TurnAutoRetryLive } from "./orchestration/Layers/TurnAutoRetry.ts";
+import { ParallelChatsLive } from "./parallelChats/ParallelChats.ts";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
@@ -330,6 +331,9 @@ const ReactorLayerLive = Layer.empty.pipe(
   // Continues a "busy" / "didn't answer" turn by itself (ingestion asks it).
   Layer.provideMerge(TurnAutoRetryLive),
   Layer.provideMerge(ProviderCommandReactorLive),
+  // Chats next to a busy one get their own copy, joined back after the turn
+  // (parallelChats/). Below the provider command reactor, which asks it first.
+  Layer.provideMerge(ParallelChatsLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(RuntimeReceiptBusLive),

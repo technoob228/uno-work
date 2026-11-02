@@ -97,6 +97,7 @@ import { ServerConfig } from "../../config.ts";
 import { HarnessSandboxPolicy } from "../../provider/Services/HarnessSandboxPolicy.ts";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
 import { WorktreeCleanup } from "../../worktreeCleanup/WorktreeCleanup.ts";
+import { ParallelChats } from "../../parallelChats/ParallelChats.ts";
 import { appendChatAttachmentsNote, buildChatAttachmentsNote } from "../../files/chatUploads.ts";
 
 type ProviderIntentEvent = Extract<
@@ -347,6 +348,8 @@ const make = Effect.gen(function* () {
           .pipe(Effect.map((decision) => decision._tag === "none"));
   // Optional so reactor tests without it keep building; the runtime has it.
   const worktreeCleanup = Option.getOrUndefined(yield* Effect.serviceOption(WorktreeCleanup));
+  // Parallel chats (parallelChats/): a chat starting next to a busy one gets its own copy.
+  const parallelChats = Option.getOrUndefined(yield* Effect.serviceOption(ParallelChats));
   const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
     attachments.length === 0
       ? null
@@ -1070,12 +1073,12 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThread(event.payload.threadId);
-    if (!thread) {
+    const requestedThread = yield* resolveThread(event.payload.threadId);
+    if (!requestedThread) {
       return;
     }
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    const message = requestedThread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1087,6 +1090,14 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+
+    // Another chat works in the project folder: this one may move to its own
+    // copy here, before its session starts (parallelChats/ParallelChats.ts).
+    const parallelTurn =
+      parallelChats === undefined
+        ? { thread: requestedThread, agentNote: null }
+        : yield* parallelChats.beforeTurn(requestedThread);
+    const thread = parallelTurn.thread;
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
@@ -1190,7 +1201,7 @@ const make = Effect.gen(function* () {
     const taskText = (yield* isFirstTaskOfAssistantChat(thread))
       ? withAssistantChatRule(message.text)
       : message.text;
-    const promptText =
+    const envelopedText =
       senderThreadId === null
         ? taskText
         : agentMessageEnvelope({
@@ -1199,6 +1210,10 @@ const make = Effect.gen(function* () {
             recipientSpawnedByThreadId: thread.spawnedByThreadId,
             text: taskText,
           });
+    const promptText =
+      parallelTurn.agentNote === null
+        ? envelopedText
+        : `${envelopedText}\n\n${parallelTurn.agentNote}`;
     const agentSwitch = yield* agentSwitchForTurn({
       thread,
       modelSelection: event.payload.modelSelection,

@@ -333,3 +333,16 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - `apps/server/src/orchestration/decider.ts`, `packages/contracts/src/orchestration.ts` — settle/snooze порт; миграции 043/045 у нас, у апстрима 033/034. Там же `source` и `thread.source.update` (импорт чатов), проекторы и `ProjectionThreads`: миграция 053.
 
 Перед мерджем: запустить `bun typecheck` после resolve. После: `bun dev:desktop` и проверить, что (а) логотип «Work», (б) dev-toggle переключает кнопки, (в) preview pane открывается на md/html, (г) клик по changed file роутит правильно.
+
+## Parallel chats in one project (night wave 02.11)
+
+Spec: `reports/day_2026-11-02/night-wave/PARALLEL_CHATS.md` (uno-workspace). Code: `apps/server/src/parallelChats/`.
+
+- **Flag:** `ServerSettings.parallelChats` = `off` (default) | `nogit` | `all` (reserved, same as `nogit`); env `UNO_WORK_PARALLEL_CHATS` overrides. Not in the UI. Read on every turn.
+- **Who:** only projects synced without git of their own (`<folder>/.uno-git`, no `.git`). Never: Home, "No project" chats, assistants, chats with a manual copy, projects with their own git.
+- **Turn start** (`ParallelChats.beforeTurn`, first thing in `ProviderCommandReactor.processTurnStartRequested`, under one lock): another chat busy in the folder → this chat gets `<worktreesDir>/<folder>/uno-auto-<8 of thread id>` (linked worktree of `.uno-git`, detached, `branch: null`), `.env*` copied, `node_modules` hard-linked (`.package-lock.json`, `.modules.yaml`, `.yarn-integrity` unlinked). The path is the only marker of an auto-copy. Old chats move only on Claude (transcript copied to the copy's Claude project folder); Codex/OpenCode/Uno/Hermes/Cursor old chats stay in the folder. A chat in a copy stays in it; each turn its prompt gets a note (`parallelCopyAgentNote`).
+- **Turn end** (`thread.session-set` ready/interrupted, `thread.reverted`): when no chat works in the folder, three-way merge on the folder's *state* (temp index seeded from the real one, its mtime kept), `read-tree -m -u` into the folder, copy moved forward. `refs/uno/parallel/<thread>/base` = what the copy agrees with.
+- **Conflicts:** text → the copy gets the markers and the chat one `(Uno Work)` turn to combine them; markers left → waits for the person (`…/conflict` ref, nothing reaches the folder). Binary on both sides → both versions kept (`name (from <chat>).ext`). Delete/rename/type → waits for the person; the chat's copy wins after their answer.
+- **Lines** (`chat.parallel-chats` activity, quiet centre line): joined / waiting / parked / kept-both. No branch/merge/copy words.
+- **Off / rollback:** off stops new copies; existing copies still join. A build without this code sees auto-copies as plain "Separate copy" chats (`branch: null`); `git --git-dir <folder>/.uno-git for-each-ref refs/uno/parallel` lists them. No migrations.
+- **Not yet:** own-git projects, folders without sync, moving old non-Claude chats, `app_register`/Recent files paths from a copy, removing idle joined copies (limit: 3 per project; a deleted chat's copy is saved to `refs/uno/saved/<chat>` and removed).

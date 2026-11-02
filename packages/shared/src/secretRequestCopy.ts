@@ -9,6 +9,7 @@
  * with {@link parseUnoWorkNote} and shows one quiet line instead.
  */
 
+import { isParallelResolveNoteBody, PARALLEL_LINE_COMBINING } from "./parallelChats.ts";
 import { ACCOUNT_SWITCH_NOTE_BODY, PLAN_RESUME_NOTE_BODY } from "./planLimitRules.ts";
 import { goalNoteLine } from "./threadGoal.ts";
 import { turnAutoRetryNoteLine, updateRestartNoteLine } from "./turnErrorRetry.ts";
@@ -172,6 +173,7 @@ export type UnoWorkNote =
       readonly body: string;
     }
   | { readonly kind: "assistant-setup"; readonly text: string }
+  | { readonly kind: "parallel-chats"; readonly text: string }
   | { readonly kind: "other"; readonly text: string };
 
 const NOTE_LINE_MAX = 200;
@@ -241,6 +243,9 @@ export function parseUnoWorkNote(text: string): UnoWorkNote | null {
   }
   if (body === ACCOUNT_SWITCH_NOTE_BODY) {
     return { kind: "plan-resume", text: "Continued with your other account." };
+  }
+  if (isParallelResolveNoteBody(body)) {
+    return { kind: "parallel-chats", text: PARALLEL_LINE_COMBINING };
   }
   const updateRestart = updateRestartNoteLine(body);
   if (updateRestart !== null) return { kind: "update-restart", text: updateRestart };

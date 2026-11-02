@@ -60,6 +60,7 @@ import {
   continueLocalRefForTransfer,
   type ContinueTransportShape,
 } from "../git/continueTransport.ts";
+import { AUTO_COPY_PREFIX } from "../parallelChats/parallelRules.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { systemCommandOrigin } from "./commandOrigin.ts";
 import { collectPages, pageReference, readPagePack } from "./continuePages.ts";
@@ -301,6 +302,16 @@ function resolveSourceCwd(
     const cwd = resolveThreadWorkspaceCwd({ thread: thread.value, projects: [project.value] });
     if (!cwd) {
       return yield* fail("project_not_found", "This chat has no project folder to carry over.");
+    }
+    // A chat in its own copy (parallelChats/): its work may not be in the project yet.
+    if (
+      thread.value.worktreePath !== null &&
+      nodePath.basename(thread.value.worktreePath).startsWith(AUTO_COPY_PREFIX)
+    ) {
+      return yield* fail(
+        "invalid_request",
+        "This chat works next to another one in this project. Continue it here for now.",
+      );
     }
     return { thread: thread.value, project: project.value, cwd };
   });
