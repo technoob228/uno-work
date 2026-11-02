@@ -208,7 +208,12 @@ export const makePlanResume = (options: PlanResumeLayerOptions = {}) =>
         if (yield* repository.caseSeen({ threadId, lastUserMessageId })) return;
 
         const account = yield* accountOf(shell);
-        const time = planResumeTime({ account, stopText, now: nowMs() });
+        const time = planResumeTime({
+          account,
+          model: shell.modelSelection.model,
+          stopText,
+          now: nowMs(),
+        });
         if (time.kind !== "at") {
           yield* Effect.logInfo("plan resume: no reset time, not scheduled").pipe(
             Effect.annotateLogs({ threadId, why: time.kind }),
@@ -287,7 +292,8 @@ export const makePlanResume = (options: PlanResumeLayerOptions = {}) =>
         // one, the single try isn't spent on a wall we can see.
         const now = nowMs();
         const account = yield* accountOf(shell);
-        const hit = account && !account.stale ? planAtLimit(account, now) : null;
+        const hit =
+          account && !account.stale ? planAtLimit(account, now, shell.modelSelection.model) : null;
         const until = hit?.resetsAt ? Date.parse(hit.resetsAt) : Number.NaN;
         if (Number.isFinite(until) && until > now) {
           const resumeAt = iso(until + PLAN_RESUME_GRACE_MS);

@@ -849,6 +849,7 @@ export function HomeComposer({
         <HomePlanRoomLine
           environmentId={targetEnvironmentId}
           driver={selectedEntry?.driverKind ?? null}
+          model={picker.selection?.model ?? null}
           onPickComputer={pickComputer}
         />
       )}

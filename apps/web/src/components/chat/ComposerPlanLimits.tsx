@@ -26,6 +26,7 @@ export function useChatPlanLimits(input: {
   readonly environmentId: EnvironmentId;
   readonly driver: ProviderDriverKind;
   readonly instanceId: ProviderInstanceId;
+  readonly model: string | null;
 }): ChatPlanLimits {
   const supported = useEnvironmentSupportsPlanLimits(input.environmentId);
   const hasPlan = planProviderForDriver(input.driver) !== null;
@@ -43,9 +44,10 @@ export function useChatPlanLimits(input: {
         accounts: data?.accounts,
         driver: input.driver,
         instanceId: input.instanceId,
+        model: input.model,
         now: Date.parse(clock),
       }),
-    [clock, data?.accounts, input.driver, input.instanceId],
+    [clock, data?.accounts, input.driver, input.instanceId, input.model],
   );
 }
 
@@ -61,9 +63,10 @@ export const ComposerPlanLimits = memo(function ComposerPlanLimits(props: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
 }) {
-  const { account, accounts, roomPercent, now } = props.limits;
+  const { account, accounts, roomPercent, roomScope, now } = props.limits;
   if (!account) return null;
-  const label = roomPercent === null ? "AI plan limits" : `${roomPercent}% of your plan left`;
+  const label =
+    roomPercent === null ? "AI plan limits" : `${roomPercent}% of ${roomScope ?? "your plan"} left`;
   return (
     <Popover open={props.open} onOpenChange={props.onOpenChange}>
       <PopoverTrigger
@@ -76,7 +79,9 @@ export const ComposerPlanLimits = memo(function ComposerPlanLimits(props: {
         )}
       >
         <GaugeIcon className="size-3.5" aria-hidden />
-        {!props.compact && roomPercent !== null ? <span>{roomPercent}% left</span> : null}
+        {!props.compact && roomPercent !== null ? (
+          <span>{roomScope ? `${roomScope} ${roomPercent}% left` : `${roomPercent}% left`}</span>
+        ) : null}
       </PopoverTrigger>
       <PopoverPopup side="top" align="end" className="w-80">
         <div className="flex flex-col gap-3" data-testid="composer-plan-limits">

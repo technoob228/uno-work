@@ -140,6 +140,7 @@ export const DraftPlanRoomNotice = memo(function DraftPlanRoomNotice({
   draftId,
   driver,
   instanceId,
+  model,
   onUseModel,
   smartTarget,
 }: {
@@ -149,6 +150,8 @@ export const DraftPlanRoomNotice = memo(function DraftPlanRoomNotice({
   driver: string | null;
   /** Its provider instance: a second account has limits of its own. */
   instanceId?: string | null;
+  /** The model picked: one model's limit leaves the others free. */
+  model?: string | null;
   onUseModel: (selection: ModelSelection) => void;
   /** Uno AI · Smart on this computer, when it's ready; null otherwise. */
   smartTarget: ModelSelection | null;
@@ -166,6 +169,7 @@ export const DraftPlanRoomNotice = memo(function DraftPlanRoomNotice({
     currentEnvironmentId: environmentId,
     provider,
     instanceId,
+    model,
     computers,
     now,
   });
@@ -178,6 +182,7 @@ export const DraftPlanRoomNotice = memo(function DraftPlanRoomNotice({
             computers.find((computer) => computer.environmentId === environmentId)?.accounts ??
             null,
           provider: room.provider,
+          model,
           blocked: room.account,
           now,
         })
@@ -378,6 +383,7 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
     ? chatPlanLimit({
         driver,
         instanceId,
+        model: currentModel,
         stopText,
         stoppedAt,
         currentEnvironmentId: environmentId,
@@ -515,10 +521,12 @@ export const ChatPlanLimitNotice = memo(function ChatPlanLimitNotice({
 export const HomePlanRoomLine = memo(function HomePlanRoomLine({
   environmentId,
   driver,
+  model,
   onPickComputer,
 }: {
   environmentId: EnvironmentId | null;
   driver: string | null;
+  model: string | null;
   onPickComputer: (environmentId: EnvironmentId) => void;
 }) {
   const provider = environmentId ? planProviderForDriver(driver) : null;
@@ -534,7 +542,13 @@ export const HomePlanRoomLine = memo(function HomePlanRoomLine({
   const room =
     environmentId === null
       ? ({ kind: "ok" } as const)
-      : pickComputerForNewChat({ currentEnvironmentId: environmentId, provider, computers, now });
+      : pickComputerForNewChat({
+          currentEnvironmentId: environmentId,
+          provider,
+          model,
+          computers,
+          now,
+        });
   const alternative = room.kind === "full" ? room.alternative : null;
   const movedLately =
     environmentId !== null &&

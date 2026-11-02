@@ -24,7 +24,7 @@
  *
  * Pure, so the rules are unit-tested without React (planRoom.logic.test.ts).
  */
-import type { EnvironmentId, PlanLimitsAccount } from "@t3tools/contracts";
+import type { EnvironmentId, PlanLimitsAccount, PlanLimitsWindow } from "@t3tools/contracts";
 import {
   blocksWork,
   isPlanLimitText,
@@ -56,15 +56,47 @@ export const PLAN_PROVIDER_NAME: Readonly<Record<PlanProvider, string>> = {
   chatgpt: "ChatGPT",
 };
 
+/** The first wall ahead; on a tie the whole plan's, it says more than one model's. */
+function fullestWindow(
+  account: PlanLimitsAccount,
+  now: number,
+  model: string | null | undefined,
+): PlanLimitsWindow | null {
+  let fullest: PlanLimitsWindow | null = null;
+  for (const window of account.windows) {
+    if (!blocksWork(window, model)) continue;
+    const used = usedNow(window, now);
+    const top = fullest === null ? -1 : usedNow(fullest, now);
+    if (used > top || (used === top && fullest?.scope !== undefined && !window.scope)) {
+      fullest = window;
+    }
+  }
+  return fullest;
+}
+
 /**
  * Room left on the account now, 0–100: what the fullest window has left (a
- * plan stops at its first wall). Null when there are no numbers at all.
+ * plan stops at its first wall). `model`: for that model, whose own limit
+ * counts too; without it, for the plan as a whole. Null when there are no
+ * numbers at all.
  */
-export function planRoomPercent(account: PlanLimitsAccount, now: number): number | null {
-  const windows = account.windows.filter(blocksWork);
-  if (windows.length === 0) return null;
-  const fullest = Math.max(...windows.map((window) => usedNow(window, now)));
-  return Math.max(0, Math.min(100, Math.round(100 - fullest)));
+export function planRoomPercent(
+  account: PlanLimitsAccount,
+  now: number,
+  model?: string | null,
+): number | null {
+  const fullest = fullestWindow(account, now, model);
+  if (fullest === null) return null;
+  return Math.max(0, Math.min(100, Math.round(100 - usedNow(fullest, now))));
+}
+
+/** The model whose own limit {@link planRoomPercent} reads; null: the whole plan's. */
+export function planRoomScope(
+  account: PlanLimitsAccount,
+  now: number,
+  model?: string | null,
+): string | null {
+  return fullestWindow(account, now, model)?.scope ?? null;
 }
 
 /** One computer as these rules see it. `accounts: null` — not read (yet), or can't read. */
@@ -116,6 +148,7 @@ export type NewChatPlanRoom =
 function findAlternative(input: {
   readonly currentEnvironmentId: EnvironmentId;
   readonly provider: PlanProvider;
+  readonly model: string | null | undefined;
   readonly blocked: PlanLimitsAccount | null;
   readonly computers: ReadonlyArray<PlanComputer>;
   readonly now: number;
@@ -125,10 +158,10 @@ function findAlternative(input: {
     if (computer.environmentId === input.currentEnvironmentId || !computer.connected) continue;
     // Its main sign-in only: a second account is used by a button, never by a move.
     const account = planAccountForInstance(computer.accounts ?? [], input.provider, null);
-    if (!account || planAtLimit(account, input.now)) continue;
+    if (!account || planAtLimit(account, input.now, input.model)) continue;
     if (input.blocked && sameAccount(account, input.blocked)) continue;
     // No numbers (a fresh sign-in): room is likely, but less sure than a known number.
-    const roomPercent = planRoomPercent(account, input.now) ?? 1;
+    const roomPercent = planRoomPercent(account, input.now, input.model) ?? 1;
     if (best === null || roomPercent > best.roomPercent) {
       best = {
         environmentId: computer.environmentId,
@@ -153,22 +186,25 @@ export function pickComputerForNewChat(input: {
   readonly provider: PlanProvider | null;
   /** The provider instance picked: a second account has limits of its own. */
   readonly instanceId?: string | null | undefined;
+  /** The model picked: one model's limit leaves the others free. */
+  readonly model?: string | null | undefined;
   readonly computers: ReadonlyArray<PlanComputer>;
   readonly now: number;
 }): NewChatPlanRoom {
-  const { provider, now } = input;
+  const { provider, model, now } = input;
   if (provider === null) return { kind: "ok" };
   const current = input.computers.find(
     (computer) => computer.environmentId === input.currentEnvironmentId,
   );
   const blocked = planAccountForInstance(current?.accounts ?? [], provider, input.instanceId);
   if (!current || !blocked) return { kind: "ok" };
-  const hit = planAtLimit(blocked, now);
+  const hit = planAtLimit(blocked, now, model);
   if (!hit) return { kind: "ok" };
 
   const best = findAlternative({
     currentEnvironmentId: current.environmentId,
     provider,
+    model,
     blocked,
     computers: input.computers,
     now,
@@ -197,14 +233,17 @@ export interface OtherAccount {
 export function otherAccountWithRoom(input: {
   readonly accounts: ReadonlyArray<PlanLimitsAccount> | null;
   readonly provider: PlanProvider;
+  readonly model?: string | null | undefined;
   readonly blocked: PlanLimitsAccount | null;
   readonly now: number;
 }): OtherAccount | null {
   let best: OtherAccount | null = null;
   for (const account of input.accounts ?? []) {
-    if (account.provider !== input.provider || planAtLimit(account, input.now)) continue;
+    if (account.provider !== input.provider || planAtLimit(account, input.now, input.model)) {
+      continue;
+    }
     if (input.blocked && account.id === input.blocked.id) continue;
-    const roomPercent = planRoomPercent(account, input.now) ?? 1;
+    const roomPercent = planRoomPercent(account, input.now, input.model) ?? 1;
     if (best === null || roomPercent > best.roomPercent) {
       best = {
         instanceId: account.instanceId ?? DRIVER_BY_PLAN_PROVIDER[input.provider],
@@ -324,6 +363,8 @@ export function chatPlanLimit(input: {
   readonly driver: string | null;
   /** The provider instance the chat runs on: a second account has limits of its own. */
   readonly instanceId?: string | null | undefined;
+  /** The chat's model: its own limit stops it, another model's doesn't. */
+  readonly model?: string | null | undefined;
   readonly stopText: string | null;
   /** When the chat stopped (the turn's end); the stop line's "3pm" is read from then. */
   readonly stoppedAt?: string | null;
@@ -340,6 +381,7 @@ export function chatPlanLimit(input: {
     currentEnvironmentId: input.currentEnvironmentId,
     provider,
     instanceId: input.instanceId,
+    model: input.model,
     computers: input.computers,
     now: input.now,
   });
@@ -350,6 +392,7 @@ export function chatPlanLimit(input: {
   const otherAccount = otherAccountWithRoom({
     accounts: here?.accounts ?? null,
     provider,
+    model: input.model,
     blocked: hereAccount,
     now: input.now,
   });
@@ -367,7 +410,9 @@ export function chatPlanLimit(input: {
   const readAfterStop = hereAccount?.checkedAt
     ? Date.parse(hereAccount.checkedAt) > stopped
     : false;
-  if (hereAccount && readAfterStop && planAtLimit(hereAccount, input.now) === null) return null;
+  if (hereAccount && readAfterStop && planAtLimit(hereAccount, input.now, input.model) === null) {
+    return null;
+  }
   if (textReset !== null && Date.parse(textReset) <= input.now) return null;
   if (textReset === null && input.now - stopped >= 5 * HOUR_MS) return null;
   // The numbers here are older than the stop (5-minute cache): trust the
@@ -379,6 +424,7 @@ export function chatPlanLimit(input: {
     alternative: findAlternative({
       currentEnvironmentId: input.currentEnvironmentId,
       provider,
+      model: input.model,
       blocked: hereAccount,
       computers: input.computers,
       now: input.now,
