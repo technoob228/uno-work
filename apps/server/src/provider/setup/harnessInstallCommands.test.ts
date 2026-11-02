@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { UNO_OPENCODE_VERSION } from "@t3tools/shared/agentVersions";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  HERMES_CLAUDE_READY_REF,
   isInstallableDriver,
   resolveInstallPlan,
   userLocalNpmPrefix,
@@ -24,6 +28,16 @@ describe("isInstallableDriver", () => {
     }
     expect(isInstallableDriver(driver("uno"))).toBe(false);
     expect(isInstallableDriver(driver("grok"))).toBe(false);
+  });
+});
+
+describe("deploy/install.sh", () => {
+  it("installs the same Hermes release as the app", () => {
+    const script = readFileSync(
+      fileURLToPath(new URL("../../../../../deploy/install.sh", import.meta.url)),
+      "utf8",
+    );
+    expect(script).toContain(`UNO_WORK_HERMES_REF="${HERMES_CLAUDE_READY_REF}"`);
   });
 });
 

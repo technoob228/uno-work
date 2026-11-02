@@ -27,6 +27,8 @@ const hangPrompt = process.env.T3_ACP_HANG_PROMPT === "1";
  * ones. The reply then says what the agent understood, as a real agent would
  * read the answer: an option it didn't offer is a refusal.
  */
+const permissionToolKind = (process.env.T3_ACP_PERMISSION_TOOL_KIND ??
+  "execute") as AcpSchema.ToolKind;
 const permissionOptions = process.env.T3_ACP_PERMISSION_OPTIONS
   ? (JSON.parse(process.env.T3_ACP_PERMISSION_OPTIONS) as ReadonlyArray<AcpSchema.PermissionOption>)
   : null;
@@ -393,7 +395,7 @@ const program = Effect.gen(function* () {
           toolCall: {
             toolCallId,
             title: "`cat server/package.json`",
-            kind: "execute",
+            kind: permissionToolKind,
             status: "pending",
             content: [
               {

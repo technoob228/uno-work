@@ -167,6 +167,8 @@ describe("buildHermesConfigYaml", () => {
         "  api_max_retries: 3",
         "  intent_ack_continuation: true",
         "  verify_on_stop: false",
+        "approvals:",
+        "  timeout: 1800",
         "model:",
         '  provider: "openai-api"',
         '  default: "anthropic/claude-haiku-4.5"',
