@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
+import { PARALLEL_CHATS_ACTIVITY_KIND } from "@t3tools/shared/parallelChats";
 import {
   ApprovalRequestId,
   CommandId,
@@ -148,6 +149,8 @@ describe("ProviderCommandReactor", () => {
     readonly workspaceRoot?: string;
     /** With the parallel chats service (parallelChats/), on real git. */
     readonly parallelChats?: boolean;
+    /** Parallel chats: the disk counts as nearly full (no copies). */
+    readonly lowDisk?: boolean;
   }) {
     const now = new Date().toISOString();
     const baseDir = input?.baseDir ?? fs.mkdtempSync(path.join(os.tmpdir(), "t3code-reactor-"));
@@ -349,7 +352,7 @@ describe("ProviderCommandReactor", () => {
       ),
       Layer.provideMerge(
         input?.parallelChats === true
-          ? makeParallelChatsLayer({ lowDisk: Effect.succeed(false) }).pipe(
+          ? makeParallelChatsLayer({ lowDisk: Effect.succeed(input?.lowDisk === true) }).pipe(
               Layer.provide(GitVcsDriver.layer),
             )
           : Layer.empty,
@@ -466,7 +469,7 @@ describe("ProviderCommandReactor", () => {
 
     const startTwoChats = async (
       harness: Awaited<ReturnType<typeof createHarness>>,
-      options: { readonly together?: boolean } = {},
+      options: { readonly together?: boolean; readonly secondWaits?: boolean } = {},
     ) => {
       const now = new Date().toISOString();
       await Effect.runPromise(
@@ -501,12 +504,111 @@ describe("ProviderCommandReactor", () => {
             createdAt: now,
           }),
         );
-        if (options.together !== true) {
+        if (options.together !== true && !(options.secondWaits === true && index === 1)) {
           await waitFor(() => harness.sendTurn.mock.calls.length === index + 1);
         }
       }
-      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      if (options.secondWaits !== true) {
+        await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      }
     };
+
+    const queuedLines = async (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      ((await harness.readModel()).threads.find((t) => t.id === "thread-2")?.activities ?? [])
+        .filter((activity) => activity.kind === PARALLEL_CHATS_ACTIVITY_KIND)
+        .map((activity) => activity.payload as { readonly line?: string; readonly lowDisk?: boolean })
+        .filter((payload) => payload.line === "queued");
+
+    const firstChatFinishes = (harness: Awaited<ReturnType<typeof createHarness>>) => {
+      const now = new Date().toISOString();
+      return Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("cmd-parallel-first-done"),
+          threadId: ThreadId.make("thread-1"),
+          session: {
+            threadId: ThreadId.make("thread-1"),
+            status: "ready",
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+    };
+
+    it("no room for a copy (disk almost full): the second chat waits, then starts in the folder", async () => {
+      const { root, dir } = syncedProject();
+      const baseDir = path.join(dir, "base");
+      process.env.UNO_WORK_PARALLEL_CHATS = "nogit";
+      try {
+        const harness = await createHarness({
+          workspaceRoot: root,
+          parallelChats: true,
+          lowDisk: true,
+          baseDir,
+        });
+        await startTwoChats(harness, { secondWaits: true });
+        await waitFor(async () => (await queuedLines(harness)).length === 1);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        // Never on top of the busy chat: its turn hasn't started.
+        expect(harness.sendTurn.mock.calls).toHaveLength(1);
+        expect(await queuedLines(harness)).toEqual([{ line: "queued", lowDisk: true }]);
+
+        await firstChatFinishes(harness);
+        await waitFor(() => harness.sendTurn.mock.calls.length === 2, 8000);
+        const cwds = harness.startSession.mock.calls.map(
+          (call) => (call[1] as { readonly cwd?: string }).cwd,
+        );
+        expect(cwds).toEqual([root, root]);
+        const second = harness.sendTurn.mock.calls[1]?.[0] as { readonly input?: string };
+        expect(second.input).toContain("task 1");
+        expect(second.input).not.toContain("temporary copy");
+        // Told once, not on every look at the folder.
+        expect(await queuedLines(harness)).toHaveLength(1);
+        const worktrees = path.join(baseDir, "worktrees");
+        expect(fs.existsSync(worktrees) ? fs.readdirSync(worktrees) : []).toEqual([]);
+      } finally {
+        delete process.env.UNO_WORK_PARALLEL_CHATS;
+      }
+    });
+
+    it("a waiting chat the person stops never starts, and stops reading as busy", async () => {
+      const { root } = syncedProject();
+      process.env.UNO_WORK_PARALLEL_CHATS = "nogit";
+      try {
+        const harness = await createHarness({
+          workspaceRoot: root,
+          parallelChats: true,
+          lowDisk: true,
+        });
+        await startTwoChats(harness, { secondWaits: true });
+        await waitFor(async () => (await queuedLines(harness)).length === 1);
+        const now = new Date().toISOString();
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.turn.interrupt",
+            commandId: CommandId.make("cmd-parallel-stop-waiting"),
+            threadId: ThreadId.make("thread-2"),
+            createdAt: now,
+          }),
+        );
+        await waitFor(async () => {
+          const thread = (await harness.readModel()).threads.find((t) => t.id === "thread-2");
+          return thread?.session?.updatedAt === now;
+        });
+        await firstChatFinishes(harness);
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        expect(harness.sendTurn.mock.calls).toHaveLength(1);
+        expect(harness.interruptTurn.mock.calls).toHaveLength(0);
+      } finally {
+        delete process.env.UNO_WORK_PARALLEL_CHATS;
+      }
+    });
 
     it("on: the second chat next to a busy one starts in its own copy and its prompt says so", async () => {
       const { root } = syncedProject();

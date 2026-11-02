@@ -11,18 +11,25 @@
 /** Activity kind of the quiet lines below (one line in the chat, no turn). */
 export const PARALLEL_CHATS_ACTIVITY_KIND = "chat.parallel-chats";
 
-export type ParallelChatsLineKind = "joined" | "waiting" | "parked" | "kept-both";
+export type ParallelChatsLineKind = "joined" | "waiting" | "parked" | "kept-both" | "queued";
 
 export interface ParallelChatsLinePayload {
   readonly line: ParallelChatsLineKind;
   /** "kept-both": the files that now have two versions. */
   readonly files?: ReadonlyArray<string>;
+  /** "queued": the disk is too full for a copy (any other reason reads the same). */
+  readonly lowDisk?: boolean;
 }
 
 export const PARALLEL_LINE_JOINED = "Combined with changes from another chat.";
 export const PARALLEL_LINE_WAITING = "Joins the project when the other chat finishes.";
 export const PARALLEL_LINE_PARKED =
   "Your work is safe here. It joins the project after you answer.";
+/** No copy could be made: the chat starts when the folder is free, never on top of the other. */
+export const PARALLEL_LINE_QUEUED =
+  "Waiting for the other chat to finish, so they don't overwrite each other.";
+export const PARALLEL_LINE_QUEUED_LOW_DISK =
+  "Waiting for the other chat to finish: the disk is almost full.";
 export const PARALLEL_LINE_COMBINING = "Combining with another chat's changes…";
 
 export function parallelKeptBothLine(files: ReadonlyArray<string>): string {
@@ -41,21 +48,31 @@ export function parallelChatsLine(payload: ParallelChatsLinePayload): string {
       return PARALLEL_LINE_PARKED;
     case "kept-both":
       return parallelKeptBothLine(payload.files ?? []);
+    case "queued":
+      return payload.lowDisk === true ? PARALLEL_LINE_QUEUED_LOW_DISK : PARALLEL_LINE_QUEUED;
   }
 }
 
 export function readParallelChatsLine(payload: unknown): ParallelChatsLinePayload | null {
   if (payload === null || typeof payload !== "object") return null;
   const line = (payload as { readonly line?: unknown }).line;
-  if (line !== "joined" && line !== "waiting" && line !== "parked" && line !== "kept-both") {
+  if (
+    line !== "joined" &&
+    line !== "waiting" &&
+    line !== "parked" &&
+    line !== "kept-both" &&
+    line !== "queued"
+  ) {
     return null;
   }
   const files = (payload as { readonly files?: unknown }).files;
+  const lowDisk = (payload as { readonly lowDisk?: unknown }).lowDisk;
   return {
     line,
     ...(Array.isArray(files)
       ? { files: files.filter((f): f is string => typeof f === "string") }
       : {}),
+    ...(lowDisk === true ? { lowDisk: true } : {}),
   };
 }
 

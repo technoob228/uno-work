@@ -32,6 +32,7 @@ import {
   Duration,
   Effect,
   Equal,
+  Fiber,
   Layer,
   Option,
   Schema,
@@ -121,7 +122,18 @@ interface SessionPrewarmRequest {
   readonly outcome: Deferred.Deferred<ProviderSessionPrewarmOutcome>;
 }
 
-type ReactorWorkItem = ProviderIntentEvent | SessionPrewarmRequest;
+type TurnStartRequestedEvent = Extract<
+  ProviderIntentEvent,
+  { type: "thread.turn-start-requested" }
+>;
+
+/** A turn start that waited for another chat to leave the folder (parallel chats), asked again. */
+interface HeldTurnStartRetry {
+  readonly type: "parallel-chats.turn-start-retry";
+  readonly event: TurnStartRequestedEvent;
+}
+
+type ReactorWorkItem = ProviderIntentEvent | SessionPrewarmRequest | HeldTurnStartRetry;
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined {
   const normalized = value?.trim();
@@ -350,6 +362,15 @@ const make = Effect.gen(function* () {
   const worktreeCleanup = Option.getOrUndefined(yield* Effect.serviceOption(WorktreeCleanup));
   // Parallel chats (parallelChats/): a chat starting next to a busy one gets its own copy.
   const parallelChats = Option.getOrUndefined(yield* Effect.serviceOption(ParallelChats));
+  const reactorScope = yield* Effect.scope;
+  /**
+   * Turn starts waiting for another chat to leave the project folder, per
+   * thread, oldest first: one watcher per thread sends them on in order.
+   */
+  const heldTurnStarts = new Map<
+    string,
+    { readonly events: Array<TurnStartRequestedEvent>; readonly watcher: Fiber.Fiber<void> }
+  >();
   const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
     attachments.length === 0
       ? null
@@ -1065,11 +1086,47 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /** Hold a turn start until the folder is free; the same chat's next messages queue behind it. */
+  const holdTurnStart = Effect.fn("holdTurnStart")(function* (event: TurnStartRequestedEvent) {
+    if (parallelChats === undefined) return;
+    const threadId = event.payload.threadId;
+    const held = heldTurnStarts.get(threadId);
+    if (held !== undefined) {
+      held.events.push(event);
+      return;
+    }
+    const events = [event];
+    const watcher = yield* parallelChats.awaitFolderFree(threadId).pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          heldTurnStarts.delete(threadId);
+          return Effect.forEach(events, (next) =>
+            worker.enqueue({ type: "parallel-chats.turn-start-retry", event: next }),
+          );
+        }),
+      ),
+      Effect.asVoid,
+      Effect.forkIn(reactorScope),
+    );
+    heldTurnStarts.set(threadId, { events, watcher });
+  });
+
+  /** The person stopped a chat whose turn waits for the folder: it never starts. */
+  const dropHeldTurnStarts = Effect.fn("dropHeldTurnStarts")(function* (threadId: ThreadId) {
+    const held = heldTurnStarts.get(threadId);
+    if (held === undefined) return false;
+    heldTurnStarts.delete(threadId);
+    yield* Fiber.interrupt(held.watcher);
+    return true;
+  });
+
   const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    event: TurnStartRequestedEvent,
+    options: { readonly retry?: boolean } = {},
   ) {
+    // A held start comes back with a key already seen: it is the same request, asked again.
     const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
+    if ((yield* hasHandledTurnStartRecently(key)) && options.retry !== true) {
       return;
     }
 
@@ -1097,6 +1154,10 @@ const make = Effect.gen(function* () {
       parallelChats === undefined
         ? { thread: requestedThread, agentNote: null }
         : yield* parallelChats.beforeTurn(requestedThread);
+    if (parallelTurn.waitForFolder === true) {
+      yield* holdTurnStart(event);
+      return;
+    }
     const thread = parallelTurn.thread;
 
     const isFirstUserMessageTurn =
@@ -1462,6 +1523,28 @@ const make = Effect.gen(function* () {
     if (!thread) {
       return;
     }
+    if (yield* dropHeldTurnStarts(thread.id)) {
+      // Nothing ran yet: the chat only has to stop reading as busy.
+      const now = event.payload.createdAt;
+      yield* setThreadSession({
+        threadId: thread.id,
+        session: {
+          threadId: thread.id,
+          status: thread.session?.status ?? "stopped",
+          providerName: thread.session?.providerName ?? null,
+          ...(thread.session?.providerInstanceId !== undefined
+            ? { providerInstanceId: thread.session.providerInstanceId }
+            : {}),
+          runtimeMode: thread.session?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
+          activeTurnId: null,
+          lastError: thread.session?.lastError ?? null,
+          lastErrorClass: thread.session?.lastErrorClass ?? null,
+          updatedAt: now,
+        },
+        createdAt: now,
+      });
+      return;
+    }
     const hasSession = thread.session && thread.session.status !== "stopped";
     if (!hasSession) {
       return yield* appendProviderFailureActivity({
@@ -1641,6 +1724,7 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    yield* dropHeldTurnStarts(thread.id);
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
       yield* providerService.stopSession({ threadId: thread.id });
@@ -1724,7 +1808,18 @@ const make = Effect.gen(function* () {
   const worker = yield* makeDrainableWorker((item: ReactorWorkItem) =>
     item.type === "assistant.session-prewarm"
       ? runSessionPrewarm(item)
-      : processDomainEventSafely(item),
+      : item.type === "parallel-chats.turn-start-retry"
+        ? processTurnStartRequested(item.event, { retry: true }).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : Effect.logWarning("provider command reactor failed to start a held turn", {
+                    threadId: item.event.payload.threadId,
+                    cause: Cause.pretty(cause),
+                  }),
+            ),
+          )
+        : processDomainEventSafely(item),
   );
 
   const prewarmSession: NonNullable<ProviderCommandReactorShape["prewarmSession"]> = (

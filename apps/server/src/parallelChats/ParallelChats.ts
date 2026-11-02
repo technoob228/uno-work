@@ -128,11 +128,25 @@ export interface ParallelTurnStart<T extends ParallelThread> {
   readonly thread: T;
   /** Added to the agent's prompt (not to the stored message), or null. */
   readonly agentNote: string | null;
+  /**
+   * Another chat works in the folder and no copy could be made (disk, limits,
+   * an agent that can't move): the turn must not start now. The reactor holds
+   * it until `awaitFolderFree` and asks again; the chat already got its line.
+   */
+  readonly waitForFolder?: true;
 }
+
+/** How often a held turn start looks at the folder again. */
+export const HELD_TURN_POLL = Duration.seconds(2);
 
 export interface ParallelChatsShape {
   /** Called by the provider command reactor first thing for each turn start. Never fails. */
   readonly beforeTurn: <T extends ParallelThread>(thread: T) => Effect.Effect<ParallelTurnStart<T>>;
+  /**
+   * Done when no other chat works in the thread's project folder (or the flag
+   * went off, or the thread is gone). Never fails.
+   */
+  readonly awaitFolderFree: (threadId: ThreadId) => Effect.Effect<void>;
   /** Event subscription and the periodic look at waiting copies. */
   readonly start: () => Effect.Effect<void, never, import("effect").Scope.Scope>;
   /** Try to join every waiting copy now (tests; the tick does the same). */
@@ -189,6 +203,8 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
   const pending = new Map<string, number>();
   /** Chats already told "Joins the project when the other chat finishes." for this wait. */
   const toldWaiting = new Set<string>();
+  /** Chats already told their turn waits for the folder, for this wait. */
+  const toldQueued = new Set<string>();
   /** Chats already told their work waits for an answer, for this conflict. */
   const toldParked = new Set<string>();
   /** Where each chat's copy is and whose project it is: a deleted chat is gone from the projection. */
@@ -295,14 +311,18 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
 
   /**
    * Move the chat into a copy: the copy, then (for a Claude chat with a
-   * session) its transcript, then the thread's folder. Any failure: the chat
-   * works in the folder as before.
+   * session) its transcript, then the thread's folder. Any failure: why the
+   * chat can't have a copy (it then waits for the folder, never works on top
+   * of the other chat).
    */
   const moveIntoCopy = Effect.fn("ParallelChats.moveIntoCopy")(function* (input: {
     readonly thread: ParallelThread;
     readonly root: string;
     readonly project: OrchestrationProjectShell;
-  }) {
+  }): Effect.fn.Return<
+    { readonly copy: string } | { readonly refused: string },
+    ParallelChatsError
+  > {
     const { thread, root } = input;
     const threads = yield* projectThreads(thread.projectId);
     const liveCopies = threads.filter(
@@ -317,25 +337,14 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
       fileCount: yield* indexEntryCount(nodePath.join(root, UNO_GIT_DIR, "index")),
     });
     if (refusal !== null) {
-      yield* Effect.logInfo("parallel chats: the chat works in the folder", {
-        threadId: thread.id,
-        reason: refusal,
-      });
-      return null;
+      return { refused: refusal };
     }
     const session = yield* deps.sessionOf(thread.id);
     const move = sessionMove({
       hasResumableSession: session?.resumeId != null,
       driver: session?.driver ?? null,
     });
-    if (move === "cannot") {
-      yield* Effect.logInfo("parallel chats: the chat works in the folder", {
-        threadId: thread.id,
-        reason: "cannot-move-session",
-        driver: session?.driver ?? null,
-      });
-      return null;
-    }
+    if (move === "cannot") return { refused: "cannot-move-session" };
     const copy = autoCopyPath({ worktreesDir: deps.worktreesDir, root, threadId: thread.id });
     const made = yield* makeCopy({ root, copy, threadId: thread.id }).pipe(
       Effect.timeoutOption(Duration.millis(COPY_TIMEOUT_MS)),
@@ -349,11 +358,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
     );
     if (!made) {
       yield* dropCopy(root, copy, thread.id);
-      yield* Effect.logInfo("parallel chats: the chat works in the folder", {
-        threadId: thread.id,
-        reason: "copy-failed",
-      });
-      return null;
+      return { refused: "copy-failed" };
     }
     if (move === "claude-transcript") {
       const moved = yield* copyClaudeTranscript({
@@ -364,11 +369,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
       });
       if (!moved) {
         yield* dropCopy(root, copy, thread.id);
-        yield* Effect.logInfo("parallel chats: the chat works in the folder", {
-          threadId: thread.id,
-          reason: "claude-transcript-not-found",
-        });
-        return null;
+        return { refused: "claude-transcript-not-found" };
       }
     }
     yield* setFolder(thread.id, copy);
@@ -377,7 +378,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
       projectId: thread.projectId,
       copy,
     });
-    return copy;
+    return { copy };
   });
 
   /** The copy can't come back: the chat works in the folder again, a Claude session with it. */
@@ -494,16 +495,55 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
     });
     if (ineligible !== null) return { thread, agentNote: null };
     if (!(yield* folderBusy(thread.projectId, root, thread.id))) {
+      toldQueued.delete(thread.id);
       return { thread, agentNote: null };
     }
-    const copy = yield* moveIntoCopy({ thread, root, project });
-    if (copy === null) return { thread, agentNote: null };
+    const moved = yield* moveIntoCopy({ thread, root, project });
+    if ("refused" in moved) {
+      // Working in the folder now would overwrite the other chat (or be
+      // overwritten): the turn waits for it instead, the person is told once.
+      starting.delete(thread.id);
+      yield* Effect.logInfo("parallel chats: the chat waits for the folder", {
+        threadId: thread.id,
+        reason: moved.refused,
+      });
+      if (!toldQueued.has(thread.id)) {
+        toldQueued.add(thread.id);
+        yield* appendLine(thread.id, {
+          line: "queued",
+          ...(moved.refused === "low-disk" ? { lowDisk: true } : {}),
+        });
+      }
+      return { thread, agentNote: null, waitForFolder: true };
+    }
+    toldQueued.delete(thread.id);
+    const copy = moved.copy;
     known.set(thread.id, { root, copy });
     return {
       thread: { ...thread, worktreePath: copy, branch: null },
       agentNote: yield* agentNoteFor({ threadId: thread.id, root, copy }),
     };
   });
+
+  const awaitFolderFree: ParallelChatsShape["awaitFolderFree"] = (threadId) =>
+    Effect.gen(function* () {
+      while (true) {
+        if ((yield* deps.mode) === "off") return;
+        const thread = yield* deps.getThread(threadId);
+        if (thread === null) return;
+        const project = yield* deps.getProject(thread.projectId);
+        if (project === null) return;
+        if (!(yield* folderBusy(thread.projectId, project.workspaceRoot, thread.id))) return;
+        yield* Effect.sleep(HELD_TURN_POLL);
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("parallel chats: folder wait failed, the turn goes on", {
+          threadId,
+          cause,
+        }),
+      ),
+    );
 
   const beforeTurn: ParallelChatsShape["beforeTurn"] = <T extends ParallelThread>(thread: T) =>
     lock
@@ -517,6 +557,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
               branch: result.thread.branch,
             },
             agentNote: result.agentNote,
+            ...(result.waitForFolder ? { waitForFolder: true as const } : {}),
           }),
         ),
         Effect.catchCause((cause) =>
@@ -960,6 +1001,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
 
   return {
     beforeTurn,
+    awaitFolderFree,
     start,
     drainAll,
     /** Tests: the in-memory queue. */
@@ -1081,6 +1123,7 @@ export const makeParallelChatsLayer = (options: ParallelChatsLayerOptions = {}) 
       });
       return {
         beforeTurn: service.beforeTurn,
+        awaitFolderFree: service.awaitFolderFree,
         start: service.start,
         drainAll: service.drainAll,
       } satisfies ParallelChatsShape;
