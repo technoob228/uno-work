@@ -272,10 +272,15 @@ describe("the card", () => {
       return { speech: "ok", visual: "" };
     };
     await recorded();
-    expect(store().items["t1"]!.watch).toMatchObject({
-      status: "failed",
-      error: "gateway timeout",
-    });
+    // One more try comes first (2 s), then the card says it failed.
+    await vi.waitFor(
+      () =>
+        expect(store().items["t1"]!.watch).toMatchObject({
+          status: "failed",
+          error: "gateway timeout",
+        }),
+      { timeout: 5_000 },
+    );
     fail = false;
     store().retryWatch("t1");
     await flush();
@@ -353,6 +358,9 @@ describe("Home's recording moves to the new chat", () => {
       return { speech: "ok", visual: "" };
     };
     await recordedOnHome();
+    await vi.waitFor(() => expect(store().items["home:e1"]!.watch.status).toBe("failed"), {
+      timeout: 5_000,
+    });
     expect(store().moveTo("home:e1", "chat-1")).toBe(true);
     fail = false;
     store().retryWatch("chat-1");

@@ -222,6 +222,18 @@ describe("the message block", () => {
     });
   });
 
+  it("not watched: the agent hears that nobody listened, not that they said nothing", () => {
+    const text = appendRecordingToPrompt("", {
+      ...recording,
+      speech: "",
+      visual: "",
+      notWatched: "The computer didn't answer.",
+    });
+    expect(text).toContain("(not transcribed: The computer didn't answer.");
+    expect(text).not.toContain("has no speech");
+    expect(extractRecordingBlock(text).recording).toMatchObject({ speech: "", visual: "" });
+  });
+
   it("leaves ordinary messages alone", () => {
     expect(extractRecordingBlock("hello <screen_recording")).toEqual({
       text: "hello <screen_recording",

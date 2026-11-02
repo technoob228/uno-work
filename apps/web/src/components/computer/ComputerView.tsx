@@ -25,33 +25,21 @@ import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, getRouteApi, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { isUsefulBackTarget, previousEntryPath } from "../../navigation/inAppBack";
-import {
-  ArrowLeftIcon,
-  HardDriveIcon,
-  HouseIcon,
-  LayoutGridIcon,
-  MonitorIcon,
-  RefreshCwIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, HardDriveIcon, HouseIcon, MonitorIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { accountTransport } from "../../account/unoAccount";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { useSpaceScope } from "../../spaces";
-import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
 import { AppCatalogDialog } from "./AppCatalogDialog";
 import { BoostControl } from "./BoostControl";
-import { EconomyCard } from "./EconomyControl";
 import { ChatInFolderDialog } from "./ChatInFolderDialog";
 import { ComputerActivityCard } from "./ComputerActivityCard";
 import { ComputerEngineersDoor } from "./ComputerEngineersDoor";
-import { ComputerCloudStorageRow } from "./ComputerCloudStorageRow";
-import { ComputerHero } from "./ComputerHero";
-import { ComputerPrograms, type BuiltInPrograms } from "./ComputerPrograms";
+import type { BuiltInPrograms } from "./ComputerPrograms";
 import {
   appAiQueryKey,
   appAiQueryOptions,
@@ -113,21 +101,19 @@ export function ComputerView() {
   });
   const devMode = useDevMode();
   /** Only set when the daemon is not an Uno computer and the user picked one. */
-  const [pickedBoxId, setPickedBoxId] = useState<number | null>(null);
-  const thisMachine = pickedBoxId === null;
   const linkDown = useComputerLinkDown(environmentId);
 
   const routeSearch = routeApi.useSearch();
   const navigate = useNavigate();
   // "What's using your computer": this machine's own daemon reads it.
-  const look = thisMachine ? routeSearch.look : undefined;
+  const look = routeSearch.look;
   const openLook = (next: ResourceLook, replace = false) =>
     void navigate({ to: "/computer", search: { look: next }, replace });
 
   const home = useHomeComputer({
     environmentId,
-    boxId: pickedBoxId,
-    onOpenLook: thisMachine ? (next) => openLook(next) : undefined,
+    boxId: null,
+    onOpenLook: (next) => openLook(next),
   });
   const {
     stateQuery,
@@ -135,36 +121,31 @@ export function ComputerView() {
     box,
     computerOn,
     load,
-    lowResource,
     boostControls,
     boosting,
     openResize,
-    powerMutation,
-    powerControls,
     homeComputer,
   } = home;
   const hasBox = box !== null;
-  const machineAppsQuery = useQuery(machineAppsQueryOptions(environmentId, thisMachine));
-  const activityQuery = useQuery(computerActivityQueryOptions(environmentId, pickedBoxId, hasBox));
-  const appsQuery = useQuery(computerAppsQueryOptions(environmentId, pickedBoxId, hasBox));
+  const machineAppsQuery = useQuery(machineAppsQueryOptions(environmentId, true));
+  const activityQuery = useQuery(computerActivityQueryOptions(environmentId, null, hasBox));
+  const appsQuery = useQuery(computerAppsQueryOptions(environmentId, null, hasBox));
   // Apps' cloud folders (Settings → Apps): only this machine's daemon knows them.
   const appAiQuery = useQuery({
-    ...appAiQueryOptions(environmentId, thisMachine),
+    ...appAiQueryOptions(environmentId, true),
     // Read when the screen opens; Settings → Apps is the one that keeps polling.
     refetchInterval: false,
   });
 
   const appAction = useMutation(machineAppActionMutationOptions(environmentId, queryClient));
   const removeStoreApp = useMutation(
-    removeStoreAppMutationOptions(environmentId, pickedBoxId, queryClient),
+    removeStoreAppMutationOptions(environmentId, null, queryClient),
   );
-  const setAiLimit = useMutation(
-    setAppAiLimitMutationOptions(environmentId, pickedBoxId, queryClient),
-  );
-  const signIn = appSignInApi(environmentId, pickedBoxId);
+  const setAiLimit = useMutation(setAppAiLimitMutationOptions(environmentId, null, queryClient));
+  const signIn = appSignInApi(environmentId, null);
   const installs = useAppInstalls({
     environmentId,
-    boxId: pickedBoxId,
+    boxId: null,
     inFlight: appsQuery.data?.installed.apps ?? [],
   });
   const launchers = useHomeLaunchers(environmentId);
@@ -172,8 +153,8 @@ export function ComputerView() {
   // A space is its computer: its Terminal has nowhere else to go.
   const terminalComputers = useSpaceScope() === null ? overviewComputers : [];
   // The console's first message / a Uno AI chat moving to this computer.
-  useUnoAiArrivals(thisMachine ? environmentId : null, launchers.startTask);
-  const primary = useAppPrimaryAction({ environmentId, boxId: pickedBoxId });
+  useUnoAiArrivals(environmentId, launchers.startTask);
+  const primary = useAppPrimaryAction({ environmentId, boxId: null });
 
   const [storeOpen, setStoreOpen] = useState(false);
   const [folderOpen, setFolderOpen] = useState(false);
@@ -181,13 +162,13 @@ export function ComputerView() {
   const layout = useHomeLayout();
 
   const browserOnMachine =
-    thisMachine && typeof window !== "undefined" && isBrowserOnMachine(window.location.hostname);
+    typeof window !== "undefined" && isBrowserOnMachine(window.location.hostname);
 
   const tiles = useMemo(
     () =>
       withAiNotes(
         buildProgramTiles({
-          machineApps: thisMachine ? (machineAppsQuery.data?.apps ?? []) : [],
+          machineApps: machineAppsQuery.data?.apps ?? [],
           storeApps: appsQuery.data?.installed.apps ?? [],
           installs: installs.installs,
           browserOnMachine,
@@ -202,7 +183,6 @@ export function ComputerView() {
       computerOn,
       installs.installs,
       machineAppsQuery.data,
-      thisMachine,
     ],
   );
   const detailsTile = tiles.find((tile) => tile.key === detailsKey) ?? null;
@@ -287,8 +267,7 @@ export function ComputerView() {
       removeStoreApp.reset();
       if (appAction.variables?.action === "remove") appAction.reset();
     },
-    cloudFiles: (removal) =>
-      thisMachine ? removalCloudFiles(removal, appAiQuery.data?.apps) : null,
+    cloudFiles: (removal) => removalCloudFiles(removal, appAiQuery.data?.apps),
     onRemove: (removal, deleteData, deleteCloudFiles, deleteCode) => {
       if (removal.kind === "store") {
         // Asked when the dialog opened; the app's id on this computer.
@@ -377,10 +356,6 @@ export function ComputerView() {
       <BoostControl controls={boostControls} computerName={home.name} />
     ) : null;
 
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: computerQueryKeys.all });
-  };
-
   const pill = (
     <ComputerPill
       computer={homeComputer}
@@ -409,7 +384,7 @@ export function ComputerView() {
         <header className="border-b border-border px-3 py-2 sm:px-5 sm:py-3">
           <div className="flex min-h-8 items-center gap-2">
             <SidebarShowButton />
-            {thisMachine && canGoBack && !look ? (
+            {canGoBack && !look ? (
               // Rama 26.09: "from Home there's no way back to where I was".
               <Button
                 size="xs"
@@ -422,51 +397,25 @@ export function ComputerView() {
                 <span className="hidden sm:inline">Back</span>
               </Button>
             ) : null}
-            {thisMachine ? (
-              <>
-                {/* 01.10: no "Home" title in the simple start screen — it's the
+            <>
+              {/* 01.10: no "Home" title in the simple start screen — it's the
                     logo and "New chat"; Dev mode keeps it. */}
-                {devMode ? (
-                  <>
-                    <HouseIcon className="size-4 text-muted-foreground" />
-                    <span className="text-sm font-medium text-foreground">Home</span>
-                  </>
-                ) : null}
-                <div className="ml-auto flex min-w-0 items-center gap-1.5">
-                  <HomeTerminalButton
-                    computers={terminalComputers}
-                    homeId={environmentId}
-                    linkDown={linkDown}
-                    onOpen={() => void launchers.openTerminal()}
-                  />
-                  {pill}
-                </div>
-              </>
-            ) : (
-              <>
-                <MonitorIcon className="size-4 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">This computer</span>
-                <Button size="xs" variant="ghost" onClick={() => setPickedBoxId(null)}>
-                  Back to this machine
-                </Button>
-                <div className="ml-auto flex items-center gap-1">
-                  {accountTransport() !== "none" ? (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      render={<Link to="/my-uno" />}
-                      data-testid="home-my-uno"
-                    >
-                      <LayoutGridIcon className="size-3.5" />
-                      All my computers
-                    </Button>
-                  ) : null}
-                  <Button size="xs" variant="ghost" onClick={refresh} aria-label="Refresh">
-                    <RefreshCwIcon className="size-3.5" />
-                  </Button>
-                </div>
-              </>
-            )}
+              {devMode ? (
+                <>
+                  <HouseIcon className="size-4 text-muted-foreground" />
+                  <span className="text-sm font-medium text-foreground">Home</span>
+                </>
+              ) : null}
+              <div className="ml-auto flex min-w-0 items-center gap-1.5">
+                <HomeTerminalButton
+                  computers={terminalComputers}
+                  homeId={environmentId}
+                  linkDown={linkDown}
+                  onOpen={() => void launchers.openTerminal()}
+                />
+                {pill}
+              </div>
+            </>
           </div>
         </header>
 
@@ -492,7 +441,7 @@ export function ComputerView() {
                 ) : null
               }
             />
-          ) : thisMachine ? (
+          ) : (
             <>
               {isWebLite ? null : <HomeAgentSignIn />}
               <HomeStart
@@ -521,77 +470,13 @@ export function ComputerView() {
                 onAskUno={launchers.askUno}
               />
             </>
-          ) : (
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-              {stateQuery.isPending ? (
-                <>
-                  <Skeleton className="h-36 w-full rounded-3xl" />
-                  <Skeleton className="h-56 w-full rounded-2xl" />
-                </>
-              ) : stateQuery.isError ? (
-                <Notice title="This screen can't reach your computer right now">
-                  {stateQuery.error instanceof Error ? stateQuery.error.message : null} It will try
-                  again by itself.
-                </Notice>
-              ) : (
-                <>
-                  {/* Another cloud computer, picked from a laptop: its full view. */}
-                  <ComputerHero
-                    name={home.name}
-                    subtitle={home.subtitle}
-                    status={box?.status ?? null}
-                    address={box?.address ?? null}
-                    own={computer?.own ?? false}
-                    load={load}
-                    loadLive={home.loadLive}
-                    power={
-                      powerControls
-                        ? {
-                            ...powerControls,
-                            onPower: (action) => powerMutation.mutate({ action }),
-                          }
-                        : null
-                    }
-                    onResize={openResize}
-                    lowResource={box ? lowResource : null}
-                    boost={boostNode}
-                    economy={box?.economy}
-                  />
-                  {box?.economy ? (
-                    <EconomyCard environmentId={environmentId} boxId={pickedBoxId} />
-                  ) : null}
-                  <ComputerPrograms
-                    builtIns={builtIns}
-                    showBuiltIns={false}
-                    tiles={tiles}
-                    machineApps={undefined}
-                    loading={false}
-                    onOpenTile={openTile}
-                    onTileDetails={(tile) => {
-                      resetTileMutations();
-                      setDetailsKey(tile.key);
-                    }}
-                  />
-                  {box ? (
-                    <>
-                      <ComputerCloudStorageRow environmentId={environmentId} />
-                      <ComputerActivityCard
-                        activity={activityQuery.data}
-                        loading={activityQuery.isPending}
-                      />
-                      <ComputerEngineersDoor box={box} />
-                    </>
-                  ) : null}
-                </>
-              )}
-            </div>
           )}
         </div>
       </div>
 
       {home.dialogs}
 
-      <NotetakerConfirmDialog notetaker={thisMachine ? notetaker : null} />
+      <NotetakerConfirmDialog notetaker={notetaker} />
 
       <ProgramDialog
         tile={detailsTile}
@@ -638,14 +523,14 @@ export function ComputerView() {
           share: (deploymentId, login) =>
             signIn.share(deploymentId, login).then((r) => {
               void queryClient.invalidateQueries({
-                queryKey: computerQueryKeys.apps(environmentId, pickedBoxId),
+                queryKey: computerQueryKeys.apps(environmentId, null),
               });
               return r;
             }),
           unshare: (deploymentId, userId) =>
             signIn.unshare(deploymentId, userId).then((r) => {
               void queryClient.invalidateQueries({
-                queryKey: computerQueryKeys.apps(environmentId, pickedBoxId),
+                queryKey: computerQueryKeys.apps(environmentId, null),
               });
               return r;
             }),

@@ -201,7 +201,8 @@ describe("Watch — the agent copy through /video/describe", () => {
   });
 
   it("skips (not fails) when there is no copy, it is too big or too long", () => {
-    expect(watchSkipReason(item({ agentParts: [] }))).toContain("couldn't make");
+    const big = new Blob([new Uint8Array(26 * 1024 * 1024)], { type: "video/mp4" });
+    expect(watchSkipReason(item({ agentParts: [], blob: big }))).toContain("couldn't make");
     expect(
       watchSkipReason(
         item({
@@ -228,6 +229,30 @@ describe("Watch — the agent copy through /video/describe", () => {
     expect(watch.last()).toMatchObject({ status: "failed" });
     expect(watch.last().error).toContain("Top up AI hours");
     expect(d.removePaths).toHaveBeenCalled();
+  });
+
+  it("no small copy (Misha 01.11): a short recording is watched itself", async () => {
+    const { deps: d, writes } = deps();
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(item({ agentParts: [], agentCopyMimeType: null }), d, watch.patch);
+    expect(writes[0]!.relativePath).toBe(".uno-recordings/rec1/agent-copy.mp4");
+    expect(writes.reduce((sum, write) => sum + write.bytes, 0)).toBe(5 * 1024 * 1024);
+    expect(watch.last()).toMatchObject({ status: "done", speech: "Make it green" });
+  });
+
+  it("one failure is tried again before the card says it failed", async () => {
+    let calls = 0;
+    const { deps: d } = deps({
+      describe: vi.fn(async () => {
+        calls += 1;
+        if (calls === 1) throw new Error("The computer didn't answer.");
+        return { speech: "Make it green", visual: "A landing page" };
+      }),
+    });
+    const watch = collect<RecordingItem["watch"]>();
+    await runWatch(item(), d, watch.patch);
+    expect(calls).toBe(2);
+    expect(watch.last()).toMatchObject({ status: "done", speech: "Make it green" });
   });
 });
 

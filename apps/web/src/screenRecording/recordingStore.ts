@@ -410,6 +410,10 @@ export const useScreenRecordingStore = create<StoreState>((set, get) => {
           item.watch.status === "done"
             ? item.watch.frames.map((frame) => ({ t: frame.t, reason: frame.reason }))
             : [],
+        notWatched:
+          item.watch.status === "done"
+            ? null
+            : (item.watch.error ?? "the agent couldn't watch the recording.").replace(/\.?$/, "."),
       };
       for (const key of [item.id, `${item.id}:save`, `${item.id}:watch`]) controllers.delete(key);
       set((state) => {
