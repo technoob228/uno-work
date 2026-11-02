@@ -16,6 +16,7 @@
  */
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { useShallow } from "zustand/react/shallow";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
@@ -92,27 +93,53 @@ interface Live {
   readonly running: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
 }
 
+function runningThreads(
+  state: Parameters<typeof selectEnvironmentState>[0],
+  environmentId: EnvironmentId,
+) {
+  const envState = selectEnvironmentState(state, environmentId);
+  return envState.threadIds.flatMap((id) => {
+    const thread = envState.sidebarThreadSummaryById[id];
+    return thread && !thread.archivedAt && thread.session?.status === "running" ? [thread] : [];
+  });
+}
+
 /** Was the link up when last seen (any component): a drop is counted once. */
 const lastUp = new Map<string, boolean>();
 
-export function useLive(environmentId: EnvironmentId): Live {
-  const connection = useComputerConnection(environmentId);
+/**
+ * 02.11, Work felt heavier since 0.0.172: a dot per computer sat on every
+ * screen, polled each computer every 3 s, ticked every second while one was
+ * down and redrew on every streamed chunk. A glance (`fast` off: the chip's
+ * dots, the spaces rail) now asks every 30 s and ticks every 10 s; the open
+ * menu asks as often as before. Running chats are picked out of the store
+ * shallowly, so a streaming answer no longer redraws the dots.
+ */
+const GLANCE_METRICS_MS = 30_000;
+const GLANCE_TICK_MS = 10_000;
+const FAST_METRICS_MS = 3_000;
+const FAST_TICK_MS = 1_000;
+
+export function useLive(environmentId: EnvironmentId, fast = false): Live {
+  const connection = useComputerConnection(environmentId, fast ? FAST_TICK_MS : GLANCE_TICK_MS);
   const up = connection.status.kind === "connected";
   useEffect(() => {
     if (lastUp.get(environmentId) === true && !up) recordDrop(environmentId);
     lastUp.set(environmentId, up);
   }, [up, environmentId]);
-  const metrics = useQuery(localMetricsQueryOptions(environmentId, up)).data;
-  const envState = useStore((state) => selectEnvironmentState(state, environmentId));
+  const metrics = useQuery(
+    localMetricsQueryOptions(environmentId, up, fast ? FAST_METRICS_MS : GLANCE_METRICS_MS),
+  ).data;
+  // Flat lists of strings: equal while the same chats run, whatever streams in them.
+  const runningIds = useStore(
+    useShallow((state) => runningThreads(state, environmentId).map((thread) => thread.id)),
+  );
+  const runningTitles = useStore(
+    useShallow((state) => runningThreads(state, environmentId).map((thread) => thread.title)),
+  );
   const running = useMemo(
-    () =>
-      envState.threadIds.flatMap((id) => {
-        const thread = envState.sidebarThreadSummaryById[id];
-        return thread && !thread.archivedAt && thread.session?.status === "running"
-          ? [{ id: thread.id, title: thread.title }]
-          : [];
-      }),
-    [envState],
+    () => runningIds.map((id, index) => ({ id, title: runningTitles[index] ?? "" })),
+    [runningIds, runningTitles],
   );
   const cpu = up && metrics?.cpuPct != null ? Math.round(metrics.cpuPct) : null;
   const mem = up && metrics ? Math.round(percent(metrics.memUsedMb, metrics.memTotalMb)) : null;
@@ -331,7 +358,8 @@ function LiveRow(props: {
 }) {
   const { computer } = props;
   const environmentId = computer.environmentId as EnvironmentId;
-  const live = useLive(environmentId);
+  // A row of the open menu: live numbers.
+  const live = useLive(environmentId, true);
   const navigate = useNavigate();
   const status = live.connection.status;
   const dropped = recentDrops(environmentId);

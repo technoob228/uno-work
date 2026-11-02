@@ -188,13 +188,21 @@ export function machineAppsQueryOptions(environmentId: EnvironmentId | null, ena
   });
 }
 
-/** Live CPU / memory / disk read by the daemon from its own OS. */
-export function localMetricsQueryOptions(environmentId: EnvironmentId | null, enabled = true) {
+/**
+ * Live CPU / memory / disk read by the daemon from its own OS. `refetchMs`:
+ * a glance (a dot in a header) asks rarely; a screen that shows the numbers
+ * asks every few seconds — the fastest one on screen wins.
+ */
+export function localMetricsQueryOptions(
+  environmentId: EnvironmentId | null,
+  enabled = true,
+  refetchMs = LOCAL_METRICS_REFETCH_MS,
+) {
   return queryOptions({
     queryKey: computerQueryKeys.localMetrics(environmentId),
     queryFn: () => api(environmentId).localMetrics(),
     enabled: environmentId !== null && enabled,
-    refetchInterval: LOCAL_METRICS_REFETCH_MS,
+    refetchInterval: refetchMs,
   });
 }
 

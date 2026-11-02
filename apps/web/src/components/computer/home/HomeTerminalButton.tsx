@@ -95,7 +95,8 @@ function LiveOption(props: {
   environmentId: EnvironmentId;
   homeId: EnvironmentId | null;
 }) {
-  const live = useLive(props.environmentId);
+  // An option of the open menu: live numbers.
+  const live = useLive(props.environmentId, true);
   const launchers = useHomeLaunchers(props.environmentId);
   const openOnce = () => {
     void launchers.openTerminal().then(() => {
