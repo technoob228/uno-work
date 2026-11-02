@@ -16,6 +16,7 @@
  */
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { useShallow } from "zustand/react/shallow";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ChevronDownIcon,
@@ -30,7 +31,7 @@ import {
   PlusIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
@@ -92,27 +93,53 @@ interface Live {
   readonly running: ReadonlyArray<{ readonly id: ThreadId; readonly title: string }>;
 }
 
+function runningThreads(
+  state: Parameters<typeof selectEnvironmentState>[0],
+  environmentId: EnvironmentId,
+) {
+  const envState = selectEnvironmentState(state, environmentId);
+  return envState.threadIds.flatMap((id) => {
+    const thread = envState.sidebarThreadSummaryById[id];
+    return thread && !thread.archivedAt && thread.session?.status === "running" ? [thread] : [];
+  });
+}
+
 /** Was the link up when last seen (any component): a drop is counted once. */
 const lastUp = new Map<string, boolean>();
 
-export function useLive(environmentId: EnvironmentId): Live {
-  const connection = useComputerConnection(environmentId);
+/**
+ * 02.11, Work felt heavier since 0.0.172: a dot per computer sat on every
+ * screen, polled each computer every 3 s, ticked every second while one was
+ * down and redrew on every streamed chunk. A glance (`fast` off: the chip's
+ * dots, the spaces rail) now asks every 30 s and ticks every 10 s; the open
+ * menu asks as often as before. Running chats are picked out of the store
+ * shallowly, so a streaming answer no longer redraws the dots.
+ */
+const GLANCE_METRICS_MS = 30_000;
+const GLANCE_TICK_MS = 10_000;
+const FAST_METRICS_MS = 3_000;
+const FAST_TICK_MS = 1_000;
+
+export function useLive(environmentId: EnvironmentId, fast = false): Live {
+  const connection = useComputerConnection(environmentId, fast ? FAST_TICK_MS : GLANCE_TICK_MS);
   const up = connection.status.kind === "connected";
   useEffect(() => {
     if (lastUp.get(environmentId) === true && !up) recordDrop(environmentId);
     lastUp.set(environmentId, up);
   }, [up, environmentId]);
-  const metrics = useQuery(localMetricsQueryOptions(environmentId, up)).data;
-  const envState = useStore((state) => selectEnvironmentState(state, environmentId));
+  const metrics = useQuery(
+    localMetricsQueryOptions(environmentId, up, fast ? FAST_METRICS_MS : GLANCE_METRICS_MS),
+  ).data;
+  // Flat lists of strings: equal while the same chats run, whatever streams in them.
+  const runningIds = useStore(
+    useShallow((state) => runningThreads(state, environmentId).map((thread) => thread.id)),
+  );
+  const runningTitles = useStore(
+    useShallow((state) => runningThreads(state, environmentId).map((thread) => thread.title)),
+  );
   const running = useMemo(
-    () =>
-      envState.threadIds.flatMap((id) => {
-        const thread = envState.sidebarThreadSummaryById[id];
-        return thread && !thread.archivedAt && thread.session?.status === "running"
-          ? [{ id: thread.id, title: thread.title }]
-          : [];
-      }),
-    [envState],
+    () => runningIds.map((id, index) => ({ id, title: runningTitles[index] ?? "" })),
+    [runningIds, runningTitles],
   );
   const cpu = up && metrics?.cpuPct != null ? Math.round(metrics.cpuPct) : null;
   const mem = up && metrics ? Math.round(percent(metrics.memUsedMb, metrics.memTotalMb)) : null;
@@ -178,14 +205,61 @@ export function KindIcon({ cloud, className }: { cloud: boolean; className?: str
 
 // ── The chip: a mark per computer ────────────────────────────────────────
 
+/**
+ * Misha 02.11, ten dots were still too many: a chat's chip names its own
+ * computer and folds the rest into "+10" (one dot beside it only when one of
+ * them is in trouble); Home shows at most five dots, trouble first, then "+N".
+ */
+const HOME_MAX_DOTS = 5;
+
+/** Where a mark goes in the chip: trouble first, asleep last. */
+type MarkRank = 0 | 1 | 2 | 3;
+
+/** What a mark tells the chip about its computer, so the chip can order and fold. */
+interface MarkReport {
+  readonly rank: MarkRank;
+  readonly dot: string;
+  readonly title: string;
+}
+
+function markRank(live: Live | null, asleep: boolean): MarkRank {
+  if (asleep || !live || live.connection.status.kind === "asleep") return 3;
+  switch (live.connection.status.kind) {
+    case "connected":
+      return live.strained ? 0 : 2;
+    case "connecting":
+    case "waking":
+      return 2;
+    case "reconnecting":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function markTitle(computer: SidebarDComputer, live: Live | null, lead = ""): string {
+  return `${lead}${computer.label} · ${live ? statusWords(live) : "Asleep"}`;
+}
+
 function LiveMark(props: {
   computer: SidebarDComputer;
   current: boolean;
   quiet: boolean;
   lead: string;
+  fit: "home" | "chat";
+  /** Folded into "+N": still watched, so trouble can surface beside the count. */
+  hidden: boolean;
+  onReport: (key: string, report: MarkReport) => void;
 }) {
-  const live = useLive(props.computer.environmentId as EnvironmentId);
-  return <Mark {...props} live={live} />;
+  const { computer, hidden, onReport, ...rest } = props;
+  const live = useLive(computer.environmentId as EnvironmentId);
+  const rank = markRank(live, false);
+  const dot = dotClass(live, false);
+  const title = markTitle(computer, live);
+  useEffect(() => {
+    onReport(computer.key, { rank, dot, title });
+  }, [computer.key, dot, onReport, rank, title]);
+  return hidden ? null : <Mark computer={computer} {...rest} live={live} />;
 }
 
 function Mark({
@@ -194,6 +268,7 @@ function Mark({
   current = false,
   quiet = false,
   lead = "",
+  fit = "home",
 }: {
   computer: SidebarDComputer;
   live: Live | null;
@@ -203,9 +278,11 @@ function Mark({
   quiet?: boolean;
   /** The tooltip's start, "This chat runs on " in a chat. */
   lead?: string;
+  /** In a chat the name folds away when the header is short of room (Misha 02.11). */
+  fit?: "home" | "chat";
 }) {
   const asleep = computer.status === "sleeping" && !live;
-  const title = `${lead}${computer.label} · ${live ? statusWords(live) : "Asleep"}`;
+  const title = markTitle(computer, live, lead);
   if (quiet) {
     return (
       <span
@@ -227,12 +304,18 @@ function Mark({
         className={cn(
           "truncate text-[11px]",
           current ? "max-w-40 font-medium" : "max-w-20",
+          fit === "chat" && "hidden max-w-28 @3xl/header-actions:inline",
           live?.up ? "text-foreground/90" : "text-muted-foreground",
         )}
       >
         {computer.label}
       </span>
-      {live?.up && live.cpu !== null ? <Meter value={live.cpu} className="h-1 w-5" /> : null}
+      {live?.up && live.cpu !== null ? (
+        <Meter
+          value={live.cpu}
+          className={cn("h-1 w-5", fit === "chat" && "hidden @6xl/header-actions:block")}
+        />
+      ) : null}
     </span>
   );
 }
@@ -275,7 +358,8 @@ function LiveRow(props: {
 }) {
   const { computer } = props;
   const environmentId = computer.environmentId as EnvironmentId;
-  const live = useLive(environmentId);
+  // A row of the open menu: live numbers.
+  const live = useLive(environmentId, true);
   const navigate = useNavigate();
   const status = live.connection.status;
   const dropped = recentDrops(environmentId);
@@ -517,7 +601,6 @@ export function ComputersPill(props: {
   const thisWord = spaceScope ? "this space" : inChat ? "this chat" : null;
   // Home has no computer of its own: all are dots, none set apart.
   const focused = thisWord !== null;
-  const dotsOnly = !focused;
   const chatComputer = inChat
     ? props.computers.find((computer) => computer.environmentId === thisId)
     : undefined;
@@ -533,6 +616,45 @@ export function ComputersPill(props: {
   );
   const asleep = computers.filter((computer) => computer.environmentId === null).length;
   const summary = `${computers.length} computers${asleep > 0 ? ` · ${asleep} asleep` : ""}`;
+  // Each live mark says how its computer is; the chip orders and folds by that.
+  const [reports, setReports] = useState<Readonly<Record<string, MarkReport>>>({});
+  const onReport = useCallback((key: string, report: MarkReport) => {
+    setReports((prev) => {
+      const old = prev[key];
+      return old && old.rank === report.rank && old.dot === report.dot && old.title === report.title
+        ? prev
+        : { ...prev, [key]: report };
+    });
+  }, []);
+  const rankOf = (computer: SidebarDComputer): MarkRank =>
+    computer.environmentId === null ? 3 : (reports[computer.key]?.rank ?? 2);
+  // A chat (or a space) names its computer; the others fold into "+N".
+  const named = focused
+    ? computers.find((computer) => computer.environmentId === thisId)
+    : undefined;
+  const others = computers.filter((computer) => computer !== named);
+  const shown = new Set(
+    (named
+      ? [named]
+      : others
+          .map((computer, index) => ({ computer, index }))
+          .toSorted((a, b) => rankOf(a.computer) - rankOf(b.computer) || a.index - b.index)
+          .slice(0, HOME_MAX_DOTS)
+          .map(({ computer }) => computer)
+    ).map((computer) => computer.key),
+  );
+  const folded = computers.filter((computer) => !shown.has(computer.key));
+  // Beside a chat's "+N": one dot, only when a folded computer is in trouble.
+  const foldedTrouble = named
+    ? folded
+        .flatMap((computer) => {
+          const report = reports[computer.key];
+          return report && report.rank <= 1 ? [report] : [];
+        })
+        .toSorted((a, b) => a.rank - b.rank)
+    : [];
+  const orderOf = (computer: SidebarDComputer): number =>
+    named === computer ? -1 : rankOf(computer);
   return (
     <>
       <Popover
@@ -555,25 +677,50 @@ export function ComputersPill(props: {
               title={chatComputer ? `This chat runs on ${chatComputer.label}` : undefined}
               className={cn(
                 "flex shrink-0 items-center rounded-full border border-border/70 bg-card/60 text-xs transition-colors outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
-                dotsOnly ? "gap-1.5" : "gap-2.5",
+                named ? "gap-2.5" : "gap-1.5",
                 props.fit === "home"
                   ? "h-8 max-w-[34rem] pr-2.5 pl-3"
                   : "h-7 max-w-[26rem] px-2.5 sm:h-6",
               )}
             >
-              {computers.map((computer) =>
-                computer.environmentId !== null ? (
-                  <LiveMark
-                    key={computer.key}
-                    computer={computer}
-                    current={focused && computer.environmentId === thisId}
-                    quiet={dotsOnly || computer.environmentId !== thisId}
-                    lead={chatComputer === computer ? "This chat runs on " : ""}
-                  />
-                ) : (
-                  <Mark key={computer.key} computer={computer} live={null} quiet />
-                ),
-              )}
+              {computers
+                .toSorted((a, b) => orderOf(a) - orderOf(b))
+                .map((computer) =>
+                  computer.environmentId !== null ? (
+                    <LiveMark
+                      key={computer.key}
+                      computer={computer}
+                      current={named === computer}
+                      quiet={named !== computer}
+                      lead={chatComputer === computer ? "This chat runs on " : ""}
+                      fit={props.fit}
+                      hidden={!shown.has(computer.key)}
+                      onReport={onReport}
+                    />
+                  ) : shown.has(computer.key) ? (
+                    <Mark key={computer.key} computer={computer} live={null} quiet />
+                  ) : null,
+                )}
+              {folded.length > 0 ? (
+                <span
+                  className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground tabular-nums"
+                  data-testid="computers-chip-more"
+                  title={
+                    foldedTrouble.length > 0
+                      ? foldedTrouble.map((report) => report.title).join("\n")
+                      : `${folded.length} more computer${folded.length === 1 ? "" : "s"}`
+                  }
+                >
+                  +{folded.length}
+                  {foldedTrouble[0] ? (
+                    <span
+                      className={cn("size-1.5 shrink-0 rounded-full", foldedTrouble[0].dot)}
+                      aria-hidden
+                      data-testid="computers-chip-trouble"
+                    />
+                  ) : null}
+                </span>
+              ) : null}
               <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
           }

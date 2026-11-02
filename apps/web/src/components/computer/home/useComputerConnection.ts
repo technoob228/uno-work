@@ -102,7 +102,11 @@ export interface ComputerConnection {
   readonly acting: boolean;
 }
 
-export function useComputerConnection(environmentId: EnvironmentId | null): ComputerConnection {
+/** `tickMs`: how often the words move on while the link is down; a dot needs less than a line. */
+export function useComputerConnection(
+  environmentId: EnvironmentId | null,
+  tickMs: number = TICK_MS,
+): ComputerConnection {
   const primaryId = usePrimaryEnvironmentId();
   const isPrimary = environmentId === null || environmentId === primaryId;
   const primaryFacts = usePrimaryFacts();
@@ -129,10 +133,10 @@ export function useComputerConnection(environmentId: EnvironmentId | null): Comp
     setClock({ now: seenDownAt, seenDownAt });
     const id = window.setInterval(
       () => setClock((current) => ({ ...current, now: Date.now() })),
-      TICK_MS,
+      tickMs,
     );
     return () => window.clearInterval(id);
-  }, [down]);
+  }, [down, tickMs]);
 
   const status =
     !down && facts.economy === null && !facts.signInNeeded
