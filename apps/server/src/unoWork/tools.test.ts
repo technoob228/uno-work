@@ -390,12 +390,7 @@ describe("uno-work tool catalogue", () => {
   });
 
   it("marks exposing, deleting and billable tools sensitive, reads safe", () => {
-    for (const name of [
-      "app_show_on_internet",
-      "app_remove",
-      "db_create",
-      "computer_create",
-    ]) {
+    for (const name of ["app_show_on_internet", "app_remove", "db_create", "computer_create"]) {
       expect(toolLevel(tool(name), {}), name).toBe("sensitive");
     }
     // Share links ask in Ask mode only (02.11); an edit link always asks.
