@@ -178,7 +178,7 @@ const decodeGitLabMergeRequestStatusEntry = Schema.decodeUnknownExit(
   GitLabMergeRequestStatusSchema,
 );
 
-function gitLabChecks(status: string | null | undefined): ChangeRequestChecksState {
+export function gitLabChecks(status: string | null | undefined): ChangeRequestChecksState {
   switch (status) {
     case "success":
       return "passing";

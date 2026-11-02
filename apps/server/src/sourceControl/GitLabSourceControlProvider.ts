@@ -2,6 +2,7 @@ import { Effect, Layer, Option } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
 import * as GitLabCli from "./GitLabCli.ts";
+import { makeGitLabPullRequestHost } from "./gitLabPullRequestHost.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 
@@ -83,6 +84,16 @@ export const discovery = {
     "Install the GitLab command-line tool (`glab`) from https://gitlab.com/gitlab-org/cli or your package manager (for example `brew install glab`).",
 } satisfies SourceControlProviderDiscovery.SourceControlCliDiscoverySpec;
 
+function gitLabHostname(context: SourceControlProvider.SourceControlProviderContext | undefined) {
+  const baseUrl = context?.provider.baseUrl;
+  if (baseUrl === undefined) return "gitlab.com";
+  try {
+    return new URL(baseUrl).hostname;
+  } catch {
+    return "gitlab.com";
+  }
+}
+
 export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
   const gitlab = yield* GitLabCli.GitLabCli;
 
@@ -117,6 +128,7 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           branches: input.branches,
         })
         .pipe(Effect.mapError((error) => providerError("readChangeRequestStatuses", error))),
+    pullRequestHost: (context) => makeGitLabPullRequestHost(gitlab, gitLabHostname(context)),
     createChangeRequest: (input) => {
       const source = SourceControlProvider.sourceControlRefFromInput(input);
       return gitlab
