@@ -42,12 +42,15 @@ function noticeLine(kind: TurnErrorKind, error: string): string {
  */
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
+  agentDown = false,
   onDismiss,
   onRetry,
   retryDisabled = false,
   placement = "banner",
 }: {
   error: string | null;
+  /** No agent can take this chat, whatever the error says. */
+  agentDown?: boolean;
   onDismiss?: () => void;
   /** Sends the person's last message again; absent when there is nothing to resend. */
   onRetry?: (() => void) | undefined;
@@ -101,7 +104,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
     );
   }
 
-  if (isInternalTurnFailure(error)) {
+  if (agentDown || isInternalTurnFailure(error)) {
     return (
       <div className={placement === "feed" ? "px-1 pb-2" : "pt-3 mx-auto max-w-3xl"}>
         <div
@@ -170,7 +173,10 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           aria-hidden
           className={alarming ? "size-3.5 shrink-0 text-destructive/80" : "size-3.5 shrink-0"}
         />
-        <span className="min-w-0 line-clamp-2" title={error}>
+        <span
+          className="min-w-0 line-clamp-2"
+          title={notice.kind === "other" ? error : undefined}
+        >
           {lineText}
         </span>
         {onRetry ? (

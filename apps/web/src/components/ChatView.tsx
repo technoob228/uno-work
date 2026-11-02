@@ -229,6 +229,8 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { unoCreditsChoiceNeeded } from "./chat/unoCreditsChoice.logic";
+import { useEnvironmentSettings } from "~/environments/settings/serverSettings";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
@@ -2084,6 +2086,17 @@ export default function ChatView(props: ChatViewProps) {
         : null,
     [activeThread, activeProviderStatus, providerStatuses],
   );
+  // The daemon refused the turn: this agent has no sign-in and may not use Uno
+  // credits. The composer asks about that, unless it has moved to another
+  // agent: then nobody would tell the person anything.
+  const environmentServerSettings = useEnvironmentSettings(environmentId);
+  const creditsRefusalUnanswered =
+    isUnoCreditsChoiceRequiredText(activeThread?.error) &&
+    !unoCreditsChoiceNeeded({
+      provider: activeProviderStatus,
+      settings: environmentServerSettings,
+      lastError: activeThread?.error ?? null,
+    });
   // A turn failed on an auth error but the snapshot still says signed in:
   // ask the daemon to re-probe once, so the picker badge catches up.
   const reprobedAuthErrorRef = useRef<string | null>(null);
@@ -4982,12 +4995,13 @@ export default function ChatView(props: ChatViewProps) {
         activeThread.session?.lastErrorClass === "billing_error" ||
         harnessAuth?.suppressThreadError ||
         // "Sign in or use Uno credits": the composer asks that itself.
-        isUnoCreditsChoiceRequiredText(activeThread.error) ||
+        (isUnoCreditsChoiceRequiredText(activeThread.error) && !creditsRefusalUnanswered) ||
         // The plan is at its limit: ChatPlanLimitNotice says it, with the ways on.
         planLimitStopText !== null
           ? null
           : activeThread.error
       }
+      agentDown={creditsRefusalUnanswered}
       onDismiss={() => setThreadError(activeThread.id, null)}
       // "Try again" sends the person's last message again (flows v2, I1).
       onRetry={isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined}
