@@ -8,6 +8,16 @@
 
 ---
 
+## v0.0.178 — 2026-11-02
+
+- Pull requests in Dev mode now work with GitLab, Bitbucket and Azure DevOps, not only GitHub: list, read, merge, approve and close from the same page.
+- A calmer computers chip: a chat shows its own computer and folds the rest into "+N"; Home shows at most five dots, trouble first. Long computer names in Files stay on one line, and projects on other computers fold into one line.
+- Work feels lighter: the computers chip checks every 30 seconds instead of every 3, a pinned app's widget preview unloads a minute after you close it, and menus and dialogs no longer blur the background.
+- An unsent message moves with you when you switch the project: its text, screenshot and files come along, and no extra draft is left behind.
+- Status groups in the sidebar can be dragged into your own order (Working is above Idle by default); "Reset status order" brings the default back.
+
+---
+
 ## v0.0.177 — 2026-11-02
 
 - Fewer "Allow this?" cards: in full access an agent makes a link to a file or an Uno Drive download link without asking (in Ask mode it still asks; a link that lets others edit a file always asks). Reports now come as a private link that opens after signing in to Uno, with no question at all.
