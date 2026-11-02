@@ -323,4 +323,54 @@ layer("GitLabCli.layer", (it) => {
       assert.equal(error.message.includes("Merge request not found"), true);
     }),
   );
+
+  it.effect("reads glab's words, not the command line, when a call fails", () =>
+    Effect.gen(function* () {
+      mockedRun.mockReturnValueOnce(
+        Effect.fail(
+          new VcsProcessExitError({
+            operation: "GitLabCli.execute",
+            command: "glab api projects/token-service/merge_requests/404/merge",
+            cwd: "/repo",
+            exitCode: 1,
+            detail: "glab: 405 Method Not Allowed",
+          }),
+        ),
+      );
+
+      const error = yield* Effect.gen(function* () {
+        const glab = yield* GitLabCli.GitLabCli;
+        return yield* glab.execute({ cwd: "/repo", args: ["api", "x"] });
+      }).pipe(Effect.flip);
+
+      assert.equal(error.detail, "GitLab CLI command failed: glab: 405 Method Not Allowed");
+    }),
+  );
+
+  it.effect("passes the host, the body and the output cap to the process", () =>
+    Effect.gen(function* () {
+      mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
+
+      yield* Effect.gen(function* () {
+        const glab = yield* GitLabCli.GitLabCli;
+        return yield* glab.execute({
+          cwd: "/repo",
+          args: ["api", "x"],
+          host: "gitlab.example.com",
+          stdin: "{}",
+          maxOutputBytes: 10,
+          truncateOutputAtMaxBytes: true,
+        });
+      });
+
+      expect(mockedRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: { GITLAB_HOST: "gitlab.example.com" },
+          stdin: "{}",
+          maxOutputBytes: 10,
+          truncateOutputAtMaxBytes: true,
+        }),
+      );
+    }),
+  );
 });

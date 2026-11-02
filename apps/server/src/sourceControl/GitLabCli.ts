@@ -51,6 +51,12 @@ export interface GitLabCliShape {
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
     readonly timeoutMs?: number;
+    /** The server a bare `--repo group/name` means; `glab` assumes gitlab.com. */
+    readonly host?: string;
+    /** A request body: stdin stays out of the process list and error details. */
+    readonly stdin?: string;
+    readonly maxOutputBytes?: number;
+    readonly truncateOutputAtMaxBytes?: boolean;
   }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitLabCliError>;
 
   readonly listMergeRequests: (input: {
@@ -118,6 +124,16 @@ function isVcsProcessSpawnError(error: unknown): boolean {
   );
 }
 
+/** What `glab` said, without our command line: an MR numbered 404 isn't a 404. */
+function glabOutput(error: Error): string {
+  return "_tag" in error &&
+    error._tag === "VcsProcessExitError" &&
+    "detail" in error &&
+    typeof error.detail === "string"
+    ? error.detail
+    : error.message;
+}
+
 function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown): GitLabCliError {
   if (error instanceof Error) {
     if (error.message.includes("Command not found: glab") || isVcsProcessSpawnError(error)) {
@@ -128,11 +144,13 @@ function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown
       });
     }
 
-    const lower = error.message.toLowerCase();
+    const output = glabOutput(error);
+    const lower = output.toLowerCase();
     if (
       lower.includes("authentication failed") ||
       lower.includes("not logged in") ||
       lower.includes("glab auth login") ||
+      lower.includes("401 unauthorized") ||
       lower.includes("token")
     ) {
       return new GitLabCliError({
@@ -156,7 +174,7 @@ function normalizeGitLabCliError(operation: "execute" | "stdout", error: unknown
 
     return new GitLabCliError({
       operation,
-      detail: `GitLab CLI command failed: ${error.message}`,
+      detail: `GitLab CLI command failed: ${output}`,
       cause: error,
     });
   }
@@ -276,6 +294,12 @@ export const make = Effect.fn("makeGitLabCli")(function* () {
         args: input.args,
         cwd: input.cwd,
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(input.host !== undefined ? { env: { GITLAB_HOST: input.host } } : {}),
+        ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+        ...(input.maxOutputBytes !== undefined ? { maxOutputBytes: input.maxOutputBytes } : {}),
+        ...(input.truncateOutputAtMaxBytes !== undefined
+          ? { truncateOutputAtMaxBytes: input.truncateOutputAtMaxBytes }
+          : {}),
       })
       .pipe(Effect.mapError((error) => normalizeGitLabCliError("execute", error)));
 
