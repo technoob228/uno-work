@@ -131,6 +131,16 @@ else
   apt-get install -y -qq curl ca-certificates git ripgrep python3 tar build-essential >/dev/null
 fi
 
+# Dev mode's pull requests read and act through `gh`; the person signs in with
+# `gh auth login`. Nothing else needs it, so it never holds up an install or a
+# self-update: on its own in the background, and it's asked for again next time.
+if ! command -v gh >/dev/null 2>&1; then
+  command -v systemd-run >/dev/null 2>&1 && systemd-run --quiet --no-block --collect \
+    --unit=uno-work-install-gh --setenv=DEBIAN_FRONTEND=noninteractive \
+    sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends gh' \
+    >/dev/null 2>&1 || log "GitHub CLI not installed; Dev mode's pull requests will say so"
+fi
+
 # The assistant sandbox ("Only selected projects", apps/server/src/sandbox/
 # harnessSandbox.ts): a restricted assistant's agent runs inside bubblewrap
 # and sees only its projects. Its own step, also on a self-update (which skips

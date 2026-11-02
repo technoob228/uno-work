@@ -884,6 +884,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "branchNameInstructions",
   "sidebarAutoSettleOnMerge",
   "removeAgentCreditsOnMerge",
+  "defaultAutoPull",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -897,6 +898,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   branchNameInstructions: Schema.optionalKey(TrimmedString),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
+  defaultAutoPull: Schema.optionalKey(Schema.Boolean),
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
@@ -919,6 +921,9 @@ export const ServerSettings = Schema.Struct({
   // Dev mode: agent co-author and "generated with" lines stay out of the merge
   // commit made from Work. Name as upstream; off by default, as upstream.
   removeAgentCreditsOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Dev mode: a project's default-branch checkout follows its upstream (only a
+  // clean fast-forward). Name as upstream; off by default, as upstream.
+  defaultAutoPull: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
@@ -1114,6 +1119,7 @@ export const ServerSettingsPatch = Schema.Struct({
   devModeChangedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
+  defaultAutoPull: Schema.optionalKey(Schema.Boolean),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),

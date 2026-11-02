@@ -87,6 +87,18 @@ export function PullRequestSettingsSection() {
           />
         }
       />
+      <SettingsRow
+        title="Automatically pull"
+        description="Keeps the default branch current, when it can fast-forward and has no local changes."
+        settingKeys={["defaultAutoPull"]}
+        control={
+          <Switch
+            checked={settings.defaultAutoPull}
+            onCheckedChange={(checked) => save({ defaultAutoPull: Boolean(checked) })}
+            aria-label="Automatically pull"
+          />
+        }
+      />
     </SettingsSection>
   );
 }

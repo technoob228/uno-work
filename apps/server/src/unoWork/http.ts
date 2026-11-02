@@ -24,6 +24,8 @@ import {
   ManagerTelegramConnectorConfig,
   ThreadId,
   UNO_GATEWAY_BASE_URL,
+  type PullRequestLinkInput,
+  type PullRequestWatchInput,
   type UnoMachineApp,
 } from "@t3tools/contracts";
 import { findMarkedAssistantChat } from "@t3tools/shared/assistantChat";
@@ -61,6 +63,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ServerConfig } from "../config.ts";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { ThreadPullRequests } from "../threadPullRequests/ThreadPullRequestService.ts";
 import { openCodeSessionEnvDir, readOpenCodeSessionEnv } from "../provider/opencodeSessionEnv.ts";
 import { UnoGatewayKey } from "../unoGatewayKey.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
@@ -96,6 +99,7 @@ import {
   UNO_WORK_GUIDE_PATH,
   UNO_WORK_MCP_PATH,
   buildUnoWorkMcpServer,
+  DEV_MODE_TOOL_NAMES,
   observerRefusal,
   UnoWorkToolError,
   type AssistantConnectStatus,
@@ -420,6 +424,7 @@ const makeDeps = (input: {
       return remoteStarterOf(input.threadId, (id) => byId.get(id), incoming);
     }).pipe(Effect.orElseSucceed(() => null));
     const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
+    const threadPullRequests = Option.getOrNull(yield* Effect.serviceOption(ThreadPullRequests));
     const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
     const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
@@ -513,6 +518,25 @@ const makeDeps = (input: {
             ),
       },
       ...(myComputer ? { myComputer } : {}),
+      ...(threadPullRequests
+        ? {
+            pullRequests: {
+              setWatch: (input) =>
+                threadPullRequests.setWatch({
+                  threadId: ThreadId.make(input.threadId),
+                  repository: input.repository as PullRequestWatchInput["repository"],
+                  number: input.number as PullRequestWatchInput["number"],
+                  watching: input.watching,
+                }),
+              link: (input) =>
+                threadPullRequests.link({
+                  threadId: ThreadId.make(input.threadId),
+                  reference: input.reference as PullRequestLinkInput["reference"],
+                }),
+              linked: threadPullRequests.linked,
+            },
+          }
+        : {}),
       // Keys of the chat's project: Full and Helper assistants get them, an Observer never.
       ...(projectSync
         ? {
@@ -949,10 +973,25 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     // The person's computers only show once one is connected. Only `tools/list`
     // asks: a chat that knew these tools still gets their own clear error.
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
+    const settingsService = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
     const hiddenTools = !isMethod(body, "tools/list")
       ? Effect.succeed(NO_HIDDEN_TOOLS)
-      : (myComputer?.toolsVisible ?? Effect.succeed(false)).pipe(
-          Effect.map((visible) => (visible ? NO_HIDDEN_TOOLS : MY_COMPUTER_TOOL_NAMES)),
+      : Effect.all([
+          myComputer?.toolsVisible ?? Effect.succeed(false),
+          settingsService === null
+            ? Effect.succeed(false)
+            : settingsService.getSettings.pipe(
+                Effect.map((settings) => settings.devMode),
+                Effect.orElseSucceed(() => false),
+              ),
+        ]).pipe(
+          Effect.map(
+            ([computersVisible, inDevMode]): ReadonlySet<string> =>
+              new Set([
+                ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES),
+                ...(inDevMode ? [] : DEV_MODE_TOOL_NAMES),
+              ]),
+          ),
         );
     const mcpServer = Effect.all([connectorTools, hiddenTools]).pipe(
       Effect.map(([tools, hidden]) => buildUnoWorkMcpServer(tools, hidden)),

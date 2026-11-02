@@ -47,6 +47,7 @@ import { isRepositoryName } from "../sourceControl/pullRequestHost.ts";
 import type { SourceControlProviderHandle } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import { AUTO_PULL_INTERVAL_MS, autoPullCheckout } from "./autoPull.ts";
 import { changeRequestsCreatedBy, closesChangeRequest, shellCallOf } from "./commandDetection.ts";
 import {
   evaluatePullRequestWatch,
@@ -109,6 +110,15 @@ export interface ThreadPullRequestsShape {
   readonly unlink: (input: PullRequestUnlinkInput) => Effect.Effect<void, PullRequestError>;
   /** The agent wakes on this PR's failed checks, comments and conflicts. */
   readonly setWatch: (input: PullRequestWatchInput) => Effect.Effect<void, PullRequestError>;
+  /** A chat's pull requests, for the agent's `watch_pull_request`. */
+  readonly linked: (threadId: string) => Effect.Effect<
+    ReadonlyArray<{
+      readonly repository: string;
+      readonly number: number;
+      readonly open: boolean;
+    }>,
+    PullRequestError
+  >;
 }
 
 export class ThreadPullRequests extends Context.Service<
@@ -162,6 +172,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     const pausedUntil = new Map<string, number>();
     /** `threadId linkKey` → when its watch last asked the host. */
     const lastWatchReadAt = new Map<string, number>();
+    let lastAutoPullAt = 0;
     const repositoryInfo = new Map<
       string,
       { readonly atMs: number; readonly info: RepositoryInfo | null }
@@ -173,9 +184,15 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
         // The switch can differ per project (Settings → Source Control).
         autoSettleOnMerge: (projectId: string) =>
           resolveProjectSettings(current, projectId).settings.sidebarAutoSettleOnMerge,
+        autoPull: (projectId: string) =>
+          resolveProjectSettings(current, projectId).settings.defaultAutoPull === true,
       })),
       // A hiccup reading the settings must not spend the person's limits.
-      Effect.orElseSucceed(() => ({ devMode: false, autoSettleOnMerge: () => false })),
+      Effect.orElseSucceed(() => ({
+        devMode: false,
+        autoSettleOnMerge: () => false,
+        autoPull: () => false,
+      })),
     );
 
     const anyClientConnected = sessions.listActive().pipe(
@@ -457,6 +474,19 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
         { discard: true },
       );
 
+    /** Each project with "Automatically pull" on, every ten minutes. */
+    const pullDefaultBranches = (autoPull: (projectId: string) => boolean) =>
+      Effect.gen(function* () {
+        if (nowMs() - lastAutoPullAt < AUTO_PULL_INTERVAL_MS) return;
+        lastAutoPullAt = nowMs();
+        const snapshot = yield* projections.getShellSnapshot();
+        yield* Effect.forEach(
+          snapshot.projects.filter((project) => autoPull(project.id)),
+          (project) => autoPullCheckout(vcsProcess, project.workspaceRoot),
+          { concurrency: PROJECT_CONCURRENCY, discard: true },
+        );
+      }).pipe(Effect.catch(() => Effect.logDebug("automatic pull skipped")));
+
     const sweep = (scope: "tick" | "requested") =>
       Effect.gen(function* () {
         const current = yield* readSettings;
@@ -476,6 +506,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
           );
         }
         if (scope === "tick" && !(yield* anyClientConnected)) return;
+        if (scope === "tick") yield* pullDefaultBranches(current.autoPull);
         const requested = new Set(requestedThreads);
         requestedThreads.clear();
         if (scope === "requested" && requested.size === 0) return;
@@ -955,6 +986,17 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
         lastWatchReadAt.set(`${input.threadId} ${linkKey(input)}`, nowMs());
       });
 
+    const linked: ThreadPullRequestsShape["linked"] = (threadId) =>
+      requireThread(threadId).pipe(
+        Effect.map((thread) =>
+          thread.pullRequests.map((pullRequest) => ({
+            repository: pullRequest.repository,
+            number: pullRequest.number,
+            open: pullRequest.snapshot === null || pullRequest.snapshot.state === "open",
+          })),
+        ),
+      );
+
     const start: ThreadPullRequestsShape["start"] = () =>
       Effect.gen(function* () {
         yield* Effect.forkScoped(Stream.runForEach(engine.streamDomainEvents, onDomainEvent));
@@ -972,6 +1014,7 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
       link,
       unlink,
       setWatch,
+      linked,
       onDomainEvent,
       drain: worker.drain,
       tick,
@@ -981,12 +1024,13 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
 export const ThreadPullRequestsLive = Layer.effect(
   ThreadPullRequests,
   makeThreadPullRequests().pipe(
-    Effect.map(({ start, refreshLinked, link, unlink, setWatch }) => ({
+    Effect.map(({ start, refreshLinked, link, unlink, setWatch, linked }) => ({
       start,
       refreshLinked,
       link,
       unlink,
       setWatch,
+      linked,
     })),
   ),
 );

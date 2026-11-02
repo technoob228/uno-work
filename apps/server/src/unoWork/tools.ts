@@ -218,6 +218,28 @@ export interface HtmlPageCapture {
 
 export interface UnoWorkToolDeps {
   readonly caller: UnoWorkCaller;
+  /** Dev mode's pull requests of this chat. Absent: not on this daemon. */
+  readonly pullRequests?: {
+    readonly setWatch: (input: {
+      readonly threadId: string;
+      readonly repository: string;
+      readonly number: number;
+      readonly watching: boolean;
+    }) => Effect.Effect<void, { readonly message: string }>;
+    readonly link: (input: {
+      readonly threadId: string;
+      readonly reference: string;
+    }) => Effect.Effect<void, { readonly message: string }>;
+    /** The chat's PRs, to name one when the agent gives no number. */
+    readonly linked: (threadId: string) => Effect.Effect<
+      ReadonlyArray<{
+        readonly repository: string;
+        readonly number: number;
+        readonly open: boolean;
+      }>,
+      { readonly message: string }
+    >;
+  };
   /** A page in this chat (`html_render`, `html_preview`). Absent: not on this daemon. */
   readonly htmlRender?: {
     readonly publish: (input: {
@@ -3422,6 +3444,70 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
   },
 
   {
+    name: "watch_pull_request",
+    group: "person",
+    description:
+      "Dev mode. Watch an open pull request of this chat, keeping it with the chat if needed. Uno Work wakes you here when a check fails, the required checks pass, someone else comments or reviews, or the branch starts to conflict. Handle old comments first: only later ones wake you. After this call, end your turn. The watch stays on after each wake, so don't call this again on a wake. A wake is not a decision to merge. watching: false stops it when you hand the work back to the person. Without repository and number it means this chat's open pull request.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repository: { type: "string", minLength: 3, maxLength: 200 },
+        number: { type: "integer", minimum: 1 },
+        watching: { type: "boolean", description: "false stops watching. Default true." },
+      },
+      additionalProperties: false,
+    },
+    level: "safe",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const pullRequests = deps.pullRequests;
+        if (!pullRequests) return yield* toolError("Pull requests aren't available here.");
+        const threadId = deps.caller.threadId;
+        const number = num(args, "number");
+        const repository = str(args, "repository");
+        const watching = args.watching !== false;
+        const linked = yield* pullRequests
+          .linked(threadId)
+          .pipe(Effect.mapError((error) => toolError(error.message)));
+        const open = linked.filter((link) => link.open);
+        const target =
+          number !== undefined
+            ? {
+                repository:
+                  repository ??
+                  linked.find((link) => link.number === number)?.repository ??
+                  linked[0]?.repository,
+                number,
+              }
+            : open.length === 1
+              ? open[0]
+              : undefined;
+        if (target?.repository === undefined) {
+          return yield* toolError(
+            open.length > 1
+              ? "This chat has several open pull requests: pass repository and number."
+              : "No pull request here yet: pass repository and number.",
+          );
+        }
+        yield* pullRequests
+          .setWatch({
+            threadId,
+            repository: target.repository,
+            number: target.number,
+            watching,
+          })
+          .pipe(Effect.mapError((error) => toolError(error.message)));
+        return {
+          ok: true,
+          repository: target.repository,
+          number: target.number,
+          watching,
+          note: watching ? "End your turn now; you'll be woken on the next change." : undefined,
+        };
+      }),
+  },
+
+  {
     name: "assistant_connect",
     group: "person",
     description:
@@ -4848,6 +4934,9 @@ export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkTo
  * github_*). A connector tool never shadows a built-in one. `hiddenTools`
  * stay out of `tools/list` (nothing to reach yet) but answer when called.
  */
+/** Tools that exist only in Dev mode: nobody else's agent hears of them. */
+export const DEV_MODE_TOOL_NAMES: ReadonlySet<string> = new Set(["watch_pull_request"]);
+
 export function buildUnoWorkMcpServer(
   connectorTools: ReadonlyArray<ConnectorTool>,
   hiddenTools: ReadonlySet<string> = new Set(),

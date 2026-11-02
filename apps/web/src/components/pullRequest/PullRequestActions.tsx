@@ -82,11 +82,15 @@ export function PullRequestActions(props: {
   const [deleteBranch, setDeleteBranch] = useState(true);
   const chosenMethod = method ?? methods[0];
 
+  // Nobody approves their own pull request; the hosts refuse it anyway.
+  const ownPullRequest =
+    detail.viewer !== undefined &&
+    detail.author?.login.toLowerCase() === detail.viewer.toLowerCase();
   const available = pullRequestActionsFor(
     detail,
     detail.capabilities.actions,
     detail.autoMergeEnabled,
-  );
+  ).filter((item) => item !== "approve" || !ownPullRequest);
   if (available.length === 0) return null;
 
   const run = (chosen: PullRequestAction) => {

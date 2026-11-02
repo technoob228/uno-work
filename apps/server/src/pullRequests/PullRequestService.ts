@@ -66,32 +66,38 @@ export interface ProjectRemote {
 }
 
 /**
- * The CLI's words for the person: the last line that isn't a label of ours, with
- * anything that looks like a secret masked. `gh` prints its reason last.
+ * The CLI's words for the person: the last line that isn't a label of ours,
+ * without `gh`'s plumbing, with anything that looks like a secret masked.
  */
 export function hostErrorLine(detail: string): string {
   const lines = redactSecretsInText(detail)
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !/^[A-Z][A-Za-z]+Error$/u.test(line));
-  const line = lines.at(-1) ?? "The service refused.";
+  const line = (lines.at(-1) ?? "The service refused.")
+    .replace(/^(?:Error: )?(?:gh: )?/u, "")
+    .replace(/^failed to [^:]+: /u, "")
+    .replace(/^GraphQL: /u, "")
+    .replace(/ \([A-Za-z.]+\)$/u, "");
   return line.length > ERROR_LINE_MAX ? `${line.slice(0, ERROR_LINE_MAX - 1)}…` : line;
 }
 
-/** Reads a provider's failure: not signed in, gone, or the host's own reason. */
+/** Reads a provider's failure: no tool, not signed in, gone, or the host's own reason. */
 export function toPullRequestError(
   label: string,
   error: Pick<SourceControlProviderError, "detail">,
 ): PullRequestError {
   const { detail } = error;
-  if (
-    /not authenticated|not available on path|required but not|auth login|not logged in|command not found|enoent/iu.test(
-      detail,
-    )
-  ) {
+  if (/not available on path|required but not|command not found|enoent/iu.test(detail)) {
     return new PullRequestError({
       reason: "not-connected",
-      detail: `${label} isn't connected. Connect it in Settings → Source control.`,
+      detail: `${label} needs its command-line tool on this computer. See Settings → Source control.`,
+    });
+  }
+  if (/not authenticated|auth login|not logged in|no oauth token/iu.test(detail)) {
+    return new PullRequestError({
+      reason: "not-connected",
+      detail: `${label} isn't signed in on this computer. See Settings → Source control.`,
     });
   }
   if (/not found|could not resolve/iu.test(detail)) {
