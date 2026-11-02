@@ -32,7 +32,7 @@ import { cn } from "~/lib/utils";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
 
-type TraitsPersistence =
+export type TraitsPersistence =
   | {
       threadRef?: ScopedThreadRef;
       draftId?: DraftId;
@@ -79,7 +79,7 @@ function replaceDescriptorCurrentValue(
   );
 }
 
-function getDescriptorStringValue(
+export function getDescriptorStringValue(
   descriptor: Extract<ProviderOptionDescriptor, { type: "select" }> | null,
 ): string | null {
   if (!descriptor) {
@@ -165,12 +165,12 @@ function getSelectedTraits(
   };
 }
 
-function getTraitsSectionVisibility(input: {
+export function getTraitsSectionVisibility(input: {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
-  modelOptions: ProviderOptions | null | undefined;
+  modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
 }) {
   const selected = getSelectedTraits(
@@ -204,7 +204,7 @@ export function shouldRenderTraitsControls(input: {
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
-  modelOptions: ProviderOptions | null | undefined;
+  modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
 }): boolean {
   return getTraitsSectionVisibility(input).hasAnyControls;
@@ -219,7 +219,7 @@ export function getTraitsSummaryLabel(input: {
   models: ReadonlyArray<ServerProviderModel>;
   model: string | null | undefined;
   prompt: string;
-  modelOptions: ProviderOptions | null | undefined;
+  modelOptions?: ProviderOptions | null | undefined;
   allowPromptInjectedEffort?: boolean;
 }): string {
   const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
@@ -251,7 +251,8 @@ export interface TraitsMenuContentProps {
   triggerClassName?: string;
 }
 
-export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
+/** What a control of the model's options reads and writes, wherever it is drawn. */
+export function useTraitsControls({
   provider,
   models,
   model,
@@ -279,15 +280,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     },
     [model, persistence, provider, setProviderModelOptions],
   );
-  const {
-    descriptors,
-    selectDescriptors,
-    booleanDescriptors,
-    primarySelectDescriptor,
-    ultrathinkPromptControlled,
-    ultrathinkInBodyText,
-    hasAnyControls,
-  } = getTraitsSectionVisibility({
+  const visibility = getTraitsSectionVisibility({
     provider,
     models,
     model,
@@ -295,6 +288,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     modelOptions,
     allowPromptInjectedEffort,
   });
+  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled, ultrathinkInBodyText } =
+    visibility;
   const updateDescriptors = (nextDescriptors: ReadonlyArray<ProviderOptionDescriptor>) => {
     updateModelOptions(buildProviderOptionSelectionsFromDescriptors(nextDescriptors));
   };
@@ -319,6 +314,26 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     }
     updateDescriptors(replaceDescriptorCurrentValue(descriptors, descriptor.id, value));
   };
+  const handleBooleanChange = (id: string, value: boolean) => {
+    updateDescriptors(replaceDescriptorCurrentValue(descriptors, id, value));
+  };
+
+  return { ...visibility, handleSelectChange, handleBooleanChange };
+}
+
+export const TraitsMenuContent = memo(function TraitsMenuContentImpl(
+  props: TraitsMenuContentProps & TraitsPersistence,
+) {
+  const {
+    selectDescriptors,
+    booleanDescriptors,
+    primarySelectDescriptor,
+    ultrathinkPromptControlled,
+    ultrathinkInBodyText,
+    hasAnyControls,
+    handleSelectChange,
+    handleBooleanChange,
+  } = useTraitsControls(props);
 
   if (!hasAnyControls) {
     return null;
@@ -370,11 +385,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             </div>
             <MenuRadioGroup
               value={descriptor.currentValue === true ? "on" : "off"}
-              onValueChange={(value) => {
-                updateDescriptors(
-                  replaceDescriptorCurrentValue(descriptors, descriptor.id, value === "on"),
-                );
-              }}
+              onValueChange={(value) => handleBooleanChange(descriptor.id, value === "on")}
             >
               <MenuRadioItem value="on">On</MenuRadioItem>
               <MenuRadioItem value="off">Off</MenuRadioItem>

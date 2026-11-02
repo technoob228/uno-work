@@ -177,13 +177,13 @@ describe("Home's first screen after signing in to Claude", () => {
     const chips = screen.getByTestId("home-composer-chips");
     await expect.element(chips).toBeVisible();
     await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
-    await expect.element(chips.getByText(/High/)).toBeVisible();
+    await expect.element(screen.getByTestId("model-effort-glyph")).toBeVisible();
     // Still the simple screen: no folder or permissions chips.
     await expect.element(screen.getByTestId("home-folder-chip")).not.toBeInTheDocument();
     await expect.element(screen.getByTestId("home-permissions")).not.toBeInTheDocument();
   });
 
-  it("after the first screen: reasoning stays in sight, permissions behind the same chip", async () => {
+  it("after the first screen: the model carries its level, context and permissions", async () => {
     providers.list = [
       uno,
       claudeWith({ status: "authenticated", type: "max", label: "Claude Max Subscription" }),
@@ -191,15 +191,15 @@ describe("Home's first screen after signing in to Claude", () => {
     const { screen } = await mountHome();
     const chips = screen.getByTestId("home-composer-chips");
     await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
-    await expect
-      .element(screen.getByTestId("home-composer-settings-summary"))
-      .toHaveTextContent(/High/);
-    await screen.getByTestId("home-composer-settings").click();
+    await expect.element(screen.getByTestId("model-effort-glyph")).toBeVisible();
+    await chips.getByText("Claude Opus 5.5").click();
     await expect.element(screen.getByText("Reasoning")).toBeVisible();
-    await expect.element(screen.getByTestId("home-permission-full-access")).toBeVisible();
+    await screen.getByTestId("model-picker-permissions").click();
+    await expect.element(screen.getByTestId("model-picker-permission-full-access")).toBeVisible();
     // Open, its portal outlives the page's cleanup and breaks the next test.
     await userEvent.keyboard("{Escape}");
-    await expect.element(screen.getByTestId("home-permission-full-access")).not.toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(screen.getByTestId("model-effort-column")).not.toBeInTheDocument();
   });
 
   it("without a Claude plan: Uno · Smart, and the model can still be changed", async () => {

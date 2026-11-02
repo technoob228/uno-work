@@ -311,6 +311,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   /** The instance currently selected in the composer (combobox "value"). */
   activeInstanceId: ProviderInstanceId;
   model: string;
+  /** Sits in a card shared with the effort column, which draws the frame. */
+  docked?: boolean;
   /**
    * When set, the picker is locked to the given driver kind — typically
    * because the user is editing a previously-sent message and can't change
@@ -1183,6 +1185,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       <div
         className={cn(
           "relative flex h-screen max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+          props.docked
+            ? "h-full max-h-none rounded-none border-0 shadow-none before:hidden max-sm:h-56 max-sm:w-full max-sm:max-w-none"
+            : undefined,
           isLocked && !showLockedInstanceSidebar ? "flex-col" : "flex-row",
         )}
       >

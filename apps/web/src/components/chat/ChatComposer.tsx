@@ -78,6 +78,7 @@ import {
   shouldUseCompactComposerFooter,
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
+import { modelEffortPickerProps } from "./ModelEffort";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { isUnoPremiumModelSelected, PremiumCreditNotice } from "./PremiumCreditNotice";
 import { UnoCreditsChoicePanel } from "./UnoCreditsChoicePanel";
@@ -111,11 +112,7 @@ import {
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
-import {
-  getComposerProviderState,
-  renderProviderTraitsMenuContent,
-  renderProviderTraitsPicker,
-} from "./composerProviderState";
+import { getComposerProviderState } from "./composerProviderState";
 import { withAppShortcutDefaults } from "../appShortcuts.logic";
 import {
   acceptsChatDrop,
@@ -1512,30 +1509,20 @@ export const ChatComposer = memo(
 
     // The Uno chat has no harness traits (effort, context size…) to pick: its
     // engine picker is the whole choice.
-    const providerTraitsMenuContent = assistantEngine
-      ? null
-      : renderProviderTraitsMenuContent({
-          provider: selectedProvider,
-          ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-          ...(routeKind === "draft" && draftId ? { draftId } : {}),
-          model: selectedModel,
-          models: selectedProviderModels,
-          modelOptions: composerModelOptions?.[selectedProvider],
-          prompt,
-          onPromptChange: setPromptFromTraits,
-        });
-    const providerTraitsPicker = assistantEngine
-      ? null
-      : renderProviderTraitsPicker({
-          provider: selectedProvider,
-          ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
-          ...(routeKind === "draft" && draftId ? { draftId } : {}),
-          model: selectedModel,
-          models: selectedProviderModels,
-          modelOptions: composerModelOptions?.[selectedProvider],
-          prompt,
-          onPromptChange: setPromptFromTraits,
-        });
+    const modelEffort = modelEffortPickerProps(
+      assistantEngine || !(routeKind === "server" || (routeKind === "draft" && draftId))
+        ? null
+        : {
+            provider: selectedProvider,
+            ...(routeKind === "server" ? { threadRef: routeThreadRef } : {}),
+            ...(routeKind === "draft" && draftId ? { draftId } : {}),
+            model: selectedModel,
+            models: selectedProviderModels,
+            modelOptions: composerModelOptions?.[selectedProvider],
+            prompt,
+            onPromptChange: setPromptFromTraits,
+          },
+    );
     const pendingPrimaryAction = useMemo(
       () =>
         activePendingProgress
@@ -3478,6 +3465,7 @@ export const ChatComposer = memo(
                 <ProviderModelPicker
                   compact
                   activeInstanceId={selectedInstanceId}
+                  {...modelEffort}
                   model={selectedModelForPickerWithCustomFallback}
                   lockedProvider={lockedProvider}
                   lockedContinuationGroupKey={lockedContinuationGroupKey}
@@ -3564,7 +3552,6 @@ export const ChatComposer = memo(
                 runtimeMode={runtimeMode}
                 hideRuntimeModeControl={hideRuntimeModeControl}
                 showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
-                traitsMenuContent={providerTraitsMenuContent}
                 onToggleInteractionMode={toggleInteractionMode}
                 onInteractionModeChange={handleInteractionModeChange}
                 onTogglePlanSidebar={togglePlanSidebar}
@@ -4290,6 +4277,7 @@ export const ChatComposer = memo(
                     <ProviderModelPicker
                       compact={isComposerFooterCompact}
                       activeInstanceId={selectedInstanceId}
+                      {...modelEffort}
                       model={selectedModelForPickerWithCustomFallback}
                       lockedProvider={lockedProvider}
                       lockedContinuationGroupKey={lockedContinuationGroupKey}
@@ -4322,7 +4310,6 @@ export const ChatComposer = memo(
                       runtimeMode={runtimeMode}
                       hideRuntimeModeControl={hideRuntimeModeControl}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
-                      traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
                       onInteractionModeChange={handleInteractionModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
@@ -4330,15 +4317,6 @@ export const ChatComposer = memo(
                     />
                   ) : (
                     <>
-                      {providerTraitsPicker ? (
-                        <>
-                          <Separator
-                            orientation="vertical"
-                            className="mx-0.5 hidden h-4 sm:block"
-                          />
-                          {providerTraitsPicker}
-                        </>
-                      ) : null}
                       <ComposerFooterModeControls
                         showInteractionModeToggle={
                           composerProviderControls.showInteractionModeToggle
