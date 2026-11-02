@@ -4,8 +4,10 @@
  * in a card beside the sidebar, with Open. The card stays while the pointer
  * is on the pin or on the card, so its button can be pressed; it closes a
  * moment after the pointer leaves both, on Escape, or when the pin is
- * clicked. Once shown, a card stays mounted (hidden): the next glance is
- * instant, the widget doesn't load again.
+ * clicked. Once shown, a card stays mounted (hidden) for a minute: a glance
+ * back is instant, the widget doesn't load again. 02.11: kept for good, every
+ * widget ever glanced at went on running its page, timers and drawing in an
+ * invisible card — Work felt heavier.
  */
 import type { EnvironmentId, UnoMachineApp, UnoPin } from "@t3tools/contracts";
 import { ArrowUpRightIcon } from "lucide-react";
@@ -29,6 +31,7 @@ import { useProgramTiles } from "../computer/useProgramTiles";
 
 const OPEN_DELAY_MS = 300;
 const CLOSE_DELAY_MS = 180;
+const UNLOAD_AFTER_MS = 60_000;
 
 /**
  * The app of this computer a pin opens: pins keep the address the app opened
@@ -66,7 +69,7 @@ let closeOpenPeek: (() => void) | null = null;
 
 export interface PeekHover {
   readonly open: boolean;
-  /** Ever shown: keep it mounted (hidden) from then on. */
+  /** Shown lately: kept mounted (hidden) for a minute after it closes. */
   readonly shown: boolean;
   readonly anchor: DOMRect | null;
   readonly triggerProps: {
@@ -147,6 +150,11 @@ export function usePeekHover(enabled: boolean): PeekHover {
   useEffect(() => {
     if (!enabled) close();
   }, [enabled, close]);
+  useEffect(() => {
+    if (open || !shown) return;
+    const id = window.setTimeout(() => setShown(false), UNLOAD_AFTER_MS);
+    return () => window.clearTimeout(id);
+  }, [open, shown]);
 
   return {
     open: open && enabled,
