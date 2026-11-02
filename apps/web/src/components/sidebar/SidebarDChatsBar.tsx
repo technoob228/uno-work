@@ -634,6 +634,8 @@ export function SidebarDChatsBar(props: {
   /** "By computer", Computer levels and the computer filter: only with 2+ computers. */
   multiComputer: boolean;
   onLevelsChange: (levels: ReadonlyArray<SidebarGroupLevel>) => void;
+  /** Status sections dragged out of the default order: the menu offers it back; null — nothing to reset. */
+  onResetStatusOrder?: (() => void) | null;
   /** Variant B: the menu's line that leads to the grouping in Settings. */
   onOpenSettings: () => void;
   /** Snoozed chats now; the menu leads to them while there are any. */
@@ -745,6 +747,15 @@ export function SidebarDChatsBar(props: {
                 </span>
               </MenuItem>
             )}
+            {props.onResetStatusOrder && levels.includes("status") ? (
+              <MenuItem
+                inset={props.groupInHeader}
+                onClick={props.onResetStatusOrder}
+                data-testid="sidebar-d-reset-status-order"
+              >
+                Reset status order
+              </MenuItem>
+            ) : null}
             <MenuSeparator />
             {/* No hint under it (Misha 29.10: "don't litter"). */}
             <MenuCheckboxItem

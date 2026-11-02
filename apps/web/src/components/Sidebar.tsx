@@ -308,14 +308,19 @@ import {
   isRunningStatus,
   previewDGroup,
   groupChatsByStatusForSidebarD,
-  STATUS_SECTIONS,
+  DEFAULT_STATUS_ORDER,
+  moveStatusSection,
+  resolveStatusOrder,
   withoutWorkingChats,
+  statusSectionLabel,
   statusSectionOf,
   type DGroupPreview,
   SIDEBAR_D_FOLDED_PROJECTS_KEY,
+  SIDEBAR_D_STATUS_ORDER_KEY,
   SIDEBAR_D_UNO_FOLDED_KEY,
   unoRunningLabel,
 } from "./sidebar/sidebarD.logic";
+import { SidebarDStatusSection, SidebarDStatusSortable } from "./sidebar/SidebarDStatusSortable";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
 import {
   useSidebarEnvironmentLabelResolver,
@@ -2283,6 +2288,21 @@ export default function Sidebar() {
     false,
     Schema.Boolean,
   );
+  // Status sections in the order the person dragged them (Misha 02.11), this
+  // device's choice like the folds; null — the default order.
+  const [dStoredStatusOrder, setDStoredStatusOrder] = useLocalStorage<
+    ReadonlyArray<string> | null,
+    ReadonlyArray<string> | null
+  >(SIDEBAR_D_STATUS_ORDER_KEY, null, Schema.NullOr(Schema.Array(Schema.String)));
+  const dStatusOrder = useMemo(() => resolveStatusOrder(dStoredStatusOrder), [dStoredStatusOrder]);
+  const moveDStatusSection = useCallback(
+    (moved: string, onto: string) => {
+      const next = moveStatusSection(dStatusOrder, moved, onto);
+      // Dragged back to the default: nothing of the person's to keep or reset.
+      setDStoredStatusOrder(next.join() === DEFAULT_STATUS_ORDER.join() ? null : [...next]);
+    },
+    [dStatusOrder, setDStoredStatusOrder],
+  );
   // Grouping (0.0.138, Misha 16.10): Project / Status / Computer in the order
   // picked, none — one list, newest first. Devices that never chose keep what
   // the older "Inbox sidebar" switch said.
@@ -2485,8 +2505,9 @@ export default function Sidebar() {
     return groupChatsByStatusForSidebarD({
       chats: dStatusViewChats(dLiveChats),
       markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+      order: dStatusOrder,
     });
-  }, [dLegacyInbox, dLiveChats, dStatusViewChats, now]);
+  }, [dLegacyInbox, dLiveChats, dStatusOrder, dStatusViewChats, now]);
   // Filters (a choice of this device): some projects, some computers; null — all.
   const [dStoredProjectPicks, setDProjectPicks] = useLocalStorage<
     ReadonlyArray<string> | null,
@@ -2636,7 +2657,7 @@ export default function Sidebar() {
             },
             orderOf: {
               computer: dOrderedComputers.map((computer) => computer.key),
-              status: STATUS_SECTIONS.map((section) => section.id),
+              status: dStatusOrder,
             },
             seedOf: {
               // Every computer keeps its header, the ones asleep too (grey) —
@@ -2674,6 +2695,7 @@ export default function Sidebar() {
       dProjectInfo,
       dProjectPicks,
       dShownChats,
+      dStatusOrder,
       dStatusViewChats,
       now,
       sidebarViewMenu,
@@ -4383,6 +4405,17 @@ export default function Sidebar() {
     );
   };
   const dRenderNodes = (nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>): ReactNode =>
+    // Status sections are siblings of one level: they drag among themselves.
+    nodes[0]?.level === "status" ? (
+      <SidebarDStatusSortable ids={nodes.map((node) => node.id)} onMove={moveDStatusSection}>
+        {dRenderNodeList(nodes)}
+      </SidebarDStatusSortable>
+    ) : (
+      dRenderNodeList(nodes)
+    );
+  const dRenderNodeList = (
+    nodes: ReadonlyArray<SidebarDGroupNode<SidebarThreadSummary>>,
+  ): ReactNode =>
     nodes.map((node, index) => {
       const underComputer = node.trail.computer !== undefined;
       const foldedChats = dFoldedChats(node);
@@ -4421,14 +4454,14 @@ export default function Sidebar() {
       }
       if (node.level === "status") {
         return (
-          <li key={node.path} className="list-none" data-testid={`sidebar-d-status-${node.id}`}>
-            <ul role="list" className="flex flex-col gap-px">
-              <SidebarDSectionLabel
-                label={STATUS_SECTIONS.find((section) => section.id === node.id)?.label ?? node.id}
-              />
-              {dRenderBelow(node, null)}
-            </ul>
-          </li>
+          <SidebarDStatusSection
+            key={node.path}
+            id={node.id}
+            label={statusSectionLabel(node.id)}
+            testId={`sidebar-d-status-${node.id}`}
+          >
+            {dRenderBelow(node, null)}
+          </SidebarDStatusSection>
         );
       }
       const block = dProjectBlock(node.id, node.chats, node.trail.computer ?? null);
@@ -4724,6 +4757,9 @@ export default function Sidebar() {
                 multiComputer={dMultiComputer && dSpace === null}
                 onLevelsChange={(levels) =>
                   void updateSidebarSettings({ sidebarGroupLevels: [...levels] })
+                }
+                onResetStatusOrder={
+                  dStoredStatusOrder === null ? null : () => setDStoredStatusOrder(null)
                 }
                 projects={dProjectOptions}
                 filterProjects={dProjectOptions.filter((option) =>

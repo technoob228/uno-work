@@ -156,8 +156,9 @@ export interface DStatusSection<T> {
 }
 
 /**
- * Top to bottom: what waits for the person, what broke, the rest, and at the
- * very bottom what runs: it needs nothing from the person (Misha 30.10).
+ * The default order, top to bottom: what waits for the person, what broke,
+ * then what runs, and idle chats last (Misha 30.10; 02.11: Working above
+ * Idle). The person can drag the sections into an order of their own.
  */
 export const STATUS_SECTIONS: ReadonlyArray<{
   readonly id: DStatusSectionId;
@@ -167,9 +168,61 @@ export const STATUS_SECTIONS: ReadonlyArray<{
   { id: "your-turn", label: "Ready" },
   { id: "failed", label: "Failed" },
   { id: "stopped", label: "Stopped" },
-  { id: "idle", label: "Idle" },
   { id: "working", label: "Working" },
+  { id: "idle", label: "Idle" },
 ];
+
+export const DEFAULT_STATUS_ORDER: ReadonlyArray<DStatusSectionId> = STATUS_SECTIONS.map(
+  (section) => section.id,
+);
+
+/** The status sections' order the person dragged them into (this device); null — the default. */
+export const SIDEBAR_D_STATUS_ORDER_KEY = "uno-work:sidebar:status-order";
+
+function isStatusSectionId(id: string): id is DStatusSectionId {
+  return (DEFAULT_STATUS_ORDER as ReadonlyArray<string>).includes(id);
+}
+
+/**
+ * The order to show: the saved one, ids no longer known dropped. A section
+ * the saved order lacks (a status added later) goes back to its default
+ * place: right after the section it follows by default, or first.
+ */
+export function resolveStatusOrder(
+  saved: ReadonlyArray<string> | null,
+): ReadonlyArray<DStatusSectionId> {
+  if (saved === null) return DEFAULT_STATUS_ORDER;
+  const out: DStatusSectionId[] = [];
+  for (const id of saved) if (isStatusSectionId(id) && !out.includes(id)) out.push(id);
+  DEFAULT_STATUS_ORDER.forEach((id, index) => {
+    if (out.includes(id)) return;
+    const before = DEFAULT_STATUS_ORDER.slice(0, index).findLast((prev) => out.includes(prev));
+    out.splice(before === undefined ? 0 : out.indexOf(before) + 1, 0, id);
+  });
+  return out;
+}
+
+/**
+ * A section dropped onto another: it takes that one's place, the ones in
+ * between shift by one (as dnd-kit's arrayMove). Sections not on screen
+ * (empty ones) keep their places in the full order.
+ */
+export function moveStatusSection(
+  order: ReadonlyArray<DStatusSectionId>,
+  moved: string,
+  onto: string,
+): ReadonlyArray<DStatusSectionId> {
+  const from = order.indexOf(moved as DStatusSectionId);
+  const to = order.indexOf(onto as DStatusSectionId);
+  if (from === -1 || to === -1 || from === to) return order;
+  const next = order.filter((id) => id !== moved);
+  next.splice(to, 0, order[from]!);
+  return next;
+}
+
+export function statusSectionLabel(id: string): string {
+  return STATUS_SECTIONS.find((section) => section.id === id)?.label ?? id;
+}
 
 export function statusSectionOf(mark: DRowMark): DStatusSectionId {
   switch (mark) {
@@ -187,12 +240,13 @@ export function statusSectionOf(mark: DRowMark): DStatusSectionId {
 }
 
 /**
- * The live chats by status, in the fixed order above; empty sections are left
- * out and chats keep their incoming order inside one.
+ * The live chats by status, in the order given (default: the one above);
+ * empty sections are left out and chats keep their incoming order inside one.
  */
 export function groupChatsByStatusForSidebarD<T>(input: {
   readonly chats: ReadonlyArray<T>;
   readonly markOf: (chat: T) => DRowMark;
+  readonly order?: ReadonlyArray<DStatusSectionId>;
 }): ReadonlyArray<DStatusSection<T>> {
   const bySection = new Map<DStatusSectionId, T[]>();
   for (const chat of input.chats) {
@@ -201,9 +255,9 @@ export function groupChatsByStatusForSidebarD<T>(input: {
     if (chats) chats.push(chat);
     else bySection.set(id, [chat]);
   }
-  return STATUS_SECTIONS.flatMap((section) => {
-    const chats = bySection.get(section.id);
-    return chats ? [{ id: section.id, label: section.label, chats }] : [];
+  return (input.order ?? DEFAULT_STATUS_ORDER).flatMap((id) => {
+    const chats = bySection.get(id);
+    return chats ? [{ id, label: statusSectionLabel(id), chats }] : [];
   });
 }
 
