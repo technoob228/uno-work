@@ -21,6 +21,7 @@ import {
   toggleFilter,
   toggleLevel,
 } from "./sidebarDView.logic";
+import { resolveStatusOrder } from "./sidebarD.logic";
 
 describe("group levels", () => {
   it("falls back to the old Inbox switch until chosen", () => {
@@ -199,6 +200,15 @@ describe("groupSidebarChats", () => {
     })!;
     expect(tree.map((node) => node.id)).toEqual(["needs-you", "working", "idle"]);
     expect(tree[0]!.children!.map((node) => node.id)).toEqual(["landing"]);
+  });
+  it("orders statuses by the person's saved order, missing ones in their default place", () => {
+    const tree = groupSidebarChats({
+      chats,
+      levels: ["status"],
+      keyOf,
+      orderOf: { status: resolveStatusOrder(["idle", "needs-you"]) },
+    })!;
+    expect(tree.map((node) => node.id)).toEqual(["idle", "needs-you", "working"]);
   });
 });
 

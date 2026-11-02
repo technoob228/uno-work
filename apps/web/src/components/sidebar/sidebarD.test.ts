@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HoverPanelController } from "./sidebarD.hover";
 import {
   accountMenuLines,
+  DEFAULT_STATUS_ORDER,
   type DRowMark,
   dRowMark,
   foldedGroupChats,
@@ -12,10 +13,12 @@ import {
   groupChatsForSidebarD,
   isHomePath,
   isRunningStatus,
+  moveStatusSection,
   needsYouPlace,
   parseFoldedProjects,
   placeNamesThatFit,
   previewDGroup,
+  resolveStatusOrder,
   SIDEBAR_D_GROUP_PREVIEW_LIMIT,
   sidebarDRailShown,
   statusSectionOf,
@@ -239,7 +242,7 @@ describe("sidebar D grouped by status", () => {
     ]);
   });
 
-  it("puts what waits for the person first, then failed, the rest, and working last", () => {
+  it("puts what waits for the person first, then failed, working, and idle last", () => {
     expect(
       byStatus([
         { id: "idle-1", mark: null },
@@ -256,9 +259,23 @@ describe("sidebar D grouped by status", () => {
       { id: "your-turn", label: "Ready", chats: ["turn"] },
       { id: "failed", label: "Failed", chats: ["failed-1"] },
       { id: "stopped", label: "Stopped", chats: ["stopped-1"] },
-      { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },
       { id: "working", label: "Working", chats: ["working-1"] },
+      { id: "idle", label: "Idle", chats: ["idle-1", "idle-2"] },
     ]);
+  });
+
+  it("follows the person's order when given", () => {
+    expect(
+      groupChatsByStatusForSidebarD({
+        chats: [
+          { id: "idle-1", mark: null },
+          { id: "working-1", mark: "working" as DRowMark },
+          { id: "question", mark: "input" as DRowMark },
+        ],
+        markOf: (chat) => chat.mark,
+        order: resolveStatusOrder(["idle", "working", "needs-you"]),
+      }).map((section) => section.id),
+    ).toEqual(["idle", "working", "needs-you"]);
   });
 
   it("leaves empty sections out", () => {
@@ -276,6 +293,91 @@ describe("sidebar D grouped by status", () => {
     expect(statusSectionOf("stopped")).toBe("stopped");
     expect(statusSectionOf("working")).toBe("working");
     expect(statusSectionOf(null)).toBe("idle");
+  });
+});
+
+describe("status sections' order (Misha 02.11: drag to reorder)", () => {
+  it("is the default with nothing saved: Working above Idle", () => {
+    expect(resolveStatusOrder(null)).toEqual([
+      "needs-you",
+      "your-turn",
+      "failed",
+      "stopped",
+      "working",
+      "idle",
+    ]);
+  });
+
+  it("keeps a full saved order as it is", () => {
+    const saved = ["working", "idle", "failed", "stopped", "needs-you", "your-turn"];
+    expect(resolveStatusOrder(saved)).toEqual(saved);
+  });
+
+  it("puts a section the saved order lacks back after the one it follows by default", () => {
+    // "stopped" missing (a status added after the person saved): after "failed".
+    expect(resolveStatusOrder(["working", "failed", "needs-you", "your-turn", "idle"])).toEqual([
+      "working",
+      "failed",
+      "stopped",
+      "needs-you",
+      "your-turn",
+      "idle",
+    ]);
+    // "needs-you" follows nothing by default: first.
+    expect(resolveStatusOrder(["idle", "working"])).toEqual([
+      "needs-you",
+      "your-turn",
+      "failed",
+      "stopped",
+      "idle",
+      "working",
+    ]);
+  });
+
+  it("drops unknown and repeated ids", () => {
+    expect(
+      resolveStatusOrder(["gone", "idle", "idle", "working", ...DEFAULT_STATUS_ORDER]),
+    ).toEqual(["idle", "working", "needs-you", "your-turn", "failed", "stopped"]);
+    expect(resolveStatusOrder([])).toEqual(DEFAULT_STATUS_ORDER);
+  });
+
+  it("moves a dropped section into the place of the one it was dropped on", () => {
+    const order = DEFAULT_STATUS_ORDER;
+    // Down: Needs you onto Failed — Ready and Failed shift up.
+    expect(moveStatusSection(order, "needs-you", "failed")).toEqual([
+      "your-turn",
+      "failed",
+      "needs-you",
+      "stopped",
+      "working",
+      "idle",
+    ]);
+    // Up: Idle onto Working.
+    expect(moveStatusSection(order, "idle", "working")).toEqual([
+      "needs-you",
+      "your-turn",
+      "failed",
+      "stopped",
+      "idle",
+      "working",
+    ]);
+  });
+
+  it("moves past sections not on screen without losing them", () => {
+    // Only Needs you and Idle on screen; Idle dropped onto Needs you.
+    expect(moveStatusSection(DEFAULT_STATUS_ORDER, "idle", "needs-you")).toEqual([
+      "idle",
+      "needs-you",
+      "your-turn",
+      "failed",
+      "stopped",
+      "working",
+    ]);
+  });
+
+  it("changes nothing for an unknown id or a drop onto itself", () => {
+    expect(moveStatusSection(DEFAULT_STATUS_ORDER, "gone", "idle")).toBe(DEFAULT_STATUS_ORDER);
+    expect(moveStatusSection(DEFAULT_STATUS_ORDER, "idle", "idle")).toBe(DEFAULT_STATUS_ORDER);
   });
 });
 
