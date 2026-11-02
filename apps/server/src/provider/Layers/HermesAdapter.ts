@@ -112,6 +112,9 @@ import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = ProviderDriverKind.make("hermes");
+/** The failed turn's error when Hermes no longer knows the chat's session. */
+export const HERMES_SESSION_LOST_MESSAGE =
+  "Hermes lost this chat's session (it restarted); the chat starts a new one.";
 const HERMES_RESUME_VERSION = 1 as const;
 const HERMES_DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER[PROVIDER] ?? "anthropic/claude-haiku-4.5";
 /**
@@ -1451,6 +1454,13 @@ export function makeHermesAdapter(
               );
             }
 
+            // `refusal` is what `hermes acp` answers a prompt for a session it
+            // does not know (lost on a restart before it was ever saved): it
+            // never reaches the model, so every next prompt fails the same
+            // way. End the turn as failed and close the session: the next
+            // turn recovers it through ProviderService, and a load Hermes
+            // cannot serve opens a new one (nullLoadMeansUnknownSession).
+            const sessionLost = billingFailure === undefined && result.stopReason === "refusal";
             yield* offerRuntimeEvent({
               type: "turn.completed",
               ...(yield* makeEventStamp()),
@@ -1464,11 +1474,31 @@ export function makeHermesAdapter(
                       stopReason: result.stopReason ?? null,
                       errorMessage: billingFailure.message,
                     }
-                  : {
-                      state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-                      stopReason: result.stopReason ?? null,
-                    },
+                  : sessionLost
+                    ? {
+                        state: "failed",
+                        stopReason: result.stopReason ?? null,
+                        errorMessage: HERMES_SESSION_LOST_MESSAGE,
+                      }
+                    : {
+                        state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+                        stopReason: result.stopReason ?? null,
+                      },
             });
+            if (sessionLost) {
+              yield* Effect.logWarning("Hermes does not know the session; restarting it", {
+                threadId: input.threadId,
+                turnId,
+              });
+              yield* withThreadLock(
+                input.threadId,
+                Effect.suspend(() =>
+                  sessions.get(input.threadId) === liveCtx
+                    ? stopSessionInternal(liveCtx)
+                    : Effect.void,
+                ),
+              );
+            }
 
             return {
               threadId: input.threadId,

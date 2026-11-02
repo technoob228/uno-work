@@ -19,7 +19,11 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import type { HermesAdapterShape } from "../Services/HermesAdapter.ts";
-import { hermesPermissionWaitMs, makeHermesAdapter } from "./HermesAdapter.ts";
+import {
+  HERMES_SESSION_LOST_MESSAGE,
+  hermesPermissionWaitMs,
+  makeHermesAdapter,
+} from "./HermesAdapter.ts";
 
 class HermesAdapter extends Context.Service<HermesAdapter, HermesAdapterShape>()(
   "test/HermesAdapter",
@@ -377,6 +381,46 @@ makeHermesAdapterTestLayer({ T3_ACP_PROMPT_RESPONSE_TEXT: "HTTP 402: Insufficien
         assert.strictEqual(turnCompleted.payload.errorMessage, text);
 
         yield* adapter.stopSession(threadId);
+      }),
+    );
+  },
+);
+
+// Hermes answers `refusal` to a prompt for a session it lost (02.11.2026).
+makeHermesAdapterTestLayer({ T3_ACP_PROMPT_REFUSAL: "1" })(
+  "HermesAdapterLive lost session",
+  (it) => {
+    it.effect("fails the turn and closes the session so the next turn opens a new one", () =>
+      Effect.gen(function* () {
+        const adapter = yield* HermesAdapter;
+        const threadId = ThreadId.make("hermes-lost-session");
+
+        const eventsFiber = yield* Stream.filter(
+          adapter.streamEvents,
+          (event) => event.type === "turn.completed" || event.type === "session.exited",
+        ).pipe(
+          Stream.takeUntil((event) => event.type === "session.exited"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "uno/smart" },
+        });
+        const { turnId } = yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        const turnCompleted = events.find((event) => event.type === "turn.completed");
+        if (turnCompleted?.type !== "turn.completed") throw new Error("no turn.completed");
+        assert.strictEqual(turnCompleted.turnId, turnId);
+        assert.strictEqual(turnCompleted.payload.state, "failed");
+        assert.strictEqual(turnCompleted.payload.errorMessage, HERMES_SESSION_LOST_MESSAGE);
+        assert.isTrue(events.some((event) => event.type === "session.exited"));
+        assert.isFalse(yield* adapter.hasSession(threadId));
       }),
     );
   },

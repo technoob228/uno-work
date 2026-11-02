@@ -274,6 +274,8 @@ export const makeHermesAcpRuntime = (
         // Hermes публикует auth-метод с id = активный провайдер: openai-api
         // (шлюз/ключ через env) или провайдер подписки.
         authMethodId: input.hermesProvider ?? HERMES_GATEWAY_PROVIDER,
+        // `session/load` of a session Hermes lost answers `{}`, not an error.
+        emptyLoadMeansUnknownSession: true,
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

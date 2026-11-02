@@ -75,6 +75,10 @@ export interface AcpSpawnInput {
   readonly sandbox?: HarnessSandboxSpec;
 }
 
+/** `session/load` answered with nothing about the session: `null` or `{}`. */
+const isEmptyLoadResult = (value: unknown): boolean =>
+  value == null || (typeof value === "object" && Object.keys(value).length === 0);
+
 export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
@@ -91,6 +95,16 @@ export interface AcpSessionRuntimeOptions {
    * agent must support). Used for custom harnesses, whose support is unknown.
    */
   readonly dropUnsupportedMcpTransports?: boolean;
+  /**
+   * The agent answers `session/load` of a session it does not know with an
+   * empty result (`{}`) instead of an error (Hermes: `load_session` → None),
+   * while a real load always carries the session's modes/models. Treat an
+   * empty one as a failed load and open a new session: taken as success,
+   * every prompt of the chat came back `refusal` ("session not found") in
+   * 50 ms and the Uno chat answered Telegram with "Готово." (box 3268,
+   * 02.11.2026).
+   */
+  readonly emptyLoadMeansUnknownSession?: boolean;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
@@ -535,7 +549,10 @@ const makeAcpSessionRuntime = (
           loadPayload,
           acp.agent.loadSession(loadPayload),
         ).pipe(Effect.exit);
-        if (Exit.isSuccess(resumed)) {
+        if (
+          Exit.isSuccess(resumed) &&
+          !(options.emptyLoadMeansUnknownSession === true && isEmptyLoadResult(resumed.value))
+        ) {
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
           // session/load реплеит всю историю через session/update ДО своего

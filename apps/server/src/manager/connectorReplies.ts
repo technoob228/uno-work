@@ -379,8 +379,18 @@ export const decidePendingReply = (probe: ReplyProbe): ReplyVerdict => {
   if (turnRow?.state === "error") {
     return { kind: "failed", turnId, reason: session?.lastError ?? "the turn ended with an error" };
   }
+  // Not a word and not a tool call: the turn never really ran (a harness that
+  // lost its session ends every prompt at once). "Готово." here told the
+  // person a task was done that nobody started (02.11.2026): run it again,
+  // then say it did not work. The class-name reason stays in the logs only.
+  if (lastWorkMs === 0) {
+    return { kind: "lost", turnId, reason: EMPTY_TURN_REASON };
+  }
   return { kind: "answer", turnId, text: "", files: [] };
 };
+
+/** Why a turn with no text and no work is re-run; {@link readableFailure} hides it from the person. */
+export const EMPTY_TURN_REASON = "EmptyTurnError: the turn ended without a word or a tool call";
 
 // ── Texts the watcher itself says ───────────────────────────────────────
 

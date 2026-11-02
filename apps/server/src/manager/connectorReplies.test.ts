@@ -8,6 +8,7 @@ import {
   isThreadBusyForNewTurn,
   LOST_TURN_MS,
   NO_TEXT_GRACE_MS,
+  EMPTY_TURN_REASON,
   readableFailure,
   replyPauseMs,
   SETTLE_QUIET_MS,
@@ -345,11 +346,27 @@ describe("decidePendingReply", () => {
   });
 
   it("gives a turn with no text the grace for a late message, then answers Done", () => {
-    const base = { turns: [turn("t1", "m1", "completed", 0, 10)], session: ready(10) };
+    const base = {
+      turns: [turn("t1", "m1", "completed", 0, 10)],
+      session: ready(10),
+      activities: [tool("t1", 6)],
+    };
     expect(decidePendingReply(probe({ ...base, nowMs: T0 + 12_000 })).kind).toBe("wait");
     expect(
       decidePendingReply(probe({ ...base, nowMs: T0 + 10_000 + NO_TEXT_GRACE_MS + 1 })),
     ).toEqual({ kind: "answer", turnId: "t1", text: "", files: [] });
+  });
+
+  it("re-runs a turn that ended without a word or a tool call instead of saying Done", () => {
+    // Hermes that lost its session ends every prompt at once (02.11.2026).
+    const base = { turns: [turn("t1", "m1", "completed", 0, 1)], session: ready(1) };
+    expect(decidePendingReply(probe({ ...base, nowMs: T0 + 12_000 })).kind).toBe("wait");
+    expect(
+      decidePendingReply(probe({ ...base, nowMs: T0 + 1_000 + NO_TEXT_GRACE_MS + 1 })),
+    ).toEqual({ kind: "lost", turnId: "t1", reason: EMPTY_TURN_REASON });
+    expect(failedText("ru", EMPTY_TURN_REASON)).toBe(
+      "Не получилось ответить на это сообщение.\nНапишите ещё раз — попробую снова.",
+    );
   });
 
   it("says the turn was stopped when the person interrupted it in the app", () => {

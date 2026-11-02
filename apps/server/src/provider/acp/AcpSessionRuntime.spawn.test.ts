@@ -154,7 +154,7 @@ describe("ACP session/load", () => {
     path.dirname(fileURLToPath(import.meta.url)),
     "../../../scripts/acp-mock-agent.ts",
   );
-  const resume = (env: Record<string, string>) =>
+  const resume = (env: Record<string, string>, emptyLoadMeansUnknownSession = false) =>
     Effect.runPromiseExit(
       Effect.gen(function* () {
         const runtime = yield* AcpSessionRuntime;
@@ -165,6 +165,7 @@ describe("ACP session/load", () => {
             spawn: { command: "bun", args: [mockAgentPath], env },
             cwd: process.cwd(),
             resumeSessionId: "mock-session-1",
+            emptyLoadMeansUnknownSession,
             clientInfo: { name: "t3-test", version: "0.0.0" },
             authMethodId: "test",
           }).pipe(Layer.provide(NodeServices.layer)),
@@ -176,6 +177,18 @@ describe("ACP session/load", () => {
 
   it("resumes a session whose load replays nothing (used to hang forever)", async () => {
     const exit = await resume({ T3_ACP_LOAD_WITHOUT_REPLAY: "1" });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) expect(exit.value.sessionId).toBe("mock-session-1");
+  }, 20_000);
+
+  it("opens a new session when the agent answers the load with {} (Hermes lost it)", async () => {
+    const exit = await resume({ T3_ACP_LOAD_UNKNOWN_AS_EMPTY: "1" }, true);
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) expect(exit.value.sessionId).toBe("mock-session-new");
+  }, 20_000);
+
+  it("keeps an empty load as loaded for agents that answer it that way on success", async () => {
+    const exit = await resume({ T3_ACP_LOAD_UNKNOWN_AS_EMPTY: "1" });
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) expect(exit.value.sessionId).toBe("mock-session-1");
   }, 20_000);

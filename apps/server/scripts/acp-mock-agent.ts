@@ -20,6 +20,8 @@ const emitAskQuestion = process.env.T3_ACP_EMIT_ASK_QUESTION === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
+/** Hermes asked to prompt a session it does not know: `refusal`, nothing streamed. */
+const promptRefusal = process.env.T3_ACP_PROMPT_REFUSAL === "1";
 /** Never answer session/prompt and ignore session/cancel (wedged agent). */
 const hangPrompt = process.env.T3_ACP_HANG_PROMPT === "1";
 /**
@@ -34,6 +36,8 @@ const permissionOptions = process.env.T3_ACP_PERMISSION_OPTIONS
   : null;
 /** `session/load` answers without replaying any history (an empty session). */
 const loadWithoutReplay = process.env.T3_ACP_LOAD_WITHOUT_REPLAY === "1";
+/** Hermes after a restart: `session/load` of a session it lost answers `{}`. */
+const loadUnknownAsEmpty = process.env.T3_ACP_LOAD_UNKNOWN_AS_EMPTY === "1";
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -239,28 +243,30 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleCreateSession(() =>
     Effect.succeed({
-      sessionId,
+      sessionId: loadUnknownAsEmpty ? "mock-session-new" : sessionId,
       modes: modeState(),
       configOptions: configOptions(),
     }),
   );
 
   yield* agent.handleLoadSession((request) =>
-    (loadWithoutReplay
-      ? Effect.void
-      : agent.client.sessionUpdate({
-          sessionId: String(request.sessionId ?? sessionId),
-          update: {
-            sessionUpdate: "user_message_chunk",
-            content: { type: "text", text: "replay" },
-          },
-        })
-    ).pipe(
-      Effect.as({
-        modes: modeState(),
-        configOptions: configOptions(),
-      }),
-    ),
+    loadUnknownAsEmpty
+      ? Effect.succeed({})
+      : (loadWithoutReplay
+          ? Effect.void
+          : agent.client.sessionUpdate({
+              sessionId: String(request.sessionId ?? sessionId),
+              update: {
+                sessionUpdate: "user_message_chunk",
+                content: { type: "text", text: "replay" },
+              },
+            })
+        ).pipe(
+          Effect.as({
+            modes: modeState(),
+            configOptions: configOptions(),
+          }),
+        ),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>
@@ -312,6 +318,10 @@ const program = Effect.gen(function* () {
 
       if (hangPrompt) {
         return yield* Effect.never;
+      }
+
+      if (promptRefusal) {
+        return { stopReason: "refusal" as const };
       }
 
       if (emitInterleavedAssistantToolCalls) {
