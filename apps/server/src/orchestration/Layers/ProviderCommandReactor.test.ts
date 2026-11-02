@@ -516,29 +516,34 @@ describe("ProviderCommandReactor", () => {
     const queuedLines = async (harness: Awaited<ReturnType<typeof createHarness>>) =>
       ((await harness.readModel()).threads.find((t) => t.id === "thread-2")?.activities ?? [])
         .filter((activity) => activity.kind === PARALLEL_CHATS_ACTIVITY_KIND)
-        .map((activity) => activity.payload as { readonly line?: string; readonly lowDisk?: boolean })
+        .map(
+          (activity) => activity.payload as { readonly line?: string; readonly lowDisk?: boolean },
+        )
         .filter((payload) => payload.line === "queued");
 
-    const firstChatFinishes = (harness: Awaited<ReturnType<typeof createHarness>>) => {
-      const now = new Date().toISOString();
-      return Effect.runPromise(
-        harness.engine.dispatch({
-          type: "thread.session.set",
-          commandId: CommandId.make("cmd-parallel-first-done"),
-          threadId: ThreadId.make("thread-1"),
-          session: {
+    /** The first chat's turn runs, then ends: the folder is free. */
+    const firstChatFinishes = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
+      for (const status of ["running", "ready"] as const) {
+        const now = new Date().toISOString();
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make(`cmd-parallel-first-${status}`),
             threadId: ThreadId.make("thread-1"),
-            status: "ready",
-            providerName: "codex",
-            providerInstanceId: ProviderInstanceId.make("codex"),
-            runtimeMode: "full-access",
-            activeTurnId: null,
-            lastError: null,
-            updatedAt: now,
-          },
-          createdAt: now,
-        }),
-      );
+            session: {
+              threadId: ThreadId.make("thread-1"),
+              status,
+              providerName: "codex",
+              providerInstanceId: ProviderInstanceId.make("codex"),
+              runtimeMode: "full-access",
+              activeTurnId: status === "running" ? asTurnId("turn-first") : null,
+              lastError: null,
+              updatedAt: now,
+            },
+            createdAt: now,
+          }),
+        );
+      }
     };
 
     it("no room for a copy (disk almost full): the second chat waits, then starts in the folder", async () => {

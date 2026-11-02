@@ -371,6 +371,8 @@ const make = Effect.gen(function* () {
     string,
     { readonly events: Array<TurnStartRequestedEvent>; readonly watcher: Fiber.Fiber<void> }
   >();
+  /** Set once the worker exists: a held start goes back into its queue. */
+  let enqueueHeldTurnStart: (item: HeldTurnStartRetry) => Effect.Effect<void> = () => Effect.void;
   const attachmentsNote = (attachments: ReadonlyArray<ChatAttachment>) =>
     attachments.length === 0
       ? null
@@ -1101,7 +1103,7 @@ const make = Effect.gen(function* () {
         Effect.suspend(() => {
           heldTurnStarts.delete(threadId);
           return Effect.forEach(events, (next) =>
-            worker.enqueue({ type: "parallel-chats.turn-start-retry", event: next }),
+            enqueueHeldTurnStart({ type: "parallel-chats.turn-start-retry", event: next }),
           );
         }),
       ),
@@ -1821,6 +1823,7 @@ const make = Effect.gen(function* () {
           )
         : processDomainEventSafely(item),
   );
+  enqueueHeldTurnStart = (item) => worker.enqueue(item);
 
   const prewarmSession: NonNullable<ProviderCommandReactorShape["prewarmSession"]> = (
     threadId,
