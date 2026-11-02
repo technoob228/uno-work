@@ -171,6 +171,7 @@ export const GITHUB_PULL_REQUEST_CAPABILITIES: PullRequestCapabilities = {
   comment: true,
   viewedFiles: true,
   mergeMessageRewrite: true,
+  deleteBranch: true,
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

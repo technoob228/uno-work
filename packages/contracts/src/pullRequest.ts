@@ -130,6 +130,8 @@ export const PullRequestCapabilities = Schema.Struct({
   viewedFiles: Schema.Boolean,
   /** An agent's credit lines can come out of the merge commit. */
   mergeMessageRewrite: Schema.Boolean,
+  /** Merge can delete the source branch. */
+  deleteBranch: Schema.Boolean,
   /**
    * Every head gets at least one check, so a head that has gone a while without any
    * means none reported. Absent: an empty list says nothing.

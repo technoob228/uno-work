@@ -257,6 +257,7 @@ export const makePullRequests = (options: { readonly now?: () => number } = {}) 
                 comment: false,
                 viewedFiles: false,
                 mergeMessageRewrite: false,
+                deleteBranch: false,
               },
             });
             const host = first.host;

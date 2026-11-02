@@ -1,11 +1,16 @@
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ThreadId, ThreadPullRequest } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  EyeIcon,
+  EyeOffIcon,
   GitBranchIcon,
   GitPullRequestIcon,
+  PlusIcon,
+  XIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -16,6 +21,8 @@ import { cn, newCommandId } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
 import { selectSidebarThreadSummaryByRef, useStore } from "../../store";
 import { formatWorktreePathForDisplay } from "../../worktreeCleanup";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
@@ -50,38 +57,170 @@ function DetailRow(props: { readonly label: string; readonly children: React.Rea
   );
 }
 
-function PullRequestRow(props: { readonly link: ThreadPullRequest }) {
-  const { link } = props;
+function PullRequestRow(props: {
+  readonly link: ThreadPullRequest;
+  readonly projectId: string;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const { link, projectId, environmentId, threadId } = props;
+  const navigate = useNavigate();
   const notes = [pullRequestChecksLabel(link), pullRequestReviewLabel(link)].filter(Boolean);
   const branches = pullRequestBranches(link);
+  const watching = link.watch !== undefined;
+  const open = link.snapshot === null || link.snapshot.state === "open";
+  const call = (run: () => Promise<void> | undefined) =>
+    void Promise.resolve(run()).catch((error: unknown) =>
+      toastManager.add({
+        type: "error",
+        title: "Didn't go through",
+        description: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  const api = () => readEnvironmentApi(environmentId)?.pullRequests;
   return (
-    <button
-      type="button"
-      className="flex w-full flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-accent"
-      onClick={() => openLink(link.url)}
+    <div className="group flex items-start gap-1 rounded-md hover:bg-accent">
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 flex-col gap-0.5 px-2 py-1.5 text-left"
+        data-testid="thread-pull-request-row"
+        onClick={() =>
+          void navigate({
+            to: "/pull-requests",
+            search: {
+              env: environmentId,
+              project: projectId,
+              repo: link.repository,
+              n: link.number,
+            },
+          })
+        }
+      >
+        <span className="flex items-center gap-1.5 text-xs">
+          <GitPullRequestIcon
+            className={cn("size-3.5 shrink-0", PULL_REQUEST_TONE_CLASS[pullRequestTone(link)])}
+          />
+          <span className="min-w-0 truncate font-medium">
+            #{link.number}
+            {link.snapshot ? ` ${link.snapshot.title}` : ""}
+          </span>
+        </span>
+        <span className="truncate pl-5 text-[11px] text-muted-foreground">
+          <span className={PULL_REQUEST_TONE_CLASS[pullRequestTone(link)]}>
+            {pullRequestStateLabel(link)}
+          </span>
+          {notes.length > 0 ? ` · ${notes.join(" · ")}` : ""}
+        </span>
+        {branches ? (
+          <span className="truncate pl-5 font-mono text-[11px] text-muted-foreground">
+            {branches}
+          </span>
+        ) : null}
+      </button>
+      <span className="flex shrink-0 items-center gap-0.5 pt-1 pr-1">
+        {open ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={watching ? "Stop waking the agent" : "Wake the agent on changes"}
+            title={watching ? "Stop waking the agent" : "Wake the agent on changes"}
+            aria-pressed={watching}
+            data-testid="thread-pull-request-watch"
+            onClick={() =>
+              call(() =>
+                api()?.setWatch({
+                  threadId,
+                  repository: link.repository,
+                  number: link.number,
+                  watching: !watching,
+                }),
+              )
+            }
+          >
+            {watching ? <EyeIcon /> : <EyeOffIcon className="opacity-50" />}
+          </Button>
+        ) : null}
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Open on the site"
+          title="Open on the site"
+          onClick={() => openLink(link.url)}
+        >
+          <ExternalLinkIcon />
+        </Button>
+        {link.source === "created" ? (
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label="Remove from this chat"
+            title="Remove from this chat"
+            onClick={() =>
+              call(() =>
+                api()?.unlink({ threadId, repository: link.repository, number: link.number }),
+              )
+            }
+          >
+            <XIcon />
+          </Button>
+        ) : null}
+      </span>
+    </div>
+  );
+}
+
+/** Keeps another pull request with this chat, from its link or `owner/name#12`. */
+function LinkPullRequest(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const { environmentId, threadId } = props;
+  const [reference, setReference] = useState("");
+  const [busy, setBusy] = useState(false);
+  const link = async () => {
+    const api = readEnvironmentApi(environmentId)?.pullRequests;
+    const value = reference.trim();
+    if (!api || value.length === 0) return;
+    setBusy(true);
+    try {
+      await api.link({ threadId, reference: value });
+      setReference("");
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Not added",
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form
+      className="flex items-center gap-1"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void link();
+      }}
     >
-      <span className="flex items-center gap-1.5 text-xs">
-        <GitPullRequestIcon
-          className={cn("size-3.5 shrink-0", PULL_REQUEST_TONE_CLASS[pullRequestTone(link)])}
-        />
-        <span className="min-w-0 truncate font-medium">
-          #{link.number}
-          {link.snapshot ? ` ${link.snapshot.title}` : ""}
-        </span>
-        <ExternalLinkIcon className="ml-auto size-3 shrink-0 text-muted-foreground" />
-      </span>
-      <span className="truncate pl-5 text-[11px] text-muted-foreground">
-        <span className={PULL_REQUEST_TONE_CLASS[pullRequestTone(link)]}>
-          {pullRequestStateLabel(link)}
-        </span>
-        {notes.length > 0 ? ` · ${notes.join(" · ")}` : ""}
-      </span>
-      {branches ? (
-        <span className="truncate pl-5 font-mono text-[11px] text-muted-foreground">
-          {branches}
-        </span>
-      ) : null}
-    </button>
+      <Input
+        size="sm"
+        value={reference}
+        onChange={(event) => setReference(event.target.value)}
+        placeholder="Add a pull request"
+        aria-label="Add a pull request by link or number"
+        data-testid="thread-pull-request-link"
+      />
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        type="submit"
+        aria-label="Add"
+        disabled={busy || reference.trim().length === 0}
+      >
+        <PlusIcon />
+      </Button>
+    </form>
   );
 }
 
@@ -140,6 +279,10 @@ export function ThreadDetailsButton(props: {
               className={cn("size-3", PULL_REQUEST_TONE_CLASS[pullRequestTone(primary)])}
             />
             <span>#{primary.number}</span>
+            {pullRequests.length > 1 ? <span>+{pullRequests.length - 1}</span> : null}
+            {pullRequests.some((link) => link.watch !== undefined) ? (
+              <EyeIcon className="size-3" aria-label="Watched" />
+            ) : null}
           </>
         ) : (
           <GitBranchIcon className="size-3" />
@@ -173,10 +316,17 @@ export function ThreadDetailsButton(props: {
           {pullRequests.length > 0 ? (
             <div className="-mx-2 flex flex-col">
               {pullRequests.map((link) => (
-                <PullRequestRow key={link.url} link={link} />
+                <PullRequestRow
+                  key={link.url}
+                  link={link}
+                  projectId={thread.projectId}
+                  environmentId={environmentId}
+                  threadId={threadId}
+                />
               ))}
             </div>
           ) : null}
+          <LinkPullRequest environmentId={environmentId} threadId={threadId} />
           {primary !== null && settings?.sidebarAutoSettleOnMerge ? (
             <label className="flex items-center justify-between gap-3 text-xs">
               <span>Move to Done after merge</span>

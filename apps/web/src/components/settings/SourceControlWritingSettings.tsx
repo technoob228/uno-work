@@ -75,6 +75,18 @@ export function PullRequestSettingsSection() {
           />
         }
       />
+      <SettingsRow
+        title="Remove agent credits when merging"
+        description="Agent co-author and generated-by lines stay out of merge commits made from Uno Work. People stay credited."
+        settingKeys={["removeAgentCreditsOnMerge"]}
+        control={
+          <Switch
+            checked={settings.removeAgentCreditsOnMerge}
+            onCheckedChange={(checked) => save({ removeAgentCreditsOnMerge: Boolean(checked) })}
+            aria-label="Remove agent credits when merging"
+          />
+        }
+      />
     </SettingsSection>
   );
 }
