@@ -75,12 +75,11 @@ await step(
   { width: 900 },
 );
 
-await step("home-narrow-summary", async ({ page, shot }) => {
+await step("home-narrow-picker", async ({ page, shot }) => {
   await home(page);
   const read = () =>
     page.getByTestId("home-composer-chips").evaluate((el) => {
-      const summary = el.querySelector("[data-testid=home-composer-settings-summary]");
-      return `chips ${el.clientWidth} px, cut off ${el.scrollWidth - el.clientWidth} px, words ${summary?.offsetWidth ? "on" : "off"}`;
+      return `chips ${el.clientWidth} px, cut off ${el.scrollWidth - el.clientWidth} px`;
     });
   const wide = await read();
   await page.setViewportSize({ width: 640, height: 860 });
@@ -101,9 +100,44 @@ await step("computers-menu", async ({ page, shot }) => {
 if (after) {
   await step("settings", async ({ page, shot }) => {
     await home(page);
-    await page.getByTestId("home-composer-settings").click();
-    await page.getByTestId("home-permission-full-access").waitFor();
+    await page.locator("[data-chat-provider-model-picker]").first().click();
+    await page.getByTestId("model-effort-column").waitFor();
+    await page.getByTestId("model-effort-effort-xhigh").click();
+    await page.getByTestId("model-picker-fast").click();
     await page.waitForTimeout(300);
+    await shot();
+    await page.getByTestId("model-picker-permissions").click();
+    await page.getByTestId("model-picker-permission-full-access").waitFor();
+    await page.waitForTimeout(300);
+    await shot("permissions");
+  });
+  await step("picker-no-levels", async ({ page, shot }) => {
+    await home(page);
+    await page.locator("[data-chat-provider-model-picker]").first().click();
+    await page.getByTestId("model-effort-column").waitFor();
+    await page
+      .getByRole("button", { name: /Uno Code/ })
+      .first()
+      .click();
+    await page.waitForTimeout(500);
+    await page.getByRole("option").first().click();
+    await page.waitForTimeout(500);
+    await shot();
+    return `popup left open: ${await page.getByTestId("model-picker-docked").count()}`;
+  });
+  await step("chat-picker", async ({ page, shot }) => {
+    await home(page);
+    await page.getByText("Fix Work").first().click();
+    await page.waitForTimeout(1500);
+    await page.locator("[data-chat-provider-model-picker]").last().click();
+    await page
+      .getByRole("button", { name: /Claude/ })
+      .last()
+      .click();
+    await page.waitForTimeout(500);
+    await page.getByRole("option").first().click();
+    await page.getByTestId("model-effort-column").waitFor();
+    await page.waitForTimeout(400);
     await shot();
   });
   await step("connect", async ({ page, shot }) => {

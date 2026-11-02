@@ -108,17 +108,11 @@ import {
   useSwitcherMachines,
 } from "../../computerSwitcher/useComputerSwitcher";
 import { useSpacesOn } from "../../../spaces";
-import { HomeComposerSettings } from "./HomeComposerSettings";
 import { useStore } from "../../../store";
 import { HomePlanRoomLine } from "../../chat/PlanRoomNotice";
 import { NewChatFolderPicker } from "../../chat/NewChatFolderPicker";
 import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
-import {
-  TraitsMenuContent,
-  TraitsPicker,
-  getTraitsSummaryLabel,
-  shouldRenderTraitsControls,
-} from "../../chat/TraitsPicker";
+import { modelEffortPickerProps } from "../../chat/ModelEffort";
 import { Skeleton } from "../../ui/skeleton";
 import { FIRST_SNAPSHOT_MAX_WAIT_MS } from "../../../lib/firstSnapshot";
 import { Spinner } from "../../ui/spinner";
@@ -647,7 +641,7 @@ export function HomeComposer({
             // The first screen shows the model and its reasoning too (Misha
             // 28.10, P2: "why can't I pick?") — folder and permissions stay off.
             <div
-              className="@container/chips -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:flex-wrap max-sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
+              className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:flex-wrap max-sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
               {assistant ? (
@@ -702,11 +696,26 @@ export function HomeComposer({
                   environmentId={targetEnvironmentId}
                   modelOptionsByInstance={picker.modelOptionsByInstance}
                   open={pickerOpen}
-                  onOpenChange={setPickerOpen}
-                  onInstanceModelChange={(instanceId, model) => {
-                    picker.pick(instanceId, model);
-                    ref.current?.focus();
+                  onOpenChange={(open) => {
+                    setPickerOpen(open);
+                    // A pick leaves the docked popup open: back to the box when it closes.
+                    if (!open) requestAnimationFrame(() => ref.current?.focus());
                   }}
+                  onInstanceModelChange={picker.pick}
+                  {...modelEffortPickerProps(
+                    selectedEntry
+                      ? {
+                          provider: selectedEntry.driverKind,
+                          models: selectedEntry.models,
+                          model: picker.selection.model,
+                          modelOptions: picker.selection.options,
+                          prompt: text,
+                          onPromptChange: setText,
+                          onModelOptionsChange: picker.setOptions,
+                        }
+                      : null,
+                    minimal ? undefined : { runtimeMode, onRuntimeModeChange: setRuntimeMode },
+                  )}
                   triggerVariant="ghost"
                   triggerClassName="text-muted-foreground"
                 />
@@ -716,60 +725,6 @@ export function HomeComposer({
                   data-testid="home-model-chip-pending"
                 />
               ) : null}
-              {picker.selection && selectedEntry && !assistant ? (
-                minimal ? (
-                  <TraitsPicker
-                    provider={selectedEntry.driverKind}
-                    models={selectedEntry.models}
-                    model={picker.selection.model}
-                    modelOptions={picker.selection.options}
-                    prompt={text}
-                    onPromptChange={setText}
-                    onModelOptionsChange={picker.setOptions}
-                    triggerVariant="ghost"
-                    triggerClassName="h-7 rounded-full text-xs"
-                  />
-                ) : null
-              ) : null}
-              {minimal || assistant ? null : (
-                <HomeComposerSettings
-                  traits={
-                    picker.selection &&
-                    selectedEntry &&
-                    shouldRenderTraitsControls({
-                      provider: selectedEntry.driverKind,
-                      models: selectedEntry.models,
-                      model: picker.selection.model,
-                      prompt: text,
-                      modelOptions: picker.selection.options,
-                      allowPromptInjectedEffort: true,
-                    }) ? (
-                      <TraitsMenuContent
-                        provider={selectedEntry.driverKind}
-                        models={selectedEntry.models}
-                        model={picker.selection.model}
-                        modelOptions={picker.selection.options}
-                        prompt={text}
-                        onPromptChange={setText}
-                        onModelOptionsChange={picker.setOptions}
-                      />
-                    ) : null
-                  }
-                  summary={
-                    picker.selection && selectedEntry
-                      ? getTraitsSummaryLabel({
-                          provider: selectedEntry.driverKind,
-                          models: selectedEntry.models,
-                          model: picker.selection.model,
-                          prompt: text,
-                          modelOptions: picker.selection.options,
-                        })
-                      : ""
-                  }
-                  runtimeMode={runtimeMode}
-                  onRuntimeModeChange={setRuntimeMode}
-                />
-              )}
             </div>
           }
           <input

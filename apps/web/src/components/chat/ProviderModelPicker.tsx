@@ -4,7 +4,7 @@ import {
   type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
 import { ChevronDownIcon } from "lucide-react";
 import { Button, buttonVariants } from "../ui/button";
@@ -52,7 +52,20 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   triggerClassName?: string;
   onOpenChange?: (open: boolean) => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** After the model's name in the same trigger: its level, speed and context. */
+  triggerSuffix?: ReactNode;
+  /** The suffix in words, for the tooltip and screen readers. */
+  triggerDetail?: string | null;
+  /**
+   * Docks a column beside the list and a footer under both, in one card. A pick
+   * leaves the popup open on the new model's levels; null is a model with none.
+   */
+  effortColumn?: ReactNode;
+  footer?: ReactNode;
 }) {
+  const docked = props.effortColumn !== undefined;
+  const hasEffortColumn = Boolean(props.effortColumn);
+  const justPicked = useRef(false);
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const environmentId = props.environmentId ?? null;
@@ -109,11 +122,39 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
+  // The new model's options arrive with its render: with none, the pick is the whole choice.
+  useEffect(() => {
+    if (!justPicked.current) return;
+    justPicked.current = false;
+    if (!hasEffortColumn) setIsMenuOpen(false);
+  }, [props.activeInstanceId, props.model, hasEffortColumn]);
+
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
-    setIsMenuOpen(false);
+    if (docked) justPicked.current = true;
+    else setIsMenuOpen(false);
   };
+
+  const picker = (
+    <ModelPickerContent
+      activeInstanceId={activeInstanceId}
+      {...(docked ? { docked } : {})}
+      model={props.model}
+      lockedProvider={props.lockedProvider}
+      lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
+      note={props.note ?? null}
+      instanceEntries={props.instanceEntries}
+      {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+      modelOptionsByInstance={props.modelOptionsByInstance}
+      terminalOpen={props.terminalOpen ?? false}
+      allowImageGenerationModels={props.allowImageGenerationModels === true}
+      setup={setup}
+      environmentId={environmentId}
+      onRequestClose={() => setIsMenuOpen(false)}
+      onInstanceModelChange={handleInstanceModelChange}
+    />
+  );
 
   return (
     <Popover
@@ -132,9 +173,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             size="sm"
             variant={props.triggerVariant ?? "ghost"}
             data-chat-provider-model-picker="true"
+            aria-label={[triggerLabel, props.triggerDetail].filter(Boolean).join(", ")}
             className={cn(
               "min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 [&_svg]:mx-0",
-              props.compact ? "max-w-42 shrink-0" : "max-w-48 shrink sm:max-w-56 sm:px-3",
+              props.compact
+                ? cn("shrink-0", props.triggerSuffix ? "max-w-58" : "max-w-42")
+                : cn(
+                    "shrink sm:px-3",
+                    props.triggerSuffix ? "max-w-58 sm:max-w-66" : "max-w-48 sm:max-w-56",
+                  ),
               props.triggerClassName,
             )}
             disabled={props.disabled}
@@ -144,7 +191,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         <span
           className={cn(
             "flex min-w-0 w-full box-border items-center gap-2 overflow-hidden",
-            props.compact ? "max-w-36 sm:pl-1" : undefined,
+            props.compact ? cn("sm:pl-1", !props.triggerSuffix && "max-w-36") : undefined,
           )}
         >
           {activeEntry ? (
@@ -182,8 +229,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 triggerTitle
               )}
             </TooltipTrigger>
-            <TooltipPopup side="top">{triggerLabel}</TooltipPopup>
+            <TooltipPopup side="top">
+              {[triggerLabel, props.triggerDetail].filter(Boolean).join(" · ")}
+            </TooltipPopup>
           </Tooltip>
+          {props.triggerSuffix}
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
       </PopoverTrigger>
@@ -191,22 +241,27 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
-        <ModelPickerContent
-          activeInstanceId={activeInstanceId}
-          model={props.model}
-          lockedProvider={props.lockedProvider}
-          lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
-          note={props.note ?? null}
-          instanceEntries={props.instanceEntries}
-          {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-          modelOptionsByInstance={props.modelOptionsByInstance}
-          terminalOpen={props.terminalOpen ?? false}
-          allowImageGenerationModels={props.allowImageGenerationModels === true}
-          setup={setup}
-          environmentId={environmentId}
-          onRequestClose={() => setIsMenuOpen(false)}
-          onInstanceModelChange={handleInstanceModelChange}
-        />
+        {docked ? (
+          <div
+            className="flex max-h-(--available-height) flex-col overflow-hidden rounded-lg border bg-popover shadow-lg"
+            data-testid="model-picker-docked"
+          >
+            <div className="flex h-96 min-h-0 max-sm:h-auto max-sm:flex-col">
+              {picker}
+              {props.effortColumn ? (
+                <div
+                  className="flex min-h-0 w-44 flex-col gap-1 overflow-y-auto border-l border-border/70 bg-muted/40 p-1 max-sm:max-h-48 max-sm:w-full max-sm:border-t max-sm:border-l-0 sm:shrink-0"
+                  data-testid="model-effort-column"
+                >
+                  {props.effortColumn}
+                </div>
+              ) : null}
+            </div>
+            {props.footer}
+          </div>
+        ) : (
+          picker
+        )}
       </PopoverPopup>
     </Popover>
   );

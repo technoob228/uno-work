@@ -30,7 +30,10 @@ const CLAUDE_TRAITS: ModelCapabilities = {
         { id: "high", label: "High", isDefault: true },
         { id: "xhigh", label: "Extra High" },
         { id: "max", label: "Max" },
+        { id: "ultracode", label: "Ultracode" },
+        { id: "ultrathink", label: "Ultrathink" },
       ],
+      promptInjectedValues: ["ultrathink"],
     },
     { id: "fastMode", label: "Fast Mode", type: "boolean" },
     {
