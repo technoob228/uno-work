@@ -52,6 +52,11 @@ describe("matchFilesByName", () => {
   it("takes any script", () => {
     expect(matchFilesByName([entry("Отчёт.md")], "отчёт")).toHaveLength(1);
   });
+
+  it("keeps what the computer found by a Russian word", () => {
+    expect(matchFilesByName([entry("utro-site")], "утро")).toHaveLength(1);
+    expect(matchFilesByName([entry("Отчет-й.md".normalize("NFD"))], "й.md")).toHaveLength(1);
+  });
 });
 
 describe("resultLocation", () => {
