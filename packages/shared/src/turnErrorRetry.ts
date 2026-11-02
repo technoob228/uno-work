@@ -17,7 +17,7 @@
  * fewer agents in parallel") and is not shown to the person.
  */
 
-export type TurnErrorKind = "busy" | "no-answer" | "other";
+export type TurnErrorKind = "busy" | "no-answer" | "agent-stopped" | "other";
 
 export interface TurnErrorNotice {
   readonly kind: TurnErrorKind;
@@ -52,6 +52,17 @@ const NO_ANSWER_PATTERNS: ReadonlyArray<RegExp> = [
   /\bempty (?:response|completion) from (?:the )?(?:model|provider)/i,
 ];
 
+/**
+ * The agent's process ended in the middle of a turn: out of memory, killed by
+ * something on the computer. Its conversation is saved, the next turn resumes
+ * it. An exit caused by Uno Work stopping never gets here (daemonStopping.ts).
+ */
+const AGENT_STOPPED_PATTERNS: ReadonlyArray<RegExp> = [
+  /\bOpenCode server exited unexpectedly\b/i,
+  /\bCodex App Server exited\b/i,
+  /\bACP process exited\b/i,
+];
+
 function retryAfter(error: string): number {
   const match =
     /retry[ _-]?after[^0-9]{0,12}(\d{1,3})/i.exec(error) ??
@@ -68,6 +79,9 @@ export function classifyTurnError(error: string): TurnErrorNotice {
   }
   if (NO_ANSWER_PATTERNS.some((pattern) => pattern.test(error))) {
     return { kind: "no-answer", retryAfterSeconds: 0 };
+  }
+  if (AGENT_STOPPED_PATTERNS.some((pattern) => pattern.test(error))) {
+    return { kind: "agent-stopped", retryAfterSeconds: 0 };
   }
   return { kind: "other", retryAfterSeconds: 0 };
 }
@@ -92,10 +106,12 @@ export const TURN_AUTO_RETRY_MAX_ATTEMPTS = 2;
  */
 export const NO_ANSWER_RETRY_DELAYS_MS: ReadonlyArray<number> = [15_000, 45_000];
 
+export type AutoRetryKind = Exclude<TurnErrorKind, "other">;
+
 export type TurnAutoRetryDecision =
   | {
       readonly retry: true;
-      readonly kind: "busy" | "no-answer";
+      readonly kind: AutoRetryKind;
       /** 1-based number of this automatic continuation. */
       readonly attempt: number;
       readonly maxAttempts: number;
@@ -138,6 +154,7 @@ export function decideTurnAutoRetry(input: {
 const AUTO_RETRY_NOTE_OPENING = {
   busy: "Uno AI was busy and your last response was cut off",
   "no-answer": "Uno AI didn't answer and your last response was cut off",
+  "agent-stopped": "Your process stopped unexpectedly and your last response was cut off",
 } as const;
 
 /**
@@ -148,7 +165,7 @@ const AUTO_RETRY_NOTE_OPENING = {
  * stall retry (OpenCodeAdapter OPENCODE_STALL_RETRY_PROMPT).
  */
 export function turnAutoRetryNoteBody(input: {
-  readonly kind: "busy" | "no-answer";
+  readonly kind: AutoRetryKind;
   readonly attempt: number;
   readonly maxAttempts: number;
 }): string {
@@ -158,14 +175,17 @@ export function turnAutoRetryNoteBody(input: {
 /** The person's words for {@link turnAutoRetryNoteBody}; null for any other text. */
 export function turnAutoRetryNoteLine(body: string): string | null {
   const match =
-    /^Uno AI (was busy|didn't answer) and your last response was cut off \(automatic retry (\d+) of (\d+)\)/.exec(
+    /^(Uno AI was busy|Uno AI didn't answer|Your process stopped unexpectedly) and your last response was cut off \(automatic retry (\d+) of (\d+)\)/.exec(
       body,
     );
   if (!match) return null;
   const counter = `(${match[2]} of ${match[3]})`;
-  return match[1] === "was busy"
-    ? `Uno AI was busy — trying again automatically ${counter}…`
-    : `Uno AI didn't answer — trying again automatically ${counter}…`;
+  if (match[1] === "Uno AI was busy") {
+    return `Uno AI was busy — trying again automatically ${counter}…`;
+  }
+  return match[1] === "Uno AI didn't answer"
+    ? `Uno AI didn't answer — trying again automatically ${counter}…`
+    : `The agent stopped — trying again automatically ${counter}…`;
 }
 
 // ── A turn cut off by a restart ─────────────────────────────────────────
@@ -186,6 +206,7 @@ export function isRestartCutOffError(error: string | null | undefined): boolean 
 
 const UPDATE_RESTART_NOTE_OPENING =
   "Uno Work restarted for an update and your last response was cut off";
+const RESTART_NOTE_OPENING = "Uno Work restarted and your last response was cut off";
 
 /**
  * What the daemon sends an agent whose turn an update of Uno Work cut off
@@ -195,9 +216,34 @@ const UPDATE_RESTART_NOTE_OPENING =
  */
 export const UPDATE_RESTART_NOTE_BODY = `${UPDATE_RESTART_NOTE_OPENING}. Continue the task from where you stopped; don't repeat finished steps.`;
 
-/** The person's words for {@link UPDATE_RESTART_NOTE_BODY}; null for any other text. */
+/** The same after any other clean restart of the computer's Uno Work. */
+export const RESTART_NOTE_BODY = `${RESTART_NOTE_OPENING}. Continue the task from where you stopped; don't repeat finished steps.`;
+
+/** The person's words for those two notes; null for any other text. */
 export function updateRestartNoteLine(body: string): string | null {
-  return body.startsWith(UPDATE_RESTART_NOTE_OPENING)
-    ? "Uno Work restarted for an update. The agent goes on where it stopped."
+  if (body.startsWith(UPDATE_RESTART_NOTE_OPENING)) {
+    return "Uno Work restarted for an update. The agent goes on where it stopped.";
+  }
+  return body.startsWith(RESTART_NOTE_OPENING)
+    ? "Uno Work restarted. The agent goes on where it stopped."
     : null;
+}
+
+// ── Try again ───────────────────────────────────────────────────────────
+
+const TRY_AGAIN_NOTE_OPENING = "The person pressed Try again: your last response failed.";
+
+/**
+ * What "Try again" sends: the task once more, as a note. Sending the message
+ * again put a copy of it into the chat on every press (qa 01.11). The task
+ * travels with the note because the agent may never have seen it: a turn can
+ * fail before its first step.
+ */
+export function tryAgainNoteBody(task: string): string {
+  return `${TRY_AGAIN_NOTE_OPENING} Their request:\n\n${task}\n\nDo it now. If part of it is already done, go on from there; don't repeat finished steps.`;
+}
+
+/** The person's words for {@link tryAgainNoteBody}; null for any other text. */
+export function tryAgainNoteLine(body: string): string | null {
+  return body.startsWith(TRY_AGAIN_NOTE_OPENING) ? "Trying again…" : null;
 }

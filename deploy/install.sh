@@ -729,11 +729,13 @@ WantedBy=paths.target
 UNIT
 
 # --- Bundled harnesses ------------------------------------------------------
+# The Hermes release tag: same as HERMES_CLAUDE_READY_REF in harnessInstallCommands.ts.
+UNO_WORK_HERMES_REF="v2026.9.24"
 # All three authenticate through the Uno gateway, so the user never pastes a
 # provider key. The key itself is written to the daemon's settings, not here.
 if [ "${UNO_WORK_SKIP_HARNESSES:-0}" != "1" ]; then
   log "Installing bundled harnesses (opencode, hermes)"
-  sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_OPENCODE_VERSION="${UNO_WORK_OPENCODE_VERSION:-}" UNO_WORK_HERMES_INSTALL_CMD="${UNO_WORK_HERMES_INSTALL_CMD:-}" UNO_WORK_HERMES_VERSION="${UNO_WORK_HERMES_VERSION:-}" bash -s <<'HARNESS' || log "WARNING: harness install had failures; the daemon still works"
+  sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_OPENCODE_VERSION="${UNO_WORK_OPENCODE_VERSION:-}" UNO_WORK_HERMES_INSTALL_CMD="${UNO_WORK_HERMES_INSTALL_CMD:-}" UNO_WORK_HERMES_VERSION="${UNO_WORK_HERMES_VERSION:-}" UNO_WORK_HERMES_REF="${UNO_WORK_HERMES_REF}" bash -s <<'HARNESS' || log "WARNING: harness install had failures; the daemon still works"
 set -uo pipefail
 npm_prefix="$HOME/.local"
 mkdir -p "$npm_prefix"
@@ -754,9 +756,9 @@ if [ -x "$opencode_bin" ]; then
   ln -sf "$opencode_bin" "$HOME/.unowork/opencode/bin/opencode"
 fi
 
-# Hermes Agent (NousResearch/hermes-agent) ships through PyPI, not npm, and the
-# driver spawns `hermes acp` — so the acp extra is mandatory. Pin the version in
-# UNO_WORK_HERMES_VERSION when we want reproducible images.
+# Hermes Agent (NousResearch/hermes-agent) is a Python tool, not npm, and the
+# driver spawns `hermes acp` — so the acp extra is mandatory.
+# UNO_WORK_HERMES_VERSION asks PyPI for that exact version instead of our release.
 if [ -n "${UNO_WORK_HERMES_INSTALL_CMD:-}" ]; then
   bash -lc "${UNO_WORK_HERMES_INSTALL_CMD}" || echo "hermes install failed"
 else
@@ -764,14 +766,33 @@ else
     curl -fsSL https://astral.sh/uv/install.sh | sh >/dev/null 2>&1 || echo "uv install failed"
     export PATH="$HOME/.local/bin:$PATH"
   fi
-  hermes_spec="hermes-agent[acp]"
-  [ -n "${UNO_WORK_HERMES_VERSION:-}" ] && hermes_spec="hermes-agent[acp]==${UNO_WORK_HERMES_VERSION}"
   # mcp 2.x dropped the HTTP client Hermes uses: an open pin silently leaves
   # the assistant without its uno-manager tools. Python 3.12: hermes-agent
-  # needs >=3.11,<3.14.
-  uv tool install --force --python 3.12 "$hermes_spec" --with "mcp>=1.9,<2" >/dev/null 2>&1 || echo "hermes install failed"
+  # needs >=3.11,<3.14. PyPI stopped at 0.19, so the release we run comes from
+  # its tag (harnessInstallCommands.ts); PyPI only when that can't be built.
+  hermes_install() { uv tool install --force --python 3.12 "$1" --with "mcp>=1.9,<2" >/dev/null 2>&1; }
+  if [ -n "${UNO_WORK_HERMES_VERSION:-}" ]; then
+    hermes_install "hermes-agent[acp]==${UNO_WORK_HERMES_VERSION}" || echo "hermes install failed"
+  else
+    HERMES_NIX_BUILD=1 hermes_install "hermes-agent[acp] @ git+https://github.com/NousResearch/hermes-agent@${UNO_WORK_HERMES_REF}" \
+      || hermes_install "hermes-agent[acp]" || echo "hermes install failed"
+  fi
 fi
 HARNESS
+elif [ "${UNO_WORK_SELF_UPDATE:-0}" = "1" ]; then
+  # An update leaves the harnesses alone, except a Hermes older than the one
+  # this daemon expects: images up to 0.0.174 carry PyPI's 0.19, whose permission
+  # card dies after a minute. Once per computer; a failure changes nothing.
+  sudo -u "${SERVICE_USER}" env HOME="/home/${SERVICE_USER}" UNO_WORK_HERMES_REF="${UNO_WORK_HERMES_REF}" timeout 600 bash -s <<'HERMES_UPDATE' || log "WARNING: Hermes stayed on its version; the daemon still works"
+set -uo pipefail
+export PATH="$HOME/.local/bin:$PATH"
+command -v hermes >/dev/null 2>&1 && command -v uv >/dev/null 2>&1 || exit 0
+minor="$(hermes --version 2>/dev/null | sed -n 's/^Hermes Agent v0\.\([0-9]*\)\..*/\1/p' | head -n 1)"
+[ -n "${minor}" ] && [ "${minor}" -lt 21 ] || exit 0
+HERMES_NIX_BUILD=1 uv tool install --force --python 3.12 \
+  "hermes-agent[acp] @ git+https://github.com/NousResearch/hermes-agent@${UNO_WORK_HERMES_REF}" \
+  --with "mcp>=1.9,<2" >/dev/null 2>&1
+HERMES_UPDATE
 fi
 
 if [ -n "${API_KEY}" ]; then

@@ -20,6 +20,7 @@ import { Route as SettingsSourceControlRouteImport } from './routes/settings.sou
 import { Route as SettingsSkillsRouteImport } from './routes/settings.skills'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
 import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
+import { Route as SettingsKeyboardRouteImport } from './routes/settings.keyboard'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsDeveloperRouteImport } from './routes/settings.developer'
@@ -119,6 +120,11 @@ const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
 const SettingsProjectsRoute = SettingsProjectsRouteImport.update({
   id: '/projects',
   path: '/projects',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsKeyboardRoute = SettingsKeyboardRouteImport.update({
+  id: '/keyboard',
+  path: '/keyboard',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
@@ -396,6 +402,7 @@ export interface FileRoutesByFullPath {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
@@ -452,6 +459,7 @@ export interface FileRoutesByTo {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
@@ -512,6 +520,7 @@ export interface FileRoutesById {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/keyboard': typeof SettingsKeyboardRoute
   '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
@@ -573,6 +582,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/keyboard'
     | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
@@ -629,6 +639,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/keyboard'
     | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
@@ -688,6 +699,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/keyboard'
     | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
@@ -801,6 +813,13 @@ declare module '@tanstack/react-router' {
       path: '/projects'
       fullPath: '/settings/projects'
       preLoaderRoute: typeof SettingsProjectsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/keyboard': {
+      id: '/settings/keyboard'
+      path: '/keyboard'
+      fullPath: '/settings/keyboard'
+      preLoaderRoute: typeof SettingsKeyboardRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/general': {
@@ -1239,6 +1258,7 @@ interface SettingsRouteChildren {
   SettingsDeveloperRoute: typeof SettingsDeveloperRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsKeyboardRoute: typeof SettingsKeyboardRoute
   SettingsProjectsRoute: typeof SettingsProjectsRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
   SettingsSkillsRoute: typeof SettingsSkillsRoute
@@ -1267,6 +1287,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDeveloperRoute: SettingsDeveloperRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsKeyboardRoute: SettingsKeyboardRoute,
   SettingsProjectsRoute: SettingsProjectsRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
   SettingsSkillsRoute: SettingsSkillsRoute,

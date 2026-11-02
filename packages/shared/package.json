@@ -208,6 +208,14 @@
       "types": "./src/secretRequestCopy.ts",
       "import": "./src/secretRequestCopy.ts"
     },
+    "./approvalActivity": {
+      "types": "./src/approvalActivity.ts",
+      "import": "./src/approvalActivity.ts"
+    },
+    "./fileNameSearch": {
+      "types": "./src/fileNameSearch.ts",
+      "import": "./src/fileNameSearch.ts"
+    },
     "./turnErrorRetry": {
       "types": "./src/turnErrorRetry.ts",
       "import": "./src/turnErrorRetry.ts"

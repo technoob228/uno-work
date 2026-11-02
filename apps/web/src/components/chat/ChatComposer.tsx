@@ -1438,14 +1438,16 @@ export const ChatComposer = memo(
     );
 
     const isComposerApprovalState = activePendingApproval !== null;
+    // The approval itself is asked in the feed, on a phone too. Only the
+    // preview's focus mode hides the feed: there the composer has to ask.
+    const approvalInComposer = isComposerApprovalState && forceCompact && isComposerCollapsedMobile;
     const activePendingUserInput = pendingUserInputs[0] ?? null;
     const hasComposerHeader =
-      // The approval itself is asked in the feed; only the folded phone composer shows it.
-      (isComposerApprovalState && isComposerCollapsedMobile) ||
+      approvalInComposer ||
       pendingUserInputs.length > 0 ||
       (showPlanFollowUpPrompt && activeProposedPlan !== null);
     const showCollapsedMobilePromptRow =
-      isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
+      isComposerCollapsedMobile && !approvalInComposer && pendingUserInputs.length === 0;
 
     const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
     const showPlanSidebarToggle = Boolean(activePlan || sidebarProposedPlan || planSidebarOpen);
@@ -3736,7 +3738,7 @@ export const ChatComposer = memo(
                 </div>
               ) : null)}
 
-            {isComposerCollapsedMobile && activePendingApproval ? (
+            {approvalInComposer && activePendingApproval ? (
               <div
                 className="rounded-t-[19px] border-b border-border/65 bg-muted/20"
                 data-chat-composer-collapsed-controls="true"

@@ -115,6 +115,7 @@ describe("simple settings (01.10)", () => {
       "Assistants & phone",
       "Projects",
       "Computer",
+      "Keyboard",
       "Developer",
     ]);
   });
@@ -156,6 +157,7 @@ describe("gating 28.10: Connectors and Skills only with the assistants update", 
       "Assistants & phone",
       "Projects",
       "Computer",
+      "Keyboard",
       "Developer",
     ]);
   });

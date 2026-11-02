@@ -27,6 +27,7 @@ export {
 export const TURN_ERROR_COPY = {
   stillBusy: "Uno is still busy. Try again in a minute.",
   noAnswer: "Uno AI didn't answer this time. Nothing is lost.",
+  agentStopped: "The agent stopped unexpectedly. Nothing is lost.",
   /** Uno Work went down mid-turn (an update, a crash): the agent stopped, nothing else broke. */
   restart: "Stopped by a restart. Send a message to continue.",
   /** The agent itself didn't start: Fix Work can't help then, a person can. */

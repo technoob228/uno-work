@@ -7,6 +7,7 @@
  * 2.5 s).
  */
 import type { EnvironmentId, FilesEntry } from "@t3tools/contracts";
+import { fileNameMatches, fileNameNeedles } from "@t3tools/shared/fileNameSearch";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Loader2Icon, SearchIcon, XIcon } from "lucide-react";
@@ -42,9 +43,9 @@ export function matchFilesByName(
   entries: ReadonlyArray<FilesEntry>,
   query: string,
 ): ReadonlyArray<FilesEntry> {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return entries;
-  return entries.filter((entry) => entry.name.toLocaleLowerCase().includes(needle));
+  if (!query.trim()) return entries;
+  const needles = fileNameNeedles(query);
+  return entries.filter((entry) => fileNameMatches(entry.name, needles));
 }
 
 /** The folder a result is in, from where the search started; null right there. */

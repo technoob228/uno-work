@@ -79,11 +79,13 @@ import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyHermesAcpModelSelection,
   buildHermesConfigYaml,
+  HERMES_APPROVAL_TIMEOUT_SECONDS,
   HERMES_DISPATCHER_COMPRESSION,
   dispatcherPromptStamp,
   resumableSessionId,
   HERMES_DISPATCHER_DISABLED_TOOLSETS,
   HERMES_DISPATCHER_MCP_TOOLS,
+  HERMES_MODE_DONT_ASK,
   type HermesLlmRoute,
   applyHermesLlmRoute,
   hermesProviderIdOf,
@@ -121,12 +123,18 @@ const HERMES_INTERRUPT_SETTLE_TIMEOUT_MS = 10_000;
 
 /**
  * Hermes stops waiting for a permission answer on its own and refuses: after
- * 60 s in 0.19 (hardcoded, in our images), after `approvals.timeout` (300 s by
- * default) in newer ones. It doesn't tell the client, so the card would stay
- * with an Allow nothing listens to and the agent's "denied" would read as the
- * person's own. We end the wait first: the card closes and says what happened.
+ * 60 s in 0.19 (hardcoded), after `approvals.timeout` from 0.21 on (we write
+ * {@link HERMES_APPROVAL_TIMEOUT_SECONDS} into config.yaml, so a person who
+ * stepped away for a few minutes still finds a live card). It doesn't tell the
+ * client, so the card would stay with an Allow nothing listens to and the
+ * agent's "denied" would read as the person's own. We end the wait first: the
+ * card closes and says what happened.
  */
-const HERMES_PERMISSION_WAIT_MS = 55_000;
+export function hermesPermissionWaitMs(agentVersion: string | undefined): number {
+  const [major, minor] = (agentVersion ?? "").split(".").map(Number);
+  const readsApprovalTimeout = (major ?? 0) > 0 || (minor ?? 0) >= 21;
+  return readsApprovalTimeout ? (HERMES_APPROVAL_TIMEOUT_SECONDS - 5) * 1_000 : 55_000;
+}
 
 export interface HermesAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
@@ -252,6 +260,10 @@ interface HermesSessionContext {
   /** Последняя применённая пара (model, mode) — чтобы не гонять двойной set_model на каждый turn. */
   lastAppliedModel: string | undefined;
   lastAppliedModeId: string | undefined;
+  /** Hermes' own version (`initialize`): what it does with an unanswered request. */
+  readonly agentVersion: string | undefined;
+  /** The person chose "Always allow" on a file edit in this session. */
+  editsAllowedForSession: boolean;
   /** The turn a prompt is running for; undefined between turns. */
   activeTurnId: TurnId | undefined;
   /**
@@ -348,7 +360,6 @@ export function makeHermesAdapter(
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("hermes");
     const interruptSettleTimeoutMs =
       options?.interruptSettleTimeoutMs ?? HERMES_INTERRUPT_SETTLE_TIMEOUT_MS;
-    const permissionWaitMs = options?.permissionWaitMs ?? HERMES_PERMISSION_WAIT_MS;
     const fileSystem = yield* FileSystem.FileSystem;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const serverConfig = yield* Effect.service(ServerConfig);
@@ -552,6 +563,33 @@ export function makeHermesAdapter(
      * Применяет model+mode к сессии, пропуская уже применённые значения.
      * Модель — двойной `session/set_model`, режим — `session/set_mode`.
      */
+    /**
+     * Hermes offers an edit only Allow and Deny, so "Always allow" on a file
+     * would be one more single Allow and the next edit would ask again. The
+     * standing permission is its `dont_ask` mode: every edit of this session
+     * except sensitive paths (.env, keys, .git), which keep asking. Commands
+     * have their own "Allow for session" option and need nothing here.
+     */
+    const allowEditsForSession = (ctx: HermesSessionContext, requestKind: string) =>
+      Effect.gen(function* () {
+        if (requestKind !== "edit" || ctx.editsAllowedForSession) return;
+        ctx.editsAllowedForSession = true;
+        yield* setHermesSessionMode({
+          runtime: ctx.acp,
+          sessionId: ctx.sessionId,
+          modeId: HERMES_MODE_DONT_ASK,
+          mapError: (cause) =>
+            mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/set_mode", cause),
+        });
+        ctx.lastAppliedModeId = HERMES_MODE_DONT_ASK;
+      }).pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("hermes: could not keep edits allowed for the session").pipe(
+            Effect.annotateLogs({ cause: cause.message }),
+          ),
+        ),
+      );
+
     const applyHermesSessionConfiguration = (input: {
       readonly ctx: HermesSessionContext;
       readonly model: string | undefined;
@@ -571,7 +609,9 @@ export function makeHermesAdapter(
           ctx.lastAppliedModel = model;
         }
 
-        const modeId = resolveHermesModeId(ctx.session.runtimeMode);
+        const modeId = ctx.editsAllowedForSession
+          ? HERMES_MODE_DONT_ASK
+          : resolveHermesModeId(ctx.session.runtimeMode);
         if (ctx.lastAppliedModeId !== modeId) {
           yield* setHermesSessionMode({
             runtime: ctx.acp,
@@ -909,9 +949,14 @@ export function makeHermesAdapter(
                   }),
                 );
                 const answered = yield* Deferred.await(decision).pipe(
-                  Effect.timeoutOption(permissionWaitMs),
+                  Effect.timeoutOption(
+                    options?.permissionWaitMs ?? hermesPermissionWaitMs(ctx?.agentVersion),
+                  ),
                 );
                 pendingApprovals.delete(requestId);
+                if (Option.getOrUndefined(answered) === "acceptForSession") {
+                  yield* allowEditsForSession(ctx, permissionRequest.kind);
+                }
                 yield* offerRuntimeEvent(
                   makeAcpRequestResolvedEvent({
                     stamp: yield* makeEventStamp(),
@@ -973,6 +1018,8 @@ export function makeHermesAdapter(
             // из своей БД сессий, поэтому форсим один set_model-проход.
             lastAppliedModel: resumeSessionId ? undefined : configuredModel,
             lastAppliedModeId: undefined,
+            agentVersion: started.initializeResult.agentInfo?.version,
+            editsAllowedForSession: false,
             activeTurnId: undefined,
             lastTurnId: undefined,
             inFlightPrompt: undefined,

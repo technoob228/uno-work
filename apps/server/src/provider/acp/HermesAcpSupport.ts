@@ -374,6 +374,12 @@ export function setHermesSessionMode<E>(input: {
  * потолок — 6.5 минут зависшего сокета до ReadError). */
 export const HERMES_GATEWAY_STALE_TIMEOUT_SECONDS = 120;
 export const HERMES_GATEWAY_REQUEST_TIMEOUT_SECONDS = 180;
+/**
+ * How long a permission card stays live (`approvals.timeout`, read from 0.21
+ * on). 5 minutes by default was still "stepped away for coffee, came back to a
+ * refused edit"; the agent just sits and costs nothing while it waits.
+ */
+export const HERMES_APPROVAL_TIMEOUT_SECONDS = 1_800;
 /** Неймспейснутый id — голый `whisper-large-v3` hermes подменяет на whisper-1. */
 export const HERMES_STT_MODEL = "openai/whisper-large-v3";
 /**
@@ -622,6 +628,8 @@ export function buildHermesConfigYaml(input: {
     ...(input.environmentHint !== undefined && input.environmentHint.trim().length > 0
       ? [`  environment_hint: ${quote(input.environmentHint)}`]
       : []),
+    "approvals:",
+    `  timeout: ${HERMES_APPROVAL_TIMEOUT_SECONDS}`,
     "model:",
     `  provider: ${quote(provider)}`,
     `  default: ${quote(input.model)}`,

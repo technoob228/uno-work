@@ -1583,6 +1583,15 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.serverRemoveKeybinding]: ({ command }) =>
+          observeRpcEffect(
+            WS_METHODS.serverRemoveKeybinding,
+            Effect.gen(function* () {
+              const keybindingsConfig = yield* keybindings.removeKeybindingRules(command);
+              return { keybindings: keybindingsConfig, issues: [] };
+            }),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetSettings]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverGetSettings,

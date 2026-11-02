@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { fileEditorOwnsSave } from "../../../lib/editableFocus";
 import { cn } from "../../../lib/utils";
 import { CodeFileView } from "../../preview/CodeFileView";
 import { Button } from "../../ui/button";
@@ -162,13 +163,14 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void save();
-      }
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return;
+      if (event.shiftKey || event.altKey || !fileEditorOwnsSave()) return;
+      event.preventDefault();
+      void save();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture: nothing on the way down may take it first, or the browser's Save Page opens.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [save]);
 
   useEffect(() => {
@@ -220,7 +222,7 @@ function TextEditor({ source, onClose, onDirtyChange }: FileEditorProps) {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-file-editor className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
         <span className="flex items-center gap-2 text-xs text-muted-foreground">
           <span

@@ -64,6 +64,13 @@ export function SidebarShortcutListener() {
     const resolved = withSidebarToggle(keybindings);
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      // The keys are being recorded in Settings.
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-keybinding-capture]")
+      ) {
+        return;
+      }
       const terminalFocus = isTerminalFocused();
       const command = resolveShortcutCommand(event, resolved, {
         context: { terminalFocus, terminalOpen: false },
@@ -83,8 +90,9 @@ export function SidebarShortcutListener() {
       event.stopPropagation();
       toggleSidebar();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // Capture: the message box (Lexical) takes ⌘B for bold on the way down.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
   return null;
 }

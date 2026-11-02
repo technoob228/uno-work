@@ -6,11 +6,13 @@ import {
   BUSY_DEFAULT_RETRY_SECONDS,
   NO_ANSWER_RETRY_DELAYS_MS,
   ORPHANED_PROVIDER_SESSION_ERROR,
+  RESTART_NOTE_BODY,
   TURN_AUTO_RETRY_MAX_ATTEMPTS,
   UPDATE_RESTART_NOTE_BODY,
   classifyTurnError,
   decideTurnAutoRetry,
   isRestartCutOffError,
+  tryAgainNoteBody,
   turnAutoRetryNoteBody,
   turnAutoRetryNoteLine,
   updateRestartNoteLine,
@@ -191,6 +193,33 @@ describe("a turn cut off by a restart", () => {
     });
     expect(updateRestartNoteLine("Continue please")).toBeNull();
     expect(classifyTurnError(UPDATE_RESTART_NOTE_BODY).kind).toBe("other");
+  });
+});
+
+describe("an agent that stopped by itself", () => {
+  it("is a calm notice, continued automatically like a model that didn't answer", () => {
+    const error = "OpenCode server exited unexpectedly (0).";
+    expect(classifyTurnError(error).kind).toBe("agent-stopped");
+    const decision = decideTurnAutoRetry({ error, attemptsUsed: 0 });
+    expect(decision).toMatchObject({ retry: true, kind: "agent-stopped", delayMs: 15_000 });
+    const body = turnAutoRetryNoteBody({ kind: "agent-stopped", attempt: 1, maxAttempts: 2 });
+    expect(parseUnoWorkNote(`${UNO_WORK_NOTE_PREFIX}${body}`)?.text).toBe(
+      "The agent stopped — trying again automatically (1 of 2)…",
+    );
+  });
+});
+
+describe("notes", () => {
+  it("a clean restart continues with its own line", () => {
+    expect(parseUnoWorkNote(`${UNO_WORK_NOTE_PREFIX}${RESTART_NOTE_BODY}`)?.text).toBe(
+      "Uno Work restarted. The agent goes on where it stopped.",
+    );
+  });
+
+  it("Try again carries the task and shows one line instead of a copy of the message", () => {
+    const text = `${UNO_WORK_NOTE_PREFIX}${tryAgainNoteBody("build the site")}`;
+    expect(text).toContain("build the site");
+    expect(parseUnoWorkNote(text)).toMatchObject({ kind: "auto-retry", text: "Trying again…" });
   });
 });
 

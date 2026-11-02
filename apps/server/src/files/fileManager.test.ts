@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import nodePath from "node:path";
 
+import { fileNameMatches, fileNameNeedles } from "@t3tools/shared/fileNameSearch";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -10,8 +11,6 @@ import {
   listFolder,
   moveEntries,
   renameEntry,
-  fileNameMatches,
-  fileNameNeedles,
   searchByName,
 } from "./fileManager.ts";
 import {

@@ -1,10 +1,10 @@
 import * as path from "node:path";
 import * as os from "node:os";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Context, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
@@ -19,7 +19,7 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import type { HermesAdapterShape } from "../Services/HermesAdapter.ts";
-import { makeHermesAdapter } from "./HermesAdapter.ts";
+import { hermesPermissionWaitMs, makeHermesAdapter } from "./HermesAdapter.ts";
 
 class HermesAdapter extends Context.Service<HermesAdapter, HermesAdapterShape>()(
   "test/HermesAdapter",
@@ -226,6 +226,39 @@ for (const [name, options, expected] of [
     }
   });
 }
+
+describe("hermesPermissionWaitMs", () => {
+  it("waits as long as this Hermes does, and ends first", () => {
+    assert.strictEqual(hermesPermissionWaitMs("0.19.0"), 55_000);
+    assert.strictEqual(hermesPermissionWaitMs(undefined), 55_000);
+    assert.strictEqual(hermesPermissionWaitMs("0.21.5"), 1_795_000);
+    assert.strictEqual(hermesPermissionWaitMs("1.0.0"), 1_795_000);
+  });
+});
+
+// "Always allow" on a file: Hermes only offers Allow, the standing permission is its mode.
+const alwaysAllowLog = path.join(os.tmpdir(), `hermes-always-allow-${process.pid}.ndjson`);
+makeHermesAdapterTestLayer({
+  T3_ACP_EMIT_TOOL_CALLS: "1",
+  T3_ACP_PERMISSION_OPTIONS: JSON.stringify(HERMES_EDIT_OPTIONS),
+  T3_ACP_PERMISSION_TOOL_KIND: "edit",
+  T3_ACP_REQUEST_LOG_PATH: alwaysAllowLog,
+})("HermesAdapterLive always allow on a file edit", (it) => {
+  it.effect("keeps edits allowed for the rest of the session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* HermesAdapter;
+      const threadId = ThreadId.make("hermes-always-allow-edit");
+      const text = yield* askAndAnswer(adapter, threadId, "acceptForSession");
+      assert.include(text, "allowed: allow_once");
+      const log = yield* Effect.promise(() => readFile(alwaysAllowLog, "utf8"));
+      const modes = log
+        .split("\n")
+        .filter((line) => line.includes('"session/set_mode"'))
+        .map((line) => (JSON.parse(line) as { params: { modeId: string } }).params.modeId);
+      assert.deepStrictEqual(modes, ["default", "dont_ask"]);
+    }),
+  );
+});
 
 // Hermes gives up on an unanswered request by itself and tells nobody.
 makeHermesAdapterTestLayer(

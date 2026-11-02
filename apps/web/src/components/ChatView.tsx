@@ -36,6 +36,8 @@ import {
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
 import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
+import { isRestartCutOffError, tryAgainNoteBody } from "@t3tools/shared/turnErrorRetry";
+import { fileEditorOwnsSave } from "../lib/editableFocus";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -227,6 +229,8 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { unoCreditsChoiceNeeded } from "./chat/unoCreditsChoice.logic";
+import { useEnvironmentSettings } from "~/environments/settings/serverSettings";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
@@ -296,6 +300,7 @@ import {
   nextQueuedMessageToSend,
   shouldQueueSend,
   type QueuedChatMessage,
+  QUEUE_AFTER_RESTART_DELAY_MS,
   useQueuedMessages,
   useQueuedMessageStore,
 } from "../queuedMessageStore";
@@ -2081,6 +2086,17 @@ export default function ChatView(props: ChatViewProps) {
         : null,
     [activeThread, activeProviderStatus, providerStatuses],
   );
+  // The daemon refused the turn: this agent has no sign-in and may not use Uno
+  // credits. The composer asks about that, unless it has moved to another
+  // agent: then nobody would tell the person anything.
+  const environmentServerSettings = useEnvironmentSettings(environmentId);
+  const creditsRefusalUnanswered =
+    isUnoCreditsChoiceRequiredText(activeThread?.error) &&
+    !unoCreditsChoiceNeeded({
+      provider: activeProviderStatus,
+      settings: environmentServerSettings,
+      lastError: activeThread?.error ?? null,
+    });
   // A turn failed on an auth error but the snapshot still says signed in:
   // ask the daemon to re-probe once, so the picker badge catches up.
   const reprobedAuthErrorRef = useRef<string | null>(null);
@@ -3121,7 +3137,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "composer.stash") {
         // ⌘S in another text field (a file open in the panel) is that field's.
         const focused = document.activeElement;
-        if (isEditableOutsideComposer(focused)) return;
+        if (isEditableOutsideComposer(focused) || fileEditorOwnsSave()) return;
         event.preventDefault();
         event.stopPropagation();
         composerRef.current?.setAside();
@@ -4003,12 +4019,22 @@ export default function ChatView(props: ChatViewProps) {
   // itself once the agent is done and nothing else needs the person.
   const queuedMessages = useQueuedMessages(routeThreadKey);
   const [messagesViewport, setMessagesViewport] = useState<HTMLDivElement | null>(null);
+  // A restart stops nothing the person decided: the daemon continues the turn
+  // itself, and if it doesn't, what waits in the queue goes on from there.
+  const cutOffByRestart = isRestartCutOffError(activeThread?.error);
+  const [restartWaitOver, setRestartWaitOver] = useState(false);
+  useEffect(() => {
+    setRestartWaitOver(false);
+    if (!cutOffByRestart) return;
+    const timer = window.setTimeout(() => setRestartWaitOver(true), QUEUE_AFTER_RESTART_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [cutOffByRestart, routeThreadKey]);
   const nextQueued = nextQueuedMessageToSend({
     queue: queuedMessages,
     phase,
     busy: isSendBusy || isConnecting || activeEnvironmentUnavailable,
     waitingForPerson: activePendingApproval !== null || pendingUserInputs.length > 0,
-    hasError: Boolean(activeThread?.error),
+    hasError: Boolean(activeThread?.error) && !restartWaitOver,
   });
   useEffect(() => {
     if (!nextQueued || sendInFlightRef.current) return;
@@ -4446,7 +4472,13 @@ export default function ChatView(props: ChatViewProps) {
     const messages = activeThread?.messages ?? [];
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index]!;
-      if (message.role === "user" && message.text.trim().length > 0) return message.text;
+      if (
+        message.role === "user" &&
+        message.text.trim().length > 0 &&
+        !message.text.startsWith(UNO_WORK_NOTE_PREFIX)
+      ) {
+        return message.text;
+      }
     }
     return null;
   }, [activeThread?.messages]);
@@ -4544,6 +4576,8 @@ export default function ChatView(props: ChatViewProps) {
     const threadIdForSend = activeThread.id;
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
+    // A note, not the message again: the chat gets no copy of it.
+    const retryText = `${UNO_WORK_NOTE_PREFIX}${tryAgainNoteBody(lastUserMessageText)}`;
     // Try again stays on this chat's agent. With a broken agent the composer
     // falls back to another one; that's not the person's choice.
     const modelSelection =
@@ -4560,7 +4594,7 @@ export default function ChatView(props: ChatViewProps) {
       {
         id: messageIdForSend,
         role: "user",
-        text: lastUserMessageText,
+        text: retryText,
         createdAt: messageCreatedAt,
         streaming: false,
       },
@@ -4573,7 +4607,7 @@ export default function ChatView(props: ChatViewProps) {
         message: {
           messageId: messageIdForSend,
           role: "user",
-          text: lastUserMessageText,
+          text: retryText,
           attachments: [],
         },
         modelSelection,
@@ -4961,12 +4995,13 @@ export default function ChatView(props: ChatViewProps) {
         activeThread.session?.lastErrorClass === "billing_error" ||
         harnessAuth?.suppressThreadError ||
         // "Sign in or use Uno credits": the composer asks that itself.
-        isUnoCreditsChoiceRequiredText(activeThread.error) ||
+        (isUnoCreditsChoiceRequiredText(activeThread.error) && !creditsRefusalUnanswered) ||
         // The plan is at its limit: ChatPlanLimitNotice says it, with the ways on.
         planLimitStopText !== null
           ? null
           : activeThread.error
       }
+      agentDown={creditsRefusalUnanswered}
       onDismiss={() => setThreadError(activeThread.id, null)}
       // "Try again" sends the person's last message again (flows v2, I1).
       onRetry={isServerThread && lastUserMessageText ? () => void onRetryAfterReauth() : undefined}

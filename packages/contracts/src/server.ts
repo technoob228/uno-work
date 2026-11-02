@@ -8,7 +8,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
-import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings.ts";
+import { KeybindingCommand, KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings.ts";
 import { EditorId } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
@@ -195,6 +195,10 @@ export const ServerUpsertKeybindingResult = Schema.Struct({
   issues: ServerConfigIssues,
 });
 export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.Type;
+
+/** Back to the default keys of a command: its rules leave keybindings.json. */
+export const ServerRemoveKeybindingInput = Schema.Struct({ command: KeybindingCommand });
+export type ServerRemoveKeybindingInput = typeof ServerRemoveKeybindingInput.Type;
 
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,

@@ -23,6 +23,31 @@ describe("ThreadErrorBanner", () => {
   const RAW =
     "ProviderAdapterProcessError: Provider adapter process error (opencode) for thread 644d1759-2760-4e5f: spawn opencode ENOENT\n    at Generator.next (<anonymous>)";
 
+  it("no agent can take the chat: the same line, whatever the error says", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadErrorBanner
+        placement="feed"
+        agentDown
+        error="Claude isn't signed in on this computer, so nothing was sent."
+      />,
+    );
+    expect(markup).toContain('data-kind="agent-down"');
+    expect(markup).not.toContain("signed in");
+  });
+
+  it("the agent stopped by itself: calm, with Try again", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadErrorBanner
+        placement="feed"
+        error="OpenCode server exited unexpectedly (0)."
+        onRetry={() => undefined}
+      />,
+    );
+    expect(markup).toContain('data-kind="agent-stopped"');
+    expect(markup).toContain("The agent stopped unexpectedly. Nothing is lost.");
+    expect(markup).not.toContain("exited unexpectedly");
+  });
+
   it("the agent didn't start: a plain line and the way to a person, none of our words", () => {
     const markup = renderToStaticMarkup(
       <ThreadErrorBanner placement="feed" error={RAW} onRetry={() => undefined} />,

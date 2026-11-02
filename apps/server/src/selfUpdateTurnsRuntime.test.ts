@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { assert, it } from "@effect/vitest";
 import { type OrchestrationCommand, ThreadId, TurnId } from "@t3tools/contracts";
 import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
-import { UPDATE_RESTART_NOTE_BODY } from "@t3tools/shared/turnErrorRetry";
+import { RESTART_NOTE_BODY, UPDATE_RESTART_NOTE_BODY } from "@t3tools/shared/turnErrorRetry";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 
@@ -19,14 +19,17 @@ import { makeSelfUpdateController } from "./selfUpdate.ts";
 import {
   readContinuedThreads,
   readDeferredUpdate,
+  readRestartTurns,
   readTurnsSnapshot,
   writeDeferredUpdate,
+  writeRestartTurns,
   writeTurnsSnapshot,
   deferredUpdateFor,
   DEFERRED_UPDATE_IDLE_MS,
 } from "./selfUpdateTurns.ts";
 import {
   SELF_UPDATE_CONTINUE_COMMAND_PREFIX,
+  continueTurnsAfterRestartWith,
   continueTurnsAfterSelfUpdateWith,
   makeSelfUpdateWatcherTick,
 } from "./selfUpdateTurnsRuntime.ts";
@@ -215,6 +218,49 @@ it.effect("a restart that is not an update continues nothing", () => {
     assert.strictEqual(dispatched.length, 0);
     // A stale snapshot is dropped.
     assert.isNull(yield* Effect.promise(() => readTurnsSnapshot(stateDir)));
+  });
+});
+
+const cutOffThread = () =>
+  makeThread(
+    "cut",
+    { status: "error", activeTurnId: null },
+    { turnId: TurnId.make("turn-cut"), state: "interrupted" },
+  );
+
+it.effect("after a clean restart, continues the chat once, however often it restarts", () => {
+  const { stateDir } = setup();
+  const dispatched: OrchestrationCommand[] = [];
+  const threads = [cutOffThread()];
+  const turns = [{ threadId: "cut", turnId: "turn-cut" }];
+  return Effect.gen(function* () {
+    yield* Effect.promise(() => writeRestartTurns(stateDir, turns, Date.now()));
+    yield* continueTurnsAfterRestartWith({ stateDir }).pipe(provide({ threads, dispatched }));
+    assert.strictEqual(dispatched.length, 1);
+    const first = dispatched[0];
+    if (first?.type !== "thread.turn.start") return assert.fail("no continuation");
+    assert.strictEqual(first.message.text, `${UNO_WORK_NOTE_PREFIX}${RESTART_NOTE_BODY}`);
+    assert.isNull(yield* Effect.promise(() => readRestartTurns(stateDir)));
+
+    // The same turn goes down with the daemon again: the person decides now.
+    yield* Effect.promise(() => writeRestartTurns(stateDir, turns, Date.now()));
+    yield* continueTurnsAfterRestartWith({ stateDir }).pipe(provide({ threads, dispatched }));
+    assert.strictEqual(dispatched.length, 1);
+  });
+});
+
+it.effect("a crash leaves nothing to continue; a long absence neither", () => {
+  const { stateDir } = setup();
+  const dispatched: OrchestrationCommand[] = [];
+  const threads = [cutOffThread()];
+  const hourAgo = Date.now() - 60 * 60_000;
+  return Effect.gen(function* () {
+    yield* continueTurnsAfterRestartWith({ stateDir }).pipe(provide({ threads, dispatched }));
+    yield* Effect.promise(() =>
+      writeRestartTurns(stateDir, [{ threadId: "cut", turnId: "turn-cut" }], hourAgo),
+    );
+    yield* continueTurnsAfterRestartWith({ stateDir }).pipe(provide({ threads, dispatched }));
+    assert.strictEqual(dispatched.length, 0);
   });
 });
 

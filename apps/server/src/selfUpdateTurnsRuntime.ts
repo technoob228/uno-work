@@ -8,7 +8,7 @@
  */
 import { CommandId, MessageId, type OrchestrationThread, type ThreadId } from "@t3tools/contracts";
 import { UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
-import { UPDATE_RESTART_NOTE_BODY } from "@t3tools/shared/turnErrorRetry";
+import { RESTART_NOTE_BODY, UPDATE_RESTART_NOTE_BODY } from "@t3tools/shared/turnErrorRetry";
 import { Cause, Duration, Effect } from "effect";
 import * as crypto from "node:crypto";
 
@@ -32,12 +32,17 @@ import {
   isSelfUpdateRestart,
   readContinuedThreads,
   readDeferredUpdate,
+  readRestartContinued,
+  readRestartTurns,
   readTurnsSnapshot,
+  restartTurnsToContinue,
   shouldKeepSnapshot,
   threadsToContinue,
   updateRunKey,
   workingTurnsOf,
   writeContinuedThreads,
+  writeRestartContinued,
+  writeRestartTurns,
   writeTurnsSnapshot,
   type WorkingTurn,
 } from "./selfUpdateTurns.ts";
@@ -174,7 +179,7 @@ const hasOpenConnectorReply = (threadId: ThreadId) =>
     Effect.orElseSucceed(() => true),
   );
 
-const dispatchContinuation = (thread: OrchestrationThread) =>
+const dispatchContinuation = (thread: OrchestrationThread, noteBody: string) =>
   Effect.gen(function* () {
     const engine = yield* OrchestrationEngineService;
     const createdAt = new Date().toISOString();
@@ -186,7 +191,7 @@ const dispatchContinuation = (thread: OrchestrationThread) =>
         message: {
           messageId: MessageId.make(crypto.randomUUID()),
           role: "user",
-          text: `${UNO_WORK_NOTE_PREFIX}${UPDATE_RESTART_NOTE_BODY}`,
+          text: `${UNO_WORK_NOTE_PREFIX}${noteBody}`,
           attachments: [],
         },
         runtimeMode: thread.runtimeMode,
@@ -197,12 +202,83 @@ const dispatchContinuation = (thread: OrchestrationThread) =>
     );
   });
 
+const sendContinuation = (thread: OrchestrationThread, noteBody: string) =>
+  dispatchContinuation(thread, noteBody).pipe(
+    Effect.as(true),
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("restart: could not continue a chat", {
+            threadId: thread.id,
+            cause: Cause.pretty(cause),
+          }).pipe(Effect.as(false)),
+    ),
+  );
+
+/**
+ * While this daemon stops (a restart, a deploy, the computer shutting down):
+ * who was working, for the next one. Runs before the provider sessions are
+ * torn down, and nothing has marked those turns as failed: runtime events are
+ * ignored from the first moment of the stop (daemonStopping.ts).
+ */
+export const rememberWorkingTurnsAtStop = Effect.gen(function* () {
+  if (!selfUpdatePathsFromEnv()) return;
+  const config = yield* ServerConfig;
+  const turns = yield* workingTurnsNow;
+  if (turns.length === 0) return;
+  yield* Effect.promise(() => writeRestartTurns(config.stateDir, turns, Date.now()));
+});
+
+/**
+ * At daemon start, after {@link continueTurnsAfterSelfUpdate}: send the chats
+ * the previous daemon remembered at its clean stop one continuation. Nothing
+ * to read after a crash.
+ */
+export const continueTurnsAfterRestart = Effect.gen(function* () {
+  if (!selfUpdatePathsFromEnv()) return;
+  const config = yield* ServerConfig;
+  yield* continueTurnsAfterRestartWith({ stateDir: config.stateDir });
+});
+
+export const continueTurnsAfterRestartWith = (input: { readonly stateDir: string }) =>
+  Effect.gen(function* () {
+    const { stateDir } = input;
+    const snapshot = yield* Effect.promise(() => readRestartTurns(stateDir));
+    if (snapshot === null) return;
+    const query = yield* ProjectionSnapshotQuery;
+    const { threads } = yield* query.getCommandReadModel();
+    const now = Date.now();
+    const continuedAt = { ...(yield* Effect.promise(() => readRestartContinued(stateDir))) };
+    const candidates = restartTurnsToContinue({ snapshot, threads, continuedAt, now });
+    const byId = new Map(threads.map((thread) => [String(thread.id), thread]));
+    let sent = 0;
+    for (const turn of candidates) {
+      const thread = byId.get(turn.threadId);
+      if (!thread) continue;
+      if (yield* hasOpenConnectorReply(thread.id)) continue;
+      // Recorded before the dispatch: at most once, even if this daemon dies right after.
+      continuedAt[turn.threadId] = now;
+      yield* Effect.promise(() => writeRestartContinued(stateDir, continuedAt));
+      if (yield* sendContinuation(thread, RESTART_NOTE_BODY)) sent += 1;
+    }
+    yield* Effect.logInfo("restart: continued the chats a clean stop cut off").pipe(
+      Effect.annotateLogs({ cutOff: snapshot.turns.length, continued: sent }),
+    );
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("restart: continuing cut-off chats failed", {
+            cause: Cause.pretty(cause),
+          }),
+    ),
+  );
+
 /**
  * At daemon start, after startup reconciliation: the update that restarted
  * this daemon cut these agents off — send each one short continuation (the
  * provider session resumes from its saved cursor), once per chat per update.
- * Anything else (a crash, a manual restart) continues nothing. Run forked;
- * never fails.
+ * Run forked; never fails.
  */
 export const continueTurnsAfterSelfUpdate = Effect.gen(function* () {
   if (!selfUpdatePathsFromEnv()) return;
@@ -258,18 +334,7 @@ export const continueTurnsAfterSelfUpdateWith = (input: {
       // Recorded before the dispatch: at most once, even if this daemon dies right after.
       continued.add(turn.threadId);
       yield* Effect.promise(() => writeContinuedThreads(stateDir, runKey, continued));
-      const ok = yield* dispatchContinuation(thread).pipe(
-        Effect.as(true),
-        Effect.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
-            : Effect.logWarning("self-update: could not continue a chat", {
-                threadId: thread.id,
-                cause: Cause.pretty(cause),
-              }).pipe(Effect.as(false)),
-        ),
-      );
-      if (ok) sent += 1;
+      if (yield* sendContinuation(thread, UPDATE_RESTART_NOTE_BODY)) sent += 1;
     }
     yield* Effect.promise(() => clearTurnsSnapshot(stateDir));
     if (snapshot.turns.length > 0) {

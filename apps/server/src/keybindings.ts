@@ -8,6 +8,7 @@
  */
 import {
   KeybindingRule,
+  KeybindingCommand,
   KeybindingsConfig,
   KeybindingsConfigError,
   KeybindingShortcut,
@@ -293,6 +294,11 @@ export interface KeybindingsShape {
   readonly upsertKeybindingRule: (
     rule: KeybindingRule,
   ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
+
+  /** Remove a command's rules: its default keys are back. */
+  readonly removeKeybindingRules: (
+    command: KeybindingCommand,
+  ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>;
 }
 
 /**
@@ -478,6 +484,21 @@ const makeKeybindings = Effect.gen(function* () {
   });
 
   const loadConfigStateFromCacheOrDisk = Cache.get(resolvedConfigCache, resolvedConfigCacheKey);
+
+  const writeAndPublish = (config: KeybindingsConfig) =>
+    Effect.gen(function* () {
+      yield* writeConfigAtomically(config);
+      const nextResolved = mergeWithDefaultKeybindings(compileResolvedKeybindingsConfig(config));
+      yield* Cache.set(resolvedConfigCache, resolvedConfigCacheKey, {
+        keybindings: nextResolved,
+        issues: [],
+      });
+      yield* emitChange({
+        keybindings: nextResolved,
+        issues: [],
+      });
+      return nextResolved;
+    });
 
   const revalidateAndEmit = upsertSemaphore.withPermits(1)(
     Effect.gen(function* () {
@@ -673,19 +694,14 @@ const makeKeybindings = Effect.gen(function* () {
               maxEntries: MAX_KEYBINDINGS_COUNT,
             });
           }
-          yield* writeConfigAtomically(cappedConfig);
-          const nextResolved = mergeWithDefaultKeybindings(
-            compileResolvedKeybindingsConfig(cappedConfig),
-          );
-          yield* Cache.set(resolvedConfigCache, resolvedConfigCacheKey, {
-            keybindings: nextResolved,
-            issues: [],
-          });
-          yield* emitChange({
-            keybindings: nextResolved,
-            issues: [],
-          });
-          return nextResolved;
+          return yield* writeAndPublish(cappedConfig);
+        }),
+      ),
+    removeKeybindingRules: (command) =>
+      upsertSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const customConfig = yield* loadWritableCustomKeybindingsConfig();
+          return yield* writeAndPublish(customConfig.filter((entry) => entry.command !== command));
         }),
       ),
   } satisfies KeybindingsShape;

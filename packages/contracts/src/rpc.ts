@@ -312,6 +312,7 @@ import {
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
   ServerTraceDiagnosticsResult,
+  ServerRemoveKeybindingInput,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
@@ -495,6 +496,7 @@ export const WS_METHODS = {
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
   serverUpsertKeybinding: "server.upsertKeybinding",
+  serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
@@ -717,6 +719,12 @@ export const WS_METHODS = {
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
+  success: ServerUpsertKeybindingResult,
+  error: KeybindingsConfigError,
+});
+
+export const WsServerRemoveKeybindingRpc = Rpc.make(WS_METHODS.serverRemoveKeybinding, {
+  payload: ServerRemoveKeybindingInput,
   success: ServerUpsertKeybindingResult,
   error: KeybindingsConfigError,
 });
@@ -2538,6 +2546,7 @@ export const WsMainRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpsertKeybindingRpc,
+  WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsServerDiscoverSourceControlRpc,

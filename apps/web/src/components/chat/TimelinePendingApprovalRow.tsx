@@ -19,6 +19,9 @@ const APPROVAL_ICON: Record<PendingApproval["requestKind"], LucideIcon> = {
   other: ShieldIcon,
 };
 
+/** A thumb on a phone: 44 px at least. */
+const ACTION_CLASS = "max-sm:h-11 max-sm:px-3";
+
 const DETAIL_CLASS =
   "mt-1.5 block max-h-40 overflow-auto rounded-md bg-background/70 px-2 py-1.5 font-mono text-xs leading-5 whitespace-pre-wrap text-foreground wrap-anywhere select-text";
 
@@ -66,12 +69,18 @@ export const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalR
       ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-xs text-amber-700 dark:text-amber-300">Waiting for your OK</span>
-        <Button size="xs" disabled={isResponding} onClick={() => respond("accept")}>
+        <Button
+          size="xs"
+          className={ACTION_CLASS}
+          disabled={isResponding}
+          onClick={() => respond("accept")}
+        >
           Allow
         </Button>
         <Button
           size="xs"
           variant="outline"
+          className={ACTION_CLASS}
           disabled={isResponding}
           onClick={() => respond("acceptForSession")}
         >
@@ -80,12 +89,19 @@ export const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalR
         <Button
           size="xs"
           variant="destructive-outline"
+          className={ACTION_CLASS}
           disabled={isResponding}
           onClick={() => respond("decline")}
         >
           Deny
         </Button>
-        <Button size="xs" variant="ghost" disabled={isResponding} onClick={() => respond("cancel")}>
+        <Button
+          size="xs"
+          variant="ghost"
+          className={ACTION_CLASS}
+          disabled={isResponding}
+          onClick={() => respond("cancel")}
+        >
           Stop
         </Button>
       </div>

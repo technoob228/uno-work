@@ -20,6 +20,10 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import {
+  approvalRequestedSummary,
+  approvalResolvedSummary,
+} from "@t3tools/shared/approvalActivity";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -37,6 +41,7 @@ import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
+import { isDaemonStopping } from "../../daemonStopping.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { redactSecretsInText } from "../../secretRedaction.ts";
 import {
@@ -320,14 +325,7 @@ function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "approval",
           kind: "approval.requested",
-          summary:
-            requestKind === "command"
-              ? "Command approval requested"
-              : requestKind === "file-read"
-                ? "File-read approval requested"
-                : requestKind === "file-change"
-                  ? "File-change approval requested"
-                  : "Approval requested",
+          summary: approvalRequestedSummary(requestKind),
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
@@ -351,7 +349,7 @@ function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "approval",
           kind: "approval.resolved",
-          summary: "Approval resolved",
+          summary: approvalResolvedSummary(event.payload.decision),
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
@@ -1859,8 +1857,10 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* turnAutoRetry.start();
       yield* Effect.forkScoped(
+        // A stopping daemon takes the agents with it: their exits say nothing
+        // about the turn, which the next daemon picks up (selfUpdateTurns.ts).
         Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: "runtime", event }),
+          isDaemonStopping() ? Effect.void : worker.enqueue({ source: "runtime", event }),
         ),
       );
       yield* Effect.forkScoped(
