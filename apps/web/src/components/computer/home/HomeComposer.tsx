@@ -116,6 +116,7 @@ import { ProviderModelPicker } from "../../chat/ProviderModelPicker";
 import {
   TraitsMenuContent,
   TraitsPicker,
+  getTraitsSummaryLabel,
   shouldRenderTraitsControls,
 } from "../../chat/TraitsPicker";
 import { Skeleton } from "../../ui/skeleton";
@@ -646,7 +647,7 @@ export function HomeComposer({
             // The first screen shows the model and its reasoning too (Misha
             // 28.10, P2: "why can't I pick?") — folder and permissions stay off.
             <div
-              className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:flex-wrap max-sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
+              className="@container/chips -m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] max-sm:flex-wrap max-sm:overflow-x-visible [&::-webkit-scrollbar]:hidden"
               data-testid="home-composer-chips"
             >
               {assistant ? (
@@ -753,6 +754,17 @@ export function HomeComposer({
                         onModelOptionsChange={picker.setOptions}
                       />
                     ) : null
+                  }
+                  summary={
+                    picker.selection && selectedEntry
+                      ? getTraitsSummaryLabel({
+                          provider: selectedEntry.driverKind,
+                          models: selectedEntry.models,
+                          model: picker.selection.model,
+                          prompt: text,
+                          modelOptions: picker.selection.options,
+                        })
+                      : ""
                   }
                   runtimeMode={runtimeMode}
                   onRuntimeModeChange={setRuntimeMode}

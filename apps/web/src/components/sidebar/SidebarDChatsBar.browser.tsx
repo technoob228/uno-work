@@ -120,9 +120,12 @@ function BarWithComputers() {
 describe("the funnel's computers", () => {
   const computer = (name: string) => page.getByTestId(`sidebar-d-computer-filter-${name}`);
 
-  it("lists every computer, one click keeps it and closes, asleep ones stay grey", async () => {
+  it("lists every computer under the projects, one click keeps it and closes, asleep ones stay grey", async () => {
     await render(<BarWithComputers />);
     await openFunnel();
+    const allProjects = page.getByTestId("sidebar-d-project-filter-all").element();
+    const position = allProjects.compareDocumentPosition(computer("All computers").element());
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await expect.element(computer("kinship")).toBeDisabled();
     await computer("MacBook").click();
     await expect.element(popup()).not.toBeInTheDocument();

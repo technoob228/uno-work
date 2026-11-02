@@ -75,6 +75,20 @@ await step(
   { width: 900 },
 );
 
+await step("home-narrow-summary", async ({ page, shot }) => {
+  await home(page);
+  const read = () =>
+    page.getByTestId("home-composer-chips").evaluate((el) => {
+      const summary = el.querySelector("[data-testid=home-composer-settings-summary]");
+      return `chips ${el.clientWidth} px, cut off ${el.scrollWidth - el.clientWidth} px, words ${summary?.offsetWidth ? "on" : "off"}`;
+    });
+  const wide = await read();
+  await page.setViewportSize({ width: 640, height: 860 });
+  await page.waitForTimeout(400);
+  await shot();
+  return `${wide}; at 640: ${await read()}`;
+});
+
 await step("computers-menu", async ({ page, shot }) => {
   await home(page);
   await page.getByTestId("home-computer-pill").click();

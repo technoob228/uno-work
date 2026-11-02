@@ -6,7 +6,7 @@
  * stop line as its last reply). Data goes through the daemon's real route
  * (`uno.computer.planLimits`) and provider snapshots, like on a real computer.
  */
-import type { PlanLimits, PlanLimitsAccount } from "@t3tools/contracts";
+import type { ModelCapabilities, PlanLimits, PlanLimitsAccount } from "@t3tools/contracts";
 import {
   PLAN_RESUME_ENDED_ACTIVITY,
   PLAN_RESUME_SCHEDULED_ACTIVITY,
@@ -15,6 +15,37 @@ import {
 import { WORLD } from "./world";
 
 /** `plans=accounts`: the daemon that waits for the reset and takes a second account. */
+
+/** What a real Claude model offers, so the demo's box shows it too. */
+const CLAUDE_TRAITS: ModelCapabilities = {
+  optionDescriptors: [
+    {
+      id: "effort",
+      label: "Reasoning",
+      type: "select",
+      currentValue: "high",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High", isDefault: true },
+        { id: "xhigh", label: "Extra High" },
+        { id: "max", label: "Max" },
+      ],
+    },
+    { id: "fastMode", label: "Fast Mode", type: "boolean" },
+    {
+      id: "contextWindow",
+      label: "Context Window",
+      type: "select",
+      currentValue: "1m",
+      options: [
+        { id: "200k", label: "200k" },
+        { id: "1m", label: "1M", isDefault: true },
+      ],
+    },
+  ],
+};
+
 export const DEMO_ACCOUNTS = WORLD.plans === "accounts";
 export const DEMO_PLANS = WORLD.plans === "full" || DEMO_ACCOUNTS;
 
@@ -294,8 +325,8 @@ export function planProvidersFor(machineKey: string, checkedAt: string, version:
     },
     checkedAt,
     models: [
-      { slug: "claude-sonnet-5", name: "Sonnet 5", isCustom: false, capabilities: null },
-      { slug: "claude-opus-5", name: "Opus 5", isCustom: false, capabilities: null },
+      { slug: "claude-sonnet-5", name: "Sonnet 5", isCustom: false, capabilities: CLAUDE_TRAITS },
+      { slug: "claude-opus-5", name: "Opus 5", isCustom: false, capabilities: CLAUDE_TRAITS },
     ],
     slashCommands: [],
     skills: [],

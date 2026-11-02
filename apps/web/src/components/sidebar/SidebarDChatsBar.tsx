@@ -458,17 +458,6 @@ function ProjectFilter(props: {
         className="w-64 overflow-hidden"
         data-testid="sidebar-d-project-filter-popup"
       >
-        {computers.length > 0 ? (
-          <ComputerFilterRows
-            computers={computers}
-            asleep={props.asleepComputers}
-            picked={props.pickedComputers}
-            onChange={(next) => {
-              props.onComputersChange(next);
-              dispatchMenu({ type: "open-changed", open: false });
-            }}
-          />
-        ) : null}
         {/* Out of sight, not gone: the keys go through this field. */}
         <div
           data-testid="sidebar-d-project-filter-search"
@@ -549,6 +538,17 @@ function ProjectFilter(props: {
             );
           }}
         </ComboboxList>
+        {computers.length > 0 ? (
+          <ComputerFilterRows
+            computers={computers}
+            asleep={props.asleepComputers}
+            picked={props.pickedComputers}
+            onChange={(next) => {
+              props.onComputersChange(next);
+              dispatchMenu({ type: "open-changed", open: false });
+            }}
+          />
+        ) : null}
       </ComboboxPopup>
     </Combobox>
   );
@@ -591,7 +591,10 @@ function ComputerFilterRows(props: {
     </button>
   );
   return (
-    <div className="border-b border-border/70 p-1" data-testid="sidebar-d-computer-filter">
+    <div
+      className="max-h-40 overflow-y-auto border-t border-border/70 p-1"
+      data-testid="sidebar-d-computer-filter"
+    >
       {row({
         key: "all",
         label: "All computers",

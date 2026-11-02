@@ -183,7 +183,7 @@ describe("Home's first screen after signing in to Claude", () => {
     await expect.element(screen.getByTestId("home-permissions")).not.toBeInTheDocument();
   });
 
-  it("after the first screen: reasoning and permissions fold into one icon", async () => {
+  it("after the first screen: reasoning stays in sight, permissions behind the same chip", async () => {
     providers.list = [
       uno,
       claudeWith({ status: "authenticated", type: "max", label: "Claude Max Subscription" }),
@@ -191,7 +191,9 @@ describe("Home's first screen after signing in to Claude", () => {
     const { screen } = await mountHome();
     const chips = screen.getByTestId("home-composer-chips");
     await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
-    await expect.element(chips.getByText(/High/)).not.toBeInTheDocument();
+    await expect
+      .element(screen.getByTestId("home-composer-settings-summary"))
+      .toHaveTextContent(/High/);
     await screen.getByTestId("home-composer-settings").click();
     await expect.element(screen.getByText("Reasoning")).toBeVisible();
     await expect.element(screen.getByTestId("home-permission-full-access")).toBeVisible();

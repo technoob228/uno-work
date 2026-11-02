@@ -210,6 +210,35 @@ export function shouldRenderTraitsControls(input: {
   return getTraitsSectionVisibility(input).hasAnyControls;
 }
 
+/**
+ * Reasoning and context in a word each, for a chip with no room for more
+ * (Home's box, Misha 01.11): "High · 1M". What is off says nothing.
+ */
+export function getTraitsSummaryLabel(input: {
+  provider: ProviderDriverKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): string {
+  const { descriptors, primarySelectDescriptor, ultrathinkPromptControlled } =
+    getTraitsSectionVisibility(input);
+  return descriptors
+    .map((descriptor) => {
+      if (ultrathinkPromptControlled && descriptor.id === primarySelectDescriptor?.id) {
+        return "Ultrathink";
+      }
+      if (descriptor.type === "boolean") {
+        if (descriptor.currentValue !== true) return null;
+        return descriptor.id === "fastMode" ? "Fast" : descriptor.label;
+      }
+      return getProviderOptionCurrentLabel(descriptor);
+    })
+    .filter((label): label is string => typeof label === "string" && label.length > 0)
+    .join(" · ");
+}
+
 export interface TraitsMenuContentProps {
   provider: ProviderDriverKind;
   models: ReadonlyArray<ServerProviderModel>;
