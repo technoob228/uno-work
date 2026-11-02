@@ -6,6 +6,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as GitHubCli from "./GitHubCli.ts";
+import { makeGitHubPullRequestHost } from "./gitHubPullRequestHost.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
@@ -184,6 +185,7 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
           branches: input.branches,
         })
         .pipe(Effect.mapError((error) => providerError("readChangeRequestStatuses", error))),
+    pullRequestHost: (context) => makeGitHubPullRequestHost(github, gitHubHostname(context)),
     createChangeRequest: (input) =>
       github
         .createPullRequest({

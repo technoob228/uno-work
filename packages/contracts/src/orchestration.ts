@@ -526,6 +526,27 @@ export const OrchestrationLatestTurn = Schema.Struct({
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
 /**
+ * What the agent's watch on a pull request already told it (`watch_pull_request`).
+ * The fields follow upstream's ThreadPullRequestWatch; `failedReads` counts reads
+ * in a row that the host refused.
+ */
+export const ThreadPullRequestWatch = Schema.Struct({
+  startedAt: IsoDateTime,
+  headSha: Schema.NullOr(TrimmedNonEmptyString),
+  failedChecks: Schema.Array(Schema.String),
+  passed: Schema.Boolean,
+  passedChecks: Schema.Array(Schema.String),
+  owedChecks: Schema.Array(Schema.String),
+  remarksThrough: IsoDateTime,
+  remarkIds: Schema.Array(Schema.String),
+  conflicting: Schema.Boolean,
+  wakes: NonNegativeInt,
+  checksAwaitedSince: Schema.NullOr(IsoDateTime),
+  failedReads: NonNegativeInt,
+});
+export type ThreadPullRequestWatch = typeof ThreadPullRequestWatch.Type;
+
+/**
  * A pull request tied to a thread. Dev mode only: found by the thread's branch
  * or read from `gh pr create` in its output. `snapshot` is the host's last
  * answer, null until the first read.
@@ -552,6 +573,8 @@ export const ThreadPullRequest = Schema.Struct({
       syncedAt: IsoDateTime,
     }),
   ),
+  /** Set while the agent is watching this pull request. */
+  watch: Schema.optional(ThreadPullRequestWatch),
 });
 export type ThreadPullRequest = typeof ThreadPullRequest.Type;
 

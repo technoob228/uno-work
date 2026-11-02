@@ -17,8 +17,14 @@
  */
 import {
   CommandId,
+  MessageId,
+  PullRequestError,
   type ChangeRequestStatus,
   type OrchestrationEvent,
+  type PullRequestDetailView,
+  type PullRequestLinkInput,
+  type PullRequestUnlinkInput,
+  type PullRequestWatchInput,
   type SourceControlProviderKind,
   ThreadId,
   type ThreadPullRequest,
@@ -26,7 +32,7 @@ import {
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { parseRemoteRepositoryPath } from "@t3tools/shared/sourceControl";
+import { parseChangeRequestUrl, parseRemoteRepositoryPath } from "@t3tools/shared/sourceControl";
 import type { Scope } from "effect";
 import { Cause, Context, Duration, Effect, Layer, Option, Schedule, Stream } from "effect";
 
@@ -37,10 +43,20 @@ import { ProjectSetupScriptRunner } from "../project/Services/ProjectSetupScript
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { MAX_STATUS_READS_PER_DOCUMENT } from "../sourceControl/gitHubPullRequestStatuses.ts";
+import { isRepositoryName } from "../sourceControl/pullRequestHost.ts";
 import type { SourceControlProviderHandle } from "../sourceControl/SourceControlProviderRegistry.ts";
 import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { changeRequestsCreatedBy, closesChangeRequest, shellCallOf } from "./commandDetection.ts";
+import {
+  evaluatePullRequestWatch,
+  PULL_REQUEST_WATCH_READ_FAILURE_LIMIT,
+  PULL_REQUEST_WATCH_READ_INTERVAL_MS,
+  pullRequestWatchClosedMessage,
+  pullRequestWatchMessage,
+  pullRequestWatchUnreadableMessage,
+  startPullRequestWatch,
+} from "./pullRequestWatch.ts";
 import { makeThreadPullRequestRepository } from "./threadPullRequestRepository.ts";
 import {
   applyRead,
@@ -53,6 +69,7 @@ import {
   linkKey,
   linkReadInterval,
   PAUSE_AFTER_FAILURE_MS,
+  parsePullRequestReference,
   pauseForBudget,
   shouldAutoSettle,
   SWEEP_INTERVAL_MS,
@@ -82,6 +99,16 @@ interface ReadPlan {
 export interface ThreadPullRequestsShape {
   /** Watch the chats and run the minute sweep. Must run in a scope. */
   readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+  /** An action from Work changed this PR: its chats read it now, not next minute. */
+  readonly refreshLinked: (input: {
+    readonly repository: string;
+    readonly number: number;
+  }) => Effect.Effect<void>;
+  /** Keep another pull request with a chat (several can live on one). */
+  readonly link: (input: PullRequestLinkInput) => Effect.Effect<void, PullRequestError>;
+  readonly unlink: (input: PullRequestUnlinkInput) => Effect.Effect<void, PullRequestError>;
+  /** The agent wakes on this PR's failed checks, comments and conflicts. */
+  readonly setWatch: (input: PullRequestWatchInput) => Effect.Effect<void, PullRequestError>;
 }
 
 export class ThreadPullRequests extends Context.Service<
@@ -133,6 +160,8 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
     const settleActionRunAt = new Map<string, string>();
     /** `kind:host` or `kind:host/repository` → until when we don't ask. */
     const pausedUntil = new Map<string, number>();
+    /** `threadId linkKey` → when its watch last asked the host. */
+    const lastWatchReadAt = new Map<string, number>();
     const repositoryInfo = new Map<
       string,
       { readonly atMs: number; readonly info: RepositoryInfo | null }
@@ -435,6 +464,17 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
           requestedThreads.clear();
           return;
         }
+        if (scope === "tick") {
+          yield* sweepWatches.pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : Effect.logWarning("pull request watch sweep failed").pipe(
+                    Effect.annotateLogs({ cause: Cause.pretty(cause) }),
+                  ),
+            ),
+          );
+        }
         if (scope === "tick" && !(yield* anyClientConnected)) return;
         const requested = new Set(requestedThreads);
         requestedThreads.clear();
@@ -581,6 +621,340 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
       );
     };
 
+    const threadIsBusy = (threadId: string) =>
+      projections.getThreadShellById(ThreadId.make(threadId)).pipe(
+        Effect.map((found) => {
+          const shell = Option.getOrNull(found);
+          if (shell === null) return true;
+          const status = shell.session?.status;
+          return (
+            status === "starting" ||
+            status === "running" ||
+            shell.session?.activeTurnId != null ||
+            shell.hasPendingApprovals ||
+            shell.hasPendingUserInput
+          );
+        }),
+        Effect.orElseSucceed(() => true),
+      );
+
+    /** Tells the agent, in the chat's own modes: a wake never raises its access. */
+    const wakeAgent = (threadId: string, text: string) =>
+      Effect.gen(function* () {
+        const id = ThreadId.make(threadId);
+        const shell = Option.getOrNull(yield* projections.getThreadShellById(id));
+        if (shell === null) return;
+        const createdAt = new Date(nowMs()).toISOString();
+        yield* engine.dispatch(
+          {
+            type: "thread.turn.start",
+            commandId: CommandId.make(`${COMPONENT}:watch:${threadId}:${crypto.randomUUID()}`),
+            threadId: id,
+            message: {
+              messageId: MessageId.make(crypto.randomUUID()),
+              role: "user",
+              text,
+              attachments: [],
+            },
+            runtimeMode: shell.runtimeMode,
+            interactionMode: shell.interactionMode,
+            createdAt,
+          } as Parameters<typeof engine.dispatch>[0],
+          { origin: systemCommandOrigin(COMPONENT, "pull request watch") },
+        );
+      });
+
+    /** Replaces one link's watch; the thread is read afresh, a sync may have just landed. */
+    const writeWatch = (
+      threadId: string,
+      link: ThreadPullRequest,
+      watch: ThreadPullRequest["watch"],
+    ) =>
+      Effect.gen(function* () {
+        const thread = yield* repository.get(threadId);
+        if (thread === null) return;
+        yield* dispatchLinks(
+          threadId,
+          thread.pullRequests.map((current) => {
+            if (linkKey(current) !== linkKey(link)) return current;
+            const { watch: _old, ...unwatched } = current;
+            return watch === undefined ? unwatched : { ...unwatched, watch };
+          }),
+        );
+      });
+
+    const hostOf = (projectId: string, cwd: string) =>
+      readRepositoryInfo(projectId, cwd).pipe(
+        Effect.map((info) => {
+          const host = info?.handle.provider.pullRequestHost?.() ?? null;
+          return info === null || host === null ? null : { info, host };
+        }),
+      );
+
+    /**
+     * One pass over the watched pull requests. Runs without a client too: being
+     * away is when a watch earns its keep. A busy chat waits for the next pass, and
+     * nothing is lost, its watch only moves on when the agent was told.
+     */
+    const sweepWatches = Effect.gen(function* () {
+      const threads = (yield* repository.list).filter((thread) =>
+        thread.pullRequests.some((link) => link.watch !== undefined),
+      );
+      /** A pull request watched by two chats is read once a pass. */
+      const reads = new Map<string, PullRequestDetailView | null>();
+      for (const thread of threads) {
+        let woken = false;
+        for (const link of thread.pullRequests) {
+          const watch = link.watch;
+          if (watch === undefined || woken) continue;
+          const key = linkKey(link);
+          const readKey = `${thread.threadId} ${key}`;
+          const last = lastWatchReadAt.get(readKey);
+          // The sweep is a minute apart give or take; a little slack keeps the beat.
+          if (last !== undefined && nowMs() - last < PULL_REQUEST_WATCH_READ_INTERVAL_MS - 5_000) {
+            continue;
+          }
+          const found = yield* hostOf(thread.projectId, thread.workspaceRoot);
+          if (found === null || isPaused(`${found.info.kind}:${found.info.host}`)) continue;
+          lastWatchReadAt.set(readKey, nowMs());
+
+          let detail = reads.get(key);
+          if (detail === undefined) {
+            detail = yield* found.host
+              .detail({
+                cwd: thread.workspaceRoot,
+                repository: link.repository,
+                number: link.number,
+              })
+              .pipe(
+                Effect.map((read): PullRequestDetailView | null => ({
+                  ...read,
+                  capabilities: found.host.capabilities,
+                  projectId: thread.projectId as PullRequestDetailView["projectId"],
+                  projectTitle: "watch" as PullRequestDetailView["projectTitle"],
+                })),
+                Effect.catch((error) =>
+                  Effect.gen(function* () {
+                    if (isRateLimited(error.detail)) {
+                      pausedUntil.set(
+                        `${found.info.kind}:${found.info.host}`,
+                        nowMs() + PAUSE_AFTER_FAILURE_MS,
+                      );
+                    }
+                    yield* Effect.logWarning("pull request watch: read failed").pipe(
+                      Effect.annotateLogs({ repository: link.repository, number: link.number }),
+                    );
+                    return null;
+                  }),
+                ),
+              );
+            reads.set(key, detail);
+          }
+
+          if (detail === null) {
+            // A limit only pauses the watch; everything else counts toward giving up.
+            if (isPaused(`${found.info.kind}:${found.info.host}`)) continue;
+            const failedReads = watch.failedReads + 1;
+            if (failedReads >= PULL_REQUEST_WATCH_READ_FAILURE_LIMIT) {
+              yield* writeWatch(thread.threadId, link, undefined);
+              if (!(yield* threadIsBusy(thread.threadId))) {
+                yield* wakeAgent(
+                  thread.threadId,
+                  pullRequestWatchUnreadableMessage(link.number, link.url),
+                );
+                woken = true;
+              }
+            } else {
+              yield* writeWatch(thread.threadId, link, { ...watch, failedReads });
+            }
+            continue;
+          }
+
+          if (detail.state !== "open") {
+            yield* writeWatch(thread.threadId, link, undefined);
+            // A merge is good news the chat row and auto-settle already carry.
+            if (detail.state === "closed" && !(yield* threadIsBusy(thread.threadId))) {
+              yield* wakeAgent(
+                thread.threadId,
+                pullRequestWatchClosedMessage(link.number, link.url),
+              );
+              woken = true;
+            }
+            continue;
+          }
+
+          const report = evaluatePullRequestWatch(watch, detail, detail.comments, nowMs());
+          if (report.changes.length === 0) {
+            if (JSON.stringify(report.next) !== JSON.stringify(watch)) {
+              yield* writeWatch(thread.threadId, link, report.next);
+            }
+            continue;
+          }
+          if (yield* threadIsBusy(thread.threadId)) {
+            // Try again next pass rather than in two minutes.
+            lastWatchReadAt.delete(readKey);
+            continue;
+          }
+          yield* writeWatch(thread.threadId, link, report.exhausted ? undefined : report.next);
+          yield* wakeAgent(
+            thread.threadId,
+            pullRequestWatchMessage({
+              number: link.number,
+              url: link.url,
+              baseBranch: detail.baseBranch,
+              headSha: detail.headSha,
+              report,
+            }),
+          );
+          woken = true;
+        }
+      }
+    });
+
+    const refusal = (reason: PullRequestError["reason"], detail: string) =>
+      new PullRequestError({ reason, detail });
+
+    const requireDevMode = readSettings.pipe(
+      Effect.flatMap(({ devMode }) =>
+        devMode
+          ? Effect.void
+          : Effect.fail(refusal("dev-mode-off", "Pull requests are part of Dev mode.")),
+      ),
+    );
+
+    const requireThread = (threadId: string) =>
+      repository.get(threadId).pipe(
+        Effect.orElseSucceed(() => null),
+        Effect.flatMap((thread) =>
+          thread === null
+            ? Effect.fail(refusal("not-found", "This chat is gone."))
+            : Effect.succeed(thread),
+        ),
+      );
+
+    const requireHost = (thread: SweepThread) =>
+      hostOf(thread.projectId, thread.workspaceRoot).pipe(
+        Effect.flatMap((found) =>
+          found === null
+            ? Effect.fail(
+                refusal("unsupported", "This project's service doesn't have this in Work yet."),
+              )
+            : Effect.succeed(found),
+        ),
+      );
+
+    /** Reads a pull request so a typo never turns into a link; returns the new link. */
+    const newLink = (
+      thread: SweepThread,
+      reference: { readonly repository: string; readonly number: number },
+    ) =>
+      Effect.gen(function* () {
+        const { info, host } = yield* requireHost(thread);
+        if (!isRepositoryName(reference.repository)) {
+          return yield* refusal("not-found", "That doesn't look like a repository.");
+        }
+        const detail = yield* host
+          .detail({
+            cwd: thread.workspaceRoot,
+            repository: reference.repository,
+            number: reference.number,
+          })
+          .pipe(
+            Effect.mapError(() =>
+              refusal("not-found", `#${reference.number} isn't in ${reference.repository}.`),
+            ),
+          );
+        const link: ThreadPullRequest = {
+          provider: info.kind,
+          repository: reference.repository as ThreadPullRequest["repository"],
+          number: reference.number as ThreadPullRequest["number"],
+          url: detail.url,
+          source: "created",
+          linkedAt: new Date(nowMs()).toISOString() as ThreadPullRequest["linkedAt"],
+          snapshot: null,
+        };
+        return { link, detail };
+      });
+
+    const refreshLinked: ThreadPullRequestsShape["refreshLinked"] = (input) =>
+      repository.list.pipe(
+        Effect.flatMap((threads) =>
+          Effect.forEach(
+            threads.filter((thread) =>
+              thread.pullRequests.some((link) => linkKey(link) === linkKey(input)),
+            ),
+            (thread) => requestRead(thread.threadId),
+            { discard: true },
+          ),
+        ),
+        Effect.catch(() => Effect.logDebug("pull request refresh skipped")),
+      );
+
+    const link: ThreadPullRequestsShape["link"] = (input) =>
+      Effect.gen(function* () {
+        yield* requireDevMode;
+        const thread = yield* requireThread(input.threadId);
+        const { info } = yield* requireHost(thread);
+        const parsed = parseChangeRequestUrl(input.reference.trim());
+        const reference =
+          parsed !== null
+            ? { repository: parsed.repository, number: parsed.number }
+            : parsePullRequestReference(input.reference, info.repository);
+        if (reference === null) {
+          return yield* refusal("not-found", "Paste a link, or owner/name#12.");
+        }
+        if (parsed !== null && parsed.host !== info.host.toLowerCase()) {
+          return yield* refusal("not-found", `This project is on ${info.host}.`);
+        }
+        if (thread.pullRequests.some((known) => linkKey(known) === linkKey(reference))) return;
+        const { link: added } = yield* newLink(thread, reference);
+        yield* dispatchLinks(input.threadId, capLinks([...thread.pullRequests, added])).pipe(
+          Effect.mapError(() => refusal("host", "Couldn't save the link.")),
+        );
+        yield* requestRead(input.threadId);
+      });
+
+    const unlink: ThreadPullRequestsShape["unlink"] = (input) =>
+      Effect.gen(function* () {
+        yield* requireDevMode;
+        const thread = yield* requireThread(input.threadId);
+        const kept = thread.pullRequests.filter((known) => linkKey(known) !== linkKey(input));
+        if (kept.length === thread.pullRequests.length) return;
+        yield* dispatchLinks(input.threadId, kept).pipe(
+          Effect.mapError(() => refusal("host", "Couldn't remove the link.")),
+        );
+      });
+
+    const setWatch: ThreadPullRequestsShape["setWatch"] = (input) =>
+      Effect.gen(function* () {
+        yield* requireDevMode;
+        const thread = yield* requireThread(input.threadId);
+        const known = thread.pullRequests.find((link) => linkKey(link) === linkKey(input));
+        if (!input.watching) {
+          if (known?.watch === undefined) return;
+          yield* writeWatch(input.threadId, known, undefined).pipe(
+            Effect.mapError(() => refusal("host", "Couldn't stop watching.")),
+          );
+          return;
+        }
+        // Already watched stays as it is: what the agent was told, it isn't told again.
+        if (known?.watch !== undefined) return;
+        const { link: fresh, detail } = yield* newLink(thread, input);
+        if (detail.state !== "open") {
+          return yield* refusal("not-found", `#${input.number} is already ${detail.state}.`);
+        }
+        const watch = startPullRequestWatch(detail, new Date(nowMs()).toISOString());
+        yield* dispatchLinks(
+          input.threadId,
+          known !== undefined
+            ? thread.pullRequests.map((link) =>
+                linkKey(link) === linkKey(input) ? { ...link, watch } : link,
+              )
+            : capLinks([...thread.pullRequests, { ...fresh, watch }]),
+        ).pipe(Effect.mapError(() => refusal("host", "Couldn't start watching.")));
+        lastWatchReadAt.set(`${input.threadId} ${linkKey(input)}`, nowMs());
+      });
+
     const start: ThreadPullRequestsShape["start"] = () =>
       Effect.gen(function* () {
         yield* Effect.forkScoped(Stream.runForEach(engine.streamDomainEvents, onDomainEvent));
@@ -592,10 +966,27 @@ export const makeThreadPullRequests = (options: ThreadPullRequestsOptions = {}) 
         );
       });
 
-    return { start, onDomainEvent, drain: worker.drain, tick };
+    return {
+      start,
+      refreshLinked,
+      link,
+      unlink,
+      setWatch,
+      onDomainEvent,
+      drain: worker.drain,
+      tick,
+    };
   });
 
 export const ThreadPullRequestsLive = Layer.effect(
   ThreadPullRequests,
-  makeThreadPullRequests().pipe(Effect.map(({ start }) => ({ start }))),
+  makeThreadPullRequests().pipe(
+    Effect.map(({ start, refreshLinked, link, unlink, setWatch }) => ({
+      start,
+      refreshLinked,
+      link,
+      unlink,
+      setWatch,
+    })),
+  ),
 );

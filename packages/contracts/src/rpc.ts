@@ -403,6 +403,22 @@ import {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import {
+  PullRequestActionInput,
+  PullRequestActionResult,
+  PullRequestCommentInput,
+  PullRequestDetailView,
+  PullRequestDiffInput,
+  PullRequestDiffResult,
+  PullRequestError,
+  PullRequestLinkInput,
+  PullRequestListInput,
+  PullRequestListResult,
+  PullRequestRef,
+  PullRequestSetFileViewedInput,
+  PullRequestUnlinkInput,
+  PullRequestWatchInput,
+} from "./pullRequest.ts";
 import { VcsError } from "./vcs.ts";
 import {
   UnoVideoCancelJobInput,
@@ -468,6 +484,17 @@ export const WS_METHODS = {
   gitRunStackedAction: "git.runStackedAction",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
+
+  // Dev mode: pull requests on the connected services
+  pullRequestsList: "pullRequests.list",
+  pullRequestsDetail: "pullRequests.detail",
+  pullRequestsDiff: "pullRequests.diff",
+  pullRequestsRunAction: "pullRequests.runAction",
+  pullRequestsSetFileViewed: "pullRequests.setFileViewed",
+  pullRequestsComment: "pullRequests.comment",
+  pullRequestsSetWatch: "pullRequests.setWatch",
+  pullRequestsLink: "pullRequests.link",
+  pullRequestsUnlink: "pullRequests.unlink",
 
   // Continue a chat on another machine, files sent through the client
   // (source: snapshot/readChunk/complete, target: inspect/writeChunk/land)
@@ -1331,6 +1358,55 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   payload: GitPreparePullRequestThreadInput,
   success: GitPreparePullRequestThreadResult,
   error: GitManagerServiceError,
+});
+
+export const WsPullRequestsListRpc = Rpc.make(WS_METHODS.pullRequestsList, {
+  payload: PullRequestListInput,
+  success: PullRequestListResult,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsDetailRpc = Rpc.make(WS_METHODS.pullRequestsDetail, {
+  payload: PullRequestRef,
+  success: PullRequestDetailView,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsDiffRpc = Rpc.make(WS_METHODS.pullRequestsDiff, {
+  payload: PullRequestDiffInput,
+  success: PullRequestDiffResult,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsRunActionRpc = Rpc.make(WS_METHODS.pullRequestsRunAction, {
+  payload: PullRequestActionInput,
+  success: PullRequestActionResult,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsSetFileViewedRpc = Rpc.make(WS_METHODS.pullRequestsSetFileViewed, {
+  payload: PullRequestSetFileViewedInput,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsCommentRpc = Rpc.make(WS_METHODS.pullRequestsComment, {
+  payload: PullRequestCommentInput,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsSetWatchRpc = Rpc.make(WS_METHODS.pullRequestsSetWatch, {
+  payload: PullRequestWatchInput,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsLinkRpc = Rpc.make(WS_METHODS.pullRequestsLink, {
+  payload: PullRequestLinkInput,
+  error: PullRequestError,
+});
+
+export const WsPullRequestsUnlinkRpc = Rpc.make(WS_METHODS.pullRequestsUnlink, {
+  payload: PullRequestUnlinkInput,
+  error: PullRequestError,
 });
 
 export const WsThreadContinueInspectRpc = Rpc.make(WS_METHODS.threadContinueInspect, {
@@ -2532,6 +2608,19 @@ export const WsMyComputerRpcGroup = RpcGroup.make(
   WsMyComputerChatHistoryRpc,
 );
 
+/** Pull requests in Dev mode, apart from the main group for the same reason. */
+export const WsPullRequestsRpcGroup = RpcGroup.make(
+  WsPullRequestsListRpc,
+  WsPullRequestsDetailRpc,
+  WsPullRequestsDiffRpc,
+  WsPullRequestsRunActionRpc,
+  WsPullRequestsSetFileViewedRpc,
+  WsPullRequestsCommentRpc,
+  WsPullRequestsSetWatchRpc,
+  WsPullRequestsLinkRpc,
+  WsPullRequestsUnlinkRpc,
+);
+
 export const WsMainRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerProbeRpc,
@@ -2768,4 +2857,4 @@ export const WsMainRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeThreadRpc,
 );
 
-export const WsRpcGroup = WsMainRpcGroup.merge(WsMyComputerRpcGroup);
+export const WsRpcGroup = WsMainRpcGroup.merge(WsMyComputerRpcGroup, WsPullRequestsRpcGroup);

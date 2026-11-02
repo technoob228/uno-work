@@ -1,4 +1,19 @@
 import type {
+  PullRequestActionInput,
+  PullRequestActionResult,
+  PullRequestCommentInput,
+  PullRequestDetailView,
+  PullRequestDiffInput,
+  PullRequestDiffResult,
+  PullRequestLinkInput,
+  PullRequestListInput,
+  PullRequestListResult,
+  PullRequestRef,
+  PullRequestSetFileViewedInput,
+  PullRequestUnlinkInput,
+  PullRequestWatchInput,
+} from "./pullRequest.ts";
+import type {
   ProjectSecretRemoveInput,
   ProjectSecretSetInput,
   ProjectSecretsList,
@@ -940,6 +955,18 @@ export interface EnvironmentApi {
     preparePullRequestThread: (
       input: GitPreparePullRequestThreadInput,
     ) => Promise<GitPreparePullRequestThreadResult>;
+  };
+  /** Dev mode's pull requests. Optional: older test doubles leave it out. */
+  pullRequests?: {
+    list: (input: PullRequestListInput) => Promise<PullRequestListResult>;
+    detail: (input: PullRequestRef) => Promise<PullRequestDetailView>;
+    diff: (input: PullRequestDiffInput) => Promise<PullRequestDiffResult>;
+    runAction: (input: PullRequestActionInput) => Promise<PullRequestActionResult>;
+    setFileViewed: (input: PullRequestSetFileViewedInput) => Promise<void>;
+    comment: (input: PullRequestCommentInput) => Promise<void>;
+    setWatch: (input: PullRequestWatchInput) => Promise<void>;
+    link: (input: PullRequestLinkInput) => Promise<void>;
+    unlink: (input: PullRequestUnlinkInput) => Promise<void>;
   };
   /**
    * "Continue on <machine>": `snapshot`, `readChunk` and `complete` are

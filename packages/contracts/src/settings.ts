@@ -883,6 +883,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "branchNamePrefix",
   "branchNameInstructions",
   "sidebarAutoSettleOnMerge",
+  "removeAgentCreditsOnMerge",
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -895,6 +896,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
 } satisfies Record<ProjectScopedServerSettingKey, unknown>);
 export type ProjectSettingsOverrides = typeof ProjectSettingsOverrides.Type;
 
@@ -914,6 +916,9 @@ export const ServerSettings = Schema.Struct({
   // Dev mode: a chat settles by itself when its PR merges after the person's
   // last message. Field name as upstream T3 Code; a closed PR settles anyway.
   sidebarAutoSettleOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Dev mode: agent co-author and "generated with" lines stay out of the merge
+  // commit made from Work. Name as upstream; off by default, as upstream.
+  removeAgentCreditsOnMerge: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
@@ -1108,6 +1113,7 @@ export const ServerSettingsPatch = Schema.Struct({
   devMode: Schema.optionalKey(Schema.Boolean),
   devModeChangedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
+  removeAgentCreditsOnMerge: Schema.optionalKey(Schema.Boolean),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),

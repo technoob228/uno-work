@@ -156,6 +156,18 @@ export interface WsRpcClient {
       typeof WS_METHODS.gitPreparePullRequestThread
     >;
   };
+  /** Dev mode's pull requests, on the service each project's remote points at. */
+  readonly pullRequests: {
+    readonly list: RpcUnaryMethod<typeof WS_METHODS.pullRequestsList>;
+    readonly detail: RpcUnaryMethod<typeof WS_METHODS.pullRequestsDetail>;
+    readonly diff: RpcUnaryMethod<typeof WS_METHODS.pullRequestsDiff>;
+    readonly runAction: RpcUnaryMethod<typeof WS_METHODS.pullRequestsRunAction>;
+    readonly setFileViewed: RpcUnaryMethod<typeof WS_METHODS.pullRequestsSetFileViewed>;
+    readonly comment: RpcUnaryMethod<typeof WS_METHODS.pullRequestsComment>;
+    readonly setWatch: RpcUnaryMethod<typeof WS_METHODS.pullRequestsSetWatch>;
+    readonly link: RpcUnaryMethod<typeof WS_METHODS.pullRequestsLink>;
+    readonly unlink: RpcUnaryMethod<typeof WS_METHODS.pullRequestsUnlink>;
+  };
   /** "Continue on <machine>": prepare/complete on the source daemon, receive on the target. */
   readonly threadContinue: {
     readonly inspect: RpcUnaryMethod<typeof WS_METHODS.threadContinueInspect>;
@@ -573,6 +585,23 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.gitResolvePullRequest](input)),
       preparePullRequestThread: (input) =>
         transport.request((client) => client[WS_METHODS.gitPreparePullRequestThread](input)),
+    },
+    pullRequests: {
+      list: (input) => transport.request((client) => client[WS_METHODS.pullRequestsList](input)),
+      detail: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsDetail](input)),
+      diff: (input) => transport.request((client) => client[WS_METHODS.pullRequestsDiff](input)),
+      runAction: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsRunAction](input)),
+      setFileViewed: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsSetFileViewed](input)),
+      comment: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsComment](input)),
+      setWatch: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsSetWatch](input)),
+      link: (input) => transport.request((client) => client[WS_METHODS.pullRequestsLink](input)),
+      unlink: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsUnlink](input)),
     },
     threadContinue: {
       inspect: (input) =>

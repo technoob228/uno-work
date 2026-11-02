@@ -46,6 +46,8 @@ export interface GitHubCliShape {
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
     readonly timeoutMs?: number;
+    readonly maxOutputBytes?: number;
+    readonly truncateOutputAtMaxBytes?: boolean;
   }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
 
   readonly listOpenPullRequests: (input: {
@@ -243,6 +245,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         args: input.args,
         cwd: input.cwd,
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        ...(input.maxOutputBytes !== undefined ? { maxOutputBytes: input.maxOutputBytes } : {}),
+        ...(input.truncateOutputAtMaxBytes !== undefined
+          ? { truncateOutputAtMaxBytes: input.truncateOutputAtMaxBytes }
+          : {}),
       })
       .pipe(Effect.mapError((error) => normalizeGitHubCliError("execute", error)));
 

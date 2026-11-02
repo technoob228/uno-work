@@ -82,6 +82,7 @@ import { PlanResumeLive } from "./planResume/PlanResumeService.ts";
 import { ThreadGoalLive } from "./goal/ThreadGoalService.ts";
 import { DatabaseCompactorLive } from "./maintenance/DatabaseCompactor.ts";
 import { ThreadSearchLive } from "./search/ThreadSearch.ts";
+import { PullRequestsLive } from "./pullRequests/PullRequestService.ts";
 import { ThreadPullRequestsLive } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { InboxServiceLive } from "./inbox/InboxService.ts";
 import { ComputerResourcesServiceLive } from "./computerResources/ComputerResourcesService.ts";
@@ -503,7 +504,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       DatabaseCompactorLive,
       // Dev mode: a chat's PR row and auto-settle after the merge; reads
       // through the source-control providers provided further down this pipe.
-      ThreadPullRequestsLive,
+      // The Pull requests page (list, viewer, actions) over the same providers.
+      PullRequestsLive.pipe(Layer.provideMerge(ThreadPullRequestsLive)),
       SelfWatchdogLive,
       // Economy mode: tells the console what is going on inside (clients,
       // agent turns, always-on apps, next reminder); needs auth sessions,

@@ -10,6 +10,8 @@ import type {
   SourceControlRepositoryVisibility,
 } from "@t3tools/contracts";
 
+import type { PullRequestHostShape } from "./pullRequestHost.ts";
+
 export interface SourceControlProviderContext {
   readonly provider: SourceControlProviderInfo;
   readonly remoteName: string;
@@ -91,6 +93,8 @@ export interface SourceControlProviderShape {
   readonly readChangeRequestStatuses?: (
     input: ChangeRequestStatusQuery,
   ) => Effect.Effect<ChangeRequestStatusRead, SourceControlProviderError>;
+  /** Dev mode's pull requests: the list, the viewer and the actions. */
+  readonly pullRequestHost?: (context?: SourceControlProviderContext) => PullRequestHostShape;
   readonly createChangeRequest: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;
