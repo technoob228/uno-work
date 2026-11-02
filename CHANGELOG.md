@@ -8,6 +8,18 @@
 
 ---
 
+## v0.0.175 — 2026-11-02
+
+- An update or a restart no longer loses the task: in the cloud the agent goes on where it stopped, and the Up next queue moves on by itself. Try again repeats the task instead of copying your message.
+- Settings → Keyboard: every shortcut in one list, change one by pressing the keys, or reset it. ⌘Z and ⌘B work from the message box, ⌘S saves the file open in the panel.
+- Settings → Projects: all your projects on one page, without Dev mode.
+- Pick the model and its level in one control.
+- Uno Smart waits 30 minutes for your Allow, and Always allow on file edits holds for the whole chat.
+- File search understands Russian words. On a phone a permission request is one block with big buttons. Stop no longer shows an error, and permission notes are in plain words.
+- Dev mode: a Pull requests page with all your GitHub pull requests, ready to merge and waiting for you on top. Open one in Work to see files, commits and comments, then merge, approve, revert or close it without leaving. An agent can watch its pull request and come back when a check fails, a comment arrives or a conflict appears.
+
+---
+
 ## v0.0.174 — 2026-11-01
 
 - A calmer Home: computers are dots, tips are for the first visit only, and reasoning, context and permissions share one short chip on the box.
