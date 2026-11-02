@@ -35,6 +35,7 @@ import { Route as SettingsAiRouteImport } from './routes/settings.ai'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
+import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
@@ -42,7 +43,6 @@ import { Route as ChatFilesRouteImport } from './routes/_chat.files'
 import { Route as ChatDriveRouteImport } from './routes/_chat.drive'
 import { Route as ChatComputerRouteImport } from './routes/_chat.computer'
 import { Route as ChatAutomationsRouteImport } from './routes/_chat.automations'
-import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatAssistantsRouteImport } from './routes/_chat.assistants'
 import { Route as ChatAssistantRouteImport } from './routes/_chat.assistant'
 import { Route as ChatAppRouteImport } from './routes/_chat.app'
@@ -197,6 +197,11 @@ const ChatSetupRoute = ChatSetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
+  id: '/pull-requests',
+  path: '/pull-requests',
+  getParentRoute: () => ChatRoute,
+} as any)
 const ChatOfficeRoute = ChatOfficeRouteImport.update({
   id: '/office',
   path: '/office',
@@ -230,11 +235,6 @@ const ChatComputerRoute = ChatComputerRouteImport.update({
 const ChatAutomationsRoute = ChatAutomationsRouteImport.update({
   id: '/automations',
   path: '/automations',
-  getParentRoute: () => ChatRoute,
-} as any)
-const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
-  id: '/pull-requests',
-  path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatAssistantsRoute = ChatAssistantsRouteImport.update({
@@ -381,13 +381,13 @@ export interface FileRoutesByFullPath {
   '/assistant': typeof ChatAssistantRouteWithChildren
   '/assistants': typeof ChatAssistantsRoute
   '/automations': typeof ChatAutomationsRoute
-  '/pull-requests': typeof ChatPullRequestsRoute
   '/computer': typeof ChatComputerRoute
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
   '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
+  '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -438,13 +438,13 @@ export interface FileRoutesByTo {
   '/app': typeof ChatAppRoute
   '/assistants': typeof ChatAssistantsRoute
   '/automations': typeof ChatAutomationsRoute
-  '/pull-requests': typeof ChatPullRequestsRoute
   '/computer': typeof ChatComputerRoute
   '/drive': typeof ChatDriveRoute
   '/files': typeof ChatFilesRoute
   '/my-uno': typeof ChatMyUnoRoute
   '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
+  '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -499,13 +499,13 @@ export interface FileRoutesById {
   '/_chat/assistant': typeof ChatAssistantRouteWithChildren
   '/_chat/assistants': typeof ChatAssistantsRoute
   '/_chat/automations': typeof ChatAutomationsRoute
-  '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/computer': typeof ChatComputerRoute
   '/_chat/drive': typeof ChatDriveRoute
   '/_chat/files': typeof ChatFilesRoute
   '/_chat/my-uno': typeof ChatMyUnoRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/office': typeof ChatOfficeRoute
+  '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -561,13 +561,13 @@ export interface FileRouteTypes {
     | '/assistant'
     | '/assistants'
     | '/automations'
-    | '/pull-requests'
     | '/computer'
     | '/drive'
     | '/files'
     | '/my-uno'
     | '/new'
     | '/office'
+    | '/pull-requests'
     | '/setup'
     | '/sites'
     | '/settings/account'
@@ -618,13 +618,13 @@ export interface FileRouteTypes {
     | '/app'
     | '/assistants'
     | '/automations'
-    | '/pull-requests'
     | '/computer'
     | '/drive'
     | '/files'
     | '/my-uno'
     | '/new'
     | '/office'
+    | '/pull-requests'
     | '/setup'
     | '/sites'
     | '/settings/account'
@@ -678,13 +678,13 @@ export interface FileRouteTypes {
     | '/_chat/assistant'
     | '/_chat/assistants'
     | '/_chat/automations'
-    | '/_chat/pull-requests'
     | '/_chat/computer'
     | '/_chat/drive'
     | '/_chat/files'
     | '/_chat/my-uno'
     | '/_chat/new'
     | '/_chat/office'
+    | '/_chat/pull-requests'
     | '/_chat/setup'
     | '/_chat/sites'
     | '/settings/account'
@@ -920,6 +920,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatSetupRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/pull-requests': {
+      id: '/_chat/pull-requests'
+      path: '/pull-requests'
+      fullPath: '/pull-requests'
+      preLoaderRoute: typeof ChatPullRequestsRouteImport
+      parentRoute: typeof ChatRoute
+    }
     '/_chat/office': {
       id: '/_chat/office'
       path: '/office'
@@ -967,13 +974,6 @@ declare module '@tanstack/react-router' {
       path: '/automations'
       fullPath: '/automations'
       preLoaderRoute: typeof ChatAutomationsRouteImport
-      parentRoute: typeof ChatRoute
-    }
-    '/_chat/pull-requests': {
-      id: '/_chat/pull-requests'
-      path: '/pull-requests'
-      fullPath: '/pull-requests'
-      preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/assistants': {
@@ -1168,13 +1168,13 @@ interface ChatRouteChildren {
   ChatAssistantRoute: typeof ChatAssistantRouteWithChildren
   ChatAssistantsRoute: typeof ChatAssistantsRoute
   ChatAutomationsRoute: typeof ChatAutomationsRoute
-  ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatComputerRoute: typeof ChatComputerRoute
   ChatDriveRoute: typeof ChatDriveRoute
   ChatFilesRoute: typeof ChatFilesRoute
   ChatMyUnoRoute: typeof ChatMyUnoRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
+  ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -1188,13 +1188,13 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatAssistantRoute: ChatAssistantRouteWithChildren,
   ChatAssistantsRoute: ChatAssistantsRoute,
   ChatAutomationsRoute: ChatAutomationsRoute,
-  ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatComputerRoute: ChatComputerRoute,
   ChatDriveRoute: ChatDriveRoute,
   ChatFilesRoute: ChatFilesRoute,
   ChatMyUnoRoute: ChatMyUnoRoute,
   ChatNewRoute: ChatNewRoute,
   ChatOfficeRoute: ChatOfficeRoute,
+  ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,
   ChatIndexRoute: ChatIndexRoute,
