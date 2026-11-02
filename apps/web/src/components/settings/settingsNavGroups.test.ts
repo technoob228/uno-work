@@ -45,7 +45,6 @@ describe("buildSettingsNavGroups", () => {
       "/settings/environment/env-box/apps",
       "/settings/environment/env-box/source-control",
       "/settings/environment/env-box/worktrees",
-      "/settings/environment/env-box/projects",
       "/settings/environment/env-box/diagnostics",
       "/settings/environment/env-box/archived",
     ]);
@@ -114,6 +113,7 @@ describe("simple settings (01.10)", () => {
       "Connectors",
       "Skills",
       "Assistants & phone",
+      "Projects",
       "Computer",
       "Developer",
     ]);
@@ -149,11 +149,12 @@ describe("gating 28.10: Connectors and Skills only with the assistants update", 
       assistantsUpdate,
     })[0]!.entries.map((entry) => entry.label);
 
-  it("without it the simple entries are those of 0.0.156", () => {
+  it("without it Connectors and Skills step aside", () => {
     expect(labels(false)).toEqual([
       "Account & plan",
       "AI",
       "Assistants & phone",
+      "Projects",
       "Computer",
       "Developer",
     ]);

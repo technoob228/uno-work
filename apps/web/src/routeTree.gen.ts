@@ -19,6 +19,7 @@ import { Route as SettingsVaultRouteImport } from './routes/settings.vault'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
 import { Route as SettingsSkillsRouteImport } from './routes/settings.skills'
 import { Route as SettingsSecurityRouteImport } from './routes/settings.security'
+import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
 import { Route as SettingsExtensionsRouteImport } from './routes/settings.extensions'
 import { Route as SettingsDeveloperRouteImport } from './routes/settings.developer'
@@ -113,6 +114,11 @@ const SettingsSkillsRoute = SettingsSkillsRouteImport.update({
 const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
   id: '/security',
   path: '/security',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsProjectsRoute = SettingsProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
@@ -390,6 +396,7 @@ export interface FileRoutesByFullPath {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -445,6 +452,7 @@ export interface FileRoutesByTo {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -504,6 +512,7 @@ export interface FileRoutesById {
   '/settings/developer': typeof SettingsDeveloperRoute
   '/settings/extensions': typeof SettingsExtensionsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/projects': typeof SettingsProjectsRoute
   '/settings/security': typeof SettingsSecurityRoute
   '/settings/skills': typeof SettingsSkillsRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
@@ -564,6 +573,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
     | '/settings/source-control'
@@ -619,6 +629,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
     | '/settings/source-control'
@@ -677,6 +688,7 @@ export interface FileRouteTypes {
     | '/settings/developer'
     | '/settings/extensions'
     | '/settings/general'
+    | '/settings/projects'
     | '/settings/security'
     | '/settings/skills'
     | '/settings/source-control'
@@ -782,6 +794,13 @@ declare module '@tanstack/react-router' {
       path: '/security'
       fullPath: '/settings/security'
       preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/projects': {
+      id: '/settings/projects'
+      path: '/projects'
+      fullPath: '/settings/projects'
+      preLoaderRoute: typeof SettingsProjectsRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/general': {
@@ -1220,6 +1239,7 @@ interface SettingsRouteChildren {
   SettingsDeveloperRoute: typeof SettingsDeveloperRoute
   SettingsExtensionsRoute: typeof SettingsExtensionsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsProjectsRoute: typeof SettingsProjectsRoute
   SettingsSecurityRoute: typeof SettingsSecurityRoute
   SettingsSkillsRoute: typeof SettingsSkillsRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
@@ -1247,6 +1267,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsDeveloperRoute: SettingsDeveloperRoute,
   SettingsExtensionsRoute: SettingsExtensionsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsProjectsRoute: SettingsProjectsRoute,
   SettingsSecurityRoute: SettingsSecurityRoute,
   SettingsSkillsRoute: SettingsSkillsRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,

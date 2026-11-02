@@ -1,7 +1,7 @@
 /**
  * What a new chat starts with: model, access and where it works. Each row
  * follows the scope sentence, so the same rows serve Settings → AI, a
- * computer's General page and each project on the Projects page.
+ * computer's General page and each project's settings.
  *
  * @module components/settings/NewChatDefaultsRows
  */

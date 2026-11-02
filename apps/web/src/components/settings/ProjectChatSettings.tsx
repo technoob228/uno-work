@@ -1,15 +1,13 @@
 /**
- * Dev mode's Projects page: per project, what new chats start with and the
- * actions (commands) with their automatic triggers.
+ * Project settings → New chats and actions: what new chats in this project
+ * start with (one project on two computers is set on both at once) and its
+ * actions (commands) with their automatic triggers, saved on the project on
+ * this computer; the chat header's actions menu edits the same list.
  *
- * Defaults follow the scope sentence, so a project on two computers can be set
- * on both at once. Actions are saved on the project on one computer; the chat
- * header's actions menu edits the same list.
- *
- * @module components/settings/ProjectsSettings
+ * @module components/settings/ProjectChatSettings
  */
-import { type EnvironmentId, type ProjectScript } from "@t3tools/contracts";
-import { PlusIcon } from "lucide-react";
+import { type ProjectScript } from "@t3tools/contracts";
+import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { readEnvironmentApi } from "~/environmentApi";
@@ -17,8 +15,10 @@ import { newCommandId } from "~/lib/utils";
 import { nextProjectScriptId, replaceProjectScript } from "~/projectScripts";
 import type { Project } from "~/types";
 
+import type { ProjectSettingsTarget } from "../projectSync/ProjectSettingsDialog";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Dialog,
   DialogDescription,
@@ -33,15 +33,11 @@ import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
-import {
-  NewChatAccessRow,
-  NewChatModelRow,
-  NewChatWorkspaceRow,
-  PerComputerNote,
-} from "./NewChatDefaultsRows";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-import { SettingsScopeProvider, useSettingsScope } from "./SettingsScopeContext";
-import { projectsForComputer, type SettingsScopeSearch } from "./settingsScope";
+import { NewChatAccessRow, NewChatModelRow, NewChatWorkspaceRow } from "./NewChatDefaultsRows";
+import { SettingsRow } from "./settingsLayout";
+import { SettingsScopeProvider } from "./SettingsScopeContext";
+import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
+import { useSettingsMachineOptions } from "./useSettingsScope";
 
 async function saveProject(project: Project, patch: { scripts: ProjectScript[] }) {
   const api = readEnvironmentApi(project.environmentId);
@@ -239,74 +235,33 @@ function ProjectActions(props: { readonly project: Project }) {
   );
 }
 
-/** One project's rows, scoped to it: the same rows the sentence drives elsewhere. */
-function ProjectSection(props: {
-  readonly projectKey: string;
-  readonly title: string;
-  readonly environmentId: EnvironmentId;
-  readonly machine: string | undefined;
-  readonly actionsProject: Project | null;
-  readonly onSelectScope: (next: SettingsScopeSearch) => void;
-}) {
-  const search: SettingsScopeSearch = {
-    project: props.projectKey,
-    ...(props.machine === undefined ? {} : { machine: props.machine }),
-  };
-  return (
-    <SettingsScopeProvider search={search} onChange={props.onSelectScope}>
-      <SettingsSection title={props.title}>
-        <NewChatModelRow environmentId={props.environmentId} />
-        <NewChatAccessRow />
-        <NewChatWorkspaceRow />
-        {props.actionsProject ? <ProjectActions project={props.actionsProject} /> : null}
-      </SettingsSection>
-    </SettingsScopeProvider>
-  );
-}
+const keepScope = () => {};
 
-export function ProjectsSettingsPanel(props: { readonly environmentId: EnvironmentId }) {
-  const { groups, search, scope, selectScope, singleComputer } = useSettingsScope();
-  const projects = projectsForComputer(groups, search.machine).filter(
-    (group) => search.project === undefined || group.projectKey === search.project,
-  );
-  const pickedComputer = search.machine ?? (singleComputer ? props.environmentId : null);
+/** Folded: most people never need it, and it shouldn't crowd sync, people and keys. */
+export function ProjectChatSettings(props: { readonly target: ProjectSettingsTarget }) {
+  const { target } = props;
+  const groups = useSettingsProjectGroups(useSettingsMachineOptions());
+  const isTarget = (project: Project) =>
+    project.environmentId === target.environmentId && project.id === target.projectId;
+  const group = groups.find((candidate) => candidate.memberProjects.some(isTarget));
+  const member = group?.memberProjects.find(isTarget);
+  if (!group || !member) return null;
   return (
-    <SettingsPageContainer>
-      {projects.length === 0 ? (
-        <SettingsSection title="Projects">
-          <SettingsRow
-            title="No projects"
-            description={
-              scope.kind === "unavailable"
-                ? scope.message
-                : "Projects on this computer show up here."
-            }
-          />
-        </SettingsSection>
-      ) : (
-        projects.map((group) => {
-          const member =
-            pickedComputer === null
-              ? group.memberProjects.length === 1
-                ? group.memberProjects[0]
-                : null
-              : group.memberProjects.find((entry) => entry.environmentId === pickedComputer);
-          return (
-            <ProjectSection
-              key={group.projectKey}
-              projectKey={group.projectKey}
-              title={group.displayName}
-              environmentId={member?.environmentId ?? group.environmentId}
-              machine={search.machine}
-              actionsProject={member ?? null}
-              onSelectScope={selectScope}
-            />
-          );
-        })
-      )}
-      {pickedComputer === null && projects.some((group) => group.memberProjects.length > 1) ? (
-        <PerComputerNote what="Actions" />
-      ) : null}
-    </SettingsPageContainer>
+    <Collapsible data-testid="project-chat-settings">
+      <CollapsibleTrigger className="group flex w-full cursor-pointer items-center justify-between text-sm font-medium text-foreground">
+        New chats and actions
+        <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+      </CollapsibleTrigger>
+      <CollapsiblePanel>
+        <div className="mt-2 rounded-md border border-border">
+          <SettingsScopeProvider search={{ project: group.projectKey }} onChange={keepScope}>
+            <NewChatModelRow environmentId={member.environmentId} />
+            <NewChatAccessRow />
+            <NewChatWorkspaceRow />
+            <ProjectActions project={member} />
+          </SettingsScopeProvider>
+        </div>
+      </CollapsiblePanel>
+    </Collapsible>
   );
 }

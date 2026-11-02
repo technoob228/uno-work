@@ -35,14 +35,34 @@ import {
 
 export const projectTeamsQueryKey = ["projectTeams"] as const;
 
-export function ProjectTeam(props: { syncName: string; teamId?: number | null }) {
-  const queryClient = useQueryClient();
-  const teams = useQuery({
+const useProjectTeams = () =>
+  useQuery({
     queryKey: projectTeamsQueryKey,
     queryFn: loadTeams,
     retry: false,
     staleTime: 15_000,
   });
+
+/** A team lives in the project's cloud copy: without sync, say what opens People. */
+export function ProjectTeamNeedsSync() {
+  const teams = useProjectTeams();
+  if (teams.isPending || teams.isError || teams.data === null) return null;
+  return (
+    <section className="space-y-2" data-testid="project-team-needs-sync">
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+        <UsersIcon className="size-4 text-muted-foreground" />
+        People
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Turn on On all my computers to invite someone to this project.
+      </p>
+    </section>
+  );
+}
+
+export function ProjectTeam(props: { syncName: string; teamId?: number | null }) {
+  const queryClient = useQueryClient();
+  const teams = useProjectTeams();
   const row = teamProjectOf(teams.data, props.syncName, props.teamId);
   const teamId = row?.id ?? null;
   const cardKey = ["projectTeam", teamId] as const;

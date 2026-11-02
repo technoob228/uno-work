@@ -1,8 +1,8 @@
 /**
  * Project settings: "On all my computers" (the switch, the status, Keep mine
  * / Keep theirs after a conflict), the project's versions, what travels and
- * what stays, and its keys — names only; a value goes in once and never comes
- * back to the screen.
+ * what stays, its keys — names only; a value goes in once and never comes
+ * back to the screen — and what its new chats start with.
  *
  * @module projectSync/ProjectSettingsDialog
  */
@@ -30,10 +30,11 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { ProjectChatSettings } from "../settings/ProjectChatSettings";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { ProjectFiles } from "./ProjectFiles";
-import { ProjectTeam } from "./ProjectTeam";
+import { ProjectTeam, ProjectTeamNeedsSync } from "./ProjectTeam";
 import { ProjectVersions } from "./ProjectVersions";
 import { conflictLine, hostLine, mineWasReplaced, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
@@ -266,7 +267,9 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
               <ProjectTeam syncName={entry.name} teamId={entry.team?.id ?? null} />
             ) : null}
           </>
-        ) : null}
+        ) : (
+          <ProjectTeamNeedsSync />
+        )}
 
         <section className="space-y-2" data-testid="project-keys">
           <div className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -346,6 +349,8 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             </Button>
           </form>
         </section>
+
+        <ProjectChatSettings target={target} />
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" onClick={props.onClose}>

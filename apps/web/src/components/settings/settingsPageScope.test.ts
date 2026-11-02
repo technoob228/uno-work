@@ -6,7 +6,6 @@ describe("settingsPageScope", () => {
   it("lets the person pick on pages with per-project settings", () => {
     expect(settingsPageScope("/settings/ai")).toEqual({ kind: "scoped" });
     expect(settingsPageScope("/settings/environment/env-1/general")).toEqual({ kind: "scoped" });
-    expect(settingsPageScope("/settings/environment/env-1/projects")).toEqual({ kind: "scoped" });
   });
 
   it("offers only a computer where settings exist per computer", () => {

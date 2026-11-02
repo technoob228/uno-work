@@ -80,7 +80,6 @@ const ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Worktrees", section: "worktrees", icon: FolderTreeIcon },
-  { label: "Projects", section: "projects", icon: FolderKanbanIcon },
   { label: "Diagnostics", section: "diagnostics", icon: ActivityIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
@@ -98,7 +97,6 @@ const WEB_ENVIRONMENT_NAV_ITEMS: ReadonlyArray<EnvironmentNavItem> = [
   { label: "Apps", section: "apps", icon: SparklesIcon },
   { label: "Source Control", section: "source-control", icon: GitBranchIcon },
   { label: "Worktrees", section: "worktrees", icon: FolderTreeIcon },
-  { label: "Projects", section: "projects", icon: FolderKanbanIcon },
   { label: "Diagnostics", section: "diagnostics", icon: ActivityIcon },
   { label: "Archive", section: "archived", icon: ArchiveIcon },
 ];
@@ -162,6 +160,7 @@ export const SIMPLE_SETTINGS_PATHS = {
   connectors: "/settings/connectors",
   skills: "/settings/skills",
   assistants: "/settings/assistants-phone",
+  projects: "/settings/projects",
   computer: "/settings/computer",
   developer: "/settings/developer",
 } as const;
@@ -173,6 +172,7 @@ export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
   { label: "Connectors", to: SIMPLE_SETTINGS_PATHS.connectors, icon: BlocksIcon },
   { label: "Skills", to: SIMPLE_SETTINGS_PATHS.skills, icon: BookOpenIcon },
   { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
+  { label: "Projects", to: SIMPLE_SETTINGS_PATHS.projects, icon: FolderKanbanIcon },
   { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
   { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
 ];

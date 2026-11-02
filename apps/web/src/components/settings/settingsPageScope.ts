@@ -30,7 +30,6 @@ const SCOPED_MACHINE_SECTIONS: ReadonlySet<string> = new Set([
   "general",
   "source-control",
   "worktrees",
-  "projects",
 ]);
 
 const OWNED_PATHS: Readonly<Record<string, SettingsPageOwner>> = {
