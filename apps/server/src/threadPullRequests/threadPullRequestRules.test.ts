@@ -5,6 +5,7 @@ import {
   applyRead,
   branchReadInterval,
   capLinks,
+  parsePullRequestReference,
   isBranchWorthAsking,
   isRateLimited,
   isReadDue,
@@ -365,5 +366,25 @@ describe("limits", () => {
     expect(isRateLimited("You have exceeded a secondary rate limit")).toBe(true);
     expect(isRateLimited("HTTP 429")).toBe(true);
     expect(isRateLimited("Not Found")).toBe(false);
+  });
+});
+
+describe("parsePullRequestReference", () => {
+  it("reads the short forms, and the chat's repository by default", () => {
+    expect(parsePullRequestReference("#12", "acme/app")).toEqual({
+      repository: "acme/app",
+      number: 12,
+    });
+    expect(parsePullRequestReference("12", "acme/app")?.number).toBe(12);
+    expect(parsePullRequestReference("acme/other#3", "acme/app")).toEqual({
+      repository: "acme/other",
+      number: 3,
+    });
+  });
+
+  it("refuses the rest", () => {
+    expect(parsePullRequestReference("nonsense", "acme/app")).toBeNull();
+    expect(parsePullRequestReference("#0", "acme/app")).toBeNull();
+    expect(parsePullRequestReference("--repo#1", "acme/app")).toBeNull();
   });
 });

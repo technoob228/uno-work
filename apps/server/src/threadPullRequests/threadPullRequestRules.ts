@@ -299,6 +299,17 @@ export function shouldAutoSettle(input: {
   return latestAtMs >= anchorMs;
 }
 
+/** `owner/name#12`, or `#12` and `12` for the chat's own repository. */
+export function parsePullRequestReference(
+  reference: string,
+  repository: string,
+): { readonly repository: string; readonly number: number } | null {
+  const match = /^(?:([\w.-]+(?:\/[\w.-]+)+))?#?(\d+)$/u.exec(reference.trim());
+  const number = Number(match?.[2]);
+  if (match === null || !Number.isSafeInteger(number) || number < 1) return null;
+  return { repository: match[1] ?? repository, number };
+}
+
 export function isRateLimited(detail: string): boolean {
   return /rate limit|secondary limit|abuse|too quickly|\b429\b/iu.test(detail);
 }

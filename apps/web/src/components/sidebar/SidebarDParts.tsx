@@ -32,6 +32,7 @@ import {
   SettingsIcon,
   SparklesIcon,
   SquarePenIcon,
+  GitPullRequestIcon,
   WorkflowIcon,
   WrenchIcon,
 } from "lucide-react";
@@ -518,7 +519,7 @@ function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const openFilesInPanel = useOpenFilesInPanel(isMobile);
-  return (to: "/files" | "/sites" | "/automations") => {
+  return (to: "/files" | "/sites" | "/automations" | "/pull-requests") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     // In a chat, Files opens on the right, beside it (Misha 18.10).
@@ -571,8 +572,9 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
   const automations = useAutomationsShown();
+  const devMode = useDevMode();
   const row = useRef<HTMLElement>(null);
-  const nameFits = usePlaceNamesFit(row, `${automations} ${shown}`);
+  const nameFits = usePlaceNamesFit(row, `${automations} ${shown} ${devMode}`);
   return (
     <nav
       ref={row}
@@ -620,6 +622,17 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           onClick={() => open("/automations")}
           testId="sidebar-nav-automations"
           nameFits={nameFits("sidebar-nav-automations")}
+        />
+      ) : null}
+      {devMode ? (
+        <PlaceIcon
+          icon={<GitPullRequestIcon />}
+          label="Pull requests"
+          name="PRs"
+          active={pathname.startsWith("/pull-requests")}
+          onClick={() => open("/pull-requests")}
+          testId="sidebar-nav-pull-requests"
+          nameFits={nameFits("sidebar-nav-pull-requests")}
         />
       ) : null}
       {shown ? (
@@ -780,6 +793,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
   const { shown } = useNeedsYouBadge();
+  const devMode = useDevMode();
   const automations = useAutomationsShown();
   const hover = {
     onPointerEnter: () => sidebarDPanel.enterTrigger(),
@@ -843,6 +857,16 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
             testId="sidebar-rail-automations"
           >
             <WorkflowIcon />
+          </RailButton>
+        ) : null}
+        {devMode ? (
+          <RailButton
+            label="Pull requests"
+            active={pathname.startsWith("/pull-requests")}
+            onClick={() => open("/pull-requests")}
+            testId="sidebar-rail-pull-requests"
+          >
+            <GitPullRequestIcon />
           </RailButton>
         ) : null}
         {shown ? (

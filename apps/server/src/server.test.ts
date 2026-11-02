@@ -112,6 +112,8 @@ import {
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { PluginRegistry, type PluginRegistryShape } from "./plugins/PluginRegistry.ts";
 import { ThreadGoal } from "./goal/ThreadGoalService.ts";
+import { PullRequests } from "./pullRequests/PullRequestService.ts";
+import { ThreadPullRequests } from "./threadPullRequests/ThreadPullRequestService.ts";
 import { DatabaseCompactor } from "./maintenance/DatabaseCompactor.ts";
 import { ThreadSearch } from "./search/ThreadSearch.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
@@ -661,6 +663,8 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(ThreadSearch)({}),
           Layer.mock(ThreadGoal)({}),
+          Layer.mock(PullRequests)({}),
+          Layer.mock(ThreadPullRequests)({}),
           Layer.mock(DatabaseCompactor)({}),
         ),
       ),

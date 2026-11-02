@@ -75,6 +75,30 @@ export function PullRequestSettingsSection() {
           />
         }
       />
+      <SettingsRow
+        title="Remove agent credits when merging"
+        description="Agent co-author and generated-by lines stay out of merge commits made from Uno Work. People stay credited."
+        settingKeys={["removeAgentCreditsOnMerge"]}
+        control={
+          <Switch
+            checked={settings.removeAgentCreditsOnMerge}
+            onCheckedChange={(checked) => save({ removeAgentCreditsOnMerge: Boolean(checked) })}
+            aria-label="Remove agent credits when merging"
+          />
+        }
+      />
+      <SettingsRow
+        title="Automatically pull"
+        description="Keeps the default branch current, when it can fast-forward and has no local changes."
+        settingKeys={["defaultAutoPull"]}
+        control={
+          <Switch
+            checked={settings.defaultAutoPull}
+            onCheckedChange={(checked) => save({ defaultAutoPull: Boolean(checked) })}
+            aria-label="Automatically pull"
+          />
+        }
+      />
     </SettingsSection>
   );
 }

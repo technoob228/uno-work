@@ -36,6 +36,7 @@ import { Route as SettingsAiRouteImport } from './routes/settings.ai'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
+import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
 import { Route as ChatOfficeRouteImport } from './routes/_chat.office'
 import { Route as ChatNewRouteImport } from './routes/_chat.new'
 import { Route as ChatMyUnoRouteImport } from './routes/_chat.my-uno'
@@ -200,6 +201,11 @@ const ChatSitesRoute = ChatSitesRouteImport.update({
 const ChatSetupRoute = ChatSetupRouteImport.update({
   id: '/setup',
   path: '/setup',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatPullRequestsRoute = ChatPullRequestsRouteImport.update({
+  id: '/pull-requests',
+  path: '/pull-requests',
   getParentRoute: () => ChatRoute,
 } as any)
 const ChatOfficeRoute = ChatOfficeRouteImport.update({
@@ -387,6 +393,7 @@ export interface FileRoutesByFullPath {
   '/my-uno': typeof ChatMyUnoRoute
   '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
+  '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -444,6 +451,7 @@ export interface FileRoutesByTo {
   '/my-uno': typeof ChatMyUnoRoute
   '/new': typeof ChatNewRoute
   '/office': typeof ChatOfficeRoute
+  '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -505,6 +513,7 @@ export interface FileRoutesById {
   '/_chat/my-uno': typeof ChatMyUnoRoute
   '/_chat/new': typeof ChatNewRoute
   '/_chat/office': typeof ChatOfficeRoute
+  '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
   '/settings/account': typeof SettingsAccountRoute
@@ -567,6 +576,7 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/new'
     | '/office'
+    | '/pull-requests'
     | '/setup'
     | '/sites'
     | '/settings/account'
@@ -624,6 +634,7 @@ export interface FileRouteTypes {
     | '/my-uno'
     | '/new'
     | '/office'
+    | '/pull-requests'
     | '/setup'
     | '/sites'
     | '/settings/account'
@@ -684,6 +695,7 @@ export interface FileRouteTypes {
     | '/_chat/my-uno'
     | '/_chat/new'
     | '/_chat/office'
+    | '/_chat/pull-requests'
     | '/_chat/setup'
     | '/_chat/sites'
     | '/settings/account'
@@ -925,6 +937,13 @@ declare module '@tanstack/react-router' {
       path: '/setup'
       fullPath: '/setup'
       preLoaderRoute: typeof ChatSetupRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/pull-requests': {
+      id: '/_chat/pull-requests'
+      path: '/pull-requests'
+      fullPath: '/pull-requests'
+      preLoaderRoute: typeof ChatPullRequestsRouteImport
       parentRoute: typeof ChatRoute
     }
     '/_chat/office': {
@@ -1174,6 +1193,7 @@ interface ChatRouteChildren {
   ChatMyUnoRoute: typeof ChatMyUnoRoute
   ChatNewRoute: typeof ChatNewRoute
   ChatOfficeRoute: typeof ChatOfficeRoute
+  ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -1193,6 +1213,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatMyUnoRoute: ChatMyUnoRoute,
   ChatNewRoute: ChatNewRoute,
   ChatOfficeRoute: ChatOfficeRoute,
+  ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,
   ChatIndexRoute: ChatIndexRoute,

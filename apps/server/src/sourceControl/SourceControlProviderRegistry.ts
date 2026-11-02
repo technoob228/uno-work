@@ -137,6 +137,12 @@ function bindProviderContext(
             }),
         }
       : {}),
+    ...(provider.pullRequestHost
+      ? {
+          pullRequestHost: (bound?: SourceControlProvider.SourceControlProviderContext) =>
+            provider.pullRequestHost!(bound ?? context),
+        }
+      : {}),
     createChangeRequest: (input) =>
       provider.createChangeRequest({
         ...input,
