@@ -11,7 +11,11 @@
 
 import { ACCOUNT_SWITCH_NOTE_BODY, PLAN_RESUME_NOTE_BODY } from "./planLimitRules.ts";
 import { goalNoteLine } from "./threadGoal.ts";
-import { tryAgainNoteLine, turnAutoRetryNoteLine, updateRestartNoteLine } from "./turnErrorRetry.ts";
+import {
+  tryAgainNoteLine,
+  turnAutoRetryNoteLine,
+  updateRestartNoteLine,
+} from "./turnErrorRetry.ts";
 
 /** Marks a message the computer (not the person) put into a chat for its agent. */
 export const UNO_WORK_NOTE_PREFIX = "(Uno Work) ";

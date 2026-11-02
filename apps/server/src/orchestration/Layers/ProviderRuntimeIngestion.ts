@@ -20,7 +20,10 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
-import { approvalRequestedSummary, approvalResolvedSummary } from "@t3tools/shared/approvalActivity";
+import {
+  approvalRequestedSummary,
+  approvalResolvedSummary,
+} from "@t3tools/shared/approvalActivity";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";

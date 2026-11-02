@@ -173,10 +173,7 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
           aria-hidden
           className={alarming ? "size-3.5 shrink-0 text-destructive/80" : "size-3.5 shrink-0"}
         />
-        <span
-          className="min-w-0 line-clamp-2"
-          title={notice.kind === "other" ? error : undefined}
-        >
+        <span className="min-w-0 line-clamp-2" title={notice.kind === "other" ? error : undefined}>
           {lineText}
         </span>
         {onRetry ? (
