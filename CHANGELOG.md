@@ -8,6 +8,16 @@
 
 ---
 
+## v0.0.174 — 2026-11-01
+
+- A calmer Home: computers are dots, tips are for the first visit only, and reasoning, context and permissions share one short chip on the box.
+- Connect your AI or other computers: one line leads to using this computer from your AI over MCP, or to adding another computer.
+- Add a computer: connect a computer you own with one command, next to a new cloud computer.
+- Files: switch between every connected computer and Cloud storage.
+- The sidebar filter lists every computer, under the projects.
+- Assistant settings are now Role & instructions, Environment, Connections, and Tasks.
+- Plan limits: a limit on one model no longer reads as the whole plan being out.
+
 ## v0.0.173 — 2026-11-01
 
 - Groundwork for connecting your own computer to Uno Work. Nothing changes for you yet.
