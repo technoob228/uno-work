@@ -60,7 +60,12 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { isLowDisk } from "../worktreeCleanup/policy.ts";
 
-import { copyClaudeTranscript, copyEnvFiles, linkNodeModules } from "./parallelCopyContents.ts";
+import {
+  copyClaudeTranscript,
+  copyEnvFiles,
+  linkNodeModules,
+  processRunsIn,
+} from "./parallelCopyContents.ts";
 import {
   baseRefFor,
   conflictRefFor,
@@ -100,6 +105,9 @@ export const PARALLEL_CHATS_COMMAND_PREFIX = "parallel-chats:";
 export const PARALLEL_CHATS_ORIGIN_COMPONENT = "parallel-chats";
 /** Copies waiting to join are looked at again this often (a refused apply, a lost event). */
 export const PARALLEL_TICK = Duration.seconds(60);
+/** Idle copies whose work all joined are removed this often (they come back on the next message). */
+export const IDLE_SWEEP_INTERVAL = Duration.hours(1);
+export const IDLE_COPY_AFTER_MS = 24 * 60 * 60_000;
 
 /** What a turn start needs from a thread (the reactor passes its full thread). */
 export type ParallelThread = Pick<
@@ -372,6 +380,30 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
     return copy;
   });
 
+  /** The copy can't come back: the chat works in the folder again, a Claude session with it. */
+  const backToFolder = Effect.fn("ParallelChats.backToFolder")(function* (
+    thread: ParallelThread,
+    root: string,
+    copy: string,
+  ) {
+    const session = yield* deps.sessionOf(thread.id);
+    if (session?.driver === "claudeAgent" && session.resumeId !== null) {
+      yield* copyClaudeTranscript({
+        configDirs: yield* deps.claudeConfigDirs,
+        sessionId: session.resumeId,
+        from: copy,
+        to: root,
+      });
+    }
+    yield* setFolder(thread.id, null);
+    yield* Effect.logInfo(
+      "parallel chats: the copy couldn't come back, the chat works in the folder",
+      {
+        threadId: thread.id,
+      },
+    );
+  });
+
   /**
    * A chat back in its copy: a copy removed meanwhile comes back (off: the
    * chat goes back to the folder instead); a copy with everything joined
@@ -381,20 +413,19 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
     readonly thread: ParallelThread;
     readonly root: string;
     readonly copy: string;
-    readonly mode: ParallelChatsMode;
   }) {
     const { thread, root, copy } = input;
     const at = rootAt(root);
     if (!existsSync(copy)) {
-      if (input.mode === "off") {
-        yield* setFolder(thread.id, null);
-        return null;
-      }
+      // Removed after it joined (idle for a day) or by hand: it comes back at
+      // the same path, off or not — a chat stays in its copy (spec, section 10),
+      // and its agent's session lives at that path.
       yield* makeCopy({ root, copy, threadId: thread.id }).pipe(
         Effect.timeoutOption(Duration.millis(COPY_TIMEOUT_MS)),
+        Effect.ignoreCause({ log: true }),
       );
       if (!existsSync(copy)) {
-        yield* setFolder(thread.id, null);
+        yield* backToFolder(thread, root, copy);
         return null;
       }
       return copy;
@@ -445,7 +476,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
       const project = yield* deps.getProject(thread.projectId);
       if (project === null) return { thread, agentNote: null };
       const root = project.workspaceRoot;
-      const copy = yield* refreshOwnCopy({ thread, root, copy: thread.worktreePath!, mode });
+      const copy = yield* refreshOwnCopy({ thread, root, copy: thread.worktreePath! });
       if (copy === null) return { thread: { ...thread, worktreePath: null }, agentNote: null };
       remember(thread, root);
       return { thread, agentNote: yield* agentNoteFor({ threadId: thread.id, root, copy }) };
@@ -794,6 +825,45 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
   }).pipe(Effect.ignoreCause({ log: true }));
 
   /**
+   * Copies whose work all joined, of chats quiet for a day, with no process
+   * in them: removed (the base ref stays; the next message makes the copy
+   * again at the same path). Unjoined work is never removed.
+   */
+  const sweepIdleCopies = Effect.gen(function* () {
+    const threads = yield* deps.listThreads;
+    for (const thread of threads) {
+      if (!isOwnAutoCopy(deps.worktreesDir, thread.worktreePath, thread.id)) continue;
+      const copy = thread.worktreePath!;
+      if (!existsSync(copy) || threadBusy(thread) || pending.has(thread.id)) continue;
+      const lastActivity = Math.max(
+        Date.parse(thread.updatedAt),
+        thread.latestTurn ? Date.parse(thread.latestTurn.requestedAt) : 0,
+      );
+      if (!(now() - lastActivity > IDLE_COPY_AFTER_MS)) continue;
+      if (yield* processRunsIn(copy)) continue;
+      const project = yield* deps.getProject(thread.projectId);
+      if (project === null) continue;
+      const root = project.workspaceRoot;
+      yield* lock
+        .withPermits(1)(
+          Effect.gen(function* () {
+            const at = rootAt(root);
+            if ((yield* git.revParse(at, conflictRefFor(thread.id))) !== null) return;
+            const base = yield* git.revParse(at, baseRefFor(thread.id));
+            if (base === null) return;
+            const copyTree = yield* git.snapshotTree(copyAt(copy), tempDir);
+            if (copyTree !== (yield* git.treeOf(at, base))) return;
+            yield* git.removeCopy(root, copy);
+            yield* Effect.logInfo("parallel chats: removed an idle copy, all its work joined", {
+              threadId: thread.id,
+            });
+          }),
+        )
+        .pipe(Effect.ignoreCause({ log: true }));
+    }
+  }).pipe(Effect.ignoreCause({ log: true }));
+
+  /**
    * A deleted chat's copy: what never joined the project is saved first
    * (`refs/uno/saved/<chat>`, like the chat-copy cleanup), then the copy goes.
    */
@@ -881,6 +951,11 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
         Effect.repeat(Schedule.spaced(PARALLEL_TICK)),
         Effect.forkScoped,
       );
+      yield* sweepIdleCopies.pipe(
+        Effect.delay(IDLE_SWEEP_INTERVAL),
+        Effect.repeat(Schedule.spaced(IDLE_SWEEP_INTERVAL)),
+        Effect.forkScoped,
+      );
     });
 
   return {
@@ -891,6 +966,7 @@ export const makeParallelChats = Effect.fn("makeParallelChats")(function* (
     pendingIds: () => [...pending.keys()],
     onEvent,
     reconcile,
+    sweepIdleCopies,
   };
 });
 
@@ -912,89 +988,103 @@ export function resumeIdOf(driver: string | null, cursor: unknown): string | nul
   return "saved-session";
 }
 
-export const ParallelChatsLive = Layer.effect(
-  ParallelChats,
-  Effect.gen(function* () {
-    const config = yield* ServerConfig;
-    const settingsService = yield* ServerSettingsService;
-    const projections = yield* ProjectionSnapshotQuery;
-    const engine = yield* OrchestrationEngineService;
-    const vcs = yield* GitVcsDriver;
-    const directory = Option.getOrUndefined(yield* Effect.serviceOption(ProviderSessionDirectory));
+export interface ParallelChatsLayerOptions {
+  /** Tests only: whether the disk counts as nearly full. */
+  readonly lowDisk?: Effect.Effect<boolean>;
+}
 
-    const settings = settingsService.getSettings.pipe(Effect.option);
+export const makeParallelChatsLayer = (options: ParallelChatsLayerOptions = {}) =>
+  Layer.effect(
+    ParallelChats,
+    Effect.gen(function* () {
+      const config = yield* ServerConfig;
+      const settingsService = yield* ServerSettingsService;
+      const projections = yield* ProjectionSnapshotQuery;
+      const engine = yield* OrchestrationEngineService;
+      const vcs = yield* GitVcsDriver;
+      const directory = Option.getOrUndefined(
+        yield* Effect.serviceOption(ProviderSessionDirectory),
+      );
 
-    const service = yield* makeParallelChats({
-      worktreesDir: config.worktreesDir,
-      tempDir: config.tempDir,
-      git: vcs.execute,
-      mode: settings.pipe(
-        Effect.map((value) =>
-          effectiveParallelMode(Option.isSome(value) ? value.value.parallelChats : undefined),
+      const settings = settingsService.getSettings.pipe(Effect.option);
+
+      const service = yield* makeParallelChats({
+        worktreesDir: config.worktreesDir,
+        tempDir: config.tempDir,
+        git: vcs.execute,
+        mode: settings.pipe(
+          Effect.map((value) =>
+            effectiveParallelMode(Option.isSome(value) ? value.value.parallelChats : undefined),
+          ),
         ),
-      ),
-      getProject: (projectId) =>
-        projections.getProjectShellById(projectId).pipe(
-          Effect.map(Option.getOrNull),
-          Effect.orElseSucceed(() => null),
+        getProject: (projectId) =>
+          projections.getProjectShellById(projectId).pipe(
+            Effect.map(Option.getOrNull),
+            Effect.orElseSucceed(() => null),
+          ),
+        getThread: (threadId) =>
+          projections.getThreadShellById(threadId).pipe(
+            Effect.map(Option.getOrNull),
+            Effect.orElseSucceed(() => null),
+          ),
+        listThreads: projections.getShellSnapshot().pipe(
+          Effect.map((snapshot) => snapshot.threads),
+          Effect.orElseSucceed(() => []),
         ),
-      getThread: (threadId) =>
-        projections.getThreadShellById(threadId).pipe(
-          Effect.map(Option.getOrNull),
-          Effect.orElseSucceed(() => null),
-        ),
-      listThreads: projections.getShellSnapshot().pipe(
-        Effect.map((snapshot) => snapshot.threads),
-        Effect.orElseSucceed(() => []),
-      ),
-      dispatch: (command, origin) =>
-        engine
-          .dispatch(
-            command,
-            origin ? { origin: systemCommandOrigin(origin.component, origin.reason ?? null) } : {},
-          )
-          .pipe(Effect.asVoid, Effect.orDie),
-      domainEvents: engine.streamDomainEvents,
-      sessionOf: (threadId) =>
-        directory === undefined
-          ? Effect.succeed(null)
-          : directory.getBinding(threadId).pipe(
-              Effect.map(Option.getOrNull),
-              Effect.map((binding) =>
-                binding === null
-                  ? null
-                  : {
-                      driver: binding.provider,
-                      resumeId: resumeIdOf(binding.provider, binding.resumeCursor),
-                    },
+        dispatch: (command, origin) =>
+          engine
+            .dispatch(
+              command,
+              origin
+                ? { origin: systemCommandOrigin(origin.component, origin.reason ?? null) }
+                : {},
+            )
+            .pipe(Effect.asVoid, Effect.orDie),
+        domainEvents: engine.streamDomainEvents,
+        sessionOf: (threadId) =>
+          directory === undefined
+            ? Effect.succeed(null)
+            : directory.getBinding(threadId).pipe(
+                Effect.map(Option.getOrNull),
+                Effect.map((binding) =>
+                  binding === null
+                    ? null
+                    : {
+                        driver: binding.provider,
+                        resumeId: resumeIdOf(binding.provider, binding.resumeCursor),
+                      },
+                ),
+                Effect.orElseSucceed(() => null),
               ),
-              Effect.orElseSucceed(() => null),
-            ),
-      claudeConfigDirs: settings.pipe(
-        Effect.map((value) => {
-          const dirs = [
-            claudeConfigDir({
-              homePath: Option.isSome(value) ? value.value.providers.claudeAgent.homePath : "",
-              environment: process.env,
-            }),
-          ];
-          if (Option.isSome(value)) {
-            for (const instance of Object.values(value.value.providerInstances)) {
-              const dir = instanceClaudeConfigDir(instance.environment);
-              if (dir) dirs.push(dir);
+        claudeConfigDirs: settings.pipe(
+          Effect.map((value) => {
+            const dirs = [
+              claudeConfigDir({
+                homePath: Option.isSome(value) ? value.value.providers.claudeAgent.homePath : "",
+                environment: process.env,
+              }),
+            ];
+            if (Option.isSome(value)) {
+              for (const instance of Object.values(value.value.providerInstances)) {
+                const dir = instanceClaudeConfigDir(instance.environment);
+                if (dir) dirs.push(dir);
+              }
             }
-          }
-          return dirs;
-        }),
-      ),
-      lowDisk: Effect.promise(() => diskSpaceAt(config.worktreesDir).catch(() => null)).pipe(
-        Effect.map(isLowDisk),
-      ),
-    });
-    return {
-      beforeTurn: service.beforeTurn,
-      start: service.start,
-      drainAll: service.drainAll,
-    } satisfies ParallelChatsShape;
-  }),
-);
+            return dirs;
+          }),
+        ),
+        lowDisk:
+          options.lowDisk ??
+          Effect.promise(() => diskSpaceAt(config.worktreesDir).catch(() => null)).pipe(
+            Effect.map(isLowDisk),
+          ),
+      });
+      return {
+        beforeTurn: service.beforeTurn,
+        start: service.start,
+        drainAll: service.drainAll,
+      } satisfies ParallelChatsShape;
+    }),
+  );
+
+export const ParallelChatsLive = makeParallelChatsLayer();

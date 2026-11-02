@@ -516,6 +516,53 @@ it.layer(TestLayer)("ParallelChats", (it) => {
     );
   });
 
+  describe("an idle copy", () => {
+    it.effect(
+      "goes after a quiet day once all its work joined, and comes back on the next message",
+      () =>
+        Effect.gen(function* () {
+          const world = yield* makeWorld;
+          const service = yield* makeService(world);
+          addThread(world, "aaaaaaaa-1");
+          addThread(world, "bbbbbbbb-2");
+          yield* startTurn(service, world, "aaaaaaaa-1");
+          const copy = (yield* startTurn(service, world, "bbbbbbbb-2")).thread.worktreePath!;
+          write(nodePath.join(copy, "b.md"), "B\n");
+          write(nodePath.join(copy, "unjoined-later.md"), "x\n");
+          yield* endTurn(service, world, "aaaaaaaa-1");
+          yield* endTurn(service, world, "bbbbbbbb-2");
+          expect(read(nodePath.join(world.root, "unjoined-later.md"))).toBe("x\n");
+          // Not a day yet: stays.
+          yield* service.sweepIdleCopies;
+          expect(existsSync(copy)).toBe(true);
+          world.clock += 25 * 60 * 60_000;
+          yield* service.sweepIdleCopies;
+          expect(existsSync(copy)).toBe(false);
+          // Off meanwhile: the chat still gets its copy back at the same path.
+          world.mode = "off";
+          const next = yield* startTurn(service, world, "bbbbbbbb-2");
+          expect(next.thread.worktreePath).toBe(copy);
+          expect(read(nodePath.join(copy, "b.md"))).toBe("B\n");
+        }),
+    );
+
+    it.effect("with work that never joined stays", () =>
+      Effect.gen(function* () {
+        const world = yield* makeWorld;
+        const service = yield* makeService(world);
+        addThread(world, "aaaaaaaa-1");
+        addThread(world, "bbbbbbbb-2");
+        yield* startTurn(service, world, "aaaaaaaa-1");
+        const copy = (yield* startTurn(service, world, "bbbbbbbb-2")).thread.worktreePath!;
+        setStatus(world, "bbbbbbbb-2", "error");
+        write(nodePath.join(copy, "b.md"), "B\n");
+        world.clock += 25 * 60 * 60_000;
+        yield* service.sweepIdleCopies;
+        expect(existsSync(copy)).toBe(true);
+      }),
+    );
+  });
+
   describe("a deleted chat", () => {
     it.effect("its copy goes; what never joined is saved first", () =>
       Effect.gen(function* () {

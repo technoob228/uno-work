@@ -151,3 +151,25 @@ export const copyClaudeTranscript = (input: {
     }
     return false;
   });
+
+/**
+ * Whether any process works inside `folder` (its cwd there): a dev server, a
+ * terminal, an agent. Linux reads /proc; elsewhere the answer is "yes", so
+ * nothing is removed there.
+ */
+export const processRunsIn = (folder: string) =>
+  Effect.promise(async () => {
+    if (process.platform !== "linux") return true;
+    const { readdir } = await import("node:fs/promises");
+    const entries = await readdir("/proc").catch(() => null);
+    if (entries === null) return true;
+    const resolved = nodePath.resolve(folder);
+    for (const entry of entries) {
+      if (!/^\d+$/.test(entry)) continue;
+      const cwd = await readlink(`/proc/${entry}/cwd`).catch(() => null);
+      if (cwd !== null && (cwd === resolved || cwd.startsWith(`${resolved}${nodePath.sep}`))) {
+        return true;
+      }
+    }
+    return false;
+  });
