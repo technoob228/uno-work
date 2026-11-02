@@ -3,7 +3,9 @@
  * chat's composer. Pictures travel through the draft store (they persist as
  * data URLs); plain files are in-memory `File`s, so they are handed over here
  * and the chat's composer takes them as soon as it is showing that draft —
- * before the pending send fires (see `pendingSendStore`).
+ * before the pending send fires (see `pendingSendStore`). A new chat moved to
+ * another folder or computer hands its files to the draft it lands on the
+ * same way (useFolderChats).
  */
 import { create } from "zustand";
 

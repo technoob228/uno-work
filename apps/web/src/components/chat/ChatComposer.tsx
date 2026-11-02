@@ -574,6 +574,12 @@ export interface ChatComposerHandle {
   /** Non-image files (staged on send); cleared/restored like videos. */
   setFileAttachments: (files: ComposerFileAttachment[]) => void;
   /**
+   * The files attached in this box while it shows the new chat `draftId`
+   * (none for any other chat): they move with it to another folder or
+   * computer (useFolderChats).
+   */
+  getDraftFiles: (draftId: DraftId) => ReadonlyArray<ComposerFileAttachment>;
+  /**
    * From the right panel (the browser's Comment / Debug, the launcher's app
    * ideas): attach cards and/or put words into the box, then focus it.
    */
@@ -3257,6 +3263,7 @@ export const ChatComposer = memo(
         setFileAttachments: (files: ComposerFileAttachment[]) => {
           setComposerFilesState(() => files);
         },
+        getDraftFiles: (forDraftId) => (forDraftId === draftId ? composerFilesRef.current : []),
         acceptTransfer: (dataTransfer) => acceptTransferRef.current(dataTransfer),
         setAside: () => setComposerAsideRef.current(),
         getAnswerFiles: () => answerFilesRef.current.map((attachment) => attachment.file),
@@ -3315,6 +3322,7 @@ export const ChatComposer = memo(
         activeThread,
         composerDraftTarget,
         composerCursor,
+        draftId,
         composerTerminalContexts,
         insertComposerDraftTerminalContext,
         promptRef,

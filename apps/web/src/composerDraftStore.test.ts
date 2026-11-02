@@ -288,6 +288,120 @@ describe("composerDraftStore clearComposerContent", () => {
   });
 });
 
+describe("composerDraftStore moveComposerContent", () => {
+  // Misha 02.11: a new chat moved to another folder keeps its screenshot and
+  // words, and leaves no second draft behind in the old folder.
+  const fromProjectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-home"));
+  const toProjectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-site"));
+  const fromDraftId = DraftId.make("draft-move-from");
+  const toDraftId = DraftId.make("draft-move-to");
+  const toThreadId = ThreadId.make("thread-move-to");
+  let originalRevokeObjectUrl: typeof URL.revokeObjectURL;
+  let revokeSpy: ReturnType<typeof vi.fn<(url: string) => void>>;
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+    originalRevokeObjectUrl = URL.revokeObjectURL;
+    revokeSpy = vi.fn();
+    URL.revokeObjectURL = revokeSpy;
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(fromProjectRef, fromDraftId, {
+      threadId: ThreadId.make("thread-move-from"),
+    });
+    store.setProjectDraftThreadId(toProjectRef, toDraftId, { threadId: toThreadId });
+  });
+
+  afterEach(() => {
+    URL.revokeObjectURL = originalRevokeObjectUrl;
+  });
+
+  it("moves words and pictures and empties the old draft", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(fromDraftId, "fix this button");
+    store.addImage(fromDraftId, makeImage({ id: "img-shot", previewUrl: "blob:shot" }));
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    const moved = draftByKey(toDraftId);
+    expect(moved?.prompt).toBe("fix this button");
+    expect(moved?.images.map((image) => image.id)).toEqual(["img-shot"]);
+    // Nothing typed or attached is left: the old folder shows no draft.
+    expect(draftByKey(fromDraftId)).toBeUndefined();
+    // The picture is still on screen in the new draft.
+    expect(revokeSpy).not.toHaveBeenCalledWith("blob:shot");
+  });
+
+  it("moves a picture alone (no words typed)", () => {
+    useComposerDraftStore
+      .getState()
+      .addImage(fromDraftId, makeImage({ id: "img-only", previewUrl: "blob:only" }));
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    expect(draftByKey(toDraftId)?.images.map((image) => image.id)).toEqual(["img-only"]);
+    expect(draftByKey(fromDraftId)).toBeUndefined();
+  });
+
+  it("keeps the old draft's model and permissions, without its content", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(fromDraftId, "hello");
+    store.setRuntimeMode(fromDraftId, "approval-required");
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    const left = draftByKey(fromDraftId);
+    expect(left?.prompt).toBe("");
+    expect(left?.images).toEqual([]);
+    expect(left?.runtimeMode).toBe("approval-required");
+  });
+
+  it("adds to a target draft that has its own content instead of replacing it", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(toDraftId, "earlier note");
+    store.addImage(toDraftId, makeImage({ id: "img-earlier", previewUrl: "blob:earlier" }));
+    store.setPrompt(fromDraftId, "new words");
+    store.addImage(
+      fromDraftId,
+      makeImage({ id: "img-new", previewUrl: "blob:new", name: "new.png", sizeBytes: 7 }),
+    );
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    const merged = draftByKey(toDraftId);
+    expect(merged?.prompt).toBe("earlier note\n\nnew words");
+    expect(merged?.images.map((image) => image.id)).toEqual(["img-earlier", "img-new"]);
+    expect(draftByKey(fromDraftId)).toBeUndefined();
+  });
+
+  it("moves terminal snippets onto the target chat", () => {
+    const store = useComposerDraftStore.getState();
+    const insertion = insertInlineTerminalContextPlaceholder("", 0);
+    store.insertTerminalContext(
+      fromDraftId,
+      insertion.prompt,
+      makeTerminalContext({ id: "ctx-move" }),
+      insertion.contextIndex,
+    );
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    const moved = draftByKey(toDraftId);
+    expect(moved?.prompt).toBe(insertion.prompt);
+    expect(moved?.terminalContexts.map((context) => [context.id, context.threadId])).toEqual([
+      ["ctx-move", toThreadId],
+    ]);
+    expect(draftByKey(fromDraftId)).toBeUndefined();
+  });
+
+  it("does nothing when the source has no draft", () => {
+    useComposerDraftStore.getState().setPrompt(toDraftId, "mine");
+
+    useComposerDraftStore.getState().moveComposerContent(fromDraftId, toDraftId);
+
+    expect(draftByKey(toDraftId)?.prompt).toBe("mine");
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.make("thread-sync-persisted");
   const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);

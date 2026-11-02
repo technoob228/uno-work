@@ -24,7 +24,13 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
+import { useComposerFileHandoffStore } from "../components/computer/composerFileHandoffStore";
+import { useComposerHandleContext, type ComposerHandleRef } from "../composerHandleContext";
+import {
+  useComposerDraftStore,
+  type ComposerFileAttachment,
+  type DraftId,
+} from "../composerDraftStore";
 import { ensureEnvironmentApi } from "../environmentApi";
 import {
   readEnvironmentServerConfig,
@@ -137,28 +143,37 @@ export async function ensureFolderProjectOn(
   return scopeProjectRef(environmentId, projectId);
 }
 
-/** What a new chat carries when it moves (folder or computer): the words, model, permissions. */
+/**
+ * What a new chat carries when it moves (folder or computer): the model and
+ * permissions, and the non-image files attached in its box. The words,
+ * pictures and terminal snippets move inside the draft store
+ * (`moveComposerContent`).
+ */
 interface DraftCarry {
-  readonly prompt: string;
   readonly modelSelection: ModelSelection | undefined;
   readonly runtimeMode: RuntimeMode | null;
+  readonly files: ReadonlyArray<ComposerFileAttachment>;
 }
 
-function readDraftCarry(draftId: DraftId): DraftCarry {
+function readDraftCarry(draftId: DraftId, composer: ComposerHandleRef | null): DraftCarry {
   const before = useComposerDraftStore.getState().getComposerDraft(draftId);
   return {
-    prompt: before?.prompt ?? "",
     modelSelection: before?.activeProvider
       ? before.modelSelectionByProvider[before.activeProvider]
       : undefined,
     runtimeMode: before?.runtimeMode ?? null,
+    // Files live in the composer, not the store (File objects, not saved);
+    // read before the move — the composer empties them when the chat changes.
+    files: composer?.current?.getDraftFiles(draftId) ?? [],
   };
 }
 
 /**
  * After the move: the draft the chat opened on — read from the route (a
  * project can have drafts under two keys, scoped id / logical path; the route
- * is the truth) — gets what was typed, and the old draft lets it go.
+ * is the truth) — gets what was typed and attached, and the old draft lets it
+ * go (Misha 02.11: a pasted screenshot was lost on a folder switch and the old
+ * folder kept a second draft with it).
  */
 function applyDraftCarry(
   router: ReturnType<typeof useRouter>,
@@ -171,10 +186,9 @@ function applyDraftCarry(
   if (route?.kind !== "draft" || route.draftId === draftId) return;
   const moved = route.draftId;
   const next = useComposerDraftStore.getState();
-  if (carry.prompt) {
-    next.setPrompt(moved, carry.prompt);
-    next.setPrompt(draftId, "");
-  }
+  next.moveComposerContent(draftId, moved);
+  // The composer picks these up when it shows the moved draft (as Home's files).
+  useComposerFileHandoffStore.getState().handOff(moved, carry.files);
   if (options.keepModel && carry.modelSelection) {
     next.setModelSelection(moved, carry.modelSelection);
   }
@@ -187,6 +201,7 @@ function applyDraftCarry(
 export function useFolderChats(environmentId: EnvironmentId | null) {
   const { handleNewThread } = useNewThreadHandler();
   const router = useRouter();
+  const composer = useComposerHandleContext();
   const providers = useEnvironmentProviders(environmentId);
 
   /** The project for `folder` on this machine, created when it isn't one yet. */
@@ -249,12 +264,12 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
       if (environmentId === null) return;
       const target = folder ?? (await resolveHomeFolder(environmentId));
       if (!target) throw new Error("Couldn't find the home folder on this computer.");
-      const carry = readDraftCarry(draftId);
+      const carry = readDraftCarry(draftId, composer);
       if (projectRef) await handleNewThread(projectRef, { envMode: "local" });
       else await chatInFolder(target, folder ? undefined : HOME_FOLDER_TITLE);
       applyDraftCarry(router, draftId, carry, { keepModel: true });
     },
-    [chatInFolder, environmentId, handleNewThread, router],
+    [chatInFolder, composer, environmentId, handleNewThread, router],
   );
 
   return { ensureFolderProject, chatInFolder, chatInHomeFolder, moveDraftToFolder };
@@ -269,6 +284,7 @@ export function useFolderChats(environmentId: EnvironmentId | null) {
 export function useChatOnComputer() {
   const { handleNewThread } = useNewThreadHandler();
   const router = useRouter();
+  const composer = useComposerHandleContext();
 
   const chatIn = useCallback(
     async (environmentId: EnvironmentId, folder: string | null): Promise<ScopedProjectRef> => {
@@ -289,11 +305,11 @@ export function useChatOnComputer() {
   // the model doesn't: an assistant works on its own.
   const moveDraftToAssistant = useCallback(
     async (draftId: DraftId, projectRef: ScopedProjectRef): Promise<void> => {
-      const carry = readDraftCarry(draftId);
+      const carry = readDraftCarry(draftId, composer);
       await handleNewThread(projectRef, { envMode: "local" });
       applyDraftCarry(router, draftId, carry, { keepModel: false });
     },
-    [handleNewThread, router],
+    [composer, handleNewThread, router],
   );
 
   const moveDraft = useCallback(
@@ -304,7 +320,7 @@ export function useChatOnComputer() {
       // here is at its limit); without it the other computer picks its own.
       options?: { readonly modelSelection?: ModelSelection },
     ): Promise<void> => {
-      const carry = readDraftCarry(draftId);
+      const carry = readDraftCarry(draftId, composer);
       await chatIn(environmentId, null);
       applyDraftCarry(
         router,
@@ -313,7 +329,7 @@ export function useChatOnComputer() {
         { keepModel: options?.modelSelection !== undefined },
       );
     },
-    [chatIn, router],
+    [chatIn, composer, router],
   );
 
   /**

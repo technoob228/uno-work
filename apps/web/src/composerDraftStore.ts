@@ -462,6 +462,12 @@ interface ComposerDraftStoreState {
     attachments: PersistedComposerImageAttachment[],
   ) => void;
   clearComposerContent: (threadRef: ComposerThreadTarget) => void;
+  /**
+   * An unsent chat moved to another folder, assistant or computer: what is in
+   * its box (words, pictures, terminal snippets) goes to the draft it opened
+   * on, and the old box is left empty so no second draft stays behind.
+   */
+  moveComposerContent: (from: ComposerThreadTarget, to: ComposerThreadTarget) => void;
 }
 
 export interface EffectiveComposerModelState {
@@ -633,6 +639,51 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
     draft.runtimeMode === null &&
     draft.interactionMode === null
   );
+}
+
+/**
+ * The box of the draft a chat moved to, with the moved box's content added.
+ * Misha 02.11: a screenshot pasted into a new chat vanished when he picked
+ * another folder before sending, and the old folder kept a second draft with
+ * it. Now everything comes along. When the draft it lands on has something of
+ * its own already (typed there earlier), nothing is dropped: its words stay
+ * first, the moved words follow after a blank line, pictures and terminal
+ * snippets are put together (the snippets' placeholders keep the same order
+ * as the words they sit in).
+ */
+export function mergeMovedComposerContent(
+  target: ComposerThreadDraftState,
+  moved: ComposerThreadDraftState,
+  targetThreadId: ThreadId | null,
+): ComposerThreadDraftState {
+  const targetPrompt = target.prompt.trim().length > 0 ? target.prompt : "";
+  const prompt =
+    targetPrompt && moved.prompt
+      ? `${targetPrompt}\n\n${moved.prompt}`
+      : targetPrompt || moved.prompt;
+  const imageIds = new Set(target.images.map((image) => image.id));
+  const persistedIds = new Set(target.persistedAttachments.map((attachment) => attachment.id));
+  const contextIds = new Set(target.terminalContexts.map((context) => context.id));
+  const movedContexts = moved.terminalContexts
+    .filter((context) => !contextIds.has(context.id))
+    .flatMap((context) => {
+      if (!targetThreadId) return [context];
+      const normalized = normalizeTerminalContextForThread(targetThreadId, context);
+      return normalized ? [normalized] : [];
+    });
+  return {
+    ...target,
+    prompt,
+    images: [...target.images, ...moved.images.filter((image) => !imageIds.has(image.id))],
+    nonPersistedImageIds: [
+      ...new Set([...target.nonPersistedImageIds, ...moved.nonPersistedImageIds]),
+    ],
+    persistedAttachments: [
+      ...target.persistedAttachments,
+      ...moved.persistedAttachments.filter((attachment) => !persistedIds.has(attachment.id)),
+    ],
+    terminalContexts: [...target.terminalContexts, ...movedContexts],
+  };
 }
 
 function normalizeProviderDriverKind(value: unknown): ProviderDriverKind | null {
@@ -3025,6 +3076,45 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               delete nextDraftsByThreadKey[threadKey];
             } else {
               nextDraftsByThreadKey[threadKey] = nextDraft;
+            }
+            return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        moveComposerContent: (from, to) => {
+          const fromKey = resolveComposerDraftKey(get(), from);
+          const toKey = resolveComposerDraftKey(get(), to);
+          if (!fromKey || !toKey || fromKey === toKey) {
+            return;
+          }
+          const targetThreadId = resolveComposerThreadId(get(), to);
+          set((state) => {
+            const source = state.draftsByThreadKey[fromKey];
+            if (!source) {
+              return state;
+            }
+            const target = state.draftsByThreadKey[toKey] ?? createEmptyThreadDraft();
+            // The model and permissions are not moved here: the caller decides
+            // (another computer may not have the model).
+            const emptiedSource: ComposerThreadDraftState = {
+              ...source,
+              prompt: "",
+              images: [],
+              nonPersistedImageIds: [],
+              persistedAttachments: [],
+              terminalContexts: [],
+            };
+            const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+            nextDraftsByThreadKey[toKey] = mergeMovedComposerContent(
+              target,
+              source,
+              targetThreadId,
+            );
+            // The pictures live on in the target, so their preview URLs are
+            // not revoked (unlike removeImage).
+            if (shouldRemoveDraft(emptiedSource)) {
+              delete nextDraftsByThreadKey[fromKey];
+            } else {
+              nextDraftsByThreadKey[fromKey] = emptiedSource;
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
