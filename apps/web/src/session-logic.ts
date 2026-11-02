@@ -1,3 +1,4 @@
+import { approvalActivityLine } from "@t3tools/shared/approvalActivity";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import {
@@ -794,7 +795,13 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const entry: DerivedWorkLogEntry = {
     id: activity.id,
     createdAt: activity.createdAt,
-    label: taskLabel || activity.summary,
+    label:
+      taskLabel ||
+      approvalActivityLine({
+        kind: activity.kind,
+        summary: activity.summary,
+        decision: typeof payload?.decision === "string" ? payload.decision : undefined,
+      }),
     tone:
       activity.kind === "task.progress"
         ? "thinking"

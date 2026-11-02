@@ -20,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { approvalRequestedSummary, approvalResolvedSummary } from "@t3tools/shared/approvalActivity";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -321,14 +322,7 @@ function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "approval",
           kind: "approval.requested",
-          summary:
-            requestKind === "command"
-              ? "Command approval requested"
-              : requestKind === "file-read"
-                ? "File-read approval requested"
-                : requestKind === "file-change"
-                  ? "File-change approval requested"
-                  : "Approval requested",
+          summary: approvalRequestedSummary(requestKind),
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),
@@ -352,7 +346,7 @@ function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "approval",
           kind: "approval.resolved",
-          summary: "Approval resolved",
+          summary: approvalResolvedSummary(event.payload.decision),
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),

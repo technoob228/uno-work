@@ -758,6 +758,14 @@ export function isOpenCodeStreamStall(message: string): boolean {
   );
 }
 
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { readonly name?: unknown }).name === "MessageAbortedError"
+  );
+}
+
 function sessionErrorMessage(error: unknown): string {
   if (!error || typeof error !== "object") {
     return "OpenCode session failed.";
@@ -2165,6 +2173,11 @@ export function makeOpenCodeAdapter(
         }
 
         case "session.error": {
+          // Stop comes back as an error: a turn the person stopped hasn't failed.
+          if (isAbortError(event.properties.error)) {
+            yield* endTurnAborted(context, "Interrupted by user.");
+            break;
+          }
           const rawMessage = sessionErrorMessage(event.properties.error);
           if (yield* retryStalledTurn(context, rawMessage, event)) {
             break;
@@ -2750,31 +2763,37 @@ export function makeOpenCodeAdapter(
       };
     });
 
+    /** The abort may arrive first as `session.error`: once per turn either way. */
+    const endTurnAborted = Effect.fn("endTurnAborted")(function* (
+      context: OpenCodeSessionContext,
+      reason: string,
+      turnId?: TurnId,
+    ) {
+      const activeTurnId = context.activeTurnId;
+      context.activeTurnId = undefined;
+      context.activeAgent = undefined;
+      context.activeModel = undefined;
+      context.activeVariant = undefined;
+      updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
+      yield* completePromptIdle(context);
+      if (!activeTurnId) return;
+      yield* emit({
+        ...(yield* buildEventBase({
+          threadId: context.session.threadId,
+          turnId: turnId ?? activeTurnId,
+        })),
+        type: "turn.aborted",
+        payload: { reason },
+      });
+    });
+
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
       function* (threadId, turnId) {
         const context = ensureSessionContext(sessions, threadId);
         yield* runOpenCodeSdk("session.abort", () =>
           context.client.session.abort({ sessionID: context.openCodeSessionId }),
         ).pipe(Effect.mapError(toRequestError));
-        const activeTurnId = turnId ?? context.activeTurnId;
-        context.activeTurnId = undefined;
-        context.activeAgent = undefined;
-        context.activeModel = undefined;
-        context.activeVariant = undefined;
-        updateProviderSession(context, { status: "ready" }, { clearActiveTurnId: true });
-        yield* completePromptIdle(context);
-        if (activeTurnId) {
-          yield* emit({
-            ...(yield* buildEventBase({
-              threadId,
-              turnId: activeTurnId,
-            })),
-            type: "turn.aborted",
-            payload: {
-              reason: "Interrupted by user.",
-            },
-          });
-        }
+        yield* endTurnAborted(context, "Interrupted by user.", turnId);
       },
     );
 

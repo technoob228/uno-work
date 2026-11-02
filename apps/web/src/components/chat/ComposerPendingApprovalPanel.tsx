@@ -1,3 +1,4 @@
+import { approvalRequestedSummary } from "@t3tools/shared/approvalActivity";
 import { memo } from "react";
 import { type PendingApproval } from "../../session-logic";
 
@@ -10,14 +11,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
   approval,
   pendingCount,
 }: ComposerPendingApprovalPanelProps) {
-  const approvalSummary =
-    approval.requestKind === "command"
-      ? "Command approval requested"
-      : approval.requestKind === "file-read"
-        ? "File-read approval requested"
-        : approval.requestKind === "file-change"
-          ? "File-change approval requested"
-          : "Approval requested";
+  const approvalSummary = approvalRequestedSummary(approval.requestKind);
 
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
