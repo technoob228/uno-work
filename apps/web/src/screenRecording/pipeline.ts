@@ -310,14 +310,27 @@ export async function runSave(
   }
 }
 
+/**
+ * What the agent watches: its small copy, or — when this browser made none —
+ * the recording itself if it's small enough (a short one usually is).
+ */
+function watchParts(
+  item: Pick<RecordingItem, "agentParts" | "durationMs" | "blob">,
+): ReadonlyArray<{ readonly blob: Blob; readonly durationMs: number }> {
+  if (item.agentParts.length > 0) return item.agentParts;
+  return item.blob.size > 0 && item.blob.size <= AGENT_COPY_MAX_BYTES
+    ? [{ blob: item.blob, durationMs: item.durationMs }]
+    : [];
+}
+
 /** Why the agent copy can't be watched, or null. */
 export function watchSkipReason(
-  item: Pick<RecordingItem, "agentParts" | "durationMs">,
+  item: Pick<RecordingItem, "agentParts" | "durationMs" | "blob">,
 ): string | null {
-  if (item.agentParts.length === 0) {
+  if (watchParts(item).length === 0) {
     return "This browser couldn't make the small copy the agent watches.";
   }
-  if (item.agentParts.some((part) => part.blob.size > AGENT_COPY_MAX_BYTES)) {
+  if (watchParts(item).some((part) => part.blob.size > AGENT_COPY_MAX_BYTES)) {
     return "The recording is too big for the agent to watch.";
   }
   if (item.durationMs > RECORDING_MAX_MS + 5_000) {
@@ -417,14 +430,42 @@ export async function runWatch(
     return;
   }
   patch({ status: "running", error: null });
-  const mime = item.agentCopyMimeType ?? item.mimeType;
+  // A hiccup (the computer busy, the network) shouldn't leave the agent deaf:
+  // one more try before the card says it failed.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      patch(await watchOnce(item, deps, signal));
+      return;
+    } catch (error) {
+      if (attempt >= 1 || signal?.aborted) {
+        patch({
+          status: "failed",
+          error: errorText(error, "The agent couldn't watch the recording."),
+        });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, WATCH_RETRY_MS));
+    }
+  }
+}
+
+const WATCH_RETRY_MS = 2_000;
+
+async function watchOnce(
+  item: RecordingItem,
+  deps: PipelineDeps,
+  signal?: AbortSignal,
+): Promise<Partial<WatchStep>> {
+  const parts = watchParts(item);
+  const mime =
+    item.agentParts.length > 0 ? (item.agentCopyMimeType ?? item.mimeType) : item.mimeType;
   const ext = extensionForMime(mime);
   const staged: string[] = [];
   let driveFolder: { bucketId: number; key: string } | null = null;
   try {
     const home = await deps.homePath();
-    if (item.agentParts.length === 1) {
-      const part = item.agentParts[0]!;
+    if (parts.length === 1) {
+      const part = parts[0]!;
       const path = await stageBlob(
         deps,
         home,
@@ -440,18 +481,17 @@ export async function runWatch(
         durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
         ...timelineRequest(item),
       });
-      patch(await watched(item, deps, result));
-      return;
+      return await watched(item, deps, result);
     }
     // A long recording: its parts through Uno Drive.
     const drive = await deps.driveState();
-    const partsBytes = item.agentParts.reduce((sum, part) => sum + part.blob.size, 0);
+    const partsBytes = parts.reduce((sum, part) => sum + part.blob.size, 0);
     const problem = driveSpaceProblem(drive, partsBytes);
     if (problem) throw new Error(`The agent watches long recordings through Uno Drive. ${problem}`);
     if (drive.bucketId === null)
       throw new Error("Uno Drive isn't ready yet. Try again in a minute.");
-    const names = item.agentParts.map((_, index) => `part-${pad2(index + 1)}.${ext}`);
-    for (const [index, part] of item.agentParts.entries()) {
+    const names = parts.map((_, index) => `part-${pad2(index + 1)}.${ext}`);
+    for (const [index, part] of parts.entries()) {
       staged.push(
         await stageBlob(
           deps,
@@ -472,11 +512,11 @@ export async function runWatch(
       removeSource: true,
     });
     staged.length = 0;
-    if (copied.files < item.agentParts.length) {
+    if (copied.files < parts.length) {
       throw new Error("Uno Drive didn't take the parts the agent watches.");
     }
     const result = await deps.describe({
-      driveParts: item.agentParts.map((part, index) => ({
+      driveParts: parts.map((part, index) => ({
         key: `${prefix}${names[index]}`,
         durationSec: Math.max(1, Math.round(part.durationMs / 1000)),
       })),
@@ -484,9 +524,7 @@ export async function runWatch(
       durationSec: Math.max(1, Math.round(item.durationMs / 1000)),
       ...timelineRequest(item),
     });
-    patch(await watched(item, deps, result));
-  } catch (error) {
-    patch({ status: "failed", error: errorText(error, "The agent couldn't watch the recording.") });
+    return await watched(item, deps, result);
   } finally {
     if (staged.length > 0) await deps.removePaths(staged).catch(() => undefined);
     if (driveFolder) await deps.deleteCloud(driveFolder).catch(() => undefined);

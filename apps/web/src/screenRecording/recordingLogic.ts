@@ -261,6 +261,12 @@ export interface RecordingForAgent {
   readonly timeline?: ReadonlyArray<TimelineEntry>;
   /** The key frames that go with the message as pictures, in order. */
   readonly frames?: ReadonlyArray<KeyFrameCandidate>;
+  /**
+   * Why nobody listened to it, when the watch step didn't finish. Without it
+   * an empty speech reads as "they said nothing" (Misha 01.11: 33 seconds of
+   * talk went out as "the recording has no speech").
+   */
+  readonly notWatched?: string | null;
 }
 
 const OPEN = "<screen_recording";
@@ -306,10 +312,12 @@ export function buildRecordingBlock(recording: RecordingForAgent): string {
     "The person recorded their screen and talked you through it. Do what they showed and asked; if something is unclear, ask before acting.",
     "",
     SAID,
-    recording.speech.trim() || "(nothing — the recording has no speech)",
+    recording.notWatched
+      ? `(not transcribed: ${recording.notWatched} They may well have talked. Don't guess what they said: ask them, or look at the frames.)`
+      : recording.speech.trim() || "(nothing — the recording has no speech)",
     "",
     SEEN,
-    recording.visual.trim() || "(no description)",
+    recording.visual.trim() || (recording.notWatched ? "(not described)" : "(no description)"),
   ];
   if (timeline.length > 0) {
     lines.push("", TIMELINE, formatTimeline(timeline));
