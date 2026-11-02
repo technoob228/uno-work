@@ -83,8 +83,9 @@ export function SidebarShortcutListener() {
       event.stopPropagation();
       toggleSidebar();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    // Capture: the message box (Lexical) takes ⌘B for bold on the way down.
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
   return null;
 }

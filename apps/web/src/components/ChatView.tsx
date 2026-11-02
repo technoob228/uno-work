@@ -37,6 +37,7 @@ import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/proje
 import { ACCOUNT_SWITCH_NOTE_BODY } from "@t3tools/shared/planLimitRules";
 import { parseUnoWorkNote, UNO_WORK_NOTE_PREFIX } from "@t3tools/shared/secretRequestCopy";
 import { isRestartCutOffError, tryAgainNoteBody } from "@t3tools/shared/turnErrorRetry";
+import { fileEditorOwnsSave } from "../lib/editableFocus";
 import { truncate } from "@t3tools/shared/String";
 import { isAssistantConversation } from "@t3tools/shared/assistantChat";
 import { Debouncer } from "@tanstack/react-pacer";
@@ -3123,7 +3124,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "composer.stash") {
         // ⌘S in another text field (a file open in the panel) is that field's.
         const focused = document.activeElement;
-        if (isEditableOutsideComposer(focused)) return;
+        if (isEditableOutsideComposer(focused) || fileEditorOwnsSave()) return;
         event.preventDefault();
         event.stopPropagation();
         composerRef.current?.setAside();

@@ -82,10 +82,11 @@ export function AppShortcuts() {
       event.preventDefault();
       event.stopPropagation();
     };
-    window.addEventListener("keydown", onKeyDown);
+    // Capture: the message box (Lexical) takes ⌘Z for its own undo on the way down.
+    window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("input", onInput, true);
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("input", onInput, true);
     };
   }, [keybindings, routeThreadRef]);
