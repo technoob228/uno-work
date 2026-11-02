@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.177 — 2026-11-02
+
+- Fewer "Allow this?" cards: in full access an agent makes a link to a file or an Uno Drive download link without asking (in Ask mode it still asks; a link that lets others edit a file always asks). Reports now come as a private link that opens after signing in to Uno, with no question at all.
+
+---
+
 ## v0.0.176 — 2026-11-02
 
 - Your assistant in Telegram no longer answers "Done." when it did nothing. If its session got lost after a restart, it starts a new one by itself and answers; a message it really could not answer gets "I couldn't finish this one" instead.
