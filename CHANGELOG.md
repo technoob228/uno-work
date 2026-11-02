@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.179 — 2026-11-02
+
+- Screen recordings: the agent hears what you said. If a recording couldn't be transcribed, the agent is told so and asks you instead of acting as if you said nothing.
+
 ## v0.0.178 — 2026-11-02
 
 - Pull requests in Dev mode now work with GitLab, Bitbucket and Azure DevOps, not only GitHub: list, read, merge, approve and close from the same page.
