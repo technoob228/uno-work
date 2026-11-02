@@ -393,13 +393,20 @@ describe("uno-work tool catalogue", () => {
     for (const name of [
       "app_show_on_internet",
       "app_remove",
-      "file_share_link",
-      "drive_share_link",
       "db_create",
       "computer_create",
     ]) {
       expect(toolLevel(tool(name), {}), name).toBe("sensitive");
     }
+    // Share links ask in Ask mode only (02.11); an edit link always asks.
+    expect(toolLevel(tool("drive_share_link"), { key: "Reports/a.md" })).toBe("change");
+    expect(toolLevel(tool("file_share_link"), { path: "~/a.md" })).toBe("change");
+    expect(toolLevel(tool("file_share_link"), { path: "~/a.docx", access: "comment" })).toBe(
+      "change",
+    );
+    expect(toolLevel(tool("file_share_link"), { path: "~/a.docx", access: "edit" })).toBe(
+      "sensitive",
+    );
     for (const name of [
       "computer_status",
       "apps_list",

@@ -2518,7 +2518,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "drive_share_link",
     group: "files",
     description:
-      "Make a link to one Uno Drive file (key from drive_find) that anyone can download, even while this computer sleeps. Expires after expiresInHours (default 7 days, max 90 days); the person can turn it off in Uno Drive → Shared links. The person always approves.",
+      "Make a link to one Uno Drive file (key from drive_find) that anyone can download, even while this computer sleeps. Expires after expiresInHours (default 7 days, max 90 days); the person can turn it off in Uno Drive → Shared links. In Ask mode the person approves it first. To send someone a file; a report for the person themselves goes out with report_publish.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2528,7 +2528,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       required: ["key"],
       additionalProperties: false,
     },
-    level: "sensitive",
+    level: "change",
     approvalTitle: (args) => `Create a download link to ${str(args, "key")} (Uno Drive)`,
     approvalDetail: (args) =>
       `Anyone with the link can download it for ${num(args, "expiresInHours") ?? 168} h.`,
@@ -2602,7 +2602,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "file_share_link",
     group: "files",
     description:
-      "Make a link to a file or folder of this computer that someone else can open (view; comment/edit for Office documents). Anyone with the link gets access — the person always approves. Optionally expires.",
+      "Make a link to a file or folder of this computer that someone else can open (view; comment/edit for Office documents). Anyone with the link gets access; an edit link always asks the person first, view and comment links only in Ask mode. Optionally expires.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2613,7 +2613,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       required: ["path"],
       additionalProperties: false,
     },
-    level: "sensitive",
+    level: (args) => (str(args, "access") === "edit" ? "sensitive" : "change"),
     approvalTitle: (args) => `Create a share link to ${str(args, "path")}`,
     approvalDetail: (args) =>
       `Anyone with the link can ${str(args, "access") ?? "view"} it${num(args, "expiresInHours") ? ` for ${num(args, "expiresInHours")} h` : " until you revoke it"}.`,

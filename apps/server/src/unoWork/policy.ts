@@ -6,17 +6,21 @@
  *                 open in the panel, ask for a secret). Always runs.
  * - `change`    — changes this computer or starts work (start/stop an app,
  *                 write a manifest, start a chat, send a letter from the
- *                 agent's own mailbox). Follows the chat's mode
+ *                 agent's own mailbox, a view/comment share link or an Uno
+ *                 Drive download link). Follows the chat's mode
  *                 like any other tool: in Ask mode ("approval-required") the
  *                 person allows it first; in the other modes it runs.
  * - `command`   — runs a command on the person's own computer. Like a shell
  *                 in the chat: only full access runs it; in Ask mode and in
  *                 "Edits run freely; commands ask" the person allows it first.
  * - `sensitive` — exposes something beyond a plain site, deletes, or creates
- *                 something billable (show an app on the internet, share
- *                 link, remove a site's password, form answers to an outside
+ *                 something billable (show an app on the internet, an edit
+ *                 share link, remove a site's password, form answers to an outside
  *                 URL, unpublish a site, remove an app, create a computer or
  *                 a database). Always asks, whatever the mode.
+ *
+ * Share links were `sensitive` until 02.11 (Misha: a weekly report asked for
+ * its link every week, even in full access); now only an edit link is.
  *
  * Publishing a plain static site is `safe` (decision 02.10): it goes up
  * without an Allow, and Unpublish is one click in Apps & sites. Setting a

@@ -335,7 +335,7 @@ export const ASSISTANT_MODE_COPY: Readonly<
       "Starts and writes in chats; they run like your own.",
       "Can approve what those chats ask for.",
       "Sends email, publishes sites and deploys without asking.",
-      "Still asks, like any chat: showing an app on the internet, deleting apps or Sparks, share links, new computers or databases.",
+      "Still asks, like any chat: showing an app on the internet, deleting apps or Sparks, edit links to files, new computers or databases.",
     ],
   },
   "asks-first": {
