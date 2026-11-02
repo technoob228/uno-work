@@ -480,6 +480,27 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
+  it.effect("a removed command is back on its default keys", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [
+        { key: "mod+y", command: "sidebar.toggle" },
+        { key: "mod+shift+r", command: "script.run-tests.run" },
+      ]);
+      const resolved = yield* Effect.gen(function* () {
+        const keybindings = yield* Keybindings;
+        return yield* keybindings.removeKeybindingRules("sidebar.toggle");
+      });
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      assert.deepEqual(
+        persisted.map(({ command }) => command),
+        ["script.run-tests.run"],
+      );
+      const sidebar = resolved.find((entry) => entry.command === "sidebar.toggle");
+      assert.strictEqual(sidebar?.shortcut.key, "b");
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
   it.effect("refuses to overwrite malformed keybindings config", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

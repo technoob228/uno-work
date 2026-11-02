@@ -4,6 +4,8 @@ T3 Code reads keybindings from:
 
 - `~/.t3/keybindings.json`
 
+In Uno Work you can change them in Settings → Keyboard: press the new keys, or reset an action to its default. The page writes to the same file, and hand edits work too. A change takes effect at once.
+
 The file must be a JSON array of rules:
 
 ```json

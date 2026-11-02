@@ -27,6 +27,7 @@ import {
   FlaskConicalIcon,
   GitBranchIcon,
   GlobeIcon,
+  KeyboardIcon,
   KeyRoundIcon,
   LayersIcon,
   LockIcon,
@@ -162,6 +163,7 @@ export const SIMPLE_SETTINGS_PATHS = {
   assistants: "/settings/assistants-phone",
   projects: "/settings/projects",
   computer: "/settings/computer",
+  keyboard: "/settings/keyboard",
   developer: "/settings/developer",
 } as const;
 
@@ -174,6 +176,7 @@ export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
   { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
   { label: "Projects", to: SIMPLE_SETTINGS_PATHS.projects, icon: FolderKanbanIcon },
   { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+  { label: "Keyboard", to: SIMPLE_SETTINGS_PATHS.keyboard, icon: KeyboardIcon },
   { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
 ];
 
