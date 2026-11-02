@@ -2,6 +2,7 @@ import { Effect, Layer, Option } from "effect";
 import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
 
 import * as GitLabCli from "./GitLabCli.ts";
+import { makeGitLabPullRequestHost } from "./gitLabPullRequestHost.ts";
 import * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderDiscovery from "./SourceControlProviderDiscovery.ts";
 
@@ -117,6 +118,11 @@ export const make = Effect.fn("makeGitLabSourceControlProvider")(function* () {
           branches: input.branches,
         })
         .pipe(Effect.mapError((error) => providerError("readChangeRequestStatuses", error))),
+    pullRequestHost: (context) =>
+      makeGitLabPullRequestHost(
+        gitlab,
+        SourceControlProvider.providerHostname(context, "gitlab.com"),
+      ),
     createChangeRequest: (input) => {
       const source = SourceControlProvider.sourceControlRefFromInput(input);
       return gitlab

@@ -89,3 +89,13 @@ export function isRepositoryName(value: string): boolean {
 }
 
 export const isCommitSha = (value: string): boolean => /^[0-9a-f]{7,64}$/iu.test(value);
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/** A non-empty string, or null: what a host's optional fields come down to. */
+export const text = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
+export const count = (value: unknown): number =>
+  typeof value === "number" && value >= 0 ? value : 0;

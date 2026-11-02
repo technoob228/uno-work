@@ -1,4 +1,4 @@
-import { Config, Context, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { Config, Context, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
 import {
   TrimmedNonEmptyString,
   type SourceControlProviderAuth,
@@ -15,6 +15,9 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
 const DEFAULT_API_BASE_URL = "https://api.bitbucket.org/2.0";
+const DEFAULT_MAX_RESPONSE_BYTES = 8_000_000;
+const MAX_REDIRECTS = 3;
+const REQUEST_TIMEOUT = "60 seconds";
 
 const BitbucketApiEnvConfig = Config.all({
   baseUrl: Config.string("T3CODE_BITBUCKET_API_BASE_URL").pipe(
@@ -93,8 +96,29 @@ export interface BitbucketRepositoryLocator {
   readonly repoSlug: string;
 }
 
+export interface BitbucketApiResponse {
+  readonly status: number;
+  readonly body: string;
+  readonly truncated: boolean;
+  /** A 202 merge points here to its task's status. */
+  readonly location: string | null;
+}
+
 export interface BitbucketApiShape {
   readonly probeAuth: Effect.Effect<SourceControlProviderAuth, never>;
+  /**
+   * One call with the saved credentials. `url` is a path under the API, or a `next`
+   * link it handed out; any other origin is refused so the credentials stay home.
+   */
+  readonly request: (input: {
+    readonly operation: string;
+    readonly method: "GET" | "POST";
+    readonly url: string;
+    readonly body?: unknown;
+    readonly maxBytes?: number;
+    /** JSON unless said; a raw diff is `text/plain`. */
+    readonly accept?: string;
+  }) => Effect.Effect<BitbucketApiResponse, BitbucketApiError>;
   readonly listPullRequests: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProvider.SourceControlProviderContext;
@@ -347,25 +371,72 @@ function isBitbucketApiError(cause: unknown): cause is BitbucketApiError {
   return Schema.is(BitbucketApiError)(cause);
 }
 
+/** Bitbucket wraps its reason in `{"error": {"message"}}`; the person needs only the reason. */
+function bitbucketReason(body: string): string {
+  const trimmed = body.trim();
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    const error =
+      typeof parsed === "object" && parsed !== null && "error" in parsed ? parsed.error : null;
+    const message =
+      typeof error === "object" && error !== null && "message" in error ? error.message : null;
+    if (typeof message === "string" && message.trim().length > 0) return message.trim();
+  } catch {
+    // Not JSON: an HTML error page or plain text.
+  }
+  return trimmed;
+}
+
 function responseError(
   operation: string,
   response: HttpClientResponse.HttpClientResponse,
 ): Effect.Effect<never, BitbucketApiError> {
   return response.text.pipe(
     Effect.catch(() => Effect.succeed("")),
-    Effect.flatMap((body) =>
-      Effect.fail(
+    Effect.flatMap((body) => {
+      const reason = bitbucketReason(body);
+      return Effect.fail(
         new BitbucketApiError({
           operation,
           status: response.status,
           detail:
-            body.trim().length > 0
-              ? `Bitbucket returned HTTP ${response.status}: ${body.trim()}`
+            reason.length > 0
+              ? `Bitbucket returned HTTP ${response.status}: ${reason}`
               : `Bitbucket returned HTTP ${response.status}.`,
         }),
-      ),
-    ),
+      );
+    }),
   );
+}
+
+function originOf(value: string): string | null {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Stops an oversized diff as it arrives instead of holding all of it and then cutting. */
+function collectCapped<E>(
+  stream: Stream.Stream<Uint8Array, E>,
+  maxBytes: number,
+): Effect.Effect<{ readonly body: string; readonly truncated: boolean }, E> {
+  const decoder = new TextDecoder();
+  let body = "";
+  let bytes = 0;
+  let truncated = false;
+  return Stream.runForEachWhile(stream, (chunk) =>
+    Effect.sync(() => {
+      if (bytes + chunk.byteLength > maxBytes) {
+        truncated = true;
+        return false;
+      }
+      bytes += chunk.byteLength;
+      body += decoder.decode(chunk, { stream: true });
+      return true;
+    }),
+  ).pipe(Effect.map(() => ({ body: truncated ? body : body + decoder.decode(), truncated })));
 }
 
 export const make = Effect.fn("makeBitbucketApi")(function* () {
@@ -386,6 +457,90 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
     }
     return request;
   };
+
+  const apiOrigin = originOf(config.baseUrl);
+
+  const trustedUrl = (value: string): string | null => {
+    if (!/^https?:\/\//u.test(value)) return apiUrl(value);
+    return originOf(value) === apiOrigin ? value : null;
+  };
+
+  /**
+   * Redirects carry the credentials along, so they too must stay on the API's origin.
+   * Fetch follows them itself and drops the credentials on another origin; this is for
+   * a client that hands a redirect back instead.
+   */
+  const send = (input: {
+    readonly operation: string;
+    readonly method: "GET" | "POST";
+    readonly url: string;
+    readonly body?: unknown;
+    readonly accept?: string;
+    readonly redirects: number;
+  }): Effect.Effect<HttpClientResponse.HttpClientResponse, BitbucketApiError> => {
+    const url = trustedUrl(input.url);
+    if (url === null) {
+      return Effect.fail(
+        new BitbucketApiError({
+          operation: input.operation,
+          detail: "Bitbucket pointed to another site; the request wasn't sent.",
+        }),
+      );
+    }
+    const base = input.method === "GET" ? HttpClientRequest.get(url) : HttpClientRequest.post(url);
+    const request =
+      input.body === undefined ? base : base.pipe(HttpClientRequest.bodyJsonUnsafe(input.body));
+    const accepting =
+      input.accept === undefined
+        ? request.pipe(HttpClientRequest.acceptJson)
+        : request.pipe(HttpClientRequest.setHeader("Accept", input.accept));
+    return httpClient.execute(withAuth(accepting)).pipe(
+      Effect.mapError((cause) => requestError(input.operation, cause)),
+      Effect.flatMap((response) => {
+        const location = response.headers.location;
+        return response.status >= 300 &&
+          response.status < 400 &&
+          location !== undefined &&
+          input.redirects < MAX_REDIRECTS
+          ? send({
+              ...input,
+              url: new URL(location, url).toString(),
+              redirects: input.redirects + 1,
+            })
+          : Effect.succeed(response);
+      }),
+    );
+  };
+
+  const request: BitbucketApiShape["request"] = (input) =>
+    send({ ...input, redirects: 0 }).pipe(
+      Effect.flatMap((response) =>
+        HttpClientResponse.matchStatus({
+          "2xx": (success) =>
+            collectCapped(success.stream, input.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES).pipe(
+              Effect.map(
+                (read): BitbucketApiResponse => ({
+                  ...read,
+                  status: success.status,
+                  location: success.headers.location ?? null,
+                }),
+              ),
+              Effect.mapError((cause) => requestError(input.operation, cause)),
+            ),
+          orElse: (failed) => responseError(input.operation, failed),
+        })(response),
+      ),
+      Effect.timeout(REQUEST_TIMEOUT),
+      Effect.mapError((cause) =>
+        isBitbucketApiError(cause)
+          ? cause
+          : new BitbucketApiError({
+              operation: input.operation,
+              detail: "Bitbucket didn't answer in time.",
+              cause,
+            }),
+      ),
+    );
 
   const decodeResponse = <S extends Schema.Top>(
     operation: string,
@@ -557,6 +712,7 @@ export const make = Effect.fn("makeBitbucketApi")(function* () {
   });
 
   return BitbucketApi.of({
+    request,
     probeAuth: executeJson(
       "probeAuth",
       HttpClientRequest.get(apiUrl("/user")),

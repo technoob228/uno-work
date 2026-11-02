@@ -602,3 +602,94 @@ it.effect("checks out fork pull requests through an ensured fork remote", () => 
     });
   }).pipe(Effect.provide(layer));
 });
+
+it.effect("request: sends a path under the API, and a 202 merge hands back its task link", () => {
+  const task = "https://api.test.local/2.0/repositories/a/b/pullrequests/7/merge/task-status/t1";
+  const { execute, layer } = makeLayer({
+    response: () => new Response("", { status: 202, headers: { Location: task } }),
+  });
+
+  return Effect.gen(function* () {
+    const bitbucket = yield* BitbucketApi.BitbucketApi;
+    const answer = yield* bitbucket.request({
+      operation: "merge",
+      method: "POST",
+      url: "/repositories/a/b/pullrequests/7/merge",
+      body: { type: "pullrequest_merge_parameters" },
+    });
+    assert.deepStrictEqual(answer, { status: 202, body: "", truncated: false, location: task });
+    const request = execute.mock.calls[0]?.[0];
+    assert.strictEqual(
+      request?.url,
+      "https://api.test.local/2.0/repositories/a/b/pullrequests/7/merge",
+    );
+    assert.strictEqual(request?.headers.accept, "application/json");
+    assert.ok(request?.headers.authorization?.startsWith("Basic "));
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("request: follows a `next` link on the API's origin and no other", () => {
+  const { execute, layer } = makeLayer({ response: () => Response.json({ values: [] }) });
+
+  return Effect.gen(function* () {
+    const bitbucket = yield* BitbucketApi.BitbucketApi;
+    yield* bitbucket.request({
+      operation: "page",
+      method: "GET",
+      url: "https://api.test.local/2.0/repositories/a/b/pullrequests?page=2",
+    });
+    const refused = yield* bitbucket
+      .request({ operation: "page", method: "GET", url: "https://evil.example/steal?page=2" })
+      .pipe(Effect.flip);
+    assert.match(refused.detail, /another site/u);
+    assert.strictEqual(execute.mock.calls.length, 1);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("request: asks for text when told, and cuts an oversized answer", () => {
+  const { execute, layer } = makeLayer({
+    response: () => new Response("diff --git a/a b/a\n+0123456789\n", { status: 200 }),
+  });
+
+  return Effect.gen(function* () {
+    const bitbucket = yield* BitbucketApi.BitbucketApi;
+    const answer = yield* bitbucket.request({
+      operation: "diff",
+      method: "GET",
+      url: "/repositories/a/b/pullrequests/7/diff",
+      accept: "text/plain",
+      maxBytes: 8,
+    });
+    assert.strictEqual(answer.truncated, true);
+    assert.strictEqual(execute.mock.calls[0]?.[0]?.headers.accept, "text/plain");
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("request: keeps the status and Bitbucket's reason from its error envelope", () => {
+  const { layer } = makeLayer({
+    response: () =>
+      Response.json(
+        {
+          type: "error",
+          error: { message: "You can't merge until you resolve all merge conflicts." },
+        },
+        { status: 400 },
+      ),
+  });
+
+  return Effect.gen(function* () {
+    const bitbucket = yield* BitbucketApi.BitbucketApi;
+    const error = yield* bitbucket
+      .request({
+        operation: "merge",
+        method: "POST",
+        url: "/repositories/a/b/pullrequests/7/merge",
+      })
+      .pipe(Effect.flip);
+    assert.strictEqual(error.status, 400);
+    assert.strictEqual(
+      error.detail,
+      "Bitbucket returned HTTP 400: You can't merge until you resolve all merge conflicts.",
+    );
+  }).pipe(Effect.provide(layer));
+});
