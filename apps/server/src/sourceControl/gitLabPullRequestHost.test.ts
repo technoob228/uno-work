@@ -5,6 +5,8 @@ import { GitLabCliError, type GitLabCliShape } from "./GitLabCli.ts";
 import {
   buildListPath,
   buildMergeBody,
+  gitLabActionLine,
+  glabRefusal,
   GITLAB_PULL_REQUEST_CAPABILITIES,
   makeGitLabPullRequestHost,
   parseCommits,
@@ -759,5 +761,136 @@ describe("the host", () => {
     expect(fake.calls[0]?.args.join(" ")).not.toContain("rm -rf");
     expect(fake.calls[0]?.stdin).toBe(JSON.stringify({ body: "--method DELETE; rm -rf /" }));
     expect(fake.calls[0]?.args[1]).toBe(`${encoded}/merge_requests/12/notes`);
+  });
+});
+
+/**
+ * As `GitLabCli` hands a refusal over: its own reading in `detail` (every 401 is
+ * "not signed in" there), and what `glab api` printed on stderr in the cause.
+ * `glab api` prints `glab: <GitLab's message> (HTTP <status>)`.
+ */
+const refusal = (stderr: string, detail = `GitLab CLI command failed: ${stderr}`) =>
+  new GitLabCliError({
+    operation: "execute",
+    detail,
+    cause: { _tag: "VcsProcessExitError", detail: stderr },
+  });
+
+const failureDetail = (exit: { _tag: string }) =>
+  exit._tag === "Failure" ? JSON.stringify(exit) : "";
+
+describe("glabRefusal", () => {
+  it("reads GitLab's message and the status", () => {
+    expect(glabRefusal("glab: 405 Method Not Allowed (HTTP 405)")).toEqual({
+      status: 405,
+      message: "405 Method Not Allowed",
+    });
+    expect(glabRefusal("warning: something\nglab: Branch cannot be merged (HTTP 422)\n")).toEqual({
+      status: 422,
+      message: "Branch cannot be merged",
+    });
+  });
+
+  it("reads a bare status, and nothing from other words", () => {
+    expect(glabRefusal("glab: HTTP 503")).toEqual({ status: 503, message: null });
+    expect(glabRefusal("could not find any merge request")).toEqual({
+      status: null,
+      message: null,
+    });
+  });
+});
+
+describe("gitLabActionLine", () => {
+  it("speaks to each refusal the merge route documents", () => {
+    expect(gitLabActionLine("merge", 401, "401 Unauthorized")).toMatch(/permission/u);
+    expect(gitLabActionLine("merge", 405, "405 Method Not Allowed")).toMatch(
+      /can't merge this yet/u,
+    );
+    expect(gitLabActionLine("merge", 409, "SHA does not match HEAD of source branch")).toMatch(
+      /changed/u,
+    );
+    expect(gitLabActionLine("merge", 422, "Branch cannot be merged")).toMatch(/conflicts/u);
+    expect(gitLabActionLine("enable-auto-merge", 405, null)).toMatch(/can't merge this yet/u);
+  });
+
+  it("tells an approver apart from a stranger", () => {
+    expect(gitLabActionLine("approve", 401, "401 Unauthorized")).toMatch(/approved already/u);
+    expect(gitLabActionLine("close", 401, "401 Unauthorized")).toMatch(/permission/u);
+  });
+
+  it("never sends the person to sign in again over a permission", () => {
+    for (const action of ["merge", "approve", "close", "reopen", "comment"] as const) {
+      expect(gitLabActionLine(action, 401, null)).not.toMatch(/sign|auth|log ?in/iu);
+    }
+  });
+
+  it("keeps GitLab's own words where they say more", () => {
+    expect(gitLabActionLine("merge", 400, "SHA must be provided when merging")).toBe(
+      "SHA must be provided when merging",
+    );
+    expect(gitLabActionLine("close", null, null)).toBeNull();
+  });
+});
+
+describe("refused actions", () => {
+  const path = `${encoded}/merge_requests/12`;
+
+  it.each([
+    ["glab: 401 Unauthorized (HTTP 401)", /lack permission/u],
+    ["glab: 405 Method Not Allowed (HTTP 405)", /can't merge this yet/u],
+    ["glab: SHA does not match HEAD of source branch: 0a1b2c (HTTP 409)", /changed/u],
+    ["glab: Branch cannot be merged (HTTP 422)", /conflicts/u],
+  ])("a merge refused with %s says so plainly", async (stderr, line) => {
+    const fake = fakeGitLab([
+      [
+        `${path}/merge`,
+        refusal(stderr, "GitLab CLI is not authenticated. Run `glab auth login` and retry."),
+      ],
+    ]);
+    const exit = await Effect.runPromiseExit(
+      fake.host.runAction({ ...target, action: "merge", mergeMethod: "merge" }),
+    );
+    expect(exit._tag).toBe("Failure");
+    const text = failureDetail(exit);
+    expect(text).toMatch(line);
+    expect(text).not.toMatch(/glab auth login/u);
+  });
+
+  it("an approval GitLab won't take isn't a sign-in problem", async () => {
+    const fake = fakeGitLab([[`${path}/approve`, refusal("glab: 401 Unauthorized (HTTP 401)")]]);
+    const exit = await Effect.runPromiseExit(fake.host.runAction({ ...target, action: "approve" }));
+    expect(failureDetail(exit)).toMatch(/approved already/u);
+  });
+
+  it("leaves a failure without an HTTP status as it was", async () => {
+    const fake = fakeGitLab([
+      ["mr update", refusal("could not update merge request", "GitLab CLI command failed: no")],
+    ]);
+    const exit = await Effect.runPromiseExit(fake.host.runAction({ ...target, action: "ready" }));
+    expect(failureDetail(exit)).toMatch(/GitLab CLI command failed: no/u);
+  });
+
+  it("reads the 201 GitLab answers when there was no auto-merge to cancel", async () => {
+    // Merge requests API: the route answers 201 either way; `status` tells.
+    const fake = fakeGitLab([
+      [
+        `${path}/cancel_merge_when_pipeline_succeeds`,
+        { status: "error", message: "Can't cancel the automatic merge", http_status: 406 },
+      ],
+    ]);
+    const exit = await Effect.runPromiseExit(
+      fake.host.runAction({ ...target, action: "disable-auto-merge" }),
+    );
+    expect(failureDetail(exit)).toMatch(/wasn't on/u);
+    const done = fakeGitLab([
+      [`${path}/cancel_merge_when_pipeline_succeeds`, { iid: 12, state: "opened" }],
+    ]);
+    await Effect.runPromise(done.host.runAction({ ...target, action: "disable-auto-merge" }));
+  });
+
+  it("explains a refused comment", async () => {
+    const fake = fakeGitLab([[`${path}/notes`, refusal("glab: 403 Forbidden (HTTP 403)")]]);
+    const exit = await Effect.runPromiseExit(fake.host.comment!({ ...target, body: "Looks good" }));
+    expect(failureDetail(exit)).toMatch(/api scope/u);
   });
 });

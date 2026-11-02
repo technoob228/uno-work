@@ -571,6 +571,63 @@ export function parseDiffPage(entries: unknown): {
   return { patch: sections.join(""), files, incomplete, rawCount: raw.length };
 }
 
+/**
+ * `glab api` ends a refusal with GitLab's message and `(HTTP 405)`, or says only
+ * `glab: HTTP 405` when the body had no message.
+ */
+export function glabRefusal(output: string): {
+  readonly status: number | null;
+  readonly message: string | null;
+} {
+  for (const line of output.split(/\r?\n/u).toReversed()) {
+    const match = /^glab: (?:(.*) )?\(?HTTP (\d{3})\)?\s*$/u.exec(line.trim());
+    if (match !== null) {
+      const message = match[1]?.trim() ?? "";
+      return { status: Number(match[2]), message: message.length > 0 ? message : null };
+    }
+  }
+  return { status: null, message: null };
+}
+
+/**
+ * The person's line for a refused action, by GitLab's status codes for it (Merge
+ * requests API: merge 401/405/409/422; approve answers 401 to someone who can't
+ * approve). GitLab's 401 here is about permission: the page already read with the
+ * same sign-in. Null: GitLab's own words say it better.
+ */
+export function gitLabActionLine(
+  action: PullRequestHostActionInput["action"] | "comment",
+  status: number | null,
+  message: string | null,
+): string | null {
+  const merging = action === "merge" || action === "enable-auto-merge";
+  switch (status) {
+    case 401:
+      if (merging) {
+        return "GitLab didn't let you merge this. You may lack permission in this project.";
+      }
+      if (action === "approve") {
+        return "GitLab didn't take the approval. You may have approved already, or you aren't an approver here.";
+      }
+      return "GitLab didn't let you do this. You may lack permission in this project.";
+    case 403:
+      return "GitLab refused. You may lack permission here, or glab's token lacks the api scope.";
+    case 405:
+      return merging
+        ? "GitLab can't merge this yet. Approvals, the pipeline, open threads or draft status may be holding it."
+        : "GitLab can't do this to the merge request as it is now.";
+    case 406:
+    case 422:
+      return merging ? "GitLab couldn't merge the branch. It may have conflicts." : message;
+    case 409:
+      return "The branch changed in the meantime. Reload and try again.";
+    case 429:
+      return "GitLab's rate limit is used up for now. Try again in a few minutes.";
+    default:
+      return message;
+  }
+}
+
 /** Left out unless a method was picked, so the project's own default applies. */
 export function buildMergeBody(input: PullRequestHostActionInput): Record<string, boolean> {
   return {
@@ -753,6 +810,41 @@ export function makeGitLabPullRequestHost(
     );
   };
 
+  /** What `glab` printed, read before `GitLabCli` takes every 401 for "not signed in". */
+  const refused =
+    (action: PullRequestHostActionInput["action"] | "comment", operation: string) =>
+    (error: SourceControlProviderError): SourceControlProviderError => {
+      const process = isRecord(error.cause) ? error.cause.cause : null;
+      const output =
+        isRecord(process) && typeof process.detail === "string" ? process.detail : null;
+      if (output === null) return error;
+      const refusal = glabRefusal(output);
+      if (refusal.status === null) return error;
+      const line = gitLabActionLine(action, refusal.status, refusal.message);
+      return line === null ? error : failure(operation, line);
+    };
+
+  /** The deprecated route, because GitLab before 17.11 has no other; it answers 201 either way. */
+  const cancelAutoMerge = (input: PullRequestHostActionInput, operation: string) =>
+    api({
+      cwd: input.cwd,
+      operation,
+      path: `${mergeRequestPath(input.repository, input.number)}/cancel_merge_when_pipeline_succeeds`,
+      method: "POST",
+    }).pipe(
+      Effect.flatMap((result) =>
+        Effect.try({
+          try: () => JSON.parse(result.stdout) as unknown,
+          catch: () => null,
+        }).pipe(Effect.orElseSucceed(() => null)),
+      ),
+      Effect.flatMap((answer) =>
+        isRecord(answer) && answer.status === "error"
+          ? Effect.fail(failure(operation, "Auto-merge wasn't on for this merge request."))
+          : Effect.void,
+      ),
+    );
+
   return {
     label: "GitLab",
     capabilities: GITLAB_PULL_REQUEST_CAPABILITIES,
@@ -903,7 +995,7 @@ export function makeGitLabPullRequestHost(
             yield* write(`${mergeRequest}/merge`, "PUT", buildMergeBody(input));
             return { url: null };
           case "disable-auto-merge":
-            yield* write(`${mergeRequest}/cancel_merge_when_pipeline_succeeds`, "POST");
+            yield* cancelAutoMerge(input, operation);
             return { url: null };
           case "approve":
             yield* write(`${mergeRequest}/approve`, "POST");
@@ -927,7 +1019,7 @@ export function makeGitLabPullRequestHost(
           case "revert":
             return yield* failure(operation, "GitLab has no revert command.");
         }
-      }),
+      }).pipe(Effect.mapError(refused(input.action, `pullRequest.${input.action}`))),
 
     comment: (input) =>
       api({
@@ -936,6 +1028,6 @@ export function makeGitLabPullRequestHost(
         path: `${mergeRequestPath(input.repository, input.number)}/notes`,
         method: "POST",
         body: { body: input.body },
-      }).pipe(Effect.asVoid),
+      }).pipe(Effect.asVoid, Effect.mapError(refused("comment", "commentOnPullRequest"))),
   };
 }
