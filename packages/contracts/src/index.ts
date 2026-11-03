@@ -21,6 +21,7 @@ export * from "./skills.ts";
 export * from "./credentialsVault.ts";
 export * from "./projectSync.ts";
 export * from "./myComputer.ts";
+export * from "./computers.ts";
 export * from "./browserLive.ts";
 export * from "./git.ts";
 export * from "./vcs.ts";

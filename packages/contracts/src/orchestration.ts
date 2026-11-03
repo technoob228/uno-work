@@ -330,6 +330,24 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+// See OrchestrationProject.computer.
+export const ProjectComputer = Schema.Struct({
+  computerId: TrimmedNonEmptyString,
+  computerName: TrimmedNonEmptyString,
+  // Absolute, on that computer.
+  path: TrimmedNonEmptyString,
+});
+export type ProjectComputer = typeof ProjectComputer.Type;
+
+// A turn of a chat on the person's own computer waits for it (asleep, offline):
+// paused, not failed; cleared when the computer is back or the turn stops.
+export const ThreadComputerWait = Schema.Struct({
+  computerId: TrimmedNonEmptyString,
+  computerName: TrimmedNonEmptyString,
+  since: IsoDateTime,
+});
+export type ThreadComputerWait = typeof ThreadComputerWait.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -337,6 +355,10 @@ export const OrchestrationProject = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  // A folder on the person's own computer this project stands for (computers
+  // lifecycle, computers.ts): its chats run here, their commands and files
+  // there. Absent or null: a project of this computer.
+  computer: Schema.optional(Schema.NullOr(ProjectComputer)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -678,6 +700,8 @@ export const OrchestrationThread = Schema.Struct({
   personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
   // See ThreadSource. Absent or null: the chat started in Uno Work.
   source: Schema.optional(Schema.NullOr(ThreadSource)),
+  // See ThreadComputerWait. Absent or null: not waiting for a computer.
+  computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -704,6 +728,8 @@ export const OrchestrationProjectShell = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  // See OrchestrationProject.computer.
+  computer: Schema.optional(Schema.NullOr(ProjectComputer)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -764,6 +790,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   personCallReason: Schema.optional(Schema.NullOr(Schema.String)),
   // See ThreadSource. Absent or null: the chat started in Uno Work.
   source: Schema.optional(Schema.NullOr(ThreadSource)),
+  // See ThreadComputerWait.
+  computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,

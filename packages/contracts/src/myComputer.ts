@@ -38,6 +38,11 @@ export const MyComputerStatus = Schema.Struct({
   /** False: no console access here, or the account doesn't have the feature. */
   enabled: Schema.Boolean,
   computers: Schema.Array(MyComputer),
+  /**
+   * The computers lifecycle flag for this account (console: COMPUTERS_LIFECYCLE_USERS).
+   * Absent from older daemons and consoles: off. See computers.ts.
+   */
+  lifecycle: Schema.optionalKey(Schema.Boolean),
 });
 export type MyComputerStatus = typeof MyComputerStatus.Type;
 

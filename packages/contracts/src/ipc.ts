@@ -50,6 +50,17 @@ import type {
   MyComputerStatus,
 } from "./myComputer.ts";
 import type {
+  ComputerInput,
+  ComputersBringWorkInput,
+  ComputersContinueInCloudInput,
+  ComputersContinueInCloudResult,
+  ComputersOpenFolderInput,
+  ComputersOpenFolderResult,
+  ComputersSetPurposeInput,
+  ComputersState,
+  ComputerWorkStatus,
+} from "./computers.ts";
+import type {
   SkillsAddInput,
   SkillsAddResult,
   SkillsInstallInput,
@@ -1093,6 +1104,18 @@ export interface EnvironmentApi {
     importStart: (input: MyComputerImportStartInput) => Promise<MyComputerImportStatus>;
     importDecline: (input: MyComputerImportInput) => Promise<MyComputerImportStatus>;
     chatHistory: (input: MyComputerChatHistoryInput) => Promise<MyComputerChatHistory>;
+  };
+  /** Computers lifecycle (computers.ts): what each own computer is for, its work, chats on it. */
+  computers: {
+    state: () => Promise<ComputersState>;
+    setPurpose: (input: ComputersSetPurposeInput) => Promise<ComputersState>;
+    workStatus: (input: ComputerInput) => Promise<ComputerWorkStatus>;
+    workScan: (input: ComputerInput) => Promise<ComputerWorkStatus>;
+    bringWork: (input: ComputersBringWorkInput) => Promise<ComputerWorkStatus>;
+    openFolder: (input: ComputersOpenFolderInput) => Promise<ComputersOpenFolderResult>;
+    continueInCloud: (
+      input: ComputersContinueInCloudInput,
+    ) => Promise<ComputersContinueInCloudResult>;
   };
   workspace: {
     getState: () => Promise<WorkspaceState>;
