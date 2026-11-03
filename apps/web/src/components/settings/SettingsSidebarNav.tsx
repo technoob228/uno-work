@@ -22,7 +22,12 @@ import {
 } from "../ui/sidebar";
 import { MachineMenuItems, MachineStatusDot } from "./SettingsScopeSwitcher";
 import { useTeamShown } from "../assistants/useAssistantTeam";
-import { buildSettingsNavGroups, type SettingsNavGroup } from "./settingsNavGroups";
+import {
+  buildSettingsNavGroups,
+  SIMPLE_SETTINGS_PATHS,
+  type SettingsNavGroup,
+} from "./settingsNavGroups";
+import { useThisComputerSettingShown } from "../computersLifecycle/WhereAgentsRun";
 import { useSettingsScopeModel, type SettingsScopeModel } from "./useSettingsScope";
 
 /**
@@ -42,7 +47,9 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const devMode = useDevMode();
 
   const assistantsUpdate = useTeamShown();
-  const groups = useMemo(() => {
+  // Computers lifecycle, variants b/c: in the desktop app "Computer" is this computer.
+  const thisComputer = useThisComputerSettingShown();
+  const builtGroups = useMemo(() => {
     const isFlagEnabled = (flag: FeatureFlagKey | undefined) =>
       flag === undefined || resolveFeatureFlag(flagOverrides, flag);
     // A URL naming a machine this device no longer has still gets its group,
@@ -68,6 +75,20 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     selectedMachine,
     unknownMachine,
   ]);
+  const groups = useMemo(
+    () =>
+      thisComputer
+        ? builtGroups.map((group) => ({
+            ...group,
+            entries: group.entries.map((entry) =>
+              entry.to === SIMPLE_SETTINGS_PATHS.computer
+                ? { ...entry, label: "This computer" }
+                : entry,
+            ),
+          }))
+        : builtGroups,
+    [builtGroups, thisComputer],
+  );
 
   const handleSectionClick = useCallback(
     (to: string) => {

@@ -21,6 +21,9 @@ import { StaleBundleNotice } from "../components/StaleBundleNotice";
 import { CommandPalette } from "../components/CommandPalette";
 import { SetupTourCoach } from "../components/setup/SetupTour";
 import { ConnectComputerDialog } from "../components/localComputer/ConnectComputerDialog";
+import { AddComputerWindow } from "../components/computersLifecycle/AddComputerWindow";
+import { LifecycleConfirmDialogs } from "../components/computersLifecycle/ComputerActions";
+import { COMPUTERS_LIFECYCLE } from "../computersLifecycle/flag";
 import { ImportProgress } from "../components/localComputer/ImportScreens";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
 import { ProjectUploadsPanel } from "../components/newProject/ProjectUploadsPanel";
@@ -243,6 +246,12 @@ function RootRouteView() {
         </AppSidebarLayout>
         <NewProjectDialog />
         <ConnectComputerDialog />
+        {COMPUTERS_LIFECYCLE ? (
+          <>
+            <AddComputerWindow />
+            <LifecycleConfirmDialogs />
+          </>
+        ) : null}
         <ImportProgress />
         <ProjectUploadsPanel />
         <ScreenRecordingBar />

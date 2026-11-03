@@ -21,6 +21,8 @@ const clients = new Map<MachineKey, Set<Closable>>();
 /** Until when (ms) a computer's link stays down; 0 = up. */
 const downUntil = new Map<MachineKey, number>();
 const woken = new Set<MachineKey>();
+/** Computers lifecycle: put to sleep from the panel, until woken from it. */
+const sleeping = new Set<MachineKey>();
 const listeners = new Set<() => void>();
 
 const FLAKY_FIRST_MS = 20_000;
@@ -33,6 +35,7 @@ function notify() {
 
 /** Is the computer's link up right now (asleep/offline ones never are). */
 export function linkUp(key: MachineKey): boolean {
+  if (sleeping.has(key)) return false;
   if (key === "work") return true;
   if (key === "product") return woken.has("product");
   if (WORLD.account !== "live") return false;
@@ -71,6 +74,31 @@ export function wakeComputer(key: MachineKey, afterSeconds = 4) {
     woken.add(key);
     notify();
   }, afterSeconds * 1000);
+}
+
+/** Computers lifecycle: the computer sleeps (its sockets close) until `setSleeping(key, false)`. */
+export function setSleeping(key: MachineKey, asleep: boolean) {
+  if (asleep) {
+    sleeping.add(key);
+    const set = clients.get(key);
+    if (set) {
+      for (const client of set) {
+        try {
+          client.close(4000, "asleep");
+        } catch {
+          // already closed
+        }
+      }
+      set.clear();
+    }
+  } else {
+    sleeping.delete(key);
+  }
+  notify();
+}
+
+export function isSleeping(key: MachineKey): boolean {
+  return sleeping.has(key);
 }
 
 export function isWoken(key: MachineKey): boolean {

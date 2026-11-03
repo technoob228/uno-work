@@ -19,6 +19,8 @@ import { personaOf } from "./daemon";
 import { VARIANT } from "./variant";
 import { MC_VARIANT } from "./mcVariant";
 import { dropLink, wakeComputer } from "./links";
+import { LC_ON } from "./lifecycle";
+import { LifecyclePanel } from "./LifecyclePanel";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -226,6 +228,10 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [open]);
 
+  // Computers lifecycle (02.11): its own card.
+  if (LC_ON) {
+    return <LifecyclePanel router={router} open={open} setOpen={setOpen} panelRef={panelRef} />;
+  }
   if (!open) {
     return (
       <button

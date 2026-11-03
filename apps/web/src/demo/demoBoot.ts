@@ -82,6 +82,16 @@ import {
   startDemoAuth,
 } from "./assist/plans";
 import { WORLD, worldStamp } from "./assist/world";
+import {
+  answerLifecycleRpc,
+  lcDeletedBox,
+  lcHidesMac,
+  lcOnTurn,
+  lcStripsMacChats,
+  startLifecycle,
+  type LifecycleOps,
+} from "./assist/lifecycle";
+import { LC_FALLBACK_KEY, LC_START, LC_START_KEY } from "../computersLifecycle/flag";
 import "./assist/variant";
 import {
   CHATS,
@@ -114,18 +124,27 @@ import {
   seedAssistantTeam,
 } from "./assistantsFixtures";
 
-const SEED_VERSION = DEMO_ASSIST ? `assist-1:${worldStamp(WORLD)}` : "w0138-1";
+// Computers lifecycle: `fresh` starts over on every load (the MacBook isn't connected yet).
+const SEED_VERSION = DEMO_ASSIST
+  ? `assist-1:${worldStamp(WORLD)}:lc-${LC_START}${LC_START === "fresh" ? `:${Date.now()}` : ""}`
+  : "w0138-1";
 
 /** Computers the page has saved (besides its own): the 16.10 mock's two clouds, or the MacBook. */
 function savedMachines(): DemoMachine[] {
   if (!DEMO_ASSIST) return [MACHINES.work, MACHINES.product];
   // The MacBook stays saved while it sleeps (it shows offline).
-  return WORLD.account === "live" ? [MACHINES.mac] : [];
+  return WORLD.account === "live" && !lcHidesMac() ? [MACHINES.mac] : [];
 }
 
 function seedLocalStorage() {
   if (localStorage.getItem("demo:seed") === SEED_VERSION) return;
-  const keep = new Set(["demo:switches", "demo:assist-world"]);
+  const keep = new Set([
+    "demo:switches",
+    "demo:assist-world",
+    LC_START_KEY,
+    LC_FALLBACK_KEY,
+    "ui_dev_mode",
+  ]);
   for (const key of Object.keys(localStorage)) {
     if (!keep.has(key)) localStorage.removeItem(key);
   }
@@ -205,6 +224,9 @@ function modelFor(machine: DemoMachine): Model {
     model = readModelFor(machine) as unknown as Model;
     const world = demoWorld();
     if (world !== null) model = freshAccount(model, world === "one");
+    // Computers lifecycle, fresh: the MacBook's chats come with the import.
+    if (DEMO_ASSIST && machine.key === "mac" && lcStripsMacChats())
+      model = { ...model, threads: [] };
     // The stopped chat is already waiting for the reset, as the daemon left it.
     if (DEMO_ACCOUNTS && machine.key === "work") {
       const stopped = model.threads.find((thread) => thread.id === PLAN_LIMIT_CHAT.id);
@@ -297,6 +319,11 @@ const unknownTags = new Set<string>();
 
 function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): unknown {
   const tag = body._tag;
+  // Computers lifecycle: the MacBook's pairing, import, projects (assist/lifecycle.ts).
+  if (DEMO_ASSIST) {
+    const lcAnswer = answerLifecycleRpc(machine, String(tag), body);
+    if (lcAnswer !== undefined) return lcAnswer;
+  }
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
   const fileAnswer = answerFileRpc(machine, body);
   if (fileAnswer !== undefined) return fileAnswer;
@@ -634,12 +661,16 @@ function cloudState() {
           box(MACHINES.work.boxId!, MACHINES.work.label, "running"),
           ...(WORLD.account === "live"
             ? [
-                box(
-                  MACHINES.product.boxId!,
-                  MACHINES.product.label,
-                  // Multi-computer variants: `__mcDemo.wake("product")` wakes it.
-                  isWoken("product") ? "running" : "sleeping",
-                ),
+                ...(lcDeletedBox(MACHINES.product.boxId!)
+                  ? []
+                  : [
+                      box(
+                        MACHINES.product.boxId!,
+                        MACHINES.product.label,
+                        // Multi-computer variants: `__mcDemo.wake("product")` wakes it.
+                        isWoken("product") ? "running" : "sleeping",
+                      ),
+                    ]),
                 ...(WORLD.fleet === "on"
                   ? FLEET.map((name, index) => box(9100 + index, name, "sleeping"))
                   : []),
@@ -861,6 +892,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
         startTurn(target, message.messageId, message.text);
         touch(model);
         publishThread(machine, String(command.threadId));
+        // Computers lifecycle: a MacBook chat's turn waits while it sleeps.
+        if (DEMO_ASSIST && lcOnTurn(machine.key, String(command.threadId), message.text)) {
+          return { sequence: commandSequence };
+        }
         // An assistant's chat answers by its script (assist/engine.ts).
         if (DEMO_ASSIST && onTurn(machine.key, String(command.threadId), message.text)) {
           return { sequence: commandSequence };
@@ -1726,8 +1761,56 @@ export const assistDemo = {
   environmentOf: (key: MachineKey) => MACHINES[key].environmentId,
 };
 
+/** Computers lifecycle: what assist/lifecycle.ts may do to the models. */
+const lifecycleOps: LifecycleOps = {
+  addThread: (key, input) => {
+    const machine = MACHINES[key];
+    newThread(machine, { threadId: input.id, projectId: input.projectId, title: input.title });
+    const thread = threadIn(key, input.id);
+    if (!thread) return;
+    const at = new Date(Date.now() - input.minutesAgo * 60_000).toISOString();
+    const turnId = `turn-${input.id}`;
+    thread.messages = input.messages.map(([role, text], index) => ({
+      id: `${input.id}-m${index}`,
+      role,
+      text,
+      turnId: role === "assistant" ? turnId : null,
+      streaming: false,
+      createdAt: at,
+      updatedAt: at,
+    })) as never;
+    Object.assign(thread, {
+      createdAt: at,
+      updatedAt: at,
+      ...(input.source ? { source: input.source } : {}),
+    });
+    touch(modelFor(machine));
+    publishThread(machine, input.id);
+  },
+  addProject: (key, input) => addDemoProject(MACHINES[key], input),
+  hasProject: (key, projectId) =>
+    modelFor(MACHINES[key]).projects.some((project) => String(project.id) === projectId),
+  readThread: (environmentId, threadId) => {
+    const machine = machineByEnv(environmentId);
+    if (!machine) return null;
+    const model = modelFor(machine);
+    const thread = model.threads.find((t) => t.id === threadId);
+    if (!thread) return null;
+    const project = model.projects.find((p) => String(p.id) === String(thread.projectId));
+    return {
+      title: String(thread.title),
+      projectTitle: String(project?.title ?? "Home folder"),
+      messages: (thread.messages as Array<{ role: "user" | "assistant"; text: string }>).map(
+        (message) => [message.role, message.text] as const,
+      ),
+    };
+  },
+  finishTurn: (key, threadId, text) => finishTurn(MACHINES[key], threadId, text),
+};
+
 function startAssist() {
   startLinks();
+  startLifecycle(lifecycleOps);
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });

@@ -31,6 +31,7 @@ import {
   type ConnectorProvider,
   type ConnectorState,
 } from "./world";
+import { lcDeletedBox } from "./lifecycle";
 import { linkUp } from "./links";
 
 // ── Per assistant: what its daemon keeps ─────────────────────────────────
@@ -742,7 +743,7 @@ export function accountHandlers(): HttpHandler[] {
       plan,
     });
     const list = [wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier)];
-    if (live())
+    if (live() && !lcDeletedBox(MACHINES.product.boxId!))
       list.push(wire(MACHINES.product.boxId!, MACHINES.product.label, "sleeping", "free"));
     if (live() && world.fleet === "on")
       ["kinship", "stage-work", "outreach", "qa-demo", "work-build"].forEach((name, index) =>
