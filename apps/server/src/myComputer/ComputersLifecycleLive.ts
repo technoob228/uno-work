@@ -72,6 +72,35 @@ const make = Effect.gen(function* () {
   const dispatch = (command: Parameters<typeof engine.dispatch>[0]) =>
     run(engine.dispatch(command, { origin: ORIGIN }));
 
+  // A wait mark lives only as long as the turn that set it: after a restart of
+  // the daemon no turn is waiting, so a mark still on a chat is left over
+  // (CONTRACT §7.6). Cleared once at start, in the background.
+  yield* projections.getShellSnapshot().pipe(
+    Effect.flatMap((shell) =>
+      Effect.forEach(
+        shell.threads.filter((thread) => thread.computerWait != null),
+        (thread) =>
+          engine
+            .dispatch(
+              {
+                type: "thread.computer-wait.set",
+                commandId: commandId("wait-cleared"),
+                threadId: thread.id,
+                computerWait: null,
+                createdAt: new Date().toISOString(),
+              },
+              { origin: ORIGIN },
+            )
+            .pipe(Effect.ignore),
+        { discard: true },
+      ),
+    ),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("computers lifecycle: couldn't clear leftover waits", cause),
+    ),
+    Effect.forkDetach,
+  );
+
   const base = makeComputersLifecycleBase({
     store,
     status: myComputer.status,

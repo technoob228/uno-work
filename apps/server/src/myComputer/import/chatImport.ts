@@ -359,6 +359,7 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
 
   const projectFor = async (
     computerId: string,
+    nameOfComputer: string,
     record: ImportRecord,
     cwd: string | null,
   ): Promise<ProjectId> => {
@@ -379,6 +380,11 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
         title: projectTitle(cwd),
         workspaceRoot,
         createWorkspaceRootIfMissing: true,
+        // The folder the chats ran in: a new turn there runs its commands on
+        // that computer (CONTRACT §7.2). No folder, nothing to point at.
+        ...(cwd !== null && cwd.trim().length > 0 && nameOfComputer.trim().length > 0
+          ? { computer: { computerId, computerName: nameOfComputer, path: cwd } }
+          : {}),
         createdAt: now().toISOString(),
       });
     }
@@ -401,7 +407,7 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
         try {
           // A crash after the dispatch and before the save lands here on resume.
           if ((await deps.getThread(threadId)) === null) {
-            const projectId = await projectFor(computerId, record, chat.cwd);
+            const projectId = await projectFor(computerId, name, record, chat.cwd);
             await deps.dispatch({
               type: "thread.create",
               commandId: commandId("thread"),

@@ -225,7 +225,23 @@ export interface GrepOptions {
   readonly ignoreCase: boolean;
   readonly mode: "content" | "files_with_matches" | "count";
   readonly context?: number | undefined;
+  readonly after?: number | undefined;
+  readonly before?: number | undefined;
+  /** A file type as rg knows it (ts, py…); grep reads it as an extension. */
+  readonly type?: string | undefined;
+  readonly multiline?: boolean | undefined;
+  /** Lines of the answer to skip first. */
+  readonly offset?: number | undefined;
   readonly headLimit: number;
+}
+
+function contextArgs(options: GrepOptions): Array<string> {
+  if (options.mode !== "content") return [];
+  return [
+    ...(options.context ? ["-C", String(options.context)] : []),
+    ...(options.after ? ["-A", String(options.after)] : []),
+    ...(options.before ? ["-B", String(options.before)] : []),
+  ];
 }
 
 /** One search on the computer: ripgrep when it's there, else grep. */
@@ -238,7 +254,9 @@ export function grepCommand(options: GrepOptions, windows: boolean): string {
     "--line-number",
     ...(options.ignoreCase ? ["-i"] : []),
     ...(options.mode === "files_with_matches" ? ["-l"] : options.mode === "count" ? ["-c"] : []),
-    ...(options.mode === "content" && options.context ? ["-C", String(options.context)] : []),
+    ...contextArgs(options),
+    ...(options.multiline ? ["-U", "--multiline-dotall"] : []),
+    ...(options.type ? ["--type", options.type] : []),
     // Outside a git repository rg has no .gitignore to skip these by.
     "--glob",
     "!node_modules",
@@ -263,7 +281,8 @@ export function grepCommand(options: GrepOptions, windows: boolean): string {
           ? '| Group-Object Path | ForEach-Object { "$($_.Name):$($_.Count)" }'
           : '| ForEach-Object { "$($_.Path):$($_.LineNumber):$($_.Line)" }',
     ].join(" ");
-    return `if (Get-Command rg -ErrorAction SilentlyContinue) { ${rg} | Select-Object -First ${options.headLimit} } else { ${select} | Select-Object -First ${options.headLimit} }`;
+    const take = `Select-Object${options.offset ? ` -Skip ${options.offset}` : ""} -First ${options.headLimit}`;
+    return `if (Get-Command rg -ErrorAction SilentlyContinue) { ${rg} | ${take} } else { ${select} | ${take} }`;
   }
   const rg = rgArgs.map((arg, index) => (index === 0 ? arg : shQuote(arg))).join(" ");
   const grepArgs = [
@@ -274,8 +293,9 @@ export function grepCommand(options: GrepOptions, windows: boolean): string {
     "--exclude-dir=node_modules",
     ...(options.ignoreCase ? ["-i"] : []),
     ...(options.mode === "files_with_matches" ? ["-l"] : options.mode === "count" ? ["-c"] : []),
-    ...(options.mode === "content" && options.context ? ["-C", String(options.context)] : []),
+    ...contextArgs(options),
     ...(options.glob ? [`--include=${options.glob}`] : []),
+    ...(options.type ? [`--include=*.${options.type}`] : []),
     "-e",
     options.pattern,
     "--",
@@ -284,7 +304,8 @@ export function grepCommand(options: GrepOptions, windows: boolean): string {
   const grep = grepArgs.map((arg, index) => (index === 0 ? arg : shQuote(arg))).join(" ");
   // grep -c lists every file, matches or not: keep the ones with matches.
   const countFilter = options.mode === "count" ? " | grep -v ':0$'" : "";
-  return `if command -v rg >/dev/null 2>&1; then ${rg}; else ${grep}${countFilter}; fi | head -n ${options.headLimit}`;
+  const skip = options.offset ? ` | tail -n +${options.offset + 1}` : "";
+  return `if command -v rg >/dev/null 2>&1; then ${rg}; else ${grep}${countFilter}; fi${skip} | head -n ${options.headLimit}`;
 }
 
 // ── Waiting for the computer ───────────────────────────────────────────
@@ -444,6 +465,12 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
           command: { type: "string", minLength: 1, maxLength: 20_000 },
           description: { type: "string", maxLength: 300 },
           timeout: { type: "integer", minimum: 1, maximum: BASH_MAX_TIMEOUT_MS },
+          // Fields Claude's own Bash sends (the tool stands in for it).
+          run_in_background: {
+            type: "boolean",
+            description: "Not available on the person's computer: start it with nohup … & instead.",
+          },
+          dangerouslyDisableSandbox: { type: "boolean" },
         },
         required: ["command"],
         additionalProperties: false,
@@ -457,6 +484,11 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
       },
       run: (deps, args) =>
         Effect.gen(function* () {
+          if (bool(args, "run_in_background")) {
+            return yield* kit.fail(
+              "Background commands aren't available on the person's computer. Run it in the foreground with a timeout, or start it detached there: nohup <command> > /tmp/<name>.log 2>&1 & — then read the log.",
+            );
+          }
           const { value: result, plan } = yield* onComputer(deps, false, (core, plan, signal) =>
             core.exec(
               {
@@ -498,6 +530,8 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
           file_path: pathArg("The file: relative to the project folder, absolute, or ~/…"),
           offset: { type: "integer", minimum: 1 },
           limit: { type: "integer", minimum: 1, maximum: 20_000 },
+          // Sent by Claude's own Read; text files have no pages.
+          pages: { type: "string", maxLength: 100 },
         },
         required: ["file_path"],
         additionalProperties: false,
@@ -662,7 +696,14 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         "List a folder on the person's computer: the project folder by default, or a path relative to it, absolute or ~/…",
       inputSchema: {
         type: "object",
-        properties: { path: pathArg("The folder. Default: the project folder.") },
+        properties: {
+          path: pathArg("The folder. Default: the project folder."),
+          ignore: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: 300 },
+            description: "Names to leave out (globs, e.g. node_modules, *.log).",
+          },
+        },
         additionalProperties: false,
       },
       level: "safe",
@@ -678,7 +719,20 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
               signal,
             ),
           );
-          const entries = Array.isArray(answer["entries"]) ? answer["entries"] : [];
+          const ignore = (Array.isArray(args["ignore"]) ? args["ignore"] : [])
+            .filter((item): item is string => typeof item === "string")
+            .map((item) => globToRegExp(item.replace(/\/+$/, "")));
+          const entries = (Array.isArray(answer["entries"]) ? answer["entries"] : []).filter(
+            (entry: unknown) => {
+              const name =
+                entry !== null && typeof entry === "object" && "name" in entry
+                  ? String((entry as { name: unknown }).name)
+                  : typeof entry === "string"
+                    ? entry
+                    : "";
+              return !ignore.some((pattern) => pattern.test(name));
+            },
+          );
           return {
             computer: plan.computerName,
             path: resolveOnComputer(plan, str(args, "path")),
@@ -752,6 +806,23 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
             description: "Lines around each match.",
           },
           head_limit: { type: "integer", minimum: 1, maximum: 5_000 },
+          // Fields Claude's own Grep sends (the tool stands in for it).
+          "-A": { type: "integer", minimum: 0, maximum: 20, description: "Lines after a match." },
+          "-B": { type: "integer", minimum: 0, maximum: 20, description: "Lines before a match." },
+          "-C": { type: "integer", minimum: 0, maximum: 20, description: "Lines around a match." },
+          "-n": { type: "boolean", description: "Line numbers (always on)." },
+          type: {
+            type: "string",
+            pattern: "^[A-Za-z0-9_+-]{1,20}$",
+            description: "File type, e.g. ts, py, go.",
+          },
+          multiline: { type: "boolean", description: "Let . and patterns span lines." },
+          offset: {
+            type: "integer",
+            minimum: 0,
+            maximum: 100_000,
+            description: "Skip this many lines first.",
+          },
         },
         required: ["pattern"],
         additionalProperties: false,
@@ -769,7 +840,12 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 glob: str(args, "glob"),
                 ignoreCase: bool(args, "-i"),
                 mode,
-                context: num(args, "context"),
+                context: num(args, "context") ?? num(args, "-C"),
+                after: num(args, "-A"),
+                before: num(args, "-B"),
+                type: str(args, "type"),
+                multiline: bool(args, "multiline"),
+                offset: num(args, "offset"),
                 headLimit,
               },
               windowsOf(plan),

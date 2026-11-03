@@ -317,6 +317,49 @@ describe("workspace tools: paths, lines, edits, globs", () => {
       { PATH: "/usr/bin:/bin" },
     );
     expect(plain.trim()).toBe(`${path.join(project, "src", "a.ts")}:1`);
+    // Claude's Grep fields: lines after, a file type, skipping lines; rg and grep alike.
+    writeFileSync(path.join(project, "src", "b.py"), "needle\n");
+    for (const env of [{}, { PATH: "/usr/bin:/bin" }]) {
+      const after = sh(
+        grepCommand(
+          {
+            pattern: "need[l]e",
+            dir: project,
+            ignoreCase: false,
+            mode: "content",
+            after: 1,
+            type: "ts",
+            headLimit: 10,
+          },
+          false,
+        ),
+        env,
+      );
+      expect(after).toContain("a.ts:1:const needle = 1;");
+      expect(after).toContain("other");
+      expect(after).not.toContain("b.py");
+      const skipped = sh(
+        grepCommand(
+          {
+            pattern: "need[l]e",
+            dir: project,
+            ignoreCase: false,
+            mode: "files_with_matches",
+            offset: 1,
+            headLimit: 10,
+          },
+          false,
+        ),
+        env,
+      );
+      expect(skipped.trim().split("\n")).toHaveLength(1);
+    }
+  });
+
+  it("leaves out what LS is told to ignore", () => {
+    expect(globToRegExp("node_modules").test("node_modules")).toBe(true);
+    expect(globToRegExp("*.log").test("app.log")).toBe(true);
+    expect(globToRegExp("*.log").test("app.ts")).toBe(false);
   });
 
   it("Claude's built-ins point at the workspace tools", () => {

@@ -176,6 +176,15 @@ describe("chat import", () => {
     expect(status.importedChats).toBe(3);
     expect(status.importedProjects).toBe(2);
     expect([...projects.values()].toSorted()).toEqual(["alpha", "other"]);
+    // Each project stands for its folder on the computer: new turns run there.
+    expect(
+      commands
+        .flatMap((command) => (command.type === "project.create" ? [command.computer] : []))
+        .toSorted((a, b) => (a?.path ?? "").localeCompare(b?.path ?? "")),
+    ).toEqual([
+      { computerId: COMPUTER, computerName: "Kate's MacBook", path: "/Users/test/projects/alpha" },
+      { computerId: COMPUTER, computerName: "Kate's MacBook", path: "/Users/test/projects/other" },
+    ]);
 
     const old = threads.get(importedThreadId(COMPUTER, "claude", session(2)))!;
     expect(old.title).toBe("An old question");
