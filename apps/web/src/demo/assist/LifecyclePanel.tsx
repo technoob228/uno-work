@@ -21,6 +21,7 @@ import type { getRouter } from "../../router";
 import { useDemoStore } from "../demoFlag";
 import { lcDemo } from "./lifecycle";
 import { onLinksChanged } from "./links";
+import { switchWorld } from "./world";
 
 type DemoRouter = ReturnType<typeof getRouter>;
 
@@ -210,6 +211,18 @@ export function LifecyclePanel(props: {
             }}
           >
             Add computer
+          </Chip>
+          <Chip
+            testId="lc-open-desktop-path"
+            active={false}
+            onClick={() => {
+              // Fresh MacBook, in the desktop app: the card «Make this Mac…» comes up on Home.
+              localStorage.setItem(LC_START_KEY, "fresh");
+              lifecycle.setThisMacPrompt("ask");
+              switchWorld({ platform: "desktop" });
+            }}
+          >
+            Приложение на Mac: «Make this Mac…»
           </Chip>
           <Chip testId="lc-open-home" active={false} onClick={() => go("/computer")}>
             Home

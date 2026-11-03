@@ -56,6 +56,10 @@ interface LifecycleState {
   /** The computer that just connected (a `MyComputer` id). */
   readonly computerId: string | null;
   readonly purposeChosen: ComputerPurpose | null;
+  /** The desktop app set this Mac up itself: "What is it for?" opens with this picked. */
+  readonly preselect: ComputerPurpose | null;
+  /** The desktop app's "Make this Mac one of your computers?": hidden after an answer. */
+  readonly thisMacPrompt: "ask" | "installing" | "done";
   readonly brought: BroughtWork | null;
   /** By `MyComputer` id. A computer without an entry is a tool for agents. */
   readonly purposes: Readonly<Record<string, ComputerPurpose>>;
@@ -75,6 +79,7 @@ const closedWindow = {
   pairError: null,
   computerId: null,
   purposeChosen: null,
+  preselect: null,
   brought: null,
 } as const;
 
@@ -88,7 +93,18 @@ export const useLifecycle = create<LifecycleState>(() => ({
   runsHere: {},
   fallback: INITIAL_FALLBACK,
   confirm: null,
+  thisMacPrompt: readThisMacPrompt(),
 }));
+
+const THIS_MAC_PROMPT_KEY = "uno:this-mac-prompt";
+
+function readThisMacPrompt(): "ask" | "done" {
+  try {
+    return localStorage.getItem(THIS_MAC_PROMPT_KEY) === "done" ? "done" : "ask";
+  } catch {
+    return "ask";
+  }
+}
 
 export const lifecycle = {
   openAdd: () => useLifecycle.setState({ ...closedWindow, addOpen: true }),
@@ -138,6 +154,25 @@ export const lifecycle = {
       return { purposes, environmentOf, runsHere };
     }),
   confirm: (confirm: LifecycleConfirm | null) => useLifecycle.setState({ confirm }),
+  /** The desktop app installed the helper on this Mac: straight to "What is it for?", Full picked. */
+  thisMacConnected: (computerId: string) =>
+    useLifecycle.setState({
+      ...closedWindow,
+      addOpen: true,
+      step: "purpose",
+      computerId,
+      preselect: "full",
+      thisMacPrompt: "done",
+    }),
+  setThisMacPrompt: (thisMacPrompt: "ask" | "installing" | "done") => {
+    try {
+      if (thisMacPrompt === "done") localStorage.setItem(THIS_MAC_PROMPT_KEY, "done");
+      else localStorage.removeItem(THIS_MAC_PROMPT_KEY);
+    } catch {
+      // this page only
+    }
+    useLifecycle.setState({ thisMacPrompt });
+  },
   setFallback: (fallback: FallbackVariant) => {
     saveFallback(fallback);
     useLifecycle.setState({ fallback });

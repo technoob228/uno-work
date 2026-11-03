@@ -30,6 +30,12 @@ export interface CloudContents {
 export interface LifecycleDemoHooks {
   /** The person pressed Download or copied the command: the helper comes up in a moment. */
   installStarted(): void;
+  /**
+   * The desktop app makes this Mac one of the person's computers: a pair code
+   * from their cloud computer, then the helper installed and paired locally.
+   * Resolves with the new computer's id.
+   */
+  installHere(): Promise<string>;
   projects(computerId: string): ReadonlyArray<FoundProject>;
   bring(input: {
     computerId: string;
@@ -56,6 +62,9 @@ function demo(): Partial<LifecycleDemoHooks> {
 
 export const lifecycleBackend = {
   installStarted: () => demo().installStarted?.(),
+  /** Null: this app can't set the Mac up by itself (not the desktop app, or no backend for it yet). */
+  canInstallHere: () => demo().installHere !== undefined,
+  installHere: async (): Promise<string | null> => (await demo().installHere?.()) ?? null,
   projects: (computerId: string): ReadonlyArray<FoundProject> =>
     demo().projects?.(computerId) ?? [],
   bring: (input: Parameters<LifecycleDemoHooks["bring"]>[0]) => demo().bring?.(input),

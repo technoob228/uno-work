@@ -33,6 +33,7 @@ import { useDevMode } from "../../devMode";
 import { ensureEnvironmentApi } from "../../environmentApi";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { cn } from "../../lib/utils";
+import { liteLinks } from "../../lite/webLite";
 import { useImportActions, useImportStatus } from "../../localComputer/useChatImport";
 import {
   STATUS_POLL_PAIRING_MS,
@@ -41,6 +42,7 @@ import {
   useRefreshMyComputers,
 } from "../../localComputer/useMyComputers";
 import { AddEnvModal } from "../AddEnvModal";
+import { ThisMacPrompt } from "./ThisMacPrompt";
 import { CopyButton } from "../computer/computerUi";
 import { ClaudeAI, OpenAI, OpenCodeIcon } from "../Icons";
 import { chatsLabel, offeredTools } from "../localComputer/chatImport.logic";
@@ -57,9 +59,6 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 
-/** Where "Download Uno Work" goes (the desktop app's page on the site). */
-const DOWNLOAD_URL = "https://uno.place/download";
-
 const TOOL_ICON = { claude: ClaudeAI, codex: OpenAI, opencode: OpenCodeIcon } as const;
 
 function Card(props: {
@@ -69,6 +68,8 @@ function Card(props: {
   testId: string;
   busy?: boolean;
   disabled?: boolean;
+  /** A pick to confirm (the desktop app's path), not a click that goes on. */
+  selected?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -77,7 +78,12 @@ function Card(props: {
       onClick={props.onClick}
       disabled={props.disabled}
       data-testid={props.testId}
-      className="flex w-full items-center gap-3 rounded-xl border border-border/70 bg-card/40 p-3.5 text-left transition-colors enabled:hover:bg-accent disabled:opacity-60"
+      data-selected={props.selected ? "true" : undefined}
+      aria-pressed={props.selected}
+      className={cn(
+        "flex w-full items-center gap-3 rounded-xl border bg-card/40 p-3.5 text-left transition-colors enabled:hover:bg-accent disabled:opacity-60",
+        props.selected ? "border-primary/70 bg-primary/5" : "border-border/70",
+      )}
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4">
         {props.icon}
@@ -88,7 +94,9 @@ function Card(props: {
       </span>
       {props.busy ? (
         <Loader2Icon className="size-4 shrink-0 animate-spin text-muted-foreground" />
-      ) : (
+      ) : props.selected ? (
+        <CheckIcon className="size-4 shrink-0 text-primary" />
+      ) : props.selected === false ? null : (
         <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
       )}
     </button>
@@ -222,7 +230,7 @@ function OwnStep() {
     setDownloaded(true);
     lifecycleBackend.installStarted();
     // The demo answers the helper itself; a real page opens the download.
-    if (!DEMO) window.open(DOWNLOAD_URL, "_blank", "noopener");
+    if (!DEMO) window.open(liteLinks.download, "_blank", "noopener");
   };
   const waiting =
     progress?.kind === "finishing" ? "Finishing setup…" : "Waiting for your computer…";
@@ -304,8 +312,10 @@ function useComputerName(computerId: string | null): string {
 
 function PurposeStep() {
   const computerId = useLifecycle((state) => state.computerId);
+  const preselect = useLifecycle((state) => state.preselect);
   const name = useComputerName(computerId);
   const [busy, setBusy] = useState<ComputerPurpose | null>(null);
+  const [picked, setPicked] = useState<ComputerPurpose | null>(preselect);
   const choose = async (purpose: ComputerPurpose) => {
     if (computerId === null) return;
     setBusy(purpose);
@@ -320,6 +330,10 @@ function PurposeStep() {
       setBusy(null);
     }
   };
+  // The desktop app's path comes with a pick: a click changes it, Continue goes on.
+  const confirming = preselect !== null;
+  const click = (purpose: ComputerPurpose) =>
+    confirming ? setPicked(purpose) : void choose(purpose);
   return (
     <div className="flex min-h-0 flex-col" data-testid="lc-add-purpose">
       <DialogHeader>
@@ -339,7 +353,8 @@ function PurposeStep() {
           testId="lc-purpose-tool"
           busy={busy === "tool"}
           disabled={busy !== null}
-          onClick={() => void choose("tool")}
+          {...(confirming ? { selected: picked === "tool" } : {})}
+          onClick={() => click("tool")}
         />
         <Card
           icon={<LaptopIcon />}
@@ -348,10 +363,23 @@ function PurposeStep() {
           testId="lc-purpose-full"
           busy={busy === "full"}
           disabled={busy !== null}
-          onClick={() => void choose("full")}
+          {...(confirming ? { selected: picked === "full" } : {})}
+          onClick={() => click("full")}
         />
         <p className="mt-1 text-xs text-muted-foreground">You can change this later.</p>
       </DialogPanel>
+      {confirming ? (
+        <DialogFooter variant="bare">
+          <Button
+            disabled={picked === null || busy !== null}
+            onClick={() => picked && void choose(picked)}
+            data-testid="lc-purpose-continue"
+          >
+            {busy !== null ? <Loader2Icon className="animate-spin" /> : null}
+            Continue
+          </Button>
+        </DialogFooter>
+      ) : null}
     </div>
   );
 }
@@ -653,6 +681,7 @@ export function AddComputerWindow() {
           {step === "done" ? <DoneStep /> : null}
         </DialogPopup>
       </Dialog>
+      <ThisMacPrompt />
       <AddEnvModal open={cloudOpen} initialStep="uno" onOpenChange={lifecycle.setCloudOpen} />
       <AddEnvModal open={customOpen} initialStep="custom" onOpenChange={lifecycle.setCustomOpen} />
     </>
