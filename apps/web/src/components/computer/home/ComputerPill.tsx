@@ -71,6 +71,7 @@ import { CONNECTION_ACTION_LABEL, CONNECTION_DOT } from "./connectionStatus";
 import { type ComputerConnection, useComputerConnection } from "./useComputerConnection";
 import type { SidebarDComputer } from "../../sidebar/sidebarDView.logic";
 import { ComputersPill } from "./ComputersOverview";
+import { COMPUTERS_LIFECYCLE } from "../../../computersLifecycle/flag";
 
 export interface HomeComputer {
   readonly name: string;
@@ -251,7 +252,11 @@ function ComputerPillView({
           : null,
       }
     : null;
-  if (computers !== undefined && computers.length > 1) {
+  // Computers lifecycle (02.11): one computer menu, even with one computer (Remove / Delete live there).
+  if (
+    computers !== undefined &&
+    (computers.length > 1 || (COMPUTERS_LIFECYCLE && computers.length > 0))
+  ) {
     return (
       <ComputersPill
         computers={computers}

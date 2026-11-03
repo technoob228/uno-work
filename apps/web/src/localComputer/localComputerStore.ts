@@ -7,6 +7,9 @@
 import type { MyComputerPairing } from "@t3tools/contracts";
 import { create } from "zustand";
 
+import { COMPUTERS_LIFECYCLE } from "../computersLifecycle/flag";
+import { lifecycle } from "../computersLifecycle/store";
+
 import {
   detectSystem,
   type InstallFix,
@@ -57,8 +60,14 @@ function browserSystem() {
 }
 
 export const localComputer = {
-  openConnect: () =>
-    useLocalComputer.setState({ ...closed, ...browserSystem(), dialog: "connect" }),
+  openConnect: () => {
+    // Computers lifecycle (02.11): every "connect your computer" goes to the one window.
+    if (COMPUTERS_LIFECYCLE) {
+      lifecycle.openOwn(browserSystem().os);
+      return;
+    }
+    useLocalComputer.setState({ ...closed, ...browserSystem(), dialog: "connect" });
+  },
   openManage: (computerId: string) =>
     useLocalComputer.setState({ ...closed, dialog: "manage", manageId: computerId }),
   openImport: (computerId: string) =>

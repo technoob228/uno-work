@@ -285,6 +285,10 @@ import {
 } from "~/outbox/outboxStore";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { ImportedChatNote } from "./localComputer/ImportedChatNote";
+import {
+  useContinueInCloud,
+  useOwnComputerWaitingItem,
+} from "./computersLifecycle/WaitingForComputer";
 import { importedChatMessages, useImportedChat } from "../localComputer/useChatImport";
 import { pendingSendDecision, usePendingSendStore } from "./computer/pendingSendStore";
 import { Button } from "./ui/button";
@@ -1506,14 +1510,27 @@ export default function ChatView(props: ChatViewProps) {
     reconnectingEnvironmentId,
     reconnectWarningVisible,
   ]);
+  // Computers lifecycle (02.11): a full computer's chat waits for it, calmly,
+  // and offers "Continue in the cloud" after a while.
+  const ownComputerWaitingItem = useOwnComputerWaitingItem({
+    unavailable: activeEnvironmentUnavailableState,
+    threadId: activeThread?.id ?? null,
+    visible: reconnectWarningVisible,
+  });
+  const environmentItems = ownComputerWaitingItem
+    ? [
+        ownComputerWaitingItem,
+        ...environmentBannerItems.filter((item) => !item.id.startsWith("environment-unavailable:")),
+      ]
+    : environmentBannerItems;
   // While Uno Work updates itself the daemon restarts: "can't reach the
   // computer" and "versions differ" would only repeat what the update notice says.
   const composerBannerItems =
     selfUpdate.view?.kind === "updating" && selfUpdateBanner
       ? [selfUpdateBanner]
       : selfUpdateBanner
-        ? [...environmentBannerItems, selfUpdateBanner]
-        : environmentBannerItems;
+        ? [...environmentItems, selfUpdateBanner]
+        : environmentItems;
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
   // An explicit picker selection is honored as before; a machine default
   // (thread/project seed, historically hardcoded codex) only sticks when that
@@ -1719,6 +1736,7 @@ export default function ChatView(props: ChatViewProps) {
   // A chat imported from a computer has no messages of its own: they stay on
   // that computer until the chat is opened (see `useImportedChat`).
   const importedSource = activeThread?.source ?? null;
+  const continueInCloud = useContinueInCloud();
   const importedChat = useImportedChat({
     environmentId,
     threadId: activeThread?.id ?? null,
@@ -5403,6 +5421,16 @@ export default function ChatView(props: ChatViewProps) {
                         history={importedChat.data}
                         loading={importedChat.isFetching}
                         onRetry={() => void importedChat.refetch()}
+                        {...(continueInCloud.available && activeThread
+                          ? {
+                              continuing: continueInCloud.busy,
+                              onContinueInCloud: () =>
+                                void continueInCloud.run(
+                                  activeThread.environmentId,
+                                  activeThread.id,
+                                ),
+                            }
+                          : {})}
                       />
                     ) : (
                       <ChatComposer

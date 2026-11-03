@@ -35,6 +35,9 @@ import {
   usePrimaryEnvironmentDescriptor,
   usePrimaryEnvironmentId,
 } from "../../environments/primary";
+import { COMPUTERS_LIFECYCLE } from "../../computersLifecycle/flag";
+import { lifecycle } from "../../computersLifecycle/store";
+import { useDevMode } from "../../devMode";
 import { localComputer } from "../../localComputer/localComputerStore";
 import { useMyComputers } from "../../localComputer/useMyComputers";
 import {
@@ -179,6 +182,9 @@ export function WorkspaceSettings() {
   // The advanced registry (grants, claims, requests, instruction layers) is
   // still behind the Labs flag. The machines list itself is always on.
   const advancedEnabled = useFeatureFlag("workspace");
+  // Computers lifecycle (02.11): one "Add computer"; removing lives in the computer's menu.
+  const devMode = useDevMode();
+  const lifecycleOn = COMPUTERS_LIFECYCLE;
   const queryClient = useQueryClient();
   // The primary daemon is the registry client: the panel describes one
   // workspace regardless of which machine's chat is on screen.
@@ -406,14 +412,23 @@ export function WorkspaceSettings() {
               one and it appears here.
             </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button size="sm" onClick={openAddBox}>
-                <CloudIcon className="size-3.5" />
-                Add a box
-              </Button>
-              <Button size="sm" variant="outline" onClick={openConnectComputer}>
-                <LaptopIcon className="size-3.5" />
-                Connect my computer
-              </Button>
+              {lifecycleOn ? (
+                <Button size="sm" onClick={lifecycle.openAdd} data-testid="settings-add-computer">
+                  <PlusIcon className="size-3.5" />
+                  Add computer
+                </Button>
+              ) : (
+                <>
+                  <Button size="sm" onClick={openAddBox}>
+                    <CloudIcon className="size-3.5" />
+                    Add a box
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={openConnectComputer}>
+                    <LaptopIcon className="size-3.5" />
+                    Connect my computer
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </SettingsSection>
@@ -460,14 +475,23 @@ export function WorkspaceSettings() {
           description="Your own computer, an Uno box, or any other machine you connect. Each one keeps its own projects and agents."
           control={
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={openAddBox}>
-                <CloudIcon className="size-3.5" />
-                Add a box
-              </Button>
-              <Button size="sm" variant="outline" onClick={openConnectComputer}>
-                <LaptopIcon className="size-3.5" />
-                Connect my computer
-              </Button>
+              {lifecycleOn ? (
+                <Button size="sm" onClick={lifecycle.openAdd} data-testid="settings-add-computer">
+                  <PlusIcon className="size-3.5" />
+                  Add computer
+                </Button>
+              ) : (
+                <>
+                  <Button size="sm" onClick={openAddBox}>
+                    <CloudIcon className="size-3.5" />
+                    Add a box
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={openConnectComputer}>
+                    <LaptopIcon className="size-3.5" />
+                    Connect my computer
+                  </Button>
+                </>
+              )}
             </div>
           }
         />
@@ -764,7 +788,7 @@ export function WorkspaceSettings() {
                   />
                 ) : null}
 
-                {row.isPrimary || !row.environmentId ? null : (
+                {row.isPrimary || !row.environmentId || (lifecycleOn && !devMode) ? null : (
                   <Button
                     size="xs"
                     variant="ghost"
