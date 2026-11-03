@@ -249,6 +249,10 @@ const make = Effect.gen(function* () {
     const computerName = plan?.computerName ?? shell.source!.computerName;
     const status = await core.cachedStatus(5_000).catch(() => null);
     const online = status?.computers.find((entry) => entry.id === computerId)?.online === true;
+    // Removed from the person's computers: its files can't come any more, so
+    // the chat continues with its history in an empty project (stand 03.11:
+    // "Continue in the cloud" of a removed computer's chat was a dead end).
+    const removed = status !== null && !status.computers.some((entry) => entry.id === computerId);
 
     // The files: copied now when the computer is there, else the copy brought before.
     let folder: string | null = null;
@@ -277,7 +281,7 @@ const make = Effect.gen(function* () {
         }
       } else if (brought !== null) {
         folder = brought;
-      } else {
+      } else if (!removed) {
         throw new MyComputerFailure(
           "remote",
           `${computerName} is offline and this project's files aren't in the cloud yet. Open ${computerName} and try again.`,
@@ -286,7 +290,8 @@ const make = Effect.gen(function* () {
     }
     // An imported chat without a folder: an empty project of its own here.
     if (folder === null) {
-      // Nothing copied (an imported chat without a folder, the home folder):
+      // Nothing copied (an imported chat without a folder, the home folder, a
+      // removed computer's project that never came over):
       // an empty project of its own here, made on disk so the chat can work in it.
       folder = await bring.freeFolder(shell.title.slice(0, 40) || "chat");
       await fsp.mkdir(folder, { recursive: true });
