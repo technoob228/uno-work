@@ -17,6 +17,7 @@ import { ChevronRightIcon, LaptopIcon, Loader2Icon, WrenchIcon } from "lucide-re
 import { useState } from "react";
 
 import { fetchComputerApps } from "../../account/accountOverview";
+import { AccountHttpError } from "../../account/unoAccount";
 import { deleteRefusal, lifecycleBackend } from "../../computersLifecycle/backend";
 import { type ComputerPurpose, lifecycle, useLifecycle } from "../../computersLifecycle/store";
 import {
@@ -47,7 +48,6 @@ import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 
 /** Where a cloud computer is deleted while Work may not do it (CONTRACT.md §4.2). */
-const CONSOLE_COMPUTERS_URL = "https://getuno.xyz/dashboard/boxes";
 
 /** Chats on a cloud computer (not archived): they stay after it goes. */
 function useChatsOnEnvironment(environmentId: string | null): number {
@@ -185,7 +185,7 @@ export function DeleteComputerDialog({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The console may know better than the menu: it refuses the plan's last one.
-  const [refused, setRefused] = useState<"last-on-plan" | "not-here" | null>(null);
+  const [refused, setRefused] = useState<"last-on-plan" | null>(null);
   const apps = useQuery({
     queryKey: ["computers", "delete", "apps", boxId],
     queryFn: () => fetchComputerApps(boxId),
@@ -222,7 +222,14 @@ export function DeleteComputerDialog({
     } catch (cause) {
       const refusal = what === "delete" ? deleteRefusal(cause) : null;
       if (refusal !== null) setRefused(refusal);
-      else setError(errorText(cause));
+      // The console's answer is a code, not a sentence: say it plainly.
+      else if (cause instanceof AccountHttpError) {
+        setError(
+          what === "delete"
+            ? `Couldn’t delete ${name}. Try again.`
+            : `Couldn’t turn off ${name}. Try again.`,
+        );
+      } else setError(errorText(cause));
     } finally {
       setPending(false);
     }
@@ -283,32 +290,18 @@ export function DeleteComputerDialog({
             <p className="text-sm font-medium">Stays</p>
             <Bullets lines={["Synced projects and keys", "Your sites", chatsLine(ranHere, name)]} />
           </div>
-          {refused === "not-here" ? (
-            <p className="text-sm" data-testid="lc-delete-in-console">
-              Deleting from here isn’t on yet.{" "}
-              <a
-                href={CONSOLE_COMPUTERS_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2"
-              >
-                Delete it in the console
-              </a>
-            </p>
-          ) : (
-            <label className="flex flex-col gap-1.5 text-sm">
-              <span className="text-muted-foreground">
-                Type <span className="font-mono text-foreground">{name}</span> to delete
-              </span>
-              <Input
-                value={typed}
-                onChange={(event) => setTyped(event.target.value)}
-                placeholder={name}
-                aria-label="Computer name"
-                data-testid="lc-delete-name"
-              />
-            </label>
-          )}
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="text-muted-foreground">
+              Type <span className="font-mono text-foreground">{name}</span> to delete
+            </span>
+            <Input
+              value={typed}
+              onChange={(event) => setTyped(event.target.value)}
+              placeholder={name}
+              aria-label="Computer name"
+              data-testid="lc-delete-name"
+            />
+          </label>
           {error !== null ? (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -317,18 +310,16 @@ export function DeleteComputerDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="ghost" onClick={() => close(false)}>
-            {refused === "not-here" ? "Close" : "Cancel"}
+            Cancel
           </Button>
-          {refused === "not-here" ? null : (
-            <Button
-              variant="destructive"
-              disabled={pending || typed.trim() !== name}
-              onClick={() => void run("delete")}
-              data-testid="lc-delete-confirm"
-            >
-              {pending ? "Deleting…" : "Delete computer"}
-            </Button>
-          )}
+          <Button
+            variant="destructive"
+            disabled={pending || typed.trim() !== name}
+            onClick={() => void run("delete")}
+            data-testid="lc-delete-confirm"
+          >
+            {pending ? "Deleting…" : "Delete computer"}
+          </Button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

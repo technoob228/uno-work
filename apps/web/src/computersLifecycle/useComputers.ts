@@ -121,8 +121,3 @@ export const computersQueryKeys = {
 export function errorText(cause: unknown, fallback = "Uno didn’t answer. Try again."): string {
   return cause instanceof Error && cause.message.trim() !== "" ? cause.message : fallback;
 }
-
-/** The backend part isn't there yet (CONTRACT.md §2): the screen leaves it out. */
-export function isNotAvailableYet(cause: unknown): boolean {
-  return cause instanceof Error && /not available yet/i.test(cause.message);
-}

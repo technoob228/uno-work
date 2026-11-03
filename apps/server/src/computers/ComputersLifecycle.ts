@@ -2,12 +2,10 @@
  * ComputersLifecycle: the daemon's side of the computers lifecycle (contracts
  * computers.ts; reports/day_2026-11-02/computers-lifecycle/CONTRACT.md §2).
  *
- * This file is the UI stream's glue: the service tag, the flag and the
- * purposes store. The work on the computer itself — finding projects and key
- * names, bringing them over, a folder on it as a project here, continuing a
- * chat in the cloud — is the backend stream's: `ComputersLifecycleStubLive`
- * answers those with "Not available yet." and the web hides them, until the
- * backend's live layer takes its place in server.ts.
+ * This file holds the service tag, the flag and the purposes. The work on the
+ * computer itself — finding projects and key names, bringing them over, a
+ * folder on it as a project here, continuing a chat in the cloud — lives in
+ * the live layer `myComputer/ComputersLifecycleLive.ts`.
  *
  * @module computers/ComputersLifecycle
  */
@@ -56,8 +54,6 @@ export class ComputersLifecycle extends Context.Service<
   ComputersLifecycle,
   ComputersLifecycleShape
 >()("t3/computers/ComputersLifecycle") {}
-
-const notYet = () => Effect.fail(new MyComputerError({ message: "Not available yet." }));
 
 /** On for this account: the env override, else the console's answer (off with the feature off). */
 export function lifecycleOn(status: MyComputerStatus, override: boolean | null): boolean {
@@ -113,24 +109,3 @@ export function makeComputersLifecycleBase(input: {
       }),
   };
 }
-
-const makeStub = Effect.gen(function* () {
-  const config = yield* ServerConfig;
-  const myComputer = yield* MyComputerService;
-  const base = makeComputersLifecycleBase({
-    store: makePurposeStore(config.stateDir),
-    status: myComputer.status,
-    override: lifecycleOverride(process.env.UNO_WORK_COMPUTERS_LIFECYCLE),
-  });
-  return ComputersLifecycle.of({
-    ...base,
-    workStatus: notYet,
-    workScan: notYet,
-    bringWork: notYet,
-    openFolder: notYet,
-    continueInCloud: notYet,
-  });
-});
-
-/** The UI stream's layer: flag + purposes real, the computer's work "Not available yet." */
-export const ComputersLifecycleStubLive = Layer.effect(ComputersLifecycle, makeStub);

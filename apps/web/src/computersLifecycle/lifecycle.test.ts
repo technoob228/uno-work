@@ -41,7 +41,7 @@ describe("ownComputerChatState", () => {
 });
 
 describe("deleteRefusal", () => {
-  it("tells the plan's last computer and a console that doesn't allow it yet apart", () => {
+  it("tells the plan's last computer from other refusals", () => {
     expect(
       deleteRefusal(
         new AccountHttpError(409, '409: {"error":"LAST_COMPUTER_ON_PLAN"}', {
@@ -49,7 +49,7 @@ describe("deleteRefusal", () => {
         }),
       ),
     ).toBe("last-on-plan");
-    expect(deleteRefusal(new AccountHttpError(403, "403: forbidden", null))).toBe("not-here");
+    expect(deleteRefusal(new AccountHttpError(403, "403: forbidden", null))).toBeNull();
     expect(deleteRefusal(new AccountHttpError(500, "500", null))).toBeNull();
     expect(deleteRefusal(new Error("network"))).toBeNull();
   });

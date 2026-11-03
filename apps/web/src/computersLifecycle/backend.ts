@@ -29,14 +29,12 @@ function demo(): Partial<LifecycleDemoHooks> {
   return (demoHooks.lc ?? {}) as Partial<LifecycleDemoHooks>;
 }
 
-/** Why deleting a cloud computer from here didn't happen. */
-export type DeleteRefusal = "last-on-plan" | "not-here" | null;
+/** Why deleting a cloud computer from here didn't happen (CONTRACT.md §4.2). */
+export type DeleteRefusal = "last-on-plan" | null;
 
 export function deleteRefusal(cause: unknown): DeleteRefusal {
   if (!(cause instanceof AccountHttpError)) return null;
   if (cause.status === 409 && /LAST_COMPUTER_ON_PLAN/.test(cause.message)) return "last-on-plan";
-  // The console doesn't let Work delete computers yet (CONTRACT.md §4.2).
-  if (cause.status === 403 || cause.status === 404) return "not-here";
   return null;
 }
 

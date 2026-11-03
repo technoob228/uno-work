@@ -1,6 +1,6 @@
 /**
  * The backend's live layer of `ComputersLifecycle` (CONTRACT.md §2, §7):
- * takes `ComputersLifecycleStubLive`'s place in server.ts.
+ * provided in server.ts.
  *
  * - purposes: kept at the console (`PATCH …/computers/{id}` `mode`), the local
  *   file as the cache and for consoles from before (§7.1);
@@ -389,5 +389,5 @@ const make = Effect.gen(function* () {
   });
 });
 
-/** The live layer: swap for `ComputersLifecycleStubLive` in server.ts. */
+/** The live layer (server.ts). */
 export const ComputersLifecycleLive = Layer.effect(ComputersLifecycle, make);

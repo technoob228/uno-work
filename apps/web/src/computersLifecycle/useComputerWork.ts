@@ -2,16 +2,13 @@
  * "Bring your work?": the projects found on one of the person's computers (key
  * names only), and bringing the chosen ones over (contracts computers.ts,
  * CONTRACT.md §2). Polls only while something runs and the screen is open.
- *
- * Until the backend has it, the cloud computer answers "Not available yet.":
- * `unavailable` is true and the screen shows chats only.
  */
 import type { ComputersBringWorkInput, ComputerWorkStatus } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 
 import { ensureEnvironmentApi } from "../environmentApi";
-import { computersQueryKeys, isNotAvailableYet, useComputersHostId } from "./useComputers";
+import { computersQueryKeys, useComputersHostId } from "./useComputers";
 
 const WORK_POLL_MS = 1_500;
 
@@ -67,12 +64,12 @@ export function useComputerWork(computerId: string | null, options: { scan?: boo
     [hostId, computerId, queryClient],
   );
 
-  const unavailable = isNotAvailableYet(query.error) || isNotAvailableYet(scanFailed);
   const failed = query.error !== null || scanFailed !== null;
   const scanState = query.data?.scan.state;
   return {
     status: query.data,
-    unavailable,
+    /** The cloud computer didn't answer the scan (not: the scan found nothing). */
+    failed,
     /** Still looking for projects: nothing answered yet, or the scan hasn't landed. */
     searching:
       !failed &&

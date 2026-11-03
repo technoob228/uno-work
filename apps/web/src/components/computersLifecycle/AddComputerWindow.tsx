@@ -528,8 +528,8 @@ function BringStep() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [computerId, environmentId]);
   const work = useComputerWork(computerId, { scan: true });
-  const projects = work.unavailable ? [] : (work.status?.scan.projects ?? []);
-  const projectsSearching = !work.unavailable && work.searching;
+  const projects = work.status?.scan.projects ?? [];
+  const projectsSearching = work.searching;
   const [untickedTools, setUntickedTools] = useState<ReadonlySet<ImportedChatTool>>(new Set());
   /** Projects whose tick differs from `tickedByDefault`. */
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
@@ -615,51 +615,49 @@ function BringStep() {
             ))
           )}
         </div>
-        {work.unavailable ? null : (
-          <div className="flex flex-col" data-testid="lc-bring-projects">
-            <SectionLabel>Projects</SectionLabel>
-            {projectsSearching && projects.length === 0 ? (
-              <p className="flex items-center gap-2 px-1 py-1.5 text-sm text-muted-foreground">
-                <Loader2Icon className="size-3.5 animate-spin" />
-                Looking in ~/projects…
-              </p>
-            ) : work.status?.scan.state === "failed" ? (
-              <p className="px-1 py-1.5 text-sm text-muted-foreground">
-                {work.status.scan.message ?? "Couldn’t look for projects."}
-              </p>
-            ) : projects.length === 0 ? (
-              <p className="px-1 py-1.5 text-sm text-muted-foreground">
-                No projects in ~/projects.
-              </p>
-            ) : (
-              projects.map((project) => (
-                <ProjectRow
-                  key={project.path}
-                  project={project}
-                  on={isOn(project)}
-                  offKeys={offKeys.get(project.path) ?? new Set()}
-                  onToggle={() => setFlipped((current) => toggle(current, project.path))}
-                  onToggleKey={(key) =>
-                    setOffKeys((current) => {
-                      const next = new Map(current);
-                      next.set(project.path, toggle(current.get(project.path) ?? new Set(), key));
-                      return next;
-                    })
-                  }
-                />
-              ))
-            )}
-            {anyKeys ? (
-              <p
-                className="mt-1 flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
-                data-testid="lc-keys-note"
-              >
-                <LockIcon className="size-3 shrink-0" />
-                Keys are kept encrypted, never in the project’s files.
-              </p>
-            ) : null}
-          </div>
-        )}
+        <div className="flex flex-col" data-testid="lc-bring-projects">
+          <SectionLabel>Projects</SectionLabel>
+          {projectsSearching && projects.length === 0 ? (
+            <p className="flex items-center gap-2 px-1 py-1.5 text-sm text-muted-foreground">
+              <Loader2Icon className="size-3.5 animate-spin" />
+              Looking in ~/projects…
+            </p>
+          ) : work.status?.scan.state === "failed" || (work.failed && !work.status) ? (
+            <p className="px-1 py-1.5 text-sm text-muted-foreground">
+              {work.status?.scan.message ?? "Couldn’t look for projects."}
+            </p>
+          ) : projects.length === 0 ? (
+            <p className="px-1 py-1.5 text-sm text-muted-foreground">
+              No projects in ~/projects.
+            </p>
+          ) : (
+            projects.map((project) => (
+              <ProjectRow
+                key={project.path}
+                project={project}
+                on={isOn(project)}
+                offKeys={offKeys.get(project.path) ?? new Set()}
+                onToggle={() => setFlipped((current) => toggle(current, project.path))}
+                onToggleKey={(key) =>
+                  setOffKeys((current) => {
+                    const next = new Map(current);
+                    next.set(project.path, toggle(current.get(project.path) ?? new Set(), key));
+                    return next;
+                  })
+                }
+              />
+            ))
+          )}
+          {anyKeys ? (
+            <p
+              className="mt-1 flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
+              data-testid="lc-keys-note"
+            >
+              <LockIcon className="size-3 shrink-0" />
+              Keys are kept encrypted, never in the project’s files.
+            </p>
+          ) : null}
+        </div>
         {error !== null ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
