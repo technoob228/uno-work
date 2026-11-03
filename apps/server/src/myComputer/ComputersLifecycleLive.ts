@@ -285,7 +285,12 @@ const make = Effect.gen(function* () {
       }
     }
     // An imported chat without a folder: an empty project of its own here.
-    folder ??= await bring.freeFolder(shell.title.slice(0, 40) || "chat");
+    if (folder === null) {
+      // Nothing copied (an imported chat without a folder, the home folder):
+      // an empty project of its own here, made on disk so the chat can work in it.
+      folder = await bring.freeFolder(shell.title.slice(0, 40) || "chat");
+      await fsp.mkdir(folder, { recursive: true });
+    }
     const projectId = await projectForFolder(folder, plan ? folderName(plan.path) : shell.title);
     if (projectSync !== null) {
       await run(projectSync.setEnabled(projectId, true).pipe(Effect.ignore));
