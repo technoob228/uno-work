@@ -31,6 +31,13 @@ export const MyComputer = Schema.Struct({
   connectedAt: Schema.NullOr(Schema.String),
   lastSeenAt: Schema.NullOr(Schema.String),
   helperVersion: Schema.NullOr(Schema.String),
+  /** What it is for, as the console keeps it (computers.ts); `computers.state` stays the UI's source. */
+  mode: Schema.optionalKey(Schema.Literals(["tool", "full"])),
+  /**
+   * M7: the helper trusts this cloud computer's key. False: connect the computer
+   * again from here (same command). Null or absent: unknown (older helper).
+   */
+  trustsThisComputer: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 export type MyComputer = typeof MyComputer.Type;
 
