@@ -107,7 +107,12 @@ import {
   OwnComputerFolderPicker,
   openOwnComputerFolder,
 } from "../../computersLifecycle/OwnComputerFolderPicker";
-import { errorText, useComputersHostId } from "../../../computersLifecycle/useComputers";
+import { useComputersLifecycleOn } from "../../../computersLifecycle/flag";
+import {
+  errorText,
+  useComputersHostId,
+  useOwnComputers,
+} from "../../../computersLifecycle/useComputers";
 import {
   useNameAmongComputers,
   useSwitcherMachines,
@@ -304,7 +309,13 @@ export function HomeComposer({
       });
     }
   };
-  const severalComputers = useSwitcherMachines().length > 1;
+  // A full own computer is a place to start a chat too: with one cloud
+  // computer the newcomer's Home hid the picker, and "on MacBook" with it.
+  const lifecycleOn = useComputersLifecycleOn();
+  const { computers: ownComputers } = useOwnComputers();
+  const severalComputers =
+    useSwitcherMachines().length > 1 ||
+    (lifecycleOn && ownComputers.some((computer) => computer.purpose === "full"));
   // A space is its computer: nothing to pick inside it.
   const spacesOn = useSpacesOn();
   const assistantComputer = useNameAmongComputers(
