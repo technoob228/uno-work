@@ -252,6 +252,25 @@ describe("project sync on two computers", { timeout: 120_000 }, () => {
     expect((await laptop.core.setEnabled(id, true)).name).toBe("site");
   });
 
+  it("turning several projects on at once saves its state without a failed save", async () => {
+    // Stand 03.11: "Bring your work" with two projects -> two saves in the same
+    // millisecond shared one temp file and the second rename failed (ENOENT).
+    const { vault } = memoryVault();
+    const warnings: string[] = [];
+    const laptop = computer("laptop", vault, { log: (message) => warnings.push(message) });
+    const ids = ["a", "b", "c", "d"].map((name) => {
+      const { id, dir } = laptop.addProject(name);
+      fs.writeFileSync(path.join(dir, "index.html"), `${name}\n`);
+      return id;
+    });
+    await Promise.all(ids.map((id) => laptop.core.setEnabled(id, true)));
+    expect(warnings).not.toContain("project sync: couldn't save its state");
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(laptop.home, ".t3", "userdata", "project-sync.json"), "utf8"),
+    ) as { projects: Record<string, { enabled?: boolean }> };
+    for (const id of ids) expect(saved.projects[id]?.enabled).toBe(true);
+  });
+
   it("a second, different folder with a taken name syncs as name-2", async () => {
     const { vault } = memoryVault();
     const a = computer("a", vault);

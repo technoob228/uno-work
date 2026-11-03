@@ -261,9 +261,13 @@ export function removeEnvName(content: string, name: string): string {
   return kept.join("\n");
 }
 
+let tmpCounter = 0;
+
 async function writePrivate(file: string, contents: string) {
   await mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  // Unique per call: two saves in the same millisecond (bringing several
+  // projects at once) shared one temp name, and the second rename failed.
+  const tmp = `${file}.${process.pid}.${Date.now()}.${++tmpCounter}.tmp`;
   await writeFile(tmp, contents, { mode: 0o600 });
   await chmod(tmp, 0o600);
   await rename(tmp, file);
@@ -355,13 +359,20 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
       await persist();
     }
   };
-  const persist = () =>
-    writePrivate(
-      storeFile,
-      `${JSON.stringify({ version: 1, ...notes, projects: store }, null, 2)}\n`,
-    ).catch((error) =>
-      deps.log("warn", "project sync: couldn't save its state", { error: String(error) }),
+  // One save at a time, each writing the state as it is when its turn comes:
+  // the file always ends with the latest state.
+  let saving: Promise<void> = Promise.resolve();
+  const persist = () => {
+    saving = saving.then(() =>
+      writePrivate(
+        storeFile,
+        `${JSON.stringify({ version: 1, ...notes, projects: store }, null, 2)}\n`,
+      ).catch((error) =>
+        deps.log("warn", "project sync: couldn't save its state", { error: String(error) }),
+      ),
     );
+    return saving;
+  };
 
   const scheduler = createSyncScheduler({
     run: (key, manual) =>
