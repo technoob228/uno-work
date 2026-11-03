@@ -77,6 +77,21 @@ function modelFor(tool: ImportedChatTool): ModelSelection {
 const hash = (...parts: ReadonlyArray<string>) =>
   Crypto.createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32);
 
+/**
+ * The imported chat's history as last read from the computer (the cache the
+ * chat's view filled), oldest first; empty when it was never opened here.
+ * For its first turn here: the agent hears the conversation so far.
+ */
+export async function cachedImportedHistory(
+  stateDir: string,
+  source: Pick<ThreadComputerSource, "computerId" | "tool" | "sessionId">,
+): Promise<ReadonlyArray<{ readonly role: "user" | "assistant"; readonly text: string }>> {
+  const cached = await readHistoryCache(
+    historyCachePath(stateDir, source.computerId, hash(source.tool, source.sessionId)),
+  ).catch(() => null);
+  return cached?.messages.map((message) => ({ role: message.role, text: message.text })) ?? [];
+}
+
 export const importedThreadId = (computerId: string, tool: string, sessionId: string) =>
   ThreadId.make(`imported-${hash(computerId, tool, sessionId)}`);
 
