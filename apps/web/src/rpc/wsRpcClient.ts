@@ -305,6 +305,16 @@ export interface WsRpcClient {
     readonly importDecline: RpcUnaryMethod<typeof WS_METHODS.myComputerImportDecline>;
     readonly chatHistory: RpcUnaryMethod<typeof WS_METHODS.myComputerChatHistory>;
   };
+  /** Computers lifecycle (contracts computers.ts). */
+  readonly computers: {
+    readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.computersState>;
+    readonly setPurpose: RpcUnaryMethod<typeof WS_METHODS.computersSetPurpose>;
+    readonly workStatus: RpcUnaryMethod<typeof WS_METHODS.computersWorkStatus>;
+    readonly workScan: RpcUnaryMethod<typeof WS_METHODS.computersWorkScan>;
+    readonly bringWork: RpcUnaryMethod<typeof WS_METHODS.computersBringWork>;
+    readonly openFolder: RpcUnaryMethod<typeof WS_METHODS.computersOpenFolder>;
+    readonly continueInCloud: RpcUnaryMethod<typeof WS_METHODS.computersContinueInCloud>;
+  };
   /** "On all my computers" on this daemon: sync status and choices, the projects' keys. */
   readonly projectSync: {
     readonly status: RpcUnaryNoArgMethod<typeof WS_METHODS.projectSyncStatus>;
@@ -819,6 +829,21 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.myComputerImportDecline](input)),
       chatHistory: (input) =>
         transport.request((client) => client[WS_METHODS.myComputerChatHistory](input)),
+    },
+    computers: {
+      state: () => transport.request((client) => client[WS_METHODS.computersState]({})),
+      setPurpose: (input) =>
+        transport.request((client) => client[WS_METHODS.computersSetPurpose](input)),
+      workStatus: (input) =>
+        transport.request((client) => client[WS_METHODS.computersWorkStatus](input)),
+      workScan: (input) =>
+        transport.request((client) => client[WS_METHODS.computersWorkScan](input)),
+      bringWork: (input) =>
+        transport.request((client) => client[WS_METHODS.computersBringWork](input)),
+      openFolder: (input) =>
+        transport.request((client) => client[WS_METHODS.computersOpenFolder](input)),
+      continueInCloud: (input) =>
+        transport.request((client) => client[WS_METHODS.computersContinueInCloud](input)),
     },
     projectSync: {
       status: () => transport.request((client) => client[WS_METHODS.projectSyncStatus]({})),
