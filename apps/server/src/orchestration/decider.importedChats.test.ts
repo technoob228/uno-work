@@ -201,7 +201,7 @@ describe("imported chats", () => {
     });
   });
 
-  it("refuses a message until M5 and M6, from anyone", async () => {
+  it("continues: a person's message starts a turn, the handoff seed is appended", async () => {
     const readModel = await seedImported();
     const message = {
       messageId: MessageId.make("message-1"),
@@ -209,26 +209,32 @@ describe("imported chats", () => {
       text: "Carry on",
       attachments: [],
     };
-    await refused(
-      decide(readModel, {
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn"),
-        threadId: THREAD_ID,
-        message,
-        runtimeMode: "approval-required",
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        createdAt: new Date().toISOString(),
-      }),
+    const turn = await decide(readModel, {
+      type: "thread.turn.start",
+      commandId: CommandId.make("cmd-turn"),
+      threadId: THREAD_ID,
+      message,
+      runtimeMode: "approval-required",
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      createdAt: new Date().toISOString(),
+    });
+    expect(turn.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["thread.message-sent", "thread.turn-start-requested"]),
     );
-    await refused(
-      decide(readModel, {
+    const seed = await decide(
+      readModel,
+      {
         type: "thread.message.user.append",
         commandId: CommandId.make("cmd-append"),
         threadId: THREAD_ID,
-        messageId: message.messageId,
-        text: message.text,
+        messageId: MessageId.make("message-seed"),
+        text: "Earlier on the computer: ...",
         createdAt: new Date().toISOString(),
-      }),
+      },
+      ORIGIN,
     );
+    expect(seed.map((event) => event.type)).toEqual(["thread.message-sent"]);
+    // Still the imported chat: the source stays on it.
+    expect(threadOf(await apply(readModel, turn)).source).toEqual(SOURCE);
   });
 });

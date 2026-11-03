@@ -20,6 +20,7 @@ import {
   ThreadStartedBy,
   TurnId,
   ThreadSource,
+  ThreadComputerWait,
 } from "@t3tools/contracts";
 import { Option, Schema, Context } from "effect";
 import type { Effect } from "effect";
@@ -75,6 +76,9 @@ export const ProjectionThread = Schema.Struct({
   // Where the chat came from, when not Uno Work (migration 059). Optional for
   // the same reason; absent persists as NULL.
   source: Schema.optional(Schema.NullOr(ThreadSource)),
+  // A turn waiting for the person's own computer (migration 060). Optional
+  // for the same reason; absent persists as NULL.
+  computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

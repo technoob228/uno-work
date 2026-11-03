@@ -2543,6 +2543,135 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 
+  it.effect("projects the computer of a project and a chat waiting for it", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshots = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = "2026-11-03T09:00:00.000Z";
+      const projectId = ProjectId.make("project-on-macbook");
+      const threadId = ThreadId.make("thread-on-macbook");
+      const origin = { kind: "system" as const, component: "computers" };
+      const computer = {
+        computerId: "computer-1",
+        computerName: "MacBook",
+        path: "/Users/kate/alpha",
+      };
+      const computerWait = {
+        computerId: "computer-1",
+        computerName: "MacBook",
+        since: "2026-11-03T10:00:00.000Z",
+      };
+
+      yield* engine.dispatch(
+        {
+          type: "project.create",
+          commandId: CommandId.make("cmd-computer-project"),
+          projectId,
+          title: "alpha",
+          workspaceRoot: "/tmp/project-on-macbook",
+          defaultModelSelection: null,
+          computer,
+          createdAt,
+        },
+        { origin },
+      );
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-computer-thread"),
+        threadId,
+        projectId,
+        title: "On the MacBook",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      });
+      yield* engine.dispatch(
+        {
+          type: "thread.computer-wait.set",
+          commandId: CommandId.make("cmd-computer-wait"),
+          threadId,
+          computerWait,
+          createdAt: computerWait.since,
+        },
+        { origin },
+      );
+
+      const rows = yield* sql<{
+        readonly computerWaitJson: string | null;
+        readonly updatedAt: string;
+      }>`
+        SELECT computer_wait_json AS "computerWaitJson", updated_at AS "updatedAt"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(rows, [
+        { computerWaitJson: JSON.stringify(computerWait), updatedAt: createdAt },
+      ]);
+
+      const projectShell = yield* snapshots.getProjectShellById(projectId);
+      assert.deepEqual(
+        projectShell._tag === "Some" ? projectShell.value.computer : "none",
+        computer,
+      );
+      const threadShell = yield* snapshots.getThreadShellById(threadId);
+      assert.deepEqual(
+        threadShell._tag === "Some" ? threadShell.value.computerWait : "none",
+        computerWait,
+      );
+      const shell = yield* snapshots.getShellSnapshot();
+      assert.deepEqual(shell.projects.find((entry) => entry.id === projectId)?.computer, computer);
+      assert.deepEqual(
+        shell.threads.find((entry) => entry.id === threadId)?.computerWait,
+        computerWait,
+      );
+      const full = yield* snapshots.getSnapshot();
+      assert.deepEqual(full.projects.find((entry) => entry.id === projectId)?.computer, computer);
+      const detail = full.threads.find((entry) => entry.id === threadId);
+      assert.deepEqual(detail?.computerWait, computerWait);
+      assert.strictEqual(detail?.updatedAt, createdAt);
+
+      // Cleared: the wait ends and the project leaves the computer.
+      yield* engine.dispatch(
+        {
+          type: "thread.computer-wait.set",
+          commandId: CommandId.make("cmd-computer-wait-clear"),
+          threadId,
+          computerWait: null,
+          createdAt: "2026-11-03T10:05:00.000Z",
+        },
+        { origin },
+      );
+      yield* engine.dispatch(
+        {
+          type: "project.computer.set",
+          commandId: CommandId.make("cmd-computer-project-clear"),
+          projectId,
+          computer: null,
+          createdAt: "2026-11-03T10:06:00.000Z",
+        },
+        { origin },
+      );
+      const cleared = yield* sql<{
+        readonly computerJson: string | null;
+        readonly updatedAt: string;
+      }>`
+        SELECT computer_json AS "computerJson", updated_at AS "updatedAt"
+        FROM projection_projects
+        WHERE project_id = ${projectId}
+      `;
+      assert.deepEqual(cleared, [{ computerJson: null, updatedAt: "2026-11-03T10:06:00.000Z" }]);
+      const clearedShell = yield* snapshots.getShellSnapshot();
+      assert.isUndefined(clearedShell.projects.find((entry) => entry.id === projectId)?.computer);
+      const clearedThread = clearedShell.threads.find((entry) => entry.id === threadId);
+      assert.isUndefined(clearedThread?.computerWait);
+      assert.strictEqual(clearedThread?.updatedAt, createdAt);
+    }),
+  );
+
   it.effect("projects the assistant chat migration and assistant-started chats", () =>
     Effect.gen(function* () {
       const engine = yield* OrchestrationEngineService;
@@ -2593,6 +2722,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       const rows = yield* sql<{ readonly threadId: string; readonly assistantRole: string | null }>`
         SELECT thread_id AS "threadId", assistant_role AS "assistantRole"
         FROM projection_threads
+        WHERE project_id = ${projectId}
         ORDER BY thread_id ASC
       `;
       assert.deepEqual(rows, [
