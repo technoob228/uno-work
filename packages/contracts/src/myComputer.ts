@@ -66,6 +66,9 @@ export const MyComputerPairing = Schema.Struct({
   url: Schema.String,
   commands: MyComputerPairCommands,
   expiresAt: Schema.String,
+  /** The console and the helper's download (CONTRACT.md §4.3); absent from older consoles. */
+  api: Schema.optionalKey(Schema.String),
+  download: Schema.optionalKey(Schema.String),
 });
 export type MyComputerPairing = typeof MyComputerPairing.Type;
 

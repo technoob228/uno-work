@@ -123,6 +123,11 @@ import {
 } from "./desktopFlavor.ts";
 import { UNO_CONSOLE_URL, UnoAccountService } from "./unoAccount.ts";
 import { nodeInspectFile, nodeUploadFile, shareLocalFileViaDrive } from "./driveShareFile.ts";
+import {
+  type ConnectHelperDeps,
+  installConnectHelper,
+  readConnectHelperState,
+} from "./connectHelperInstaller.ts";
 import { defaultSkillsFolder, readLocalSkillsFolder } from "./localSkillsFolder.ts";
 import {
   decideMainWindowNavigation,
@@ -199,6 +204,8 @@ const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
 const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
 const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
 const UNO_DRIVE_SHARE_FILE_CHANNEL = "desktop:uno-drive-share-file";
+const CONNECT_HELPER_STATE_CHANNEL = "desktop:connect-helper-state";
+const CONNECT_HELPER_INSTALL_CHANNEL = "desktop:connect-helper-install";
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 // "Uno Work Stage" (16.10) next to the release app: its own data home,
 // Chromium profile and ids (desktopFlavor.ts). Read before anything touches
@@ -2100,7 +2107,11 @@ function registerIpcHandlers(): void {
     const method = input?.method;
     const path = input?.path;
     if (
-      (method !== "GET" && method !== "POST" && method !== "PUT" && method !== "PATCH") ||
+      (method !== "GET" &&
+        method !== "POST" &&
+        method !== "PUT" &&
+        method !== "PATCH" &&
+        method !== "DELETE") ||
       typeof path !== "string"
     ) {
       return { status: 400, body: { error: "INVALID_REQUEST" } };
@@ -2110,6 +2121,46 @@ function registerIpcHandlers(): void {
       path,
       ...(input?.body === undefined ? {} : { body: input.body }),
     });
+  });
+
+  // Computers lifecycle: the app makes this computer one of the person's
+  // computers itself — the console's install script, without a terminal
+  // (connectHelperInstaller.ts).
+  ipcMain.removeHandler(CONNECT_HELPER_STATE_CHANNEL);
+  handleTrustedIpc(CONNECT_HELPER_STATE_CHANNEL, async () =>
+    readConnectHelperState(connectHelperDeps()),
+  );
+  let connectHelperInstalling = false;
+  ipcMain.removeHandler(CONNECT_HELPER_INSTALL_CHANNEL);
+  handleTrustedIpc(CONNECT_HELPER_INSTALL_CHANNEL, async (_event, raw: unknown) => {
+    const input = raw as {
+      url?: unknown;
+      code?: unknown;
+      api?: unknown;
+      download?: unknown;
+    } | null;
+    if (typeof input?.url !== "string" || typeof input.code !== "string") {
+      return { ok: false, step: "input", message: "Nothing to install." };
+    }
+    if (connectHelperInstalling) {
+      return { ok: false, step: "busy", message: "Already setting this computer up." };
+    }
+    connectHelperInstalling = true;
+    try {
+      return await installConnectHelper(connectHelperDeps(), {
+        url: input.url,
+        code: input.code,
+        ...(typeof input.api === "string" ? { api: input.api } : {}),
+        ...(typeof input.download === "string" ? { download: input.download } : {}),
+      });
+    } catch (error) {
+      console.warn("[desktop] installing the connect helper failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { ok: false, step: "install", message: "Couldn’t set this computer up. Try again." };
+    } finally {
+      connectHelperInstalling = false;
+    }
   });
 
   // "Share with a link…" for a file on this Mac: a copy to Uno Drive → Shared/
@@ -3234,4 +3285,74 @@ if (process.platform !== "win32") {
     restoreStdIoCapture?.();
     app.quit();
   });
+}
+
+const CONNECT_HELPER_FETCH_TIMEOUT_MS = 60_000;
+const CONNECT_HELPER_MAX_BYTES = 64 * 1024 * 1024;
+const CONNECT_HELPER_PAIR_TIMEOUT_MS = 90_000;
+
+async function connectHelperFetch(url: string): Promise<Response> {
+  const response = await fetch(url, {
+    redirect: "error",
+    signal: AbortSignal.timeout(CONNECT_HELPER_FETCH_TIMEOUT_MS),
+    // The console serves the install script as text to anything that isn't a browser.
+    headers: { Accept: "text/plain, */*" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response;
+}
+
+/** The real computer for connectHelperInstaller.ts. */
+function connectHelperDeps(): ConnectHelperDeps {
+  return {
+    platform: process.platform,
+    arch: process.arch,
+    homeDir: OS.homedir(),
+    localAppData: process.env.LOCALAPPDATA,
+    isRoot: typeof process.getuid === "function" && process.getuid() === 0,
+    fetchText: async (url) => (await connectHelperFetch(url)).text(),
+    fetchBytes: async (url) => {
+      const bytes = new Uint8Array(await (await connectHelperFetch(url)).arrayBuffer());
+      if (bytes.byteLength > CONNECT_HELPER_MAX_BYTES) throw new Error("too big");
+      return bytes;
+    },
+    readFile: async (path) => {
+      try {
+        return await FS.promises.readFile(path, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    mkdirPrivate: async (path) => {
+      await FS.promises.mkdir(path, { recursive: true, mode: 0o700 });
+      if (process.platform !== "win32") await FS.promises.chmod(path, 0o700);
+    },
+    writeExecutable: async (path, bytes) => {
+      const tmp = `${path}.download-${process.pid}`;
+      await FS.promises.writeFile(tmp, bytes, { mode: 0o755 });
+      // A running .exe can be renamed, not replaced (as install.ps1 does).
+      if (process.platform === "win32") {
+        await FS.promises.rename(path, `${path}.old`).catch(() => undefined);
+      }
+      await FS.promises.rename(tmp, path);
+    },
+    run: (file, args) =>
+      new Promise((resolve, reject) => {
+        ChildProcess.execFile(
+          file,
+          [...args],
+          { timeout: CONNECT_HELPER_PAIR_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 },
+          (error, stdout, stderr) => {
+            const output = `${stdout}\n${stderr}`;
+            if (error && typeof (error as { code?: unknown }).code !== "number") {
+              // Spawning failed (ENOENT, EACCES) or the timeout killed it.
+              if ((error as { killed?: boolean }).killed) resolve({ code: null, output });
+              else reject(error);
+              return;
+            }
+            resolve({ code: error ? Number((error as { code?: unknown }).code) : 0, output });
+          },
+        );
+      }),
+  };
 }

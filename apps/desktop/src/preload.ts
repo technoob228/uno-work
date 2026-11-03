@@ -30,6 +30,8 @@ const UNO_ACCOUNT_SIGN_IN_CHANNEL = "desktop:uno-account-sign-in";
 const UNO_ACCOUNT_SIGN_OUT_CHANNEL = "desktop:uno-account-sign-out";
 const UNO_ACCOUNT_REQUEST_CHANNEL = "desktop:uno-account-request";
 const UNO_DRIVE_SHARE_FILE_CHANNEL = "desktop:uno-drive-share-file";
+const CONNECT_HELPER_STATE_CHANNEL = "desktop:connect-helper-state";
+const CONNECT_HELPER_INSTALL_CHANNEL = "desktop:connect-helper-install";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
 const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-registry";
@@ -87,6 +89,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   pageTools: { version: PAGE_TOOLS_PRELOAD_VERSION },
   unoDrive: {
     shareLocalFile: (input) => ipcRenderer.invoke(UNO_DRIVE_SHARE_FILE_CHANNEL, input),
+  },
+  // Computers lifecycle: this computer becomes one of the person's computers.
+  connectHelper: {
+    state: () => ipcRenderer.invoke(CONNECT_HELPER_STATE_CHANNEL),
+    install: (input) => ipcRenderer.invoke(CONNECT_HELPER_INSTALL_CHANNEL, input),
   },
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(GET_APP_BRANDING_CHANNEL);
