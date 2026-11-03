@@ -345,12 +345,42 @@ await step("Dev Mode: SSH, trash and roles come back", async () => {
 });
 await page.context().close();
 
+// ── D. The desktop app sets this Mac up itself ───────────────────────────
+page = await newPage({ lc: "fresh", fallback: "a", platform: "desktop", mac: "online" });
+await step("Desktop app: Make this Mac one of your computers?", async () => {
+  await id("lc-this-mac-prompt").waitFor({ timeout: 20_000 });
+  expect("The card", await text("lc-this-mac-prompt"), "Make this Mac one of your computers?");
+  await shot("d01-this-mac-prompt");
+  await id("lc-this-mac-yes").click();
+  await page.waitForTimeout(400);
+  expect("Installs itself", await text("lc-this-mac-prompt"), "Setting up this Mac");
+  await shot("d02-installing");
+});
+await step("Desktop app: What is it for? with A full computer picked", async () => {
+  await id("lc-add-purpose").waitFor({ timeout: 15_000 });
+  expect("Full picked", String(await id("lc-purpose-full").getAttribute("data-selected")), "true");
+  expect("No terminal command", String(await page.getByTestId("lc-command").count()), "0");
+  await shot("d03-purpose-full-picked");
+  await id("lc-purpose-continue").click();
+  await id("lc-bring-tool-claude").waitFor({ timeout: 15_000 });
+  await shot("d04-bring");
+  await id("lc-bring-start").click();
+  await id("lc-add-done").waitFor();
+  expect("Full: start chats", await text("lc-add-done"), "on MacBook");
+  await shot("d05-done");
+  await id("lc-done").click();
+  await page.waitForTimeout(1500);
+  expect("The card is gone", String(await visible("lc-this-mac-prompt")), "false");
+});
+await page.context().close();
+
 // ── Variant b: the desktop app's Settings → This computer ────────────────
 page = await newPage({ lc: "connected", fallback: "b", platform: "desktop", mac: "online" });
 await step("Variant b: Settings → This computer (desktop app)", async () => {
   await go("#/settings/computer");
   await id("lc-where-agents-run").waitFor({ timeout: 10_000 });
   expect("Where agents run", await text("lc-where-agents-run"), "In your cloud (recommended)");
+  expect("No stale owner line", String(await visible("settings-owner-line")), "false");
   expect(
     "Nav says This computer",
     String((await page.getByText("This computer", { exact: true }).count()) > 0),

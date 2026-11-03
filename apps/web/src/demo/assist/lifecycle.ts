@@ -454,6 +454,13 @@ const hooks: LifecycleDemoHooks = {
   installStarted: () => {
     installStartedAt ??= Date.now();
   },
+  // The desktop app: a code from uno-work, the helper installed and paired here (~2 s).
+  installHere: async () => {
+    await wait(2_000);
+    installStartedAt = Date.now() - 3_000;
+    macConnected = true;
+    return MAC_COMPUTER_ID;
+  },
   projects: () => FOUND,
   bring: ({ projects }) => {
     for (const project of projects) workProject(project.name);
