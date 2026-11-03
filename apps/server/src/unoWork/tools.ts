@@ -115,6 +115,7 @@ import { automationChatTools } from "../automations/chatTools.ts";
 import type { AutomationChatTools } from "../automations/AutomationsService.ts";
 import type { MyComputerShape } from "../myComputer/MyComputerService.ts";
 import { myComputerTools } from "../myComputer/myComputerTools.ts";
+import { workspaceTools, type WorkspaceToolDeps } from "../myComputer/workspaceTools.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
@@ -216,7 +217,7 @@ export interface HtmlPageCapture {
   readonly blockedRequests: ReadonlyArray<string>;
 }
 
-export interface UnoWorkToolDeps {
+export interface UnoWorkToolDeps extends WorkspaceToolDeps {
   readonly caller: UnoWorkCaller;
   /** Dev mode's pull requests of this chat. Absent: not on this daemon. */
   readonly pullRequests?: {
@@ -4355,6 +4356,10 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     requireAccess: requireAccountAccess,
     fail: toolError,
   }),
+
+  // A chat whose project is on the person's computer: its hands there
+  // (myComputer/workspaceTools.ts; listed only to such a chat)
+  ...workspaceTools({ requireAccess: requireAccountAccess, fail: toolError }),
 
   // Account
   {

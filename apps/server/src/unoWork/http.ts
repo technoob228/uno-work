@@ -87,6 +87,13 @@ import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { makeCancellableCalls } from "../myComputer/cancelCalls.ts";
 import { MyComputerService } from "../myComputer/MyComputerService.ts";
 import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
+import { WORKSPACE_TOOL_NAMES, type ComputerWaitMark } from "../myComputer/workspaceTools.ts";
+import {
+  makeComputerWorkspaceReader,
+  makeWaitMarks,
+  sharedPurposeStore,
+} from "../myComputer/ComputerWorkspaces.ts";
+import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { ManagerCapabilityTokenRepository } from "../persistence/Services/ManagerCapabilityTokens.ts";
 import {
   buildUnoWorkGuide,
@@ -268,6 +275,15 @@ const myComputerCalls = makeCancellableCalls();
 
 const NO_HIDDEN_TOOLS: ReadonlySet<string> = new Set();
 
+/**
+ * "Waiting for <name>…" on a chat whose computer sleeps (workspace tools):
+ * one mark per chat however many of its calls wait. Module-wide: every call
+ * of the chat goes through this route.
+ */
+let computerWaitMarks:
+  | ((threadId: string, mark: ComputerWaitMark | null) => Effect.Effect<void>)
+  | null = null;
+
 /** The request a `notifications/cancelled` names, if the body is one. */
 function cancelledRequestId(body: unknown): string | number | null {
   if (!isMethod(body, "notifications/cancelled")) return null;
@@ -280,7 +296,8 @@ function myComputerCallId(body: unknown): string | number | null {
   if (!isMethod(body, "tools/call")) return null;
   const message = body as { id?: unknown; params?: { name?: unknown } };
   const { id } = message;
-  return MY_COMPUTER_TOOL_NAMES.has(String(message.params?.name)) &&
+  const name = String(message.params?.name);
+  return (MY_COMPUTER_TOOL_NAMES.has(name) || WORKSPACE_TOOL_NAMES.has(name)) &&
     (typeof id === "string" || typeof id === "number")
     ? id
     : null;
@@ -429,6 +446,16 @@ const makeDeps = (input: {
     const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
+    // The calling chat's project on the person's computer (workspace tools), once per call.
+    const computerWorkspaceOf = myComputer
+      ? yield* Effect.cached(
+          makeComputerWorkspaceReader({
+            projections,
+            core: myComputer.core,
+            purposes: sharedPurposeStore(serverConfig.stateDir),
+          }).planOfThread(input.threadId),
+        )
+      : Effect.succeed(null);
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
@@ -518,6 +545,33 @@ const makeDeps = (input: {
             ),
       },
       ...(myComputer ? { myComputer } : {}),
+      ...(myComputer
+        ? {
+            computerWorkspace: computerWorkspaceOf,
+            setComputerWait: (mark: ComputerWaitMark | null) =>
+              (computerWaitMarks ??= makeWaitMarks<ComputerWaitMark>((threadId, wait) =>
+                engine
+                  .dispatch(
+                    {
+                      type: "thread.computer-wait.set",
+                      commandId: CommandId.make(`computer-wait:${crypto.randomUUID()}`),
+                      threadId: ThreadId.make(threadId),
+                      computerWait: wait,
+                      createdAt: new Date().toISOString(),
+                    },
+                    { origin: systemCommandOrigin("computer-workspace") },
+                  )
+                  .pipe(
+                    Effect.asVoid,
+                    Effect.catchCause((cause) =>
+                      Effect.logWarning("computer wait mark failed").pipe(
+                        Effect.annotateLogs({ threadId, cause: String(cause) }),
+                      ),
+                    ),
+                  ),
+              ))(input.threadId, mark),
+          }
+        : {}),
       ...(threadPullRequests
         ? {
             pullRequests: {
@@ -990,6 +1044,9 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
               new Set([
                 ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES),
                 ...(inDevMode ? [] : DEV_MODE_TOOL_NAMES),
+                // Listed only to a chat whose project is on the person's
+                // computer: unhidden below, once the caller is known.
+                ...WORKSPACE_TOOL_NAMES,
               ]),
           ),
         );
@@ -1042,7 +1099,24 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
       threadId: thread.threadId,
       cwd: thread.context.cwd,
     });
-    const handled = handleMcpMessage(yield* mcpServer, deps, body);
+    const onComputer =
+      isMethod(body, "tools/list") && deps.computerWorkspace
+        ? (yield* deps.computerWorkspace) !== null
+        : false;
+    const handled = handleMcpMessage(
+      onComputer
+        ? yield* mcpServer.pipe(
+            Effect.map((server) => ({
+              ...server,
+              hiddenTools: new Set(
+                [...(server.hiddenTools ?? [])].filter((name) => !WORKSPACE_TOOL_NAMES.has(name)),
+              ),
+            })),
+          )
+        : yield* mcpServer,
+      deps,
+      body,
+    );
     const callId = myComputerCallId(body);
     const outcome = yield* callId === null
       ? handled

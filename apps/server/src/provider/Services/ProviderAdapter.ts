@@ -24,6 +24,7 @@ import type { Effect } from "effect";
 import type { Stream } from "effect";
 
 import type { HarnessSandboxPlan } from "../../sandbox/harnessSandbox.ts";
+import type { ComputerWorkspacePlan } from "./ComputerWorkspacePolicy.ts";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
@@ -45,6 +46,13 @@ export interface ProviderAdapterCapabilities {
    * run open (`ProviderService`).
    */
   readonly harnessSandbox?: boolean;
+  /**
+   * The adapter can run a chat whose project is on the person's own computer
+   * (`computerWorkspace` in `startSession`): it switches its own shell and file
+   * tools off and points the agent at the `workspace_*` tools. Absent: such a
+   * chat is refused on this harness (`ProviderService`).
+   */
+  readonly computerWorkspace?: boolean;
 }
 
 /**
@@ -54,6 +62,8 @@ export interface ProviderAdapterCapabilities {
  */
 export type ProviderAdapterStartSessionInput = ProviderSessionStartInput & {
   readonly harnessSandbox?: HarnessSandboxPlan;
+  /** The chat's project is this folder on the person's computer (ComputerWorkspacePolicy). */
+  readonly computerWorkspace?: ComputerWorkspacePlan;
 };
 
 export interface ProviderThreadTurnSnapshot {

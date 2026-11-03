@@ -124,7 +124,8 @@ import { CredentialsVaultLive } from "./credentialsVault.ts";
 import { ProjectSyncServiceLive } from "./projectSync/ProjectSyncService.ts";
 import { ChatImportServiceLive } from "./myComputer/import/ChatImportService.ts";
 import { MyComputerServiceLive } from "./myComputer/MyComputerService.ts";
-import { ComputersLifecycleStubLive } from "./computers/ComputersLifecycle.ts";
+import { ComputersLifecycleLive } from "./myComputer/ComputersLifecycleLive.ts";
+import { ComputerWorkspacePolicyLive } from "./myComputer/ComputerWorkspaces.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -364,6 +365,9 @@ const ProviderLayerLive = ProviderServiceBudgetedLive.pipe(
   // would run open: keep it here. Merged: the provider command reactor asks
   // it too (no harness title runs for sandboxed chats).
   Layer.provideMerge(AssistantHarnessSandboxPolicyLive),
+  // A chat whose project is on the person's computer runs its harness here
+  // with the workspace_* tools there, or is refused (computers lifecycle).
+  Layer.provideMerge(ComputerWorkspacePolicyLive.pipe(Layer.provide(MyComputerServiceLive))),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
@@ -530,8 +534,13 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Computers lifecycle (computers/): what each own computer is for, its work.
       Layer.mergeAll(
         ChatImportServiceLive,
-        // computers lifecycle: backend swaps this for its live layer (CONTRACT.md §2)
-        ComputersLifecycleStubLive,
+        // computers lifecycle: the backend's live layer (CONTRACT.md §2, §7):
+        // purposes at the console, open a folder there, continue in the
+        // cloud, bring work over (myComputer/ComputersLifecycleLive.ts).
+        ComputersLifecycleLive.pipe(
+          Layer.provide(ChatImportServiceLive),
+          Layer.provide(ProjectSyncServiceLive),
+        ),
       ).pipe(Layer.provideMerge(MyComputerServiceLive)),
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
