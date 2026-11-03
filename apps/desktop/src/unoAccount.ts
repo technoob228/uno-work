@@ -113,6 +113,16 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   // copy through a one-time upload address and links to it (driveShareFile.ts).
   { method: "GET", pattern: /^\/api\/v1\/drive$/ },
   { method: "POST", pattern: /^\/api\/v1\/drive\/(upload-link|shares)$/ },
+  // "Connect my computer" and the computers lifecycle (CONTRACT.md §4): the
+  // person's own computers — list, pairing, its state, mode / name, remove —
+  // and deleting a cloud computer from its menu (the console refuses the
+  // plan's last one). The channel to a computer stays the machine token's.
+  { method: "GET", pattern: /^\/api\/v1\/work\/computers$/ },
+  { method: "POST", pattern: /^\/api\/v1\/work\/computers\/pair$/ },
+  { method: "GET", pattern: /^\/api\/v1\/work\/computers\/pair\/[A-Za-z0-9-]{4,32}$/ },
+  { method: "PATCH", pattern: /^\/api\/v1\/work\/computers\/\d+$/ },
+  { method: "DELETE", pattern: /^\/api\/v1\/work\/computers\/\d+$/ },
+  { method: "DELETE", pattern: /^\/api\/v1\/boxes\/\d+$/ },
   {
     method: "GET",
     pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,

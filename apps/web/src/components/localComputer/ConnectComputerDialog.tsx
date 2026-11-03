@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
+import { useDevMode } from "../../devMode";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -613,6 +615,8 @@ function Manage() {
     pollMs: STATUS_POLL_CARD_MS,
   });
   const [confirming, setConfirming] = useState(false);
+  const devMode = useDevMode();
+  const lifecycleOn = useComputersLifecycleOn();
   const computer = computers.find((one) => one.id === manageId);
   const gone = settled && computer === undefined;
   useEffect(() => {
@@ -649,13 +653,16 @@ function Manage() {
         <Button variant="ghost" onClick={localComputer.close}>
           Close
         </Button>
-        <Button
-          variant="destructive-outline"
-          onClick={() => setConfirming(true)}
-          data-testid="connect-disconnect"
-        >
-          Disconnect computer
-        </Button>
+        {/* Computers lifecycle (02.11): removing is in the computer's menu; here only in Dev Mode. */}
+        {lifecycleOn && !devMode ? null : (
+          <Button
+            variant="destructive-outline"
+            onClick={() => setConfirming(true)}
+            data-testid="connect-disconnect"
+          >
+            Disconnect computer
+          </Button>
+        )}
       </div>
     </Shell>
   );

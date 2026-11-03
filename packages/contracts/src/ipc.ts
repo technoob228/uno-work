@@ -661,7 +661,35 @@ export interface DesktopUnoDriveBridge {
   shareLocalFile: (input: DesktopUnoDriveShareFileInput) => Promise<DesktopUnoDriveShareFileResult>;
 }
 
+/** What the desktop app knows about Uno's helper on this computer (`~/.uno-connect`). */
+export interface DesktopConnectHelperState {
+  readonly installed: boolean;
+  /** From the helper's config: this computer's id among the person's computers. */
+  readonly computerId: string | null;
+  readonly name: string | null;
+}
+
+export interface DesktopConnectHelperInstallInput {
+  /** The pairing's install address (`/c/<code>`): its script names the console and the download. */
+  readonly url: string;
+  readonly code: string;
+  readonly api?: string;
+  readonly download?: string;
+}
+
+export type DesktopConnectHelperInstallResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly step: string; readonly message: string };
+
+/** Computers lifecycle: the app makes this computer one of the person's computers itself. */
+export interface DesktopConnectHelperBridge {
+  state: () => Promise<DesktopConnectHelperState>;
+  install: (input: DesktopConnectHelperInstallInput) => Promise<DesktopConnectHelperInstallResult>;
+}
+
 export interface DesktopBridge {
+  /** Absent before the computers lifecycle wave (0.0.180). */
+  connectHelper?: DesktopConnectHelperBridge;
   /** Absent in desktop builds before 0.0.70. */
   unoAccount?: DesktopUnoAccountBridge;
   /**

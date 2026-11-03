@@ -4,6 +4,7 @@
  * already had; the old pages are all still there and come back in the nav
  * with Dev mode (Settings → Developer).
  */
+import { WhereAgentsRunSection } from "../computersLifecycle/WhereAgentsRun";
 import { useNavigate } from "@tanstack/react-router";
 import {
   ArchiveIcon,
@@ -705,6 +706,7 @@ export function ComputerSettings() {
   const { economy } = useComputerEconomy(environmentId, null);
   return (
     <SettingsPageContainer>
+      <WhereAgentsRunSection />
       <SettingsSection title={`Sleep and economy · ${label}`}>
         {economy ? (
           <EconomyCard

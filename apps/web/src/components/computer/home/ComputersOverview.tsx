@@ -31,9 +31,20 @@ import {
   PlusIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { cn } from "~/lib/utils";
+import { useComputersLifecycleOn } from "../../../computersLifecycle/flag";
+import { useOwnComputers } from "../../../computersLifecycle/useComputers";
+import { useMachineRows } from "../../../hooks/useMachineRows";
+import { CloudComputerActions, OwnComputerRow } from "../../computersLifecycle/ComputerActions";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
 import { useSpaceScope, useSwitchSpace } from "../../../spaces";
 import { selectEnvironmentState, useStore } from "../../../store";
@@ -355,9 +366,13 @@ function LiveRow(props: {
   thisDetails: ReactNode;
   switcher: ComputerSwitcher;
   onClose: () => void;
+  /** Computers lifecycle: the account's box behind a cloud computer (Delete needs it). */
+  boxId?: number | null;
+  lastOnPlan?: boolean;
 }) {
   const { computer } = props;
   const environmentId = computer.environmentId as EnvironmentId;
+  const lifecycleOn = useComputersLifecycleOn();
   // A row of the open menu: live numbers.
   const live = useLive(environmentId, true);
   const navigate = useNavigate();
@@ -519,6 +534,15 @@ function LiveRow(props: {
               {props.onSwitchSpace ? "Switch to its space" : "Open its files and apps"}
             </button>
           ) : null}
+          {lifecycleOn && computer.cloud ? (
+            <CloudComputerActions
+              boxId={props.boxId ?? null}
+              environmentId={environmentId}
+              name={computer.label}
+              lastOnPlan={props.lastOnPlan ?? false}
+              onBeforeDialog={props.onClose}
+            />
+          ) : null}
         </div>
       ) : null}
     </li>
@@ -536,13 +560,42 @@ function MiniBar({ label, pct }: { label: string; pct: number | null }) {
 }
 
 /** A cloud computer on the account nothing has connected to (asleep): Wake opens it. */
-function AsleepRow(props: { computer: SidebarDComputer; switcher: ComputerSwitcher }) {
+function AsleepRow(props: {
+  computer: SidebarDComputer;
+  switcher: ComputerSwitcher;
+  /** Computers lifecycle: the row opens into Delete. */
+  open?: boolean;
+  onToggle?: () => void;
+  boxId?: number | null;
+  lastOnPlan?: boolean;
+  onClose?: () => void;
+}) {
   const { computer, switcher } = props;
   const row = switcher.accountBoxes.find((box) => box.key === computer.key) ?? null;
   const waking = row !== null && switcher.connecting?.boxId === row.box?.id;
   return (
     <li className="list-none" data-testid="computers-row">
-      <div className="flex w-full items-start gap-2.5 rounded-lg px-2 py-2">
+      <div
+        className={cn(
+          "flex w-full items-start gap-2.5 rounded-lg px-2 py-2",
+          props.onToggle && "cursor-pointer hover:bg-accent/60",
+          props.open && "bg-accent/40",
+        )}
+        {...(props.onToggle
+          ? {
+              role: "button",
+              tabIndex: 0,
+              "aria-expanded": props.open ?? false,
+              onClick: props.onToggle,
+              onKeyDown: (event: KeyboardEvent) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  props.onToggle?.();
+                }
+              },
+            }
+          : {})}
+      >
         <span className="relative mt-0.5">
           <KindIcon cloud={computer.cloud ?? true} className="size-4 text-muted-foreground/70" />
           <span
@@ -568,13 +621,35 @@ function AsleepRow(props: { computer: SidebarDComputer; switcher: ComputerSwitch
             size="xs"
             variant="outline"
             disabled={switcher.connecting !== null}
-            onClick={() => void switcher.openAccountBox(row)}
+            onClick={(event) => {
+              event.stopPropagation();
+              void switcher.openAccountBox(row);
+            }}
           >
             {waking ? <Loader2Icon className="size-3 animate-spin" /> : null}
             Wake
           </Button>
         ) : null}
+        {props.onToggle ? (
+          <ChevronRightIcon
+            className={cn(
+              "mt-1 size-3.5 shrink-0 text-muted-foreground transition-transform",
+              props.open && "rotate-90",
+            )}
+          />
+        ) : null}
       </div>
+      {props.open ? (
+        <div className="mb-1 ml-8 flex flex-col gap-2.5 border-l border-border/60 py-1 pr-2 pl-3">
+          <CloudComputerActions
+            boxId={props.boxId ?? row?.box?.id ?? null}
+            environmentId={null}
+            name={computer.label}
+            lastOnPlan={props.lastOnPlan ?? false}
+            {...(props.onClose ? { onBeforeDialog: props.onClose } : {})}
+          />
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -615,7 +690,10 @@ export function ComputersPill(props: {
     [focused, props.computers, thisId],
   );
   const asleep = computers.filter((computer) => computer.environmentId === null).length;
-  const summary = `${computers.length} computers${asleep > 0 ? ` · ${asleep} asleep` : ""}`;
+  // Computers lifecycle: the person's computers used as tools (no chats of their own) are listed too.
+  const lifecycleExtras = useLifecycleMenuExtras(props.computers);
+  const total = computers.length + lifecycleExtras.own.length;
+  const summary = `${total} computers${asleep > 0 ? ` · ${asleep} asleep` : ""}`;
   // Each live mark says how its computer is; the chip orders and folds by that.
   const [reports, setReports] = useState<Readonly<Record<string, MarkReport>>>({});
   const onReport = useCallback((key: string, report: MarkReport) => {
@@ -759,11 +837,39 @@ export function ComputersPill(props: {
                     thisDetails={props.thisDetails}
                     switcher={switcher}
                     onClose={() => setOpen(false)}
+                    boxId={lifecycleExtras.boxIdOf(computer.key)}
+                    lastOnPlan={lifecycleExtras.lastOnPlan}
+                  />
+                ) : lifecycleExtras.on ? (
+                  <AsleepRow
+                    key={computer.key}
+                    computer={computer}
+                    switcher={switcher}
+                    open={expanded === computer.key}
+                    onToggle={() =>
+                      setExpanded((current) => (current === computer.key ? null : computer.key))
+                    }
+                    boxId={lifecycleExtras.boxIdOf(computer.key)}
+                    lastOnPlan={lifecycleExtras.lastOnPlan}
+                    onClose={() => setOpen(false)}
                   />
                 ) : (
                   <AsleepRow key={computer.key} computer={computer} switcher={switcher} />
                 ),
               )}
+              {lifecycleExtras.own.map((tool) => (
+                <OwnComputerRow
+                  key={tool.id}
+                  computer={tool}
+                  open={expanded === `tool:${tool.id}`}
+                  onToggle={() =>
+                    setExpanded((current) =>
+                      current === `tool:${tool.id}` ? null : `tool:${tool.id}`,
+                    )
+                  }
+                  onClose={() => setOpen(false)}
+                />
+              ))}
             </ul>
             <div className="-mx-1 mt-1 flex flex-col border-t border-border/60 pt-1.5">
               <FooterRow icon={<LayoutGridIcon />} onClick={switcher.goAllComputers}>
@@ -779,6 +885,26 @@ export function ComputersPill(props: {
       <ComputerSwitcherDialogs switcher={switcher} />
     </>
   );
+}
+
+/**
+ * Computers lifecycle: what the menu adds — the person's own computers (a tool
+ * for agents or a full computer: either way not a computer of its own here,
+ * their chats live on the cloud computer), the box id behind each cloud
+ * computer, and whether a cloud computer is the plan's last (it can only be
+ * turned off then).
+ */
+function useLifecycleMenuExtras(computers: ReadonlyArray<SidebarDComputer>) {
+  const on = useComputersLifecycleOn();
+  const { computers: own } = useOwnComputers();
+  const rows = useMachineRows();
+  const cloudCount = computers.filter((computer) => computer.cloud).length;
+  return {
+    on,
+    own: on ? own : [],
+    lastOnPlan: cloudCount <= 1,
+    boxIdOf: (key: string): number | null => rows.find((row) => row.key === key)?.box?.id ?? null,
+  };
 }
 
 function FooterRow(props: { icon: ReactNode; onClick: () => void; children: ReactNode }) {

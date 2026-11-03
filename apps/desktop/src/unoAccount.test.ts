@@ -87,6 +87,15 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("PUT", "/api/v1/account/goal")).toBe(true);
     expect(isAllowedAccountRequest("DELETE", "/api/v1/account/goal")).toBe(false);
     expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
+    // Computers lifecycle: own computers, and deleting a cloud computer — never its channel.
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/computers")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/work/computers/pair")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/computers/pair/7KQ2-M9XD")).toBe(true);
+    expect(isAllowedAccountRequest("PATCH", "/api/v1/work/computers/41")).toBe(true);
+    expect(isAllowedAccountRequest("DELETE", "/api/v1/work/computers/41")).toBe(true);
+    expect(isAllowedAccountRequest("GET", "/api/v1/work/computers/41/channel")).toBe(false);
+    expect(isAllowedAccountRequest("DELETE", "/api/v1/boxes/12")).toBe(true);
+    expect(isAllowedAccountRequest("DELETE", "/api/v1/boxes/12/ports/3")).toBe(false);
     // Uno Drive: share a copy of a file on this Mac (w0139) — not buckets' raw presign.
     expect(isAllowedAccountRequest("GET", "/api/v1/drive")).toBe(true);
     expect(isAllowedAccountRequest("POST", "/api/v1/drive/upload-link")).toBe(true);

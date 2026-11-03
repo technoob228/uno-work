@@ -18,6 +18,8 @@ import type {
 } from "@t3tools/contracts";
 
 import { APP_BASE_NAME } from "../branding";
+import { useComputersLifecycleOn } from "../computersLifecycle/flag";
+import { lifecycle } from "../computersLifecycle/store";
 import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { localComputer } from "../localComputer/localComputerStore";
 import { useMyComputers } from "../localComputer/useMyComputers";
@@ -197,7 +199,22 @@ function formatDesktopSshConnectionError(error: unknown): string {
   return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
-export function AddEnvModal({ open, onOpenChange, initialStep }: AddEnvModalProps) {
+export function AddEnvModal(props: AddEnvModalProps) {
+  // Computers lifecycle (02.11): the choice is the one "Add computer" window now.
+  const lifecycleOn = useComputersLifecycleOn();
+  const redirect =
+    lifecycleOn && (props.initialStep === undefined || props.initialStep === "choice");
+  const { open, onOpenChange } = props;
+  useEffect(() => {
+    if (!redirect || !open) return;
+    onOpenChange(false);
+    lifecycle.openAdd();
+  }, [onOpenChange, open, redirect]);
+  if (redirect) return null;
+  return <AddEnvModalView {...props} />;
+}
+
+function AddEnvModalView({ open, onOpenChange, initialStep }: AddEnvModalProps) {
   const startStep = initialStep ?? "choice";
   const [step, setStep] = useState<Step>(startStep);
 

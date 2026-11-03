@@ -31,6 +31,7 @@ import {
 import { type ScopedEnvironment, useOptionalSettingsScope } from "./SettingsScopeContext";
 import { MachineStatusDot } from "./SettingsScopeSwitcher";
 import { settingsOwnerLine, type SettingsPageOwner } from "./settingsPageScope";
+import { useThisComputerSettingShown } from "../computersLifecycle/WhereAgentsRun";
 import {
   ALL_COMPUTERS_VALUE,
   ALL_PROJECTS_VALUE,
@@ -335,6 +336,10 @@ export function SettingsOwnerLine({
   readonly owner: SettingsPageOwner;
   readonly computerLabel: string;
 }) {
+  // Computers lifecycle, desktop app: the page opens on "This computer" (this Mac);
+  // the cloud computer's own sections below name it themselves.
+  const thisComputerFirst = useThisComputerSettingShown();
+  if (owner === "this-computer" && thisComputerFirst) return null;
   return (
     <p className="text-sm text-muted-foreground" data-testid="settings-owner-line">
       {settingsOwnerLine(owner, computerLabel)}

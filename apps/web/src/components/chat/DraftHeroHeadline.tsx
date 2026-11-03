@@ -30,6 +30,13 @@ import { useHomeThreads } from "../computer/home/HomeThreads";
 import { useSpacesOn } from "../../spaces";
 import { useStartableAssistants } from "../assistants/useAssistantTeam";
 import { toastManager } from "../ui/toast";
+import { useComputersHostId } from "../../computersLifecycle/useComputers";
+import { useStore } from "../../store";
+import { createProjectSelectorByRef } from "../../storeSelectors";
+import {
+  OwnComputerFolderPicker,
+  openOwnComputerFolder,
+} from "../computersLifecycle/OwnComputerFolderPicker";
 import { DraftHeroProjectHeading } from "./DraftHeroProjectHeading";
 import { NewChatComputerPicker, useNewChatComputerName } from "./NewChatComputerPicker";
 import { NewChatFolderPicker } from "./NewChatFolderPicker";
@@ -66,44 +73,89 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
     home !== null &&
     normalizeProjectPathForComparison(home) === normalizeProjectPathForComparison(projectCwd);
   const folder = inHome ? null : { cwd: projectCwd, name: projectName };
-
-  const folderPicker = (
-    <NewChatFolderPicker
-      variant="inline"
-      environmentId={environmentId}
-      folder={folder}
-      assistants={assistants}
-      assistant={assistant}
-      onPickAssistant={(member) =>
-        moveDraftToAssistant(
-          draftId,
-          scopeProjectRef(member.environmentId as EnvironmentId, member.projectId as ProjectId),
-        ).catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: `Couldn't start a chat with ${member.profile.name}`,
-            description: errorText(error),
-          });
-        })
-      }
-      onPick={(next, projectRef) => {
-        if (next === null ? inHome : next.cwd === projectCwd) return;
-        return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch((error: unknown) => {
-          toastManager.add({
-            type: "error",
-            title: "Couldn't switch the folder",
-            description: errorText(error),
-          });
-        });
-      }}
-    />
+  // Computers lifecycle: a draft in a folder on the person's own computer.
+  const hostId = useComputersHostId();
+  const projectRef = useMemo(
+    () => scopeProjectRef(environmentId, projectId),
+    [environmentId, projectId],
   );
+  const ownComputer = useStore(
+    useMemo(() => createProjectSelectorByRef(projectRef), [projectRef]),
+  )?.computer;
+  const moveToOwnFolder = (next: { cwd: string; projectId: ProjectId }) =>
+    moveDraftToFolder(draftId, next.cwd, scopeProjectRef(hostId!, next.projectId)).catch(
+      (error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Couldn't switch the folder",
+          description: errorText(error),
+        });
+      },
+    );
+
+  const folderPicker =
+    ownComputer && hostId !== null ? (
+      <OwnComputerFolderPicker
+        hostId={hostId}
+        computerId={ownComputer.computerId}
+        folder={{ cwd: projectCwd, name: projectName }}
+        onPick={moveToOwnFolder}
+        testId="draft-own-folder-picker"
+      />
+    ) : (
+      <NewChatFolderPicker
+        variant="inline"
+        environmentId={environmentId}
+        folder={folder}
+        assistants={assistants}
+        assistant={assistant}
+        onPickAssistant={(member) =>
+          moveDraftToAssistant(
+            draftId,
+            scopeProjectRef(member.environmentId as EnvironmentId, member.projectId as ProjectId),
+          ).catch((error: unknown) => {
+            toastManager.add({
+              type: "error",
+              title: `Couldn't start a chat with ${member.profile.name}`,
+              description: errorText(error),
+            });
+          })
+        }
+        onPick={(next, projectRef) => {
+          if (next === null ? inHome : next.cwd === projectCwd) return;
+          return moveDraftToFolder(draftId, next?.cwd ?? null, projectRef).catch(
+            (error: unknown) => {
+              toastManager.add({
+                type: "error",
+                title: "Couldn't switch the folder",
+                description: errorText(error),
+              });
+            },
+          );
+        }}
+      />
+    );
   // A space is its computer: a new chat in it has nowhere else to go.
   const spacesOn = useSpacesOn();
   const computerPicker = (
     <NewChatComputerPicker
       variant="inline"
       environmentId={environmentId}
+      ownComputerId={ownComputer?.computerId ?? null}
+      onPickOwnComputer={async (computer) => {
+        if (hostId === null) return;
+        try {
+          await moveToOwnFolder(
+            await openOwnComputerFolder({ hostId, computerId: computer.id, path: "~" }),
+          );
+        } catch (error) {
+          toastManager.add({
+            type: "error",
+            title: `Couldn't start a chat on ${computer.name}`,
+            description: errorText(error),
+          });
+        }
+      }}
       onPick={(target) => {
         // Another Uno Work version in the browser: that computer's own page.
         if (switchReloadUrl(currentStaleBundlePage(), readStaleBundleMachine(target))) {
@@ -127,7 +179,7 @@ export const DraftHeroHeadline = memo(function DraftHeroHeadline({
         folderPicker={folderPicker}
         computerPicker={assistant || spacesOn ? null : computerPicker}
         folderName={assistant ? assistant.profile.name : folder ? folder.name : "Home folder"}
-        computerName={assistant || spacesOn ? null : computerName}
+        computerName={assistant || spacesOn ? null : (ownComputer?.computerName ?? computerName)}
         asksAssistant={assistant !== null}
         noProject={home !== null && isNoProjectRoot(projectCwd, home)}
       />

@@ -21,6 +21,10 @@ import { StaleBundleNotice } from "../components/StaleBundleNotice";
 import { CommandPalette } from "../components/CommandPalette";
 import { SetupTourCoach } from "../components/setup/SetupTour";
 import { ConnectComputerDialog } from "../components/localComputer/ConnectComputerDialog";
+import { AddComputerWindow } from "../components/computersLifecycle/AddComputerWindow";
+import { LifecycleConfirmDialogs } from "../components/computersLifecycle/ComputerActions";
+import { useComputersLifecycleOn } from "../computersLifecycle/flag";
+import { ComputersLifecycleSync } from "../computersLifecycle/useComputers";
 import { ImportProgress } from "../components/localComputer/ImportScreens";
 import { NewProjectDialog } from "../components/newProject/NewProjectDialog";
 import { ProjectUploadsPanel } from "../components/newProject/ProjectUploadsPanel";
@@ -171,6 +175,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const lifecycleOn = useComputersLifecycleOn();
   const context = Route.useRouteContext();
   const { authGateState } = context;
   // The context is computed when the app loads; finishing the welcome screen
@@ -243,6 +248,13 @@ function RootRouteView() {
         </AppSidebarLayout>
         <NewProjectDialog />
         <ConnectComputerDialog />
+        <ComputersLifecycleSync />
+        {lifecycleOn ? (
+          <>
+            <AddComputerWindow />
+            <LifecycleConfirmDialogs />
+          </>
+        ) : null}
         <ImportProgress />
         <ProjectUploadsPanel />
         <ScreenRecordingBar />

@@ -38,6 +38,9 @@ import { accountRequest } from "../../account/unoAccount";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { computerSize, formatRam, planTitle } from "../../account/billingModel";
 import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
+import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
+import { lifecycle } from "../../computersLifecycle/store";
+import { useDevMode } from "../../devMode";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { isWebLite, liteLinks, openCloudWork } from "../../lite/webLite";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
@@ -161,14 +164,7 @@ function RunPastPlanPanel({
   );
 }
 
-export function AddComputerDialog({
-  open,
-  onOpenChange,
-  subscription,
-  computers,
-  catalog,
-  onSeePlans,
-}: {
+interface AddComputerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   subscription: AccountSubscription | null;
@@ -176,7 +172,33 @@ export function AddComputerDialog({
   /** For "Get Pro — always on 16 GB, $70/mo" when the new computer doesn't fit. */
   catalog?: PlanCatalog | undefined;
   onSeePlans: () => void;
-}) {
+}
+
+/**
+ * Computers lifecycle (02.11): outside Dev Mode, My Uno's "Add computer" is the
+ * one window too; the roles (server, production, staging…) stay for Dev Mode.
+ */
+export function AddComputerDialog(props: AddComputerDialogProps) {
+  const devMode = useDevMode();
+  const redirect = useComputersLifecycleOn() && !devMode;
+  const { open, onOpenChange } = props;
+  useEffect(() => {
+    if (!redirect || !open) return;
+    onOpenChange(false);
+    lifecycle.openAdd();
+  }, [onOpenChange, open, redirect]);
+  if (redirect) return null;
+  return <AddComputerDialogView {...props} />;
+}
+
+function AddComputerDialogView({
+  open,
+  onOpenChange,
+  subscription,
+  computers,
+  catalog,
+  onSeePlans,
+}: AddComputerDialogProps) {
   const queryClient = useQueryClient();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { enabled: canPair } = useMyComputers(primaryEnvironmentId);
