@@ -117,6 +117,8 @@ describe("session MCP servers: built-in uno-work + the owner's own", () => {
       type: "http",
       url: "${UNO_WORK_MCP_URL_0}",
       headers: { Authorization: "Bearer ${UNO_WORK_BRIDGE_TOKEN}" },
+      // Claude Code's default cut a waiting uno-work call at 60 s (stand 03.11).
+      timeout: 1_860_000,
     });
     expect(claude.mcpServers.docs).toEqual({ type: "http", url: "${UNO_WORK_MCP_URL_1}" });
     expect(claude.env).toEqual({

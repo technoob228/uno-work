@@ -248,6 +248,8 @@ export function claudeMcpServers(servers: ReadonlyArray<McpServerEntry>): {
       readonly type: "http";
       readonly url: string;
       readonly headers?: Readonly<Record<string, string>>;
+      /** Per-call limit in ms (Claude Code's own default cut uno-work calls at 60 s). */
+      readonly timeout?: number;
     }
   >;
   readonly env: Readonly<Record<string, string>>;
@@ -266,6 +268,10 @@ export function claudeMcpServers(servers: ReadonlyArray<McpServerEntry>): {
           type: "http" as const,
           url: `\${${urlVar}}`,
           ...(headers ? { headers } : {}),
+          // A full computer's tool call waits up to 25 minutes for a sleeping
+          // laptop and my_computer_run runs up to 30: without this Claude Code
+          // gave up after 60 s ("The operation timed out.", stand 03.11).
+          ...(server.toolTimeoutSec ? { timeout: server.toolTimeoutSec * 1000 } : {}),
         },
       ];
     }),
