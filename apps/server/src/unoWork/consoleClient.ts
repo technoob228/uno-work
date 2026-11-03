@@ -27,7 +27,7 @@ export interface ConsoleReply {
 }
 
 export interface ConsoleRequest {
-  readonly method: "GET" | "POST" | "PUT" | "DELETE";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   /** `/api/v1/...` */
   readonly path: string;
   readonly body?: unknown;

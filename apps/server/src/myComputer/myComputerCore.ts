@@ -29,6 +29,13 @@ import {
   type HelperRequest,
 } from "./channel.ts";
 import { OutputCollector, type CollectedOutput } from "./outputCollector.ts";
+import {
+  keyOwner,
+  loadOrCreateBoxKey,
+  signFrame,
+  SIGNATURE_REFUSALS,
+  type BoxKey,
+} from "./frameSigning.ts";
 
 export const EXEC_DEFAULT_TIMEOUT_MS = 120_000;
 export const EXEC_MAX_TIMEOUT_MS = 1_800_000;
@@ -50,6 +57,13 @@ const FILE_OP_TIMEOUT_MS = 30_000;
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 const TOOLS_VISIBLE_TTL_MS = 60_000;
+/** How old the console's word on a computer's M7 state may be when a channel opens. */
+const META_TTL_MS = 30_000;
+/** A key the console refused is offered again after this. */
+const KEY_RETRY_MS = 5 * 60_000;
+/** One update attempt per computer per this long. */
+const HELPER_UPDATE_EVERY_MS = 6 * 60 * 60_000;
+const HELPER_UPDATE_TIMEOUT_MS = 120_000;
 /** `tools/list` must stay quick: past this it answers from what it knew. */
 const TOOLS_VISIBLE_WAIT_MS = 2_500;
 
@@ -133,9 +147,33 @@ export type HelperAnswer = Readonly<Record<string, unknown>>;
 
 const FRAME_FIELDS: ReadonlySet<string> = new Set(["id", "ch", "v", "type"]);
 
+/**
+ * What the console says about a computer beyond the contract's `MyComputer`:
+ * its purpose and M7 state. Kept here, read by the routing and the RPC layer.
+ */
+export interface ComputerMeta {
+  /** Absent: a console from before the purpose was kept there. */
+  readonly mode: "tool" | "full" | null;
+  /** The helper verifies signed frames (M7). */
+  readonly signedFrames: boolean;
+  /** The helper trusts this cloud computer's key; null: unknown, old helper. */
+  readonly trustsThisBox: boolean | null;
+}
+
+/** Account-wide parts of the console's list. */
+export interface ComputersMeta {
+  readonly lifecycle: boolean;
+  readonly latestHelperVersion: string | null;
+  readonly computers: ReadonlyMap<string, ComputerMeta>;
+}
+
 export interface MyComputerCoreOptions {
   /** `settings.uno.boxToken`, or "" where there is none. */
   readonly token: () => Promise<string>;
+  /** `settings.uno.boxId`, or null: whom this computer's M7 key belongs to. */
+  readonly boxId?: () => Promise<number | null>;
+  /** Where the helper is downloaded from (its update script). Default: `<console>/cli/connect`. */
+  readonly helperDownloadUrl?: () => string;
   readonly baseUrl: () => string;
   readonly stateDir: string;
   readonly fetchImpl?: typeof fetch;
@@ -157,6 +195,12 @@ export interface MyComputerCoreOptions {
 
 export interface MyComputerCore {
   readonly status: () => Promise<MyComputerStatus>;
+  /** `status`, or the last answer when it is at most `maxAgeMs` old (tool calls). */
+  readonly cachedStatus: (maxAgeMs: number) => Promise<MyComputerStatus>;
+  /** What the last `status` learned beyond the contract (purpose, M7); null before one. */
+  readonly meta: () => ComputersMeta | null;
+  /** Set the computer's purpose at the console. */
+  readonly setMode: (computerId: string, mode: "tool" | "full") => Promise<void>;
   readonly pair: () => Promise<MyComputerPairing>;
   readonly pairStatus: (code: string) => Promise<MyComputerPairStatus>;
   readonly disconnect: (computerId: string) => Promise<void>;
@@ -208,6 +252,32 @@ function parseComputer(raw: unknown): MyComputer | null {
     connectedAt: nullableString(record.connectedAt),
     lastSeenAt: nullableString(record.lastSeenAt),
     helperVersion: nullableString(record.helperVersion),
+    ...(record.mode === "full" || record.mode === "tool" ? { mode: record.mode } : {}),
+    ...(typeof record.trustsThisBox === "boolean" || record.trustsThisBox === null
+      ? { trustsThisComputer: record.trustsThisBox }
+      : {}),
+  };
+}
+
+export function parseComputersMeta(body: unknown): ComputersMeta {
+  const record = asRecord(body);
+  const computers = new Map<string, ComputerMeta>();
+  if (Array.isArray(record.computers)) {
+    for (const raw of record.computers) {
+      const entry = asRecord(raw);
+      const id = idOf(entry.id);
+      if (id === null) continue;
+      computers.set(id, {
+        mode: entry.mode === "full" || entry.mode === "tool" ? entry.mode : null,
+        signedFrames: entry.signedFrames === true,
+        trustsThisBox: typeof entry.trustsThisBox === "boolean" ? entry.trustsThisBox : null,
+      });
+    }
+  }
+  return {
+    lifecycle: record.lifecycle === true,
+    latestHelperVersion: nullableString(asRecord(record.helper).latestVersion),
+    computers,
   };
 }
 
@@ -216,7 +286,11 @@ export function parseComputers(body: unknown): MyComputerStatus {
   const computers = Array.isArray(record.computers)
     ? record.computers.map(parseComputer).filter((entry) => entry !== null)
     : [];
-  return { enabled: record.enabled === true, computers };
+  return {
+    enabled: record.enabled === true,
+    computers,
+    ...(typeof record.lifecycle === "boolean" ? { lifecycle: record.lifecycle } : {}),
+  };
 }
 
 const PAIR_STATES: ReadonlySet<string> = new Set(["waiting", "claimed", "failed", "expired"]);
@@ -328,7 +402,12 @@ const decodeData = (value: unknown): Buffer =>
   typeof value === "string" ? Buffer.from(value, "base64") : Buffer.alloc(0);
 
 function remoteFailure(frame: HelperFrame): MyComputerFailure {
-  const message = nullableString(frame["message"]) ?? nullableString(frame["code"]);
+  const code = nullableString(frame["code"]);
+  const refusal = code === null ? undefined : SIGNATURE_REFUSALS[code];
+  if (refusal !== undefined) {
+    return new MyComputerFailure("remote", `The computer ${refusal}`);
+  }
+  const message = nullableString(frame["message"]) ?? code;
   return new MyComputerFailure(
     "remote",
     `The computer answered: ${message?.slice(0, 500) ?? "it couldn't do that."}`,
@@ -377,6 +456,10 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     visible = null;
   };
 
+  // What the console said last beyond the contract (purpose, M7).
+  let lastMeta: { readonly value: ComputersMeta; readonly at: number } | null = null;
+  let lastStatus: MyComputerStatus | null = null;
+
   const status: MyComputerCore["status"] = async () => {
     const token = await options.token();
     if (token.length === 0) return { enabled: false, computers: [] };
@@ -384,9 +467,119 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
       { method: "GET", path: "/api/v1/work/computers" },
       "list the computers",
     );
-    if (isAnswer(reply.status)) return parseComputers(reply.body);
+    if (isAnswer(reply.status)) {
+      lastMeta = { value: parseComputersMeta(reply.body), at: Date.now() };
+      lastStatus = parseComputers(reply.body);
+      return lastStatus;
+    }
     if (meansOff(reply.status)) return { enabled: false, computers: [] };
     throw new MyComputerFailure("console", `Couldn't list the computers: ${consoleDetail(reply)}.`);
+  };
+
+  /** The computer's M7 state, at most 30 s old (a fresh list otherwise). */
+  const metaOf = async (computerId: string): Promise<ComputerMeta | null> => {
+    if (lastMeta === null || Date.now() - lastMeta.at > META_TTL_MS) {
+      await status().catch(() => undefined);
+    }
+    return lastMeta?.value.computers.get(computerId) ?? null;
+  };
+
+  // ── M7: this computer's key, registered once per process ──────────────
+  let boxKey: Promise<BoxKey | null> | null = null;
+  let registered: Promise<boolean> | null = null;
+  let registeredAt = 0;
+
+  const keyOf = (): Promise<BoxKey | null> => {
+    boxKey ??= (async () => {
+      const owner = keyOwner({
+        boxId: (await options.boxId?.().catch(() => null)) ?? null,
+        token: await options.token(),
+      });
+      if (owner.length === 0) return null;
+      return loadOrCreateBoxKey(options.stateDir, owner);
+    })().catch((cause) => {
+      options.warn?.(`my-computer key: ${cause instanceof Error ? cause.message : String(cause)}`);
+      boxKey = null;
+      return null;
+    });
+    return boxKey;
+  };
+
+  /** The console knows this computer's public key (a failure is retried later). */
+  const registerKey = (): Promise<boolean> => {
+    if (registered !== null && (registeredAt === 0 || Date.now() - registeredAt < KEY_RETRY_MS)) {
+      return registered;
+    }
+    registeredAt = 0;
+    registered = (async () => {
+      const key = await keyOf();
+      if (key === null) return false;
+      const reply = await consoleCall(
+        {
+          method: "PUT",
+          path: "/api/v1/work/computers/box-key",
+          body: { publicKey: key.publicKey },
+        },
+        "register this computer's key",
+      );
+      if (isAnswer(reply.status)) return true;
+      options.warn?.(`my-computer key not registered: ${consoleDetail(reply)}`);
+      return false;
+    })()
+      .catch(() => false)
+      .then((ok) => {
+        // A failure is tried again after a while, a success holds for the process.
+        if (!ok) registeredAt = Date.now();
+        return ok;
+      });
+    return registered;
+  };
+
+  // ── Helper updates: through the tunnel, when its channel is idle ──────
+  const updateTriedAt = new Map<string, number>();
+  const updateHelperIfOld = (computerId: string, channel: ComputerChannel): boolean => {
+    const meta = lastMeta?.value;
+    const latest = meta?.latestHelperVersion ?? null;
+    const computer = lastStatus?.computers.find((entry) => entry.id === computerId);
+    if (latest === null || computer === undefined || !computer.online) return false;
+    if (computer.helperVersion === null || computer.helperVersion === latest) return false;
+    const tried = updateTriedAt.get(computerId) ?? 0;
+    if (Date.now() - tried < HELPER_UPDATE_EVERY_MS) return false;
+    updateTriedAt.set(computerId, Date.now());
+    const download =
+      options.helperDownloadUrl?.() ?? `${options.baseUrl().replace(/\/+$/, "")}/cli/connect`;
+    const windows = computer.os === "windows";
+    // A helper of M7 checks our signature on SHA256SUMS itself; an older one is
+    // brought over by the update script, which checks the checksum like install.
+    const cmd = meta?.computers.get(computerId)?.signedFrames
+      ? windows
+        ? `& "$env:LOCALAPPDATA\\UnoConnect\\uno-connect.exe" update`
+        : `"$HOME/.uno-connect/uno-connect" update`
+      : windows
+        ? `irm "${download}/update.ps1" | iex`
+        : `curl -fsSL "${download}/update.sh" | sh`;
+    void record(
+      computerId,
+      "run",
+      `Updated the Uno helper on ${computer.name || "this computer"} to ${latest}`,
+      undefined,
+    );
+    try {
+      const call = channel.start(
+        { op: "exec", cmd, timeoutMs: HELPER_UPDATE_TIMEOUT_MS },
+        {
+          // The helper restarts itself at the end: the exit may never come.
+          onFrame: (frame) => {
+            if (frame.type === "exit" || frame.type === "error") call.end();
+          },
+          onClosed: () => undefined,
+        },
+      );
+      setTimeout(() => call.end(), HELPER_UPDATE_TIMEOUT_MS + 5_000).unref?.();
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const checkVisible = (): Promise<boolean> => {
@@ -403,25 +596,61 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     return checking;
   };
 
+  // Commands that start together share one socket: the first one opens it
+  // (after the M7 lookup), the rest wait on that same opening.
+  const opening = new Map<string, Promise<ComputerChannel>>();
+
   const channelFor = async (computerId: string): Promise<ComputerChannel> => {
     const token = await options.token();
     if (token.length === 0) throw new MyComputerFailure("off", OFF_MESSAGE);
     let channel = channels.get(computerId);
     if (channel === undefined || channel.isClosed()) {
-      const opened: ComputerChannel = openComputerChannel({
-        url: `${options.baseUrl().replace(/^http/, "ws")}/api/v1/work/computers/${encodeURIComponent(computerId)}/channel`,
-        token,
-        ...(timings.connectTimeoutMs ? { connectTimeoutMs: timings.connectTimeoutMs } : {}),
-        ...(timings.idleCloseMs ? { idleCloseMs: timings.idleCloseMs } : {}),
-        onClosed: () => {
-          if (channels.get(computerId) === opened) channels.delete(computerId);
-        },
-      });
-      channels.set(computerId, opened);
-      channel = opened;
+      let pending = opening.get(computerId);
+      if (pending === undefined) {
+        pending = openChannel(computerId, token).finally(() => opening.delete(computerId));
+        opening.set(computerId, pending);
+      }
+      channel = await pending;
     }
     await channel.ready;
     return channel;
+  };
+
+  const openChannel = async (computerId: string, token: string): Promise<ComputerChannel> => {
+    const meta = await metaOf(computerId);
+    if (meta?.trustsThisBox === false) {
+      const name = lastStatus?.computers.find((entry) => entry.id === computerId)?.name;
+      throw new MyComputerFailure(
+        "remote",
+        `“${name || "This computer"}” ${SIGNATURE_REFUSALS.untrusted_key}`,
+      );
+    }
+    // A helper of M7 gets signed frames; one from before gets `v: 1` until
+    // it updates (the transition, CONTRACT §7.4).
+    let key: BoxKey | null = null;
+    if (meta?.signedFrames === true) {
+      void registerKey();
+      key = await keyOf();
+    }
+    const signer = key;
+    const opened: ComputerChannel = openComputerChannel({
+      url: `${options.baseUrl().replace(/^http/, "ws")}/api/v1/work/computers/${encodeURIComponent(computerId)}/channel`,
+      token,
+      ...(timings.connectTimeoutMs ? { connectTimeoutMs: timings.connectTimeoutMs } : {}),
+      ...(timings.idleCloseMs ? { idleCloseMs: timings.idleCloseMs } : {}),
+      ...(signer
+        ? {
+            sign: (id: string, frame: HelperRequest) =>
+              signFrame({ key: signer, id, computerId, frame }),
+          }
+        : {}),
+      onIdle: () => updateHelperIfOld(computerId, opened),
+      onClosed: () => {
+        if (channels.get(computerId) === opened) channels.delete(computerId);
+      },
+    });
+    channels.set(computerId, opened);
+    return opened;
   };
 
   const record = (
@@ -483,7 +712,34 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
 
   return {
     status,
+    meta: () => lastMeta?.value ?? null,
+    cachedStatus: async (maxAgeMs) =>
+      lastStatus !== null && lastMeta !== null && Date.now() - lastMeta.at <= maxAgeMs
+        ? lastStatus
+        : status(),
+    setMode: async (computerId, mode) => {
+      const reply = await consoleCall(
+        {
+          method: "PATCH",
+          path: `/api/v1/work/computers/${encodeURIComponent(computerId)}`,
+          body: { mode },
+        },
+        "change what the computer is for",
+      );
+      if (!isAnswer(reply.status)) {
+        throw new MyComputerFailure(
+          reply.status === 404 ? "remote" : "console",
+          reply.status === 404
+            ? "This computer isn't connected any more."
+            : `Couldn't change what the computer is for: ${consoleDetail(reply)}.`,
+        );
+      }
+      lastMeta = null;
+    },
     pair: async () => {
+      // The new computer trusts the keys the console knows at pairing (M7):
+      // this computer's must be among them.
+      await registerKey();
       const reply = await consoleCall(
         { method: "POST", path: "/api/v1/work/computers/pair" },
         "start connecting a computer",

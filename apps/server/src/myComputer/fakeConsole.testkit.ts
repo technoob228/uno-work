@@ -43,6 +43,8 @@ export interface FakeConsole {
     readonly method: string;
     readonly path: string;
     readonly authorization: string | undefined;
+    /** PUT / PATCH bodies, parsed. */
+    body?: unknown;
   }>;
   /** Every frame from the daemon, on any channel. */
   readonly frames: () => ReadonlyArray<Frame>;
@@ -113,7 +115,35 @@ export async function startFakeConsole(): Promise<FakeConsole> {
   const server = http.createServer((request, response) => {
     const path = (request.url ?? "").split("?")[0]!;
     const method = request.method ?? "";
-    fake.requests.push({ method, path, authorization: request.headers.authorization });
+    const entry: (typeof fake.requests)[number] = {
+      method,
+      path,
+      authorization: request.headers.authorization,
+    };
+    fake.requests.push(entry);
+    if (method === "PUT" || method === "PATCH") {
+      let text = "";
+      request.on("data", (chunk: Buffer) => {
+        text += chunk.toString("utf8");
+      });
+      request.on("end", () => {
+        try {
+          entry.body = JSON.parse(text);
+        } catch {
+          entry.body = text;
+        }
+        if (request.headers.authorization !== `Bearer ${fake.token}`) {
+          json(response, 401, { code: "unauthorized" });
+        } else if (method === "PUT" && path === "/api/v1/work/computers/box-key") {
+          json(response, 200, { kid: "k" });
+        } else if (method === "PATCH" && path.startsWith("/api/v1/work/computers/")) {
+          json(response, 200, { ok: true });
+        } else {
+          json(response, 404, { code: "not_found" });
+        }
+      });
+      return;
+    }
     if (request.headers.authorization !== `Bearer ${fake.token}`) {
       json(response, 401, { code: "unauthorized" });
     } else if (method === "GET" && path === "/api/v1/work/computers") {
