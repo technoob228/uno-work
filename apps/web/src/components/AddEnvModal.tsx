@@ -18,7 +18,7 @@ import type {
 } from "@t3tools/contracts";
 
 import { APP_BASE_NAME } from "../branding";
-import { COMPUTERS_LIFECYCLE } from "../computersLifecycle/flag";
+import { useComputersLifecycleOn } from "../computersLifecycle/flag";
 import { lifecycle } from "../computersLifecycle/store";
 import { usePrimaryEnvironmentDescriptor, usePrimaryEnvironmentId } from "../environments/primary";
 import { localComputer } from "../localComputer/localComputerStore";
@@ -201,8 +201,9 @@ function formatDesktopSshConnectionError(error: unknown): string {
 
 export function AddEnvModal(props: AddEnvModalProps) {
   // Computers lifecycle (02.11): the choice is the one "Add computer" window now.
+  const lifecycleOn = useComputersLifecycleOn();
   const redirect =
-    COMPUTERS_LIFECYCLE && (props.initialStep === undefined || props.initialStep === "choice");
+    lifecycleOn && (props.initialStep === undefined || props.initialStep === "choice");
   const { open, onOpenChange } = props;
   useEffect(() => {
     if (!redirect || !open) return;

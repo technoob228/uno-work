@@ -12,6 +12,7 @@ import {
   WS_METHODS,
   isAssistantProjectId,
   type InboxItem,
+  type ProjectComputer,
   type RuntimeMode,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -91,7 +92,7 @@ import {
   startLifecycle,
   type LifecycleOps,
 } from "./assist/lifecycle";
-import { LC_FALLBACK_KEY, LC_START, LC_START_KEY } from "../computersLifecycle/flag";
+import { LC_START, LC_START_KEY } from "../computersLifecycle/flag";
 import "./assist/variant";
 import {
   CHATS,
@@ -138,13 +139,7 @@ function savedMachines(): DemoMachine[] {
 
 function seedLocalStorage() {
   if (localStorage.getItem("demo:seed") === SEED_VERSION) return;
-  const keep = new Set([
-    "demo:switches",
-    "demo:assist-world",
-    LC_START_KEY,
-    LC_FALLBACK_KEY,
-    "ui_dev_mode",
-  ]);
+  const keep = new Set(["demo:switches", "demo:assist-world", LC_START_KEY, "ui_dev_mode"]);
   for (const key of Object.keys(localStorage)) {
     if (!keep.has(key)) localStorage.removeItem(key);
   }
@@ -1398,7 +1393,7 @@ const sessionJson = (machine: DemoMachine) => ({
 /** p7: "New assistant" makes its folder on that computer (like project.create). */
 function addDemoProject(
   machine: DemoMachine,
-  input: { id: string; title: string; workspaceRoot: string },
+  input: { id: string; title: string; workspaceRoot: string; computer?: ProjectComputer },
 ) {
   const model = modelFor(machine);
   if (model.projects.some((project) => project.id === input.id)) return;
@@ -1788,6 +1783,13 @@ const lifecycleOps: LifecycleOps = {
     publishThread(machine, input.id);
   },
   addProject: (key, input) => addDemoProject(MACHINES[key], input),
+  patchThread: (key, threadId, patch) => {
+    const thread = threadIn(key, threadId);
+    if (!thread) return;
+    Object.assign(thread, patch);
+    touch(modelFor(MACHINES[key]));
+    publishThread(MACHINES[key], threadId);
+  },
   hasProject: (key, projectId) =>
     modelFor(MACHINES[key]).projects.some((project) => String(project.id) === projectId),
   readThread: (environmentId, threadId) => {
@@ -1800,6 +1802,7 @@ const lifecycleOps: LifecycleOps = {
     return {
       title: String(thread.title),
       projectTitle: String(project?.title ?? "Home folder"),
+      computer: (project as { computer?: ProjectComputer } | undefined)?.computer ?? null,
       messages: (thread.messages as Array<{ role: "user" | "assistant"; text: string }>).map(
         (message) => [message.role, message.text] as const,
       ),

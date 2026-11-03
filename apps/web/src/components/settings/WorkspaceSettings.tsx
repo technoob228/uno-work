@@ -35,7 +35,7 @@ import {
   usePrimaryEnvironmentDescriptor,
   usePrimaryEnvironmentId,
 } from "../../environments/primary";
-import { COMPUTERS_LIFECYCLE } from "../../computersLifecycle/flag";
+import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
 import { lifecycle } from "../../computersLifecycle/store";
 import { useDevMode } from "../../devMode";
 import { localComputer } from "../../localComputer/localComputerStore";
@@ -184,7 +184,7 @@ export function WorkspaceSettings() {
   const advancedEnabled = useFeatureFlag("workspace");
   // Computers lifecycle (02.11): one "Add computer"; removing lives in the computer's menu.
   const devMode = useDevMode();
-  const lifecycleOn = COMPUTERS_LIFECYCLE;
+  const lifecycleOn = useComputersLifecycleOn();
   const queryClient = useQueryClient();
   // The primary daemon is the registry client: the panel describes one
   // workspace regardless of which machine's chat is on screen.

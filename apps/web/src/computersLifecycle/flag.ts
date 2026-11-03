@@ -1,25 +1,26 @@
 /**
- * Computers lifecycle (Misha 02.11, reports/day_2026-11-02/computers-lifecycle/SPEC.md):
- * one "Add computer" window from every entry, "What is it for?" after a
- * computer connects, "Bring your work?", one computer menu with Remove /
- * Delete, and the secondary "agents on the laptop itself" path.
+ * Computers lifecycle (Misha 02.11, reports/day_2026-11-02/computers-lifecycle/
+ * SPEC.md, CONTRACT.md §1): one "Add computer" window from every entry, "What
+ * is it for?" after a computer connects, "Bring your work?", one computer menu
+ * with Remove / Delete, chats "on MacBook" (brain in the cloud).
  *
- * Off outside the demo: production keeps today's screens until the backend
- * parts exist. On in the demo build (`VITE_DEMO=assist`) unless `?lc=off`,
- * or on one device with `localStorage["uno:computers-lifecycle"] = "1"`.
+ * Server-controlled, off by default: the cloud computer's `computers.state`
+ * says `lifecycle` (console flag COMPUTERS_LIFECYCLE_USERS per account, or the
+ * daemon's UNO_WORK_COMPUTERS_LIFECYCLE). `ComputersLifecycleSync` (mounted in
+ * the root) keeps `useLifecycleFlag` up to date. One device can force it with
+ * `localStorage["uno:computers-lifecycle"] = "1"` (or "0").
  *
- * The demo's own switches live here too (they are read before the demo
- * boots): `?lc=fresh|connected|off` — the MacBook isn't connected yet, or it
- * already is a full computer; `?fallback=a|b|c` — how the secondary path is
- * shown. Both are kept in this browser: the password page drops the address.
+ * In the demo build (`VITE_DEMO=assist`) it is on unless `?lc=off`; `?lc=fresh`
+ * — the MacBook isn't connected yet, `?lc=connected` — it already is a full
+ * computer. Kept in this browser: the password page drops the address.
  */
+import { create } from "zustand";
+
 import { DEMO_ASSIST } from "../demo/demoFlag";
 
 export type LcStart = "fresh" | "connected" | "off";
-export type FallbackVariant = "a" | "b" | "c";
 
 export const LC_START_KEY = "demo:lc";
-export const LC_FALLBACK_KEY = "demo:lc-fallback";
 const DEVICE_FLAG_KEY = "uno:computers-lifecycle";
 
 function param(name: string): string | null {
@@ -57,29 +58,40 @@ function readStart(): LcStart {
   return saved === "connected" || saved === "off" ? saved : "fresh";
 }
 
-function readFallback(): FallbackVariant {
-  if (typeof window === "undefined") return "a";
-  const asked = param("fallback");
-  if (asked === "a" || asked === "b" || asked === "c") {
-    remember(LC_FALLBACK_KEY, asked);
-    return asked;
-  }
-  const saved = stored(LC_FALLBACK_KEY);
-  return saved === "b" || saved === "c" ? saved : "a";
-}
-
 /** How the demo starts (always "off" outside it). */
 export const LC_START: LcStart = readStart();
 
-export const COMPUTERS_LIFECYCLE: boolean = DEMO_ASSIST
-  ? LC_START !== "off"
-  : typeof window !== "undefined" && stored(DEVICE_FLAG_KEY) === "1";
+function readDeviceOverride(): boolean | null {
+  if (DEMO_ASSIST) return LC_START !== "off";
+  if (typeof window === "undefined") return null;
+  const value = stored(DEVICE_FLAG_KEY);
+  return value === "1" ? true : value === "0" ? false : null;
+}
 
-/** The secondary path's presentation at the start (the store can change it live). */
-export const INITIAL_FALLBACK: FallbackVariant = readFallback();
+interface FlagState {
+  /** What the cloud computer said last (false until it answers). */
+  readonly server: boolean;
+  readonly device: boolean | null;
+}
 
-export function saveFallback(variant: FallbackVariant) {
-  remember(LC_FALLBACK_KEY, variant);
+export const useLifecycleFlag = create<FlagState>(() => ({
+  server: false,
+  device: readDeviceOverride(),
+}));
+
+export function setLifecycleServerFlag(server: boolean) {
+  if (useLifecycleFlag.getState().server !== server) useLifecycleFlag.setState({ server });
+}
+
+const resolve = (state: FlagState) => state.device ?? state.server;
+
+/** For code outside React (store actions). */
+export function computersLifecycleOn(): boolean {
+  return resolve(useLifecycleFlag.getState());
+}
+
+export function useComputersLifecycleOn(): boolean {
+  return useLifecycleFlag(resolve);
 }
 
 /** After this long without the computer, a waiting chat offers "Continue in the cloud". */

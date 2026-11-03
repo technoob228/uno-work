@@ -1,21 +1,17 @@
 /**
  * Computers lifecycle demo: the "what to look at" card for Misha — where the
- * demo starts (the MacBook not connected yet / already a full computer), how
- * the secondary path is shown (a/b/c), the browser or the desktop app, Dev
- * Mode, and putting the MacBook to sleep and waking it.
+ * demo starts (the MacBook not connected yet / already a full computer), the
+ * browser or the desktop app, Dev Mode, and putting the MacBook to sleep and
+ * waking it. The secondary path is variant b (Settings → This computer in the
+ * desktop app).
  */
 import { ChevronDownIcon, EyeIcon } from "lucide-react";
 import type { ReactNode, RefObject } from "react";
 import { useEffect, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import {
-  LC_START,
-  LC_START_KEY,
-  type FallbackVariant,
-  type LcStart,
-} from "../../computersLifecycle/flag";
-import { lifecycle, useLifecycle } from "../../computersLifecycle/store";
+import { LC_START, LC_START_KEY, type LcStart } from "../../computersLifecycle/flag";
+import { lifecycle } from "../../computersLifecycle/store";
 import { setDevMode, useDevMode } from "../../devMode";
 import type { getRouter } from "../../router";
 import { useDemoStore } from "../demoFlag";
@@ -63,19 +59,12 @@ function restart(start: LcStart) {
   location.replace(`${location.pathname}#/computer`);
 }
 
-const FALLBACKS: ReadonlyArray<{ id: FallbackVariant; name: string }> = [
-  { id: "a", name: "а · меню компьютера" },
-  { id: "b", name: "б · приложение на Mac" },
-  { id: "c", name: "в · только Dev Mode" },
-];
-
 export function LifecyclePanel(props: {
   router: DemoRouter;
   open: boolean;
   setOpen: (open: boolean) => void;
   panelRef: RefObject<HTMLDivElement | null>;
 }) {
-  const fallback = useLifecycle((state) => state.fallback);
   const platform = useDemoStore((state) => state.switches.platform);
   const setSwitch = useDemoStore((state) => state.setSwitch);
   const devMode = useDevMode();
@@ -139,18 +128,6 @@ export function LifecyclePanel(props: {
           >
             уже полноценный
           </Chip>
-        </Row>
-        <Row label="Запасной путь">
-          {FALLBACKS.map((option) => (
-            <Chip
-              key={option.id}
-              testId={`lc-fallback-${option.id}`}
-              active={fallback === option.id}
-              onClick={() => lifecycle.setFallback(option.id)}
-            >
-              {option.name}
-            </Chip>
-          ))}
         </Row>
         <Row label="Work открыт">
           <Chip
@@ -246,8 +223,8 @@ export function LifecyclePanel(props: {
             computer.
           </li>
           <li>
-            Запасной путь: а — в строке MacBook «Advanced»; б — «приложение на Mac» + Settings →
-            This computer; в — то же, но только с Dev Mode.
+            Запасной путь (б): «приложение на Mac», MacBook подключён → Settings → This computer →
+            Where agents run.
           </li>
         </ol>
       </div>

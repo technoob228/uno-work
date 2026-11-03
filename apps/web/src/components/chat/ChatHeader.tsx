@@ -13,6 +13,7 @@ import { type DraftId } from "~/composerDraftStore";
 import {
   DiffIcon,
   EllipsisIcon,
+  LaptopIcon,
   MonitorSmartphoneIcon,
   PlusIcon,
   PanelRightIcon,
@@ -115,6 +116,11 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  /**
+   * Computers lifecycle: the project stands for a folder on the person's own
+   * computer — the header says "on MacBook" instead of the cloud computer.
+   */
+  activeProjectComputerName?: string | null | undefined;
   /** The project's folder; a new chat shows it as the folder chip. */
   activeProjectCwd?: string | undefined;
   /** The new chat's centred question already asks for the folder (draft hero). */
@@ -159,6 +165,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
+  activeProjectComputerName = null,
   activeProjectCwd,
   hideDraftFolderChip = false,
   isGitRepo,
@@ -367,7 +374,18 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {/* The computer this chat runs on, and switching to another, from any chat (0.0.96). */}
-        <ComputerChip environmentId={activeThreadEnvironmentId} />
+        {activeProjectComputerName ? (
+          <span
+            className="flex shrink-0 items-center gap-1 px-1.5 text-xs text-muted-foreground"
+            title={`Runs in your cloud, commands and files on ${activeProjectComputerName}`}
+            data-testid="lc-chat-on-computer"
+          >
+            <LaptopIcon className="size-3.5" />
+            on {activeProjectComputerName}
+          </span>
+        ) : (
+          <ComputerChip environmentId={activeThreadEnvironmentId} />
+        )}
         {isAssistantChat ? (
           <AssistantChatHeaderActions
             environmentId={activeThreadEnvironmentId}

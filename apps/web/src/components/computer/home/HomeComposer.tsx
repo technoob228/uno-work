@@ -104,6 +104,11 @@ import { ComposerStashMenu, toastSetAside } from "../../chat/ComposerStashMenu";
 import { type TeamMember, useStartableAssistants } from "../../assistants/useAssistantTeam";
 import { NewChatComputerPicker } from "../../chat/NewChatComputerPicker";
 import {
+  OwnComputerFolderPicker,
+  openOwnComputerFolder,
+} from "../../computersLifecycle/OwnComputerFolderPicker";
+import { errorText, useComputersHostId } from "../../../computersLifecycle/useComputers";
+import {
   useNameAmongComputers,
   useSwitcherMachines,
 } from "../../computerSwitcher/useComputerSwitcher";
@@ -275,10 +280,29 @@ export function HomeComposer({
   // new chat, Terminal, Files and Apps all go to it until another one is picked.
   const targetEnvironmentId = environmentId;
   const setActiveEnvironmentId = useStore((state) => state.setActiveEnvironmentId);
+  // Computers lifecycle: the chat goes "on" one of the person's own computers —
+  // it runs on the cloud computer (`hostId`), its commands and files there.
+  const hostId = useComputersHostId();
+  const [ownTarget, setOwnTarget] = useState<{ id: string; name: string } | null>(null);
   const pickComputer = (next: EnvironmentId) => {
     setActiveEnvironmentId(next);
+    setOwnTarget(null);
     // Folders belong to a computer: a new one starts in its home folder.
     setFolder(null);
+  };
+  const pickOwnComputer = async (computer: { id: string; name: string }) => {
+    if (hostId === null) return;
+    try {
+      const home = await openOwnComputerFolder({ hostId, computerId: computer.id, path: "~" });
+      setActiveEnvironmentId(hostId);
+      setOwnTarget({ id: computer.id, name: computer.name });
+      setFolder(home);
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: errorText(cause, `Couldn’t start a chat on ${computer.name}.`),
+      });
+    }
   };
   const severalComputers = useSwitcherMachines().length > 1;
   // A space is its computer: nothing to pick inside it.
@@ -662,10 +686,25 @@ export function HomeComposer({
                     pickComputer(next);
                     ref.current?.focus();
                   }}
+                  ownComputerId={ownTarget?.id ?? null}
+                  onPickOwnComputer={async (computer) => {
+                    await pickOwnComputer(computer);
+                    ref.current?.focus();
+                  }}
                   testId="home-computer-chip"
                 />
               )}
-              {minimal ? null : (
+              {minimal ? null : ownTarget !== null && hostId !== null ? (
+                <OwnComputerFolderPicker
+                  hostId={hostId}
+                  computerId={ownTarget.id}
+                  folder={folder}
+                  onPick={(next) => {
+                    setFolder(next);
+                    ref.current?.focus();
+                  }}
+                />
+              ) : (
                 <NewChatFolderPicker
                   variant="chip"
                   environmentId={targetEnvironmentId}

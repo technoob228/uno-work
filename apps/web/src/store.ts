@@ -1281,11 +1281,61 @@ export function syncServerThreadDetail(
   );
 }
 
+/**
+ * Computers lifecycle events (CONTRACT.md §7.6): a project that stands for a
+ * folder on the person's own computer, and a turn waiting for that computer.
+ * Matched by name, so this client also runs against daemons that don't have
+ * them (and builds before their schemas land).
+ */
+function applyComputersLifecycleEvent(
+  state: EnvironmentState,
+  event: { readonly type: string; readonly payload: unknown },
+): EnvironmentState | null {
+  if (event.type === "thread.computer-wait-set") {
+    const payload = event.payload as {
+      threadId: ThreadId;
+      computerWait: Thread["computerWait"];
+    };
+    // Not `updatedAt`: waiting doesn't move the chat in the sidebar.
+    return updateThreadState(state, payload.threadId, (thread) =>
+      (thread.computerWait?.since ?? null) === (payload.computerWait?.since ?? null)
+        ? thread
+        : { ...thread, computerWait: payload.computerWait ?? null },
+    );
+  }
+  if (event.type === "project.computer-set") {
+    const payload = event.payload as {
+      projectId: ProjectId;
+      computer: Project["computer"];
+      updatedAt: string;
+    };
+    const project = state.projectById[payload.projectId];
+    if (!project) return state;
+    return {
+      ...state,
+      projectById: {
+        ...state.projectById,
+        [payload.projectId]: {
+          ...project,
+          computer: payload.computer ?? null,
+          updatedAt: payload.updatedAt,
+        },
+      },
+    };
+  }
+  return null;
+}
+
 function applyEnvironmentOrchestrationEvent(
   state: EnvironmentState,
   event: OrchestrationEvent,
   environmentId: EnvironmentId,
 ): EnvironmentState {
+  const lifecycleState = applyComputersLifecycleEvent(
+    state,
+    event as unknown as { type: string; payload: unknown },
+  );
+  if (lifecycleState !== null) return lifecycleState;
   switch (event.type) {
     case "project.created": {
       const nextProject = mapProject(
@@ -1296,6 +1346,7 @@ function applyEnvironmentOrchestrationEvent(
           repositoryIdentity: event.payload.repositoryIdentity ?? null,
           defaultModelSelection: event.payload.defaultModelSelection,
           scripts: event.payload.scripts,
+          computer: (event.payload as { computer?: Project["computer"] }).computer ?? null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           deletedAt: null,

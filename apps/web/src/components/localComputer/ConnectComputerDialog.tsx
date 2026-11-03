@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { COMPUTERS_LIFECYCLE } from "../../computersLifecycle/flag";
+import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
 import { useDevMode } from "../../devMode";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useSettings } from "../../hooks/useSettings";
@@ -616,6 +616,7 @@ function Manage() {
   });
   const [confirming, setConfirming] = useState(false);
   const devMode = useDevMode();
+  const lifecycleOn = useComputersLifecycleOn();
   const computer = computers.find((one) => one.id === manageId);
   const gone = settled && computer === undefined;
   useEffect(() => {
@@ -653,7 +654,7 @@ function Manage() {
           Close
         </Button>
         {/* Computers lifecycle (02.11): removing is in the computer's menu; here only in Dev Mode. */}
-        {COMPUTERS_LIFECYCLE && !devMode ? null : (
+        {lifecycleOn && !devMode ? null : (
           <Button
             variant="destructive-outline"
             onClick={() => setConfirming(true)}

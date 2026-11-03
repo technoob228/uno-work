@@ -38,7 +38,7 @@ import { accountRequest } from "../../account/unoAccount";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { computerSize, formatRam, planTitle } from "../../account/billingModel";
 import { ALL_ROLES, ROLE_BLURB, ROLE_LABEL, type ComputerRole } from "../../account/computerRoles";
-import { COMPUTERS_LIFECYCLE } from "../../computersLifecycle/flag";
+import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
 import { lifecycle } from "../../computersLifecycle/store";
 import { useDevMode } from "../../devMode";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
@@ -180,7 +180,7 @@ interface AddComputerDialogProps {
  */
 export function AddComputerDialog(props: AddComputerDialogProps) {
   const devMode = useDevMode();
-  const redirect = COMPUTERS_LIFECYCLE && !devMode;
+  const redirect = useComputersLifecycleOn() && !devMode;
   const { open, onOpenChange } = props;
   useEffect(() => {
     if (!redirect || !open) return;

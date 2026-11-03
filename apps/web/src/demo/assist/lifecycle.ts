@@ -1,44 +1,50 @@
 /**
  * Computers lifecycle demo (Misha 02.11, SPEC
- * reports/day_2026-11-02/computers-lifecycle/SPEC.md): what the backend would
- * answer for the one "Add computer" window and the computer menu.
+ * reports/day_2026-11-02/computers-lifecycle/SPEC.md, CONTRACT.md): what the
+ * cloud computer (uno-work) answers for the person's own MacBook — the same
+ * RPCs the real daemon serves, so the screens run their real code:
  *
- *   - "Connect my computer" RPCs: the pairing is claimed ~2.5 s after the
- *     person presses Download or copies the command; the MacBook (a
- *     `MyComputer`) is then listed, online unless the panel put it to sleep;
+ *   - "Connect my computer": the pairing is claimed ~2.5 s after the person
+ *     presses Download or copies the command; the MacBook is then listed,
+ *     online unless the panel put it to sleep;
+ *   - `computers.*`: what it is for, projects in ~/projects with key names,
+ *     bringing them over, a MacBook folder as a uno-work project
+ *     (`project.computer`), continuing a chat in the cloud;
  *   - the chat import: Claude Code 4 chats, Codex 2, OpenCode not installed;
- *     imported chats land on the MacBook (full computer) or on uno-work with
- *     their source (tool) — then "Continue in the cloud";
- *   - projects in ~/projects with key names from their .env;
- *   - a full computer: the MacBook becomes a computer of its own (the real
- *     `addSavedEnvironment`); its chat's turn waits while it sleeps and goes
- *     on when it wakes;
- *   - delete / turn off a cloud computer, and what is on it.
+ *     a full computer's chats land in MacBook folder projects, a tool's on
+ *     uno-work with their source (then "Continue in the cloud");
+ *   - a chat on the MacBook waits while it sleeps (`thread.computerWait`) and
+ *     goes on when it wakes;
+ *   - delete / turn off a cloud computer.
+ *
+ * The MacBook is never a computer of its own here (brain in the cloud): its
+ * chats live on uno-work.
  *
  * `?lc=fresh` (default): the MacBook isn't connected yet; `?lc=connected`:
  * it already is a full computer; `?lc=off`: the demo as before.
  */
 import type {
+  ComputerPurpose,
+  ComputerWorkStatus,
+  DesktopConnectHelperState,
+  FoundProject,
   ImportedChatTool,
   MyComputerImportStatus,
+  ProjectComputer,
   ThreadComputerSource,
 } from "@t3tools/contracts";
 import { WS_METHODS } from "@t3tools/contracts";
 
 import { LC_START } from "../../computersLifecycle/flag";
-import type { FoundProject, LifecycleDemoHooks } from "../../computersLifecycle/backend";
-import { lifecycle } from "../../computersLifecycle/store";
-import {
-  addSavedEnvironment,
-  reconnectSavedEnvironment,
-  removeSavedEnvironment,
-} from "../../environments/runtime";
+import type { LifecycleDemoHooks } from "../../computersLifecycle/backend";
 import { demoHooks } from "../demoFlag";
 import { MACHINES, type DemoMachine, type MachineKey } from "../heavyFixtures";
 import { isSleeping, setSleeping } from "./links";
 
 export const LC_ON = LC_START !== "off";
-export const MAC_COMPUTER_ID = "mc-macbook";
+export const MAC_COMPUTER_ID = "41";
+const MAC_NAME = "MacBook";
+const MAC_HOME = "/Users/misha";
 
 /** What demoBoot lends this module (its models and chats). */
 export interface LifecycleOps {
@@ -53,17 +59,23 @@ export interface LifecycleOps {
       source?: ThreadComputerSource;
     },
   ): void;
-  addProject(key: MachineKey, input: { id: string; title: string; workspaceRoot: string }): void;
+  addProject(
+    key: MachineKey,
+    input: { id: string; title: string; workspaceRoot: string; computer?: ProjectComputer },
+  ): void;
   hasProject(key: MachineKey, projectId: string): boolean;
-  /** The chat's messages and project title (null: no such chat). */
+  /** The chat's messages, project and that project's computer (null: no such chat). */
   readThread(
     environmentId: string,
     threadId: string,
   ): {
     title: string;
     projectTitle: string;
+    computer: ProjectComputer | null;
     messages: ReadonlyArray<readonly ["user" | "assistant", string]>;
   } | null;
+  /** Sets fields on a chat and publishes it. */
+  patchThread(key: MachineKey, threadId: string, patch: Record<string, unknown>): void;
   finishTurn(key: MachineKey, threadId: string, text: string): void;
 }
 
@@ -72,36 +84,42 @@ let ops: LifecycleOps | null = null;
 // ── State ───────────────────────────────────────────────────────────────
 
 let macConnected = LC_START === "connected";
-let macFull = LC_START === "connected";
+const purposes = new Map<string, ComputerPurpose>(
+  LC_START === "connected" ? [[MAC_COMPUTER_ID, "full"]] : [],
+);
 let installStartedAt: number | null = null;
 const deletedBoxes = new Set<number>();
+/** MacBook chats whose turn waits for it: the reply they give when it wakes. */
 const resumeOnWake = new Map<string, string>();
-let waitingThread: { environmentId: string; threadId: string } | null = null;
 
-/** The MacBook isn't one of the page's computers at the start (fresh). */
+/** The MacBook is never a computer of its own in the page: its chats live on uno-work. */
 export function lcHidesMac(): boolean {
-  return LC_ON && !macFull;
+  return LC_ON;
 }
 
-/** A fresh MacBook has no chats of Uno's yet: they come with the import. */
+/** The MacBook has no chats of Uno's: they come with the import. */
 export function lcStripsMacChats(): boolean {
-  return LC_START === "fresh";
+  return LC_ON;
 }
 
 export function lcDeletedBox(id: number): boolean {
   return deletedBoxes.has(id);
 }
 
+const isFull = () => purposes.get(MAC_COMPUTER_ID) === "full";
+
 function mac() {
   return {
     id: MAC_COMPUTER_ID,
-    name: "MacBook",
+    name: MAC_NAME,
     os: "darwin",
     arch: "arm64",
     online: !isSleeping("mac"),
     connectedAt: new Date(Date.now() - 60_000).toISOString(),
     lastSeenAt: new Date().toISOString(),
     helperVersion: "0.4.0",
+    mode: purposes.get(MAC_COMPUTER_ID) ?? "tool",
+    trustsThisComputer: true,
   };
 }
 
@@ -254,15 +272,7 @@ function importStatus(): MyComputerImportStatus {
   };
 }
 
-const MAC_PROJECT_ID: Record<string, string> = {
-  landing: "p-mac-landing",
-  fishcode: "p-mac-fishcode",
-  "uno-work-app": "p-mac-uno-work",
-  "uno-project": "p-mac-uno-project",
-  "Home folder": "p-mac-home",
-};
-
-/** The project of that name on uno-work, made if it isn't there (an imported chat's folder). */
+/** The project of that name on uno-work, made if it isn't there (a copy in the cloud). */
 function workProject(name: string): string {
   if (name === "Home folder") return "p-work-home";
   const id = `p-work-${name}`;
@@ -272,17 +282,46 @@ function workProject(name: string): string {
   return id;
 }
 
+/** The uno-work project that stands for a MacBook folder (computers.openFolder). */
+function macFolderProject(path: string): {
+  projectId: string;
+  workspaceRoot: string;
+  title: string;
+} {
+  const home = path === "~" || path === MAC_HOME;
+  const name = home ? "Home folder" : (path.split("/").pop() ?? path);
+  const slug = home ? "home" : name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const projectId = `p-mac-${slug}`;
+  const workspaceRoot = `/home/uno/computers/${MAC_COMPUTER_ID}/${slug}`;
+  if (!ops!.hasProject("work", projectId)) {
+    ops!.addProject("work", {
+      id: projectId,
+      title: name,
+      workspaceRoot,
+      computer: {
+        computerId: MAC_COMPUTER_ID,
+        computerName: MAC_NAME,
+        path: home ? MAC_HOME : path,
+      },
+    });
+  }
+  return { projectId, workspaceRoot, title: name };
+}
+
 function landImported(specs: ReadonlyArray<ImportedSpec>) {
   if (!ops) return;
   importedCount += specs.length;
   specs.forEach((spec, index) => {
     const id = `imp-${spec.tool}-${index}-${spec.title.toLowerCase().replace(/[^a-z]+/g, "-")}`;
     importedHistory.set(id, spec);
-    if (macFull) {
+    if (isFull()) {
       // A full computer: the chat goes on on the MacBook, in its project's folder.
-      ops!.addThread("mac", {
+      const folder = macFolderProject(
+        spec.project === "Home folder" ? "~" : `${MAC_HOME}/projects/${spec.project}`,
+      );
+      ops!.addThread("work", {
         id,
-        projectId: MAC_PROJECT_ID[spec.project] ?? "p-mac-home",
+        projectId: folder.projectId,
         title: spec.title,
         minutesAgo: spec.minutesAgo,
         messages: spec.messages,
@@ -298,11 +337,11 @@ function landImported(specs: ReadonlyArray<ImportedSpec>) {
         source: {
           kind: "computer",
           computerId: MAC_COMPUTER_ID,
-          computerName: "MacBook",
+          computerName: MAC_NAME,
           tool: spec.tool,
           sessionId: id,
-          path: `/Users/misha/.claude/projects/${spec.project}/${id}.jsonl`,
-          cwd: `/Users/misha/projects/${spec.project}`,
+          path: `${MAC_HOME}/.claude/projects/${spec.project}/${id}.jsonl`,
+          cwd: `${MAC_HOME}/projects/${spec.project}`,
           lastActiveAt: new Date(Date.now() - spec.minutesAgo * 60_000).toISOString(),
         },
       });
@@ -310,33 +349,189 @@ function landImported(specs: ReadonlyArray<ImportedSpec>) {
   });
 }
 
-// ── Projects and keys ───────────────────────────────────────────────────
+// ── Projects and keys (computers.workScan / bringWork) ──────────────────
 
 const FOUND: ReadonlyArray<FoundProject> = [
   {
     name: "landing",
-    path: "~/projects/landing",
-    keys: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "RESEND_API_KEY"],
+    path: `${MAC_HOME}/projects/landing`,
+    displayPath: "~/projects/landing",
+    git: true,
+    keys: ["RESEND_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
     fromChats: true,
+    synced: false,
   },
   {
     name: "fishcode",
-    path: "~/projects/fishcode",
+    path: `${MAC_HOME}/projects/fishcode`,
+    displayPath: "~/projects/fishcode",
+    git: true,
     keys: ["DATABASE_URL", "TELEGRAM_BOT_TOKEN"],
     fromChats: true,
+    synced: false,
   },
-  { name: "uno-work-app", path: "~/projects/uno-work", keys: [], fromChats: true },
-  { name: "uno-project", path: "~/projects/uno-project", keys: [], fromChats: false },
+  {
+    name: "uno-work-app",
+    path: `${MAC_HOME}/projects/uno-work-app`,
+    displayPath: "~/projects/uno-work-app",
+    git: true,
+    keys: [],
+    fromChats: true,
+    synced: false,
+  },
+  {
+    name: "uno-project",
+    path: `${MAC_HOME}/projects/uno-project`,
+    displayPath: "~/projects/uno-project",
+    git: true,
+    keys: [],
+    fromChats: false,
+    synced: false,
+  },
 ];
+
+const SCAN_MS = 1_200;
+const BRING_MS = 1_800;
+let scanStartedAt: number | null = null;
+let bringing: { startedAt: number; paths: ReadonlyArray<string>; keys: number[] } | null = null;
+const synced = new Set<string>();
+
+function workStatus(): ComputerWorkStatus {
+  const scanning = scanStartedAt !== null && Date.now() - scanStartedAt < SCAN_MS;
+  const scanned = scanStartedAt !== null && !scanning;
+  const running = bringing !== null && Date.now() - bringing.startedAt < BRING_MS;
+  if (bringing !== null && !running) {
+    for (const path of bringing.paths) {
+      if (!synced.has(path)) {
+        synced.add(path);
+        workProject(path.split("/").pop() ?? path);
+      }
+    }
+  }
+  return {
+    computerId: MAC_COMPUTER_ID,
+    scan: {
+      state: scanning ? "scanning" : scanned ? "ready" : "idle",
+      message: null,
+      scannedAt: scanned ? new Date(scanStartedAt! + SCAN_MS).toISOString() : null,
+      home: MAC_HOME,
+      projects: scanned
+        ? FOUND.map((project) => ({ ...project, synced: synced.has(project.path) }))
+        : [],
+    },
+    bring:
+      bringing === null
+        ? { state: "idle", done: 0, total: 0, message: null, results: [] }
+        : {
+            state: running ? "running" : "done",
+            done: running ? 0 : bringing.paths.length,
+            total: bringing.paths.length,
+            message: null,
+            results: running
+              ? []
+              : bringing.paths.map((path, index) => ({
+                  path,
+                  name: path.split("/").pop() ?? path,
+                  ok: true,
+                  keysSaved: bringing!.keys[index] ?? 0,
+                  message: null,
+                })),
+          },
+  };
+}
+
+// ── A chat on the MacBook waits for it ──────────────────────────────────
+
+function macWait() {
+  return { computerId: MAC_COMPUTER_ID, computerName: MAC_NAME, since: new Date().toISOString() };
+}
+
+/** A message in a MacBook chat: the agent works ~5 s; asleep by then, it waits for the wake. */
+export function lcOnTurn(key: MachineKey, threadId: string, text: string): boolean {
+  if (!LC_ON || key !== "work" || !ops) return false;
+  const chat = ops.readThread(MACHINES.work.environmentId, threadId);
+  if (chat?.computer?.computerId !== MAC_COMPUTER_ID) return false;
+  const reply = /test/i.test(text)
+    ? "Ran the tests on MacBook: 42 passed in 8 s."
+    : "Done on MacBook — the files are in the project folder.";
+  setTimeout(() => {
+    if (isSleeping("mac")) {
+      resumeOnWake.set(threadId, reply);
+      ops?.patchThread("work", threadId, { computerWait: macWait() });
+    } else ops?.finishTurn("work", threadId, reply);
+  }, 5_000);
+  return true;
+}
+
+export function lcSleepMac() {
+  setSleeping("mac", true);
+  // A turn already running on it waits too.
+  for (const threadId of resumeOnWake.keys()) {
+    ops?.patchThread("work", threadId, { computerWait: macWait() });
+  }
+}
+
+export function lcWakeMac() {
+  setSleeping("mac", false);
+  setTimeout(() => {
+    for (const [threadId, reply] of resumeOnWake) {
+      ops?.patchThread("work", threadId, { computerWait: null });
+      ops?.finishTurn("work", threadId, `MacBook is back. ${reply}`);
+    }
+    resumeOnWake.clear();
+  }, 2_500);
+}
 
 // ── RPC ─────────────────────────────────────────────────────────────────
 
-/** The answer to a "Connect my computer" RPC (undefined: not one, or the demo is off). */
-export function answerLifecycleRpc(_machine: DemoMachine, tag: string, body: unknown): unknown {
+function computersState() {
+  return {
+    lifecycle: true,
+    purposes: [...purposes].map(([computerId, purpose]) => ({ computerId, purpose })),
+  };
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function continueInCloud(threadId: string) {
+  const from = ops?.readThread(MACHINES.work.environmentId, threadId);
+  const spec = importedHistory.get(threadId);
+  const title = from?.title ?? spec?.title ?? "Chat";
+  const projectName = spec?.project ?? from?.projectTitle ?? "Home folder";
+  const messages = from?.messages.length ? from.messages : (spec?.messages ?? []);
+  await wait(900);
+  const id = `${threadId}-cloud`;
+  resumeOnWake.delete(threadId);
+  ops?.patchThread("work", threadId, { computerWait: null });
+  ops?.addThread("work", {
+    id,
+    projectId: workProject(projectName),
+    title,
+    minutesAgo: 0,
+    messages: [
+      ...messages,
+      [
+        "assistant",
+        `Continued from MacBook. Copied ${projectName} to uno-work and picked up where it stopped.`,
+      ],
+    ],
+  });
+  return { threadId: id };
+}
+
+/** The answer to a "Connect my computer" or `computers.*` RPC (undefined: not one, or off). */
+export function answerLifecycleRpc(machine: DemoMachine, tag: string, body: unknown): unknown {
   if (!LC_ON) return undefined;
+  // Only the cloud computers hold the person's own computers.
+  if (machine.machineKind !== "uno_box" && tag.startsWith("myComputer.")) {
+    return tag === WS_METHODS.myComputerStatus ? { enabled: false, computers: [] } : undefined;
+  }
+  const input = body as Record<string, unknown>;
   switch (tag) {
     case WS_METHODS.myComputerStatus:
-      return { enabled: true, computers: macConnected ? [mac()] : [] };
+      return { enabled: true, lifecycle: true, computers: macConnected ? [mac()] : [] };
+    case WS_METHODS.myComputerPair:
+      return undefined;
     case WS_METHODS.myComputerPairStatus: {
       if (installStartedAt !== null && Date.now() - installStartedAt > 2_500) {
         macConnected = true;
@@ -352,6 +547,10 @@ export function answerLifecycleRpc(_machine: DemoMachine, tag: string, body: unk
     case WS_METHODS.myComputerDisconnect:
       macConnected = false;
       installStartedAt = null;
+      purposes.delete(MAC_COMPUTER_ID);
+      importPhase = { kind: "idle" };
+      declined = false;
+      scanStartedAt = null;
       return null;
     case WS_METHODS.myComputerActivity:
       return [];
@@ -363,7 +562,7 @@ export function answerLifecycleRpc(_machine: DemoMachine, tag: string, body: unk
       }
       return importStatus();
     case WS_METHODS.myComputerImportStart: {
-      const tools = ((body as { tools?: ImportedChatTool[] }).tools ?? []).filter(
+      const tools = ((input.tools as ImportedChatTool[] | undefined) ?? []).filter(
         (tool) => tool !== "opencode",
       );
       importPhase = { kind: "importing", startedAt: Date.now(), tools };
@@ -374,7 +573,7 @@ export function answerLifecycleRpc(_machine: DemoMachine, tag: string, body: unk
       declined = true;
       return importStatus();
     case WS_METHODS.myComputerChatHistory: {
-      const threadId = String((body as { threadId?: string }).threadId ?? "");
+      const threadId = String(input.threadId ?? "");
       const spec = importedHistory.get(threadId);
       if (!spec) return { kind: "gone" };
       return {
@@ -391,64 +590,36 @@ export function answerLifecycleRpc(_machine: DemoMachine, tag: string, body: unk
         })),
       };
     }
+    case WS_METHODS.computersState:
+      return computersState();
+    case WS_METHODS.computersSetPurpose:
+      purposes.set(String(input.computerId), input.purpose === "full" ? "full" : "tool");
+      return computersState();
+    case WS_METHODS.computersWorkStatus:
+      return workStatus();
+    case WS_METHODS.computersWorkScan:
+      if (scanStartedAt === null || Date.now() - scanStartedAt > 60_000) scanStartedAt = Date.now();
+      return workStatus();
+    case WS_METHODS.computersBringWork: {
+      const projects = (input.projects as Array<{ path: string; keys: string[] }>) ?? [];
+      bringing = {
+        startedAt: Date.now(),
+        paths: projects.map((project) => project.path),
+        keys: projects.map((project) => project.keys.length),
+      };
+      setTimeout(() => workStatus(), BRING_MS + 50);
+      return workStatus();
+    }
+    case WS_METHODS.computersOpenFolder:
+      return macFolderProject(String(input.path ?? "~"));
+    case WS_METHODS.computersContinueInCloud:
+      return continueInCloud(String(input.threadId ?? ""));
     default:
       return undefined;
   }
 }
 
-// ── A full computer's turn waits for it ─────────────────────────────────
-
-/** A message in a MacBook chat: the agent works ~5 s; asleep by then, it goes on at the wake. */
-export function lcOnTurn(key: MachineKey, threadId: string, text: string): boolean {
-  if (!LC_ON || key !== "mac" || !ops) return false;
-  const reply = /test/i.test(text)
-    ? "Ran the tests on MacBook: 42 passed in 8 s."
-    : "Done on MacBook — the files are in the project folder.";
-  setTimeout(() => {
-    if (isSleeping("mac")) resumeOnWake.set(threadId, reply);
-    else ops?.finishTurn("mac", threadId, reply);
-  }, 5_000);
-  return true;
-}
-
-export function lcSleepMac() {
-  setSleeping("mac", true);
-}
-
-export function lcWakeMac() {
-  setSleeping("mac", false);
-  if (macFull) void reconnectSavedEnvironment(MACHINES.mac.environmentId).catch(() => undefined);
-  setTimeout(() => {
-    for (const [threadId, reply] of resumeOnWake) {
-      ops?.finishTurn("mac", threadId, `MacBook is back. ${reply}`);
-    }
-    resumeOnWake.clear();
-  }, 2_500);
-}
-
 // ── Hooks for the real components (computersLifecycle/backend.ts) ───────
-
-async function makeFull(): Promise<string> {
-  macFull = true;
-  const record = await addSavedEnvironment({
-    label: "MacBook",
-    host: `https://${MACHINES.mac.host}/`,
-    pairingCode: "demo-macbook",
-  });
-  return record.environmentId;
-}
-
-async function makeTool(): Promise<void> {
-  macFull = false;
-  await removeSavedEnvironment(MACHINES.mac.environmentId).catch(() => undefined);
-}
-
-const CLOUD_CONTENTS: Record<string, { apps: string[]; sites: string[] }> = {
-  work: { apps: ["orders-bot", "crm"], sites: ["misha-portfolio.uno4.me"] },
-  product: { apps: ["landing-preview"], sites: ["uno-pitch.uno4.me"] },
-};
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const hooks: LifecycleDemoHooks = {
   installStarted: () => {
@@ -461,57 +632,16 @@ const hooks: LifecycleDemoHooks = {
     macConnected = true;
     return MAC_COMPUTER_ID;
   },
-  projects: () => FOUND,
-  bring: ({ projects }) => {
-    for (const project of projects) workProject(project.name);
-  },
-  makeFull,
-  makeTool,
-  removeComputer: async () => {
-    if (macFull) await makeTool();
-    macConnected = false;
-    installStartedAt = null;
-    importPhase = { kind: "idle" };
-    declined = false;
-  },
-  continueInCloud: async (environmentId, threadId) => {
-    const from = ops?.readThread(environmentId, threadId);
-    const spec = importedHistory.get(threadId);
-    const title = from?.title ?? spec?.title ?? "Chat";
-    const projectName = spec?.project ?? from?.projectTitle ?? "Home folder";
-    const messages = spec?.messages ?? from?.messages ?? [];
-    await wait(900);
-    const id = `${threadId}-cloud`;
-    ops?.addThread("work", {
-      id,
-      projectId: workProject(projectName),
-      title,
-      minutesAgo: 0,
-      messages: [
-        ...messages,
-        [
-          "assistant",
-          `Continued from MacBook. Copied ${projectName} to uno-work and picked up where it stopped.`,
-        ],
-      ],
-    });
-    await wait(500);
-    return { environmentId: MACHINES.work.environmentId, threadId: id };
-  },
-  cloudContents: (boxId) => {
-    const key =
-      boxId === MACHINES.work.boxId ? "work" : boxId === MACHINES.product.boxId ? "product" : null;
-    return key ? CLOUD_CONTENTS[key]! : { apps: [], sites: [] };
-  },
+  thisMacHelper: (): DesktopConnectHelperState =>
+    macConnected
+      ? { installed: true, computerId: MAC_COMPUTER_ID, name: MAC_NAME }
+      : { installed: false, computerId: null, name: null },
   deleteBox: async (boxId) => {
     await wait(600);
     deletedBoxes.add(boxId);
   },
   sleepBox: async () => {
     await wait(400);
-  },
-  waiting: (environmentId, threadId) => {
-    waitingThread = { environmentId, threadId };
   },
 };
 
@@ -520,9 +650,8 @@ export const lcDemo = {
   sleep: lcSleepMac,
   wake: lcWakeMac,
   asleep: () => isSleeping("mac"),
-  waiting: () => waitingThread,
   connected: () => macConnected,
-  full: () => macFull,
+  full: isFull,
 };
 
 export function startLifecycle(next: LifecycleOps) {
@@ -530,8 +659,4 @@ export function startLifecycle(next: LifecycleOps) {
   ops = next;
   demoHooks.lc = hooks;
   (window as unknown as { __lcDemo: typeof lcDemo }).__lcDemo = lcDemo;
-  if (macFull) {
-    lifecycle.setPurpose(MAC_COMPUTER_ID, "full");
-    lifecycle.linkEnvironment(MAC_COMPUTER_ID, MACHINES.mac.environmentId);
-  }
 }

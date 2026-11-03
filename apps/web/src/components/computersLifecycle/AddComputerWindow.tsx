@@ -8,11 +8,14 @@
  *            command; Linux — the command → "MacBook is connected" →
  *            purpose: "What is it for?" → bring: chats, projects, key names → done
  *
- * The pairing is the real one (`myComputer.pair` + `pairStatus`, as "Connect my
- * computer"); what doesn't exist yet in the backend goes through
- * `lifecycleBackend` (answered by the demo). SSH / address + code: Dev Mode only.
+ * All of it talks to the cloud computer that holds the person's own computers
+ * (`useComputersHostId`): the pairing (`myComputer.pair` + `pairStatus`), what
+ * the computer is for (`computers.setPurpose`), its chats (`myComputer.import*`)
+ * and its projects and key names (`computers.workScan` / `bringWork`). Until the
+ * backend has the projects part, "Bring your work?" offers chats only.
+ * SSH / address + code: Dev Mode only.
  */
-import type { ImportedChatTool, MyComputerImportTool } from "@t3tools/contracts";
+import type { FoundProject, ImportedChatTool, MyComputerImportTool } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -24,14 +27,19 @@ import {
   LockIcon,
   WrenchIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
-import { lifecycleBackend, type FoundProject } from "../../computersLifecycle/backend";
+import { lifecycleBackend } from "../../computersLifecycle/backend";
 import { type ComputerPurpose, lifecycle, useLifecycle } from "../../computersLifecycle/store";
+import {
+  errorText,
+  useComputersHostId,
+  useSetComputerPurpose,
+} from "../../computersLifecycle/useComputers";
+import { useComputerWork } from "../../computersLifecycle/useComputerWork";
 import { DEMO } from "../../demo/demoFlag";
 import { useDevMode } from "../../devMode";
 import { ensureEnvironmentApi } from "../../environmentApi";
-import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { cn } from "../../lib/utils";
 import { liteLinks } from "../../lite/webLite";
 import { useImportActions, useImportStatus } from "../../localComputer/useChatImport";
@@ -179,7 +187,7 @@ function CommandBox({ command }: { command: string }) {
 }
 
 function OwnStep() {
-  const environmentId = usePrimaryEnvironmentId();
+  const environmentId = useComputersHostId();
   const os = useLifecycle((state) => state.os);
   const showCommand = useLifecycle((state) => state.showCommand);
   const pairing = useLifecycle((state) => state.pairing);
@@ -197,8 +205,7 @@ function OwnStep() {
           if (!gone) lifecycle.paired(next);
         },
         (cause: unknown) => {
-          if (!gone)
-            lifecycle.pairFailed(cause instanceof Error ? cause.message : "Uno didn’t answer.");
+          if (!gone) lifecycle.pairFailed(errorText(cause));
         },
       );
     return () => {
@@ -207,7 +214,9 @@ function OwnStep() {
   }, [environmentId, pairing]);
 
   const pairStatus = usePairStatus(environmentId, pairing);
-  const { computers } = useMyComputers(environmentId, { pollMs: STATUS_POLL_PAIRING_MS });
+  const { computers, settled } = useMyComputers(environmentId, {
+    pollMs: STATUS_POLL_PAIRING_MS,
+  });
   const refresh = useRefreshMyComputers();
   const progress =
     pairing === null
@@ -218,12 +227,28 @@ function OwnStep() {
           expiresAt: pairing.expiresAt,
           nowMs: Date.now(),
         });
-  const connectedId = progress?.kind === "connected" ? progress.computerId : null;
+  // Downloaded the app: the app links this computer with its own code, so the
+  // computer that turns up new while this window is open is the one.
+  const [knownIds, setKnownIds] = useState<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    if (settled && knownIds === null) setKnownIds(new Set(computers.map((one) => one.id)));
+  }, [computers, knownIds, settled]);
+  const appeared =
+    downloaded && knownIds !== null
+      ? (computers.find((one) => one.online && !knownIds.has(one.id))?.id ?? null)
+      : null;
+  const connectedId = progress?.kind === "connected" ? progress.computerId : (appeared ?? null);
   useEffect(() => {
     if (connectedId === null) return;
     void refresh();
     lifecycle.connected(connectedId);
   }, [connectedId, refresh]);
+  // A code lives 15 minutes: an expired one is replaced, the command with it.
+  const expired = progress?.kind === "expired";
+  useEffect(() => {
+    if (expired) lifecycle.repair();
+  }, [expired]);
+  const failure = progress?.kind === "failed" ? progress : null;
 
   const app = os !== "linux";
   const download = () => {
@@ -290,6 +315,18 @@ function OwnStep() {
             {pairError}
           </p>
         ) : null}
+        {failure !== null ? (
+          <div role="alert" className="flex flex-col gap-1.5 text-sm" data-testid="lc-pair-failed">
+            <p className="text-destructive">
+              {failure.message ?? "It didn’t connect. Try the command again."}
+            </p>
+            {failure.codeUsable ? null : (
+              <Button size="xs" variant="outline" className="self-start" onClick={lifecycle.repair}>
+                Get a new command
+              </Button>
+            )}
+          </div>
+        ) : null}
         <p
           className="flex items-center gap-2 text-sm text-muted-foreground"
           data-testid="lc-waiting"
@@ -306,7 +343,7 @@ function OwnStep() {
 // ── purpose: what is it for ─────────────────────────────────────────────
 
 function useComputerName(computerId: string | null): string {
-  const { computers } = useMyComputers(usePrimaryEnvironmentId());
+  const { computers } = useMyComputers(useComputersHostId());
   return computers.find((one) => one.id === computerId)?.name ?? "Your computer";
 }
 
@@ -314,18 +351,19 @@ function PurposeStep() {
   const computerId = useLifecycle((state) => state.computerId);
   const preselect = useLifecycle((state) => state.preselect);
   const name = useComputerName(computerId);
+  const setPurpose = useSetComputerPurpose();
   const [busy, setBusy] = useState<ComputerPurpose | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<ComputerPurpose | null>(preselect);
   const choose = async (purpose: ComputerPurpose) => {
     if (computerId === null) return;
     setBusy(purpose);
+    setError(null);
     try {
-      if (purpose === "full") {
-        const environmentId = await lifecycleBackend.makeFull(computerId);
-        lifecycle.linkEnvironment(computerId, environmentId);
-      }
-      lifecycle.setPurpose(computerId, purpose);
+      await setPurpose(computerId, purpose);
       lifecycle.chosePurpose(purpose);
+    } catch (cause) {
+      setError(errorText(cause, "Couldn’t save it. Try again."));
     } finally {
       setBusy(null);
     }
@@ -367,6 +405,11 @@ function PurposeStep() {
           onClick={() => click("full")}
         />
         <p className="mt-1 text-xs text-muted-foreground">You can change this later.</p>
+        {error !== null ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
       </DialogPanel>
       {confirming ? (
         <DialogFooter variant="bare">
@@ -439,7 +482,9 @@ function ProjectRow({
       <label className="flex cursor-pointer items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-accent/60">
         <Checkbox checked={on} onCheckedChange={onToggle} />
         <span className="min-w-0 flex-1 truncate text-sm">{project.name}</span>
-        <span className="shrink-0 truncate text-xs text-muted-foreground">{project.path}</span>
+        <span className="max-w-40 shrink-0 truncate text-xs text-muted-foreground">
+          {project.synced ? "On all my computers" : project.displayPath}
+        </span>
       </label>
       {on && project.keys.length > 0 ? (
         <div className="mb-1 ml-8 flex flex-wrap gap-1.5" data-testid="lc-bring-keys">
@@ -470,37 +515,38 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
+/** Ticked unless the person changed it: projects a chat ran in, not synced yet. */
+const tickedByDefault = (project: FoundProject) => project.fromChats && !project.synced;
+
 function BringStep() {
-  const environmentId = usePrimaryEnvironmentId();
+  const environmentId = useComputersHostId();
   const computerId = useLifecycle((state) => state.computerId);
-  const purpose = useLifecycle((state) => state.purposeChosen) ?? "tool";
   const status = useImportStatus(environmentId, computerId, { watch: true }).data;
   const actions = useImportActions(environmentId, computerId);
   useEffect(() => {
     if (environmentId !== null && computerId !== null) actions.scan().catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [computerId, environmentId]);
-  const projects = useMemo(
-    () => (computerId === null ? [] : lifecycleBackend.projects(computerId)),
-    [computerId],
-  );
+  const work = useComputerWork(computerId, { scan: true });
+  const projects = work.unavailable ? [] : (work.status?.scan.projects ?? []);
+  const projectsSearching =
+    !work.unavailable && (!work.settled || work.status?.scan.state === "scanning");
   const [untickedTools, setUntickedTools] = useState<ReadonlySet<ImportedChatTool>>(new Set());
-  const [onProjects, setOnProjects] = useState<ReadonlySet<string>>(
-    () => new Set(projects.filter((project) => project.fromChats).map((project) => project.name)),
-  );
+  /** Projects whose tick differs from `tickedByDefault`. */
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
   const [offKeys, setOffKeys] = useState<ReadonlyMap<string, ReadonlySet<string>>>(new Map());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const tools = status?.state === "ready" ? offeredTools(status.tools) : [];
   const searching = status === undefined || status.state === "scanning" || status.state === "idle";
   const pickedTools = tools.filter((tool) => tool.available && !untickedTools.has(tool.id));
   const chatCount = pickedTools.reduce((sum, tool) => sum + tool.newChats, 0);
-  const pickedProjects = projects.filter((project) => onProjects.has(project.name));
-  const keyCount = pickedProjects.reduce(
-    (sum, project) =>
-      sum + project.keys.filter((key) => !offKeys.get(project.name)?.has(key)).length,
-    0,
-  );
+  const isOn = (project: FoundProject) => tickedByDefault(project) !== flipped.has(project.path);
+  const pickedProjects = projects.filter(isOn);
+  const keysOf = (project: FoundProject) =>
+    project.keys.filter((key) => !offKeys.get(project.path)?.has(key));
+  const keyCount = pickedProjects.reduce((sum, project) => sum + keysOf(project).length, 0);
   const anyKeys = pickedProjects.some((project) => project.keys.length > 0);
 
   const toggle = <T,>(set: ReadonlySet<T>, value: T): ReadonlySet<T> => {
@@ -513,23 +559,23 @@ function BringStep() {
   const bring = async () => {
     if (computerId === null) return;
     setBusy(true);
+    setError(null);
     try {
-      if (pickedTools.length > 0) {
-        await actions.start(pickedTools.map((tool) => tool.id)).catch(() => undefined);
+      if (pickedProjects.length > 0) {
+        await work.bring(
+          pickedProjects.map((project) => ({ path: project.path, keys: keysOf(project) })),
+        );
       }
-      lifecycleBackend.bring({
-        computerId,
-        purpose,
-        projects: pickedProjects.map((project) => ({
-          name: project.name,
-          keys: project.keys.filter((key) => !offKeys.get(project.name)?.has(key)),
-        })),
-      });
+      if (pickedTools.length > 0) {
+        await actions.start(pickedTools.map((tool) => tool.id));
+      }
       lifecycle.brought({
         chats: chatCount,
         projects: pickedProjects.map((project) => project.name),
         keys: keyCount,
       });
+    } catch (cause) {
+      setError(errorText(cause, "Couldn’t bring it. Try again."));
     } finally {
       setBusy(false);
     }
@@ -570,25 +616,40 @@ function BringStep() {
             ))
           )}
         </div>
-        {projects.length > 0 ? (
-          <div className="flex flex-col">
+        {work.unavailable ? null : (
+          <div className="flex flex-col" data-testid="lc-bring-projects">
             <SectionLabel>Projects</SectionLabel>
-            {projects.map((project) => (
-              <ProjectRow
-                key={project.name}
-                project={project}
-                on={onProjects.has(project.name)}
-                offKeys={offKeys.get(project.name) ?? new Set()}
-                onToggle={() => setOnProjects((current) => toggle(current, project.name))}
-                onToggleKey={(key) =>
-                  setOffKeys((current) => {
-                    const next = new Map(current);
-                    next.set(project.name, toggle(current.get(project.name) ?? new Set(), key));
-                    return next;
-                  })
-                }
-              />
-            ))}
+            {projectsSearching && projects.length === 0 ? (
+              <p className="flex items-center gap-2 px-1 py-1.5 text-sm text-muted-foreground">
+                <Loader2Icon className="size-3.5 animate-spin" />
+                Looking in ~/projects…
+              </p>
+            ) : work.status?.scan.state === "failed" ? (
+              <p className="px-1 py-1.5 text-sm text-muted-foreground">
+                {work.status.scan.message ?? "Couldn’t look for projects."}
+              </p>
+            ) : projects.length === 0 ? (
+              <p className="px-1 py-1.5 text-sm text-muted-foreground">
+                No projects in ~/projects.
+              </p>
+            ) : (
+              projects.map((project) => (
+                <ProjectRow
+                  key={project.path}
+                  project={project}
+                  on={isOn(project)}
+                  offKeys={offKeys.get(project.path) ?? new Set()}
+                  onToggle={() => setFlipped((current) => toggle(current, project.path))}
+                  onToggleKey={(key) =>
+                    setOffKeys((current) => {
+                      const next = new Map(current);
+                      next.set(project.path, toggle(current.get(project.path) ?? new Set(), key));
+                      return next;
+                    })
+                  }
+                />
+              ))
+            )}
             {anyKeys ? (
               <p
                 className="mt-1 flex items-center gap-1.5 px-1 text-xs text-muted-foreground"
@@ -599,6 +660,11 @@ function BringStep() {
               </p>
             ) : null}
           </div>
+        )}
+        {error !== null ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
         ) : null}
       </DialogPanel>
       <DialogFooter variant="bare">
@@ -610,6 +676,7 @@ function BringStep() {
           onClick={() => void bring()}
           data-testid="lc-bring-start"
         >
+          {busy ? <Loader2Icon className="animate-spin" /> : null}
           {label === "" ? "Bring" : `Bring ${label}`}
         </Button>
       </DialogFooter>
@@ -624,6 +691,11 @@ function DoneStep() {
   const purpose = useLifecycle((state) => state.purposeChosen) ?? "tool";
   const brought = useLifecycle((state) => state.brought);
   const name = useComputerName(computerId);
+  // Bringing goes on after the window closes; while it's open, it shows how it went.
+  const bring = useComputerWork(brought && brought.projects.length > 0 ? computerId : null).status
+    ?.bring;
+  const bringing = bring?.state === "running";
+  const failed = bring?.results.filter((result) => !result.ok) ?? [];
   return (
     <div className="flex min-h-0 flex-col" data-testid="lc-add-done">
       <DialogHeader>
@@ -643,9 +715,16 @@ function DoneStep() {
         {brought && brought.projects.length > 0 ? (
           <p data-testid="lc-done-projects">
             {brought.projects.join(", ")}
-            <span className="text-muted-foreground"> · On all my computers</span>
+            <span className="text-muted-foreground">
+              {bringing ? " · copying…" : " · On all my computers"}
+            </span>
           </p>
         ) : null}
+        {failed.map((result) => (
+          <p key={result.path} role="alert" className="text-destructive">
+            {result.name}: {result.message ?? "didn’t come over."}
+          </p>
+        ))}
         {brought && brought.chats > 0 ? (
           <p className="text-muted-foreground">{chatsLabel(brought.chats)} on their way.</p>
         ) : null}

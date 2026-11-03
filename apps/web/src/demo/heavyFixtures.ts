@@ -1330,6 +1330,13 @@ export function toShellThread(thread: WireThread) {
     hasPendingApprovals: pending.approvals,
     hasPendingUserInput: pending.input,
     hasActionableProposedPlan: false,
+    // Computers lifecycle: where an imported chat came from, and a turn waiting for a computer.
+    ...((thread as { source?: unknown }).source !== undefined
+      ? { source: (thread as { source?: unknown }).source }
+      : {}),
+    ...((thread as { computerWait?: unknown }).computerWait !== undefined
+      ? { computerWait: (thread as { computerWait?: unknown }).computerWait }
+      : {}),
     ...demoDevDetails(thread),
   };
 }
@@ -1345,6 +1352,9 @@ export function toShellSnapshot(model: OrchestrationReadModel) {
       repositoryIdentity: project.repositoryIdentity ?? null,
       defaultModelSelection: project.defaultModelSelection,
       scripts: project.scripts,
+      ...((project as { computer?: unknown }).computer !== undefined
+        ? { computer: (project as { computer?: unknown }).computer }
+        : {}),
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
     })),

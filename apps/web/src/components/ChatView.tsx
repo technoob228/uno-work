@@ -1510,18 +1510,17 @@ export default function ChatView(props: ChatViewProps) {
     reconnectingEnvironmentId,
     reconnectWarningVisible,
   ]);
-  // Computers lifecycle (02.11): a full computer's chat waits for it, calmly,
-  // and offers "Continue in the cloud" after a while.
+  // Computers lifecycle (02.11): a chat on the person's own computer waits for
+  // it calmly, and offers "Continue in the cloud" after a while (or at once,
+  // when that computer is a tool for agents now or was removed).
   const ownComputerWaitingItem = useOwnComputerWaitingItem({
-    unavailable: activeEnvironmentUnavailableState,
-    threadId: activeThread?.id ?? null,
-    visible: reconnectWarningVisible,
+    environmentId: activeThread?.environmentId ?? null,
+    threadId: isServerThread ? (activeThread?.id ?? null) : null,
+    computer: activeProject?.computer,
+    wait: activeThread?.computerWait,
   });
   const environmentItems = ownComputerWaitingItem
-    ? [
-        ownComputerWaitingItem,
-        ...environmentBannerItems.filter((item) => !item.id.startsWith("environment-unavailable:")),
-      ]
+    ? [ownComputerWaitingItem, ...environmentBannerItems]
     : environmentBannerItems;
   // While Uno Work updates itself the daemon restarts: "can't reach the
   // computer" and "versions differ" would only repeat what the update notice says.
@@ -5061,6 +5060,7 @@ export default function ChatView(props: ChatViewProps) {
               {...(routeKind === "draft" && draftId ? { draftId } : {})}
               activeThreadTitle={activeThread.title}
               activeProjectName={activeProject?.name}
+              activeProjectComputerName={activeProject?.computer?.computerName ?? null}
               activeProjectCwd={activeProject?.cwd}
               hideDraftFolderChip={isDraftHeroState}
               isGitRepo={isGitRepo}

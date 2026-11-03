@@ -1,20 +1,32 @@
 /**
  * The one computer menu's actions (Misha 02.11, SPEC "Удаление"): for the
- * person's own computer — what it is for, "Remove computer", and (variant a)
- * "Advanced → Run agents on this computer itself"; for a cloud computer —
- * "Delete computer" (type its name; the plan's last computer can only be
- * turned off). Replaces the two removals there were (the helper's Manage card
- * and Settings → My machines); those stay in Dev Mode.
+ * person's own computer — what it is for and "Remove computer"; for a cloud
+ * computer — "Delete computer" (type its name; the plan's last computer can
+ * only be turned off). Replaces the two removals there were (the helper's
+ * Manage card and Settings → My machines); those stay in Dev Mode.
+ *
+ * Remove is the existing `myComputer.disconnect`; what it is for is
+ * `computers.setPurpose`; Delete goes to the console (`DELETE
+ * /api/v1/boxes/{id}`, CONTRACT.md §4.2) — until the console allows it from
+ * Work, the dialog points to the console instead.
  */
-import type { EnvironmentId, MyComputer } from "@t3tools/contracts";
-import { useQueryClient } from "@tanstack/react-query";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, LaptopIcon, Loader2Icon, WrenchIcon } from "lucide-react";
 import { useState } from "react";
 
-import { lifecycleBackend } from "../../computersLifecycle/backend";
+import { fetchComputerApps } from "../../account/accountOverview";
+import { deleteRefusal, lifecycleBackend } from "../../computersLifecycle/backend";
 import { type ComputerPurpose, lifecycle, useLifecycle } from "../../computersLifecycle/store";
-import { usePrimaryEnvironmentId } from "../../environments/primary";
+import {
+  errorText,
+  type OwnComputer,
+  useComputerPurpose,
+  useComputersHostId,
+  useRefreshComputersState,
+  useSetComputerPurpose,
+} from "../../computersLifecycle/useComputers";
 import { removeSavedEnvironment } from "../../environments/runtime";
 import { cn } from "../../lib/utils";
 import { workspaceQueryKeys } from "../../lib/workspaceReactQuery";
@@ -32,15 +44,30 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 
-/** Chats that ran on a computer (not archived): they stay after it goes. */
-function useChatsOn(environmentId: string | null): number {
+/** Where a cloud computer is deleted while Work may not do it (CONTRACT.md §4.2). */
+const CONSOLE_COMPUTERS_URL = "https://getuno.xyz/dashboard/boxes";
+
+/** Chats on a cloud computer (not archived): they stay after it goes. */
+function useChatsOnEnvironment(environmentId: string | null): number {
   return useStore((state) => {
     if (environmentId === null) return 0;
     const env = selectEnvironmentState(state, environmentId as EnvironmentId);
     return env.threadIds.filter((id) => !env.sidebarThreadSummaryById[id]?.archivedAt).length;
+  });
+}
+
+/** Chats that ran on one of the person's own computers (its folders, on the cloud computer). */
+function useChatsOnComputer(hostId: EnvironmentId | null, computerId: string): number {
+  return useStore((state) => {
+    if (hostId === null) return 0;
+    const env = selectEnvironmentState(state, hostId);
+    return env.threadIds.filter((id) => {
+      const summary = env.sidebarThreadSummaryById[id];
+      if (!summary || summary.archivedAt) return false;
+      return env.projectById[summary.projectId]?.computer?.computerId === computerId;
+    }).length;
   });
 }
 
@@ -66,40 +93,32 @@ export function RemoveComputerDialog({
   onOpenChange,
   name,
   computerId,
-  environmentId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   name: string;
-  computerId: string | null;
-  environmentId: string | null;
+  computerId: string;
 }) {
-  const primaryId = usePrimaryEnvironmentId();
+  const hostId = useComputersHostId();
   const refresh = useRefreshMyComputers();
+  const refreshState = useRefreshComputersState();
   const navigate = useNavigate();
-  const ranHere = useChatsOn(environmentId);
-  const imported = useImportStatus(primaryId, computerId).data?.importedChats ?? 0;
+  const ranHere = useChatsOnComputer(hostId, computerId);
+  const imported = useImportStatus(hostId, computerId).data?.importedChats ?? 0;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const remove = async () => {
     setPending(true);
     setError(null);
     try {
-      if (computerId !== null) {
-        const failure = await disconnectComputer(primaryId, computerId);
-        if (failure !== null) throw new Error(failure);
-        await lifecycleBackend.removeComputer(computerId);
-        lifecycle.forget(computerId);
-      }
-      if (environmentId !== null) {
-        await removeSavedEnvironment(environmentId as EnvironmentId);
-      }
-      await refresh();
+      const failure = await disconnectComputer(hostId, computerId);
+      if (failure !== null) throw new Error(failure);
+      await Promise.all([refresh(), refreshState()]);
       onOpenChange(false);
       void navigate({ to: "/computer" } as never);
       toastManager.add({ type: "success", title: `${name} removed` });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Couldn’t remove it. Try again.");
+      setError(errorText(cause, "Couldn’t remove it. Try again."));
     } finally {
       setPending(false);
     }
@@ -156,31 +175,41 @@ export function DeleteComputerDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   name: string;
-  boxId: number | null;
+  boxId: number;
   environmentId: string | null;
   lastOnPlan: boolean;
 }) {
   const queryClient = useQueryClient();
-  const ranHere = useChatsOn(environmentId);
+  const ranHere = useChatsOnEnvironment(environmentId);
   const [typed, setTyped] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const contents = lifecycleBackend.cloudContents(boxId);
+  // The console may know better than the menu: it refuses the plan's last one.
+  const [refused, setRefused] = useState<"last-on-plan" | "not-here" | null>(null);
+  const apps = useQuery({
+    queryKey: ["computers", "delete", "apps", boxId],
+    queryFn: () => fetchComputerApps(boxId),
+    enabled: open && !lastOnPlan,
+    staleTime: 30_000,
+    retry: false,
+  });
   const close = (next: boolean) => {
     if (!next) {
       setTyped("");
       setError(null);
+      setRefused(null);
     }
     onOpenChange(next);
   };
   const run = async (what: "delete" | "sleep") => {
-    if (boxId === null) return;
     setPending(true);
     setError(null);
     try {
       if (what === "delete") {
         await lifecycleBackend.deleteBox(boxId);
-        if (environmentId !== null) await removeSavedEnvironment(environmentId as EnvironmentId);
+        if (environmentId !== null) {
+          await removeSavedEnvironment(environmentId as EnvironmentId).catch(() => undefined);
+        }
       } else {
         await lifecycleBackend.sleepBox(boxId);
       }
@@ -191,13 +220,15 @@ export function DeleteComputerDialog({
         title: what === "delete" ? `${name} deleted` : `${name} is turning off`,
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Uno didn’t answer. Try again.");
+      const refusal = what === "delete" ? deleteRefusal(cause) : null;
+      if (refusal !== null) setRefused(refusal);
+      else setError(errorText(cause));
     } finally {
       setPending(false);
     }
   };
 
-  if (lastOnPlan) {
+  if (lastOnPlan || refused === "last-on-plan") {
     return (
       <Dialog open={open} onOpenChange={close}>
         <DialogPopup className="max-w-md" data-testid="lc-delete-last">
@@ -232,18 +263,10 @@ export function DeleteComputerDialog({
     );
   }
 
+  const appNames = (apps.data ?? []).map((app) => app.name);
   const lost = [
     "Files outside synced projects",
-    contents && contents.apps.length > 0
-      ? `Apps: ${contents.apps.join(", ")}`
-      : contents
-        ? null
-        : "Apps on it",
-    contents && contents.sites.length > 0
-      ? `Sites: ${contents.sites.join(", ")}`
-      : contents
-        ? null
-        : "Sites on it",
+    apps.isPending ? "Apps on it" : appNames.length > 0 ? `Apps: ${appNames.join(", ")}` : null,
   ];
   return (
     <Dialog open={open} onOpenChange={close}>
@@ -258,20 +281,34 @@ export function DeleteComputerDialog({
           </div>
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">Stays</p>
-            <Bullets lines={["Synced projects and keys", chatsLine(ranHere, name)]} />
+            <Bullets lines={["Synced projects and keys", "Your sites", chatsLine(ranHere, name)]} />
           </div>
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">
-              Type <span className="font-mono text-foreground">{name}</span> to delete
-            </span>
-            <Input
-              value={typed}
-              onChange={(event) => setTyped(event.target.value)}
-              placeholder={name}
-              aria-label="Computer name"
-              data-testid="lc-delete-name"
-            />
-          </label>
+          {refused === "not-here" ? (
+            <p className="text-sm" data-testid="lc-delete-in-console">
+              Deleting from here isn’t on yet.{" "}
+              <a
+                href={CONSOLE_COMPUTERS_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                Delete it in the console
+              </a>
+            </p>
+          ) : (
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="text-muted-foreground">
+                Type <span className="font-mono text-foreground">{name}</span> to delete
+              </span>
+              <Input
+                value={typed}
+                onChange={(event) => setTyped(event.target.value)}
+                placeholder={name}
+                aria-label="Computer name"
+                data-testid="lc-delete-name"
+              />
+            </label>
+          )}
           {error !== null ? (
             <p role="alert" className="text-sm text-destructive">
               {error}
@@ -280,16 +317,18 @@ export function DeleteComputerDialog({
         </DialogPanel>
         <DialogFooter variant="bare">
           <Button variant="ghost" onClick={() => close(false)}>
-            Cancel
+            {refused === "not-here" ? "Close" : "Cancel"}
           </Button>
-          <Button
-            variant="destructive"
-            disabled={pending || typed.trim() !== name}
-            onClick={() => void run("delete")}
-            data-testid="lc-delete-confirm"
-          >
-            {pending ? "Deleting…" : "Delete computer"}
-          </Button>
+          {refused === "not-here" ? null : (
+            <Button
+              variant="destructive"
+              disabled={pending || typed.trim() !== name}
+              onClick={() => void run("delete")}
+              data-testid="lc-delete-confirm"
+            >
+              {pending ? "Deleting…" : "Delete computer"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogPopup>
     </Dialog>
@@ -304,19 +343,16 @@ const PURPOSE_LABEL: Record<ComputerPurpose, string> = {
 };
 
 function PurposeSwitch({ computerId }: { computerId: string }) {
-  const purpose = useLifecycle((state) => state.purposes[computerId] ?? "tool");
+  const purpose = useComputerPurpose(computerId) ?? "tool";
+  const setPurpose = useSetComputerPurpose();
   const [busy, setBusy] = useState<ComputerPurpose | null>(null);
   const pick = async (next: ComputerPurpose) => {
     if (next === purpose || busy) return;
     setBusy(next);
     try {
-      if (next === "full") {
-        lifecycle.linkEnvironment(computerId, await lifecycleBackend.makeFull(computerId));
-      } else {
-        await lifecycleBackend.makeTool(computerId);
-        lifecycle.linkEnvironment(computerId, null);
-      }
-      lifecycle.setPurpose(computerId, next);
+      await setPurpose(computerId, next);
+    } catch (cause) {
+      toastManager.add({ type: "error", title: errorText(cause, "Couldn’t change it.") });
     } finally {
       setBusy(null);
     }
@@ -348,73 +384,28 @@ function PurposeSwitch({ computerId }: { computerId: string }) {
   );
 }
 
-/** Variant (a) of the secondary path: in the computer's menu, under Advanced. */
-function RunHereAdvanced({ computerId, name }: { computerId: string; name: string }) {
-  const [open, setOpen] = useState(false);
-  const on = useLifecycle((state) => state.runsHere[computerId] === true);
-  return (
-    <div className="flex flex-col gap-1.5" data-testid="lc-advanced">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        data-testid="lc-advanced-toggle"
-        className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
-      >
-        <ChevronRightIcon className={cn("size-3 transition-transform", open && "rotate-90")} />
-        Advanced
-      </button>
-      {open ? (
-        <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 p-2.5">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-xs font-medium">Run agents on this computer itself</span>
-            <span className="text-[11px] text-muted-foreground">
-              Works offline and with {name}’s own AI plans.
-            </span>
-          </span>
-          <Switch
-            checked={on}
-            onCheckedChange={(value) => lifecycle.setRunsHere(computerId, value)}
-            data-testid="lc-run-here"
-          />
-        </label>
-      ) : null}
-    </div>
-  );
-}
-
-/** Own computer: what it is for, Advanced (variant a), Remove. */
+/** Own computer: what it is for, Remove. */
 export function OwnComputerActions({
-  computerId,
-  environmentId,
-  name,
+  computer,
   onBeforeDialog,
 }: {
-  computerId: string | null;
-  environmentId: string | null;
-  name: string;
+  computer: Pick<OwnComputer, "id" | "name" | "trustsThisComputer">;
   onBeforeDialog?: () => void;
 }) {
-  const fallback = useLifecycle((state) => state.fallback);
-  const runsHere = useLifecycle((state) =>
-    computerId === null ? false : state.runsHere[computerId] === true,
-  );
   return (
     <div className="flex flex-col gap-2.5" data-testid="lc-own-actions">
-      {computerId !== null ? <PurposeSwitch computerId={computerId} /> : null}
-      {runsHere ? (
-        <p className="text-[11px] text-muted-foreground" data-testid="lc-runs-here-line">
-          Agents run on {name} itself.
+      <PurposeSwitch computerId={computer.id} />
+      {computer.trustsThisComputer === false ? (
+        <p className="text-[11px] text-muted-foreground" data-testid="lc-not-trusted">
+          {computer.name} doesn’t trust this cloud computer yet — connect it again from here (same
+          command).
         </p>
-      ) : null}
-      {computerId !== null && fallback === "a" ? (
-        <RunHereAdvanced computerId={computerId} name={name} />
       ) : null}
       <button
         type="button"
         onClick={() => {
           onBeforeDialog?.();
-          lifecycle.confirm({ kind: "remove", name, computerId, environmentId });
+          lifecycle.confirm({ kind: "remove", name: computer.name, computerId: computer.id });
         }}
         data-testid="lc-remove"
         className="self-start text-xs text-destructive/90 underline-offset-2 hover:text-destructive hover:underline"
@@ -450,7 +441,7 @@ export function CloudComputerActions({
       data-testid="lc-delete"
       className="self-start text-xs text-destructive/90 underline-offset-2 hover:text-destructive hover:underline"
     >
-      Delete computer
+      {lastOnPlan ? "Turn off" : "Delete computer"}
     </button>
   );
 }
@@ -468,7 +459,6 @@ export function LifecycleConfirmDialogs() {
       onOpenChange={close}
       name={confirm.name}
       computerId={confirm.computerId}
-      environmentId={confirm.environmentId}
     />
   ) : (
     <DeleteComputerDialog
@@ -482,21 +472,21 @@ export function LifecycleConfirmDialogs() {
   );
 }
 
-/** A tool-mode computer in the computers menu: not a place for chats, so not a computer of its own. */
-export function ToolComputerRow({
+/** One of the person's own computers in the computers menu: what it's for, Remove. */
+export function OwnComputerRow({
   computer,
   open,
   onToggle,
   onClose,
 }: {
-  computer: MyComputer;
+  computer: OwnComputer;
   open: boolean;
   onToggle: () => void;
   onClose: () => void;
 }) {
-  const runsHere = useLifecycle((state) => state.runsHere[computer.id] === true);
+  const Icon = computer.purpose === "full" ? LaptopIcon : WrenchIcon;
   return (
-    <li className="list-none" data-testid="lc-tool-row">
+    <li className="list-none" data-testid="lc-own-row">
       <button
         type="button"
         onClick={onToggle}
@@ -519,8 +509,8 @@ export function ToolComputerRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{computer.name}</span>
           <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-            <WrenchIcon className="size-3 shrink-0" />
-            {runsHere ? "Agents run here" : "Tool for your agents"}
+            <Icon className="size-3 shrink-0" />
+            {computer.purpose === "full" ? "Full computer" : "Tool for your agents"}
             {computer.online ? "" : " · asleep"}
           </span>
         </span>
@@ -533,12 +523,7 @@ export function ToolComputerRow({
       </button>
       {open ? (
         <div className="mb-1 ml-8 flex flex-col gap-2.5 border-l border-border/60 py-1 pr-2 pl-3">
-          <OwnComputerActions
-            computerId={computer.id}
-            environmentId={null}
-            name={computer.name}
-            onBeforeDialog={onClose}
-          />
+          <OwnComputerActions computer={computer} onBeforeDialog={onClose} />
         </div>
       ) : null}
     </li>

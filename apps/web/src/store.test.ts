@@ -1364,3 +1364,64 @@ describe("thread-upserted with nothing new", () => {
     expect(second).toBe(first);
   });
 });
+
+describe("computers lifecycle events (CONTRACT.md §7.6)", () => {
+  const event = (type: string, payload: unknown) =>
+    ({
+      ...makeEvent("thread.meta-updated", {
+        threadId: ThreadId.make("thread-1"),
+        updatedAt: "2026-02-27T00:00:01.000Z",
+      }),
+      type,
+      payload,
+    }) as unknown as OrchestrationEvent;
+
+  it("sets and clears a turn's wait for the computer without moving the chat", () => {
+    const state = makeState(makeThread());
+    const since = "2026-11-03T10:00:00.000Z";
+    const waiting = applyOrchestrationEvent(
+      state,
+      event("thread.computer-wait-set", {
+        threadId: ThreadId.make("thread-1"),
+        computerWait: { computerId: "41", computerName: "MacBook", since },
+        updatedAt: since,
+      }),
+      localEnvironmentId,
+    );
+    const thread = selectThreadByRef(
+      waiting,
+      scopeThreadRef(localEnvironmentId, ThreadId.make("thread-1")),
+    );
+    expect(thread?.computerWait).toEqual({ computerId: "41", computerName: "MacBook", since });
+    expect(thread?.updatedAt).toBe(makeThread().updatedAt);
+    const cleared = applyOrchestrationEvent(
+      waiting,
+      event("thread.computer-wait-set", {
+        threadId: ThreadId.make("thread-1"),
+        computerWait: null,
+        updatedAt: since,
+      }),
+      localEnvironmentId,
+    );
+    expect(
+      selectThreadByRef(cleared, scopeThreadRef(localEnvironmentId, ThreadId.make("thread-1")))
+        ?.computerWait,
+    ).toBeNull();
+  });
+
+  it("binds a project to a folder on the person's computer", () => {
+    const computer = { computerId: "41", computerName: "MacBook", path: "/Users/m/app" };
+    const next = applyOrchestrationEvent(
+      makeState(makeThread()),
+      event("project.computer-set", {
+        projectId: ProjectId.make("project-1"),
+        computer,
+        updatedAt: "2026-11-03T10:00:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(
+      localEnvironmentStateOf(next).projectById[ProjectId.make("project-1")]?.computer,
+    ).toEqual(computer);
+  });
+});

@@ -41,15 +41,10 @@ import {
 } from "react";
 
 import { cn } from "~/lib/utils";
-import { COMPUTERS_LIFECYCLE } from "../../../computersLifecycle/flag";
-import { computerOfEnvironment, useLifecycle } from "../../../computersLifecycle/store";
+import { useComputersLifecycleOn } from "../../../computersLifecycle/flag";
+import { useOwnComputers } from "../../../computersLifecycle/useComputers";
 import { useMachineRows } from "../../../hooks/useMachineRows";
-import { useMyComputers } from "../../../localComputer/useMyComputers";
-import {
-  CloudComputerActions,
-  OwnComputerActions,
-  ToolComputerRow,
-} from "../../computersLifecycle/ComputerActions";
+import { CloudComputerActions, OwnComputerRow } from "../../computersLifecycle/ComputerActions";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
 import { useSpaceScope, useSwitchSpace } from "../../../spaces";
 import { selectEnvironmentState, useStore } from "../../../store";
@@ -377,7 +372,7 @@ function LiveRow(props: {
 }) {
   const { computer } = props;
   const environmentId = computer.environmentId as EnvironmentId;
-  const environmentOf = useLifecycle((state) => state.environmentOf);
+  const lifecycleOn = useComputersLifecycleOn();
   // A row of the open menu: live numbers.
   const live = useLive(environmentId, true);
   const navigate = useNavigate();
@@ -539,23 +534,14 @@ function LiveRow(props: {
               {props.onSwitchSpace ? "Switch to its space" : "Open its files and apps"}
             </button>
           ) : null}
-          {COMPUTERS_LIFECYCLE ? (
-            computer.cloud ? (
-              <CloudComputerActions
-                boxId={props.boxId ?? null}
-                environmentId={environmentId}
-                name={computer.label}
-                lastOnPlan={props.lastOnPlan ?? false}
-                onBeforeDialog={props.onClose}
-              />
-            ) : (
-              <OwnComputerActions
-                computerId={computerOfEnvironment(environmentOf, environmentId)}
-                environmentId={environmentId}
-                name={computer.label}
-                onBeforeDialog={props.onClose}
-              />
-            )
+          {lifecycleOn && computer.cloud ? (
+            <CloudComputerActions
+              boxId={props.boxId ?? null}
+              environmentId={environmentId}
+              name={computer.label}
+              lastOnPlan={props.lastOnPlan ?? false}
+              onBeforeDialog={props.onClose}
+            />
           ) : null}
         </div>
       ) : null}
@@ -706,7 +692,7 @@ export function ComputersPill(props: {
   const asleep = computers.filter((computer) => computer.environmentId === null).length;
   // Computers lifecycle: the person's computers used as tools (no chats of their own) are listed too.
   const lifecycleExtras = useLifecycleMenuExtras(props.computers);
-  const total = computers.length + lifecycleExtras.tools.length;
+  const total = computers.length + lifecycleExtras.own.length;
   const summary = `${total} computers${asleep > 0 ? ` · ${asleep} asleep` : ""}`;
   // Each live mark says how its computer is; the chip orders and folds by that.
   const [reports, setReports] = useState<Readonly<Record<string, MarkReport>>>({});
@@ -854,7 +840,7 @@ export function ComputersPill(props: {
                     boxId={lifecycleExtras.boxIdOf(computer.key)}
                     lastOnPlan={lifecycleExtras.lastOnPlan}
                   />
-                ) : COMPUTERS_LIFECYCLE ? (
+                ) : lifecycleExtras.on ? (
                   <AsleepRow
                     key={computer.key}
                     computer={computer}
@@ -871,8 +857,8 @@ export function ComputersPill(props: {
                   <AsleepRow key={computer.key} computer={computer} switcher={switcher} />
                 ),
               )}
-              {lifecycleExtras.tools.map((tool) => (
-                <ToolComputerRow
+              {lifecycleExtras.own.map((tool) => (
+                <OwnComputerRow
                   key={tool.id}
                   computer={tool}
                   open={expanded === `tool:${tool.id}`}
@@ -901,28 +887,21 @@ export function ComputersPill(props: {
   );
 }
 
-const NO_TOOLS: ReadonlyArray<never> = [];
-
 /**
- * Computers lifecycle: what the menu adds — the person's computers used as a
- * tool for agents, the box id behind each cloud computer, and whether a cloud
- * computer is the plan's last (it can only be turned off then).
+ * Computers lifecycle: what the menu adds — the person's own computers (a tool
+ * for agents or a full computer: either way not a computer of its own here,
+ * their chats live on the cloud computer), the box id behind each cloud
+ * computer, and whether a cloud computer is the plan's last (it can only be
+ * turned off then).
  */
 function useLifecycleMenuExtras(computers: ReadonlyArray<SidebarDComputer>) {
-  const primaryId = usePrimaryEnvironmentId();
-  const { computers: own } = useMyComputers(COMPUTERS_LIFECYCLE ? primaryId : null);
-  const environmentOf = useLifecycle((state) => state.environmentOf);
+  const on = useComputersLifecycleOn();
+  const { computers: own } = useOwnComputers();
   const rows = useMachineRows();
-  const tools = useMemo(
-    () =>
-      COMPUTERS_LIFECYCLE
-        ? own.filter((computer) => environmentOf[computer.id] === undefined)
-        : NO_TOOLS,
-    [environmentOf, own],
-  );
   const cloudCount = computers.filter((computer) => computer.cloud).length;
   return {
-    tools,
+    on,
+    own: on ? own : [],
     lastOnPlan: cloudCount <= 1,
     boxIdOf: (key: string): number | null => rows.find((row) => row.key === key)?.box?.id ?? null,
   };

@@ -1,21 +1,19 @@
 /**
- * Computers lifecycle: the one "Add computer" window (which step is open), what
- * each of the person's own computers is for (a tool for agents, or a full
- * computer), and where agents run on it (the secondary path). One store for
- * the whole app, like "Connect my computer" — the window is opened from
- * Home, the computers menu, Settings and My Uno.
+ * Computers lifecycle: the one "Add computer" window (which step is open), the
+ * open Remove / Delete confirmation, the desktop app's "Make this Mac one of
+ * your computers?" card, and where agents run for this Mac (desktop only).
+ * One store for the whole app — the window is opened from Home, the computers
+ * menu, Settings, Connectors and My Uno.
  *
- * What's true about the computers (connected, online) still comes from the
- * daemon (`useMyComputers`) and the saved environments; this keeps only the
- * person's choices and the window's progress.
+ * What is true about the computers (connected, online, what each is for) comes
+ * from the cloud computer (`useOwnComputers`); this keeps only the window.
  */
-import type { MyComputerPairing } from "@t3tools/contracts";
+import type { ComputerPurpose, MyComputerPairing } from "@t3tools/contracts";
 import { create } from "zustand";
 
 import type { LocalOs } from "../components/localComputer/connectComputer.logic";
-import { INITIAL_FALLBACK, saveFallback, type FallbackVariant } from "./flag";
 
-export type ComputerPurpose = "tool" | "full";
+export type { ComputerPurpose };
 export type AddStep = "choose" | "own" | "purpose" | "bring" | "done";
 
 /** A Remove / Delete confirmation, open over the page (it outlives the menu it came from). */
@@ -23,8 +21,7 @@ export type LifecycleConfirm =
   | {
       readonly kind: "remove";
       readonly name: string;
-      readonly computerId: string | null;
-      readonly environmentId: string | null;
+      readonly computerId: string;
     }
   | {
       readonly kind: "delete";
@@ -39,6 +36,9 @@ export interface BroughtWork {
   readonly projects: ReadonlyArray<string>;
   readonly keys: number;
 }
+
+/** Desktop app, Settings → This computer: where this Mac's chats run (SPEC variant b). */
+export type WhereAgentsRun = "cloud" | "here";
 
 interface LifecycleState {
   /** The "Add computer" window. */
@@ -61,13 +61,7 @@ interface LifecycleState {
   /** The desktop app's "Make this Mac one of your computers?": hidden after an answer. */
   readonly thisMacPrompt: "ask" | "installing" | "done";
   readonly brought: BroughtWork | null;
-  /** By `MyComputer` id. A computer without an entry is a tool for agents. */
-  readonly purposes: Readonly<Record<string, ComputerPurpose>>;
-  /** A full computer shows up as a computer of its own (its environment id). */
-  readonly environmentOf: Readonly<Record<string, string>>;
-  /** The secondary path: agents run on the computer itself (by `MyComputer` id). */
-  readonly runsHere: Readonly<Record<string, boolean>>;
-  readonly fallback: FallbackVariant;
+  readonly whereAgentsRun: WhereAgentsRun;
   readonly confirm: LifecycleConfirm | null;
 }
 
@@ -83,28 +77,35 @@ const closedWindow = {
   brought: null,
 } as const;
 
+const THIS_MAC_PROMPT_KEY = "uno:this-mac-prompt";
+const WHERE_AGENTS_RUN_KEY = "uno:where-agents-run";
+
+function read(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function write(key: string, value: string | null) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // this page only
+  }
+}
+
 export const useLifecycle = create<LifecycleState>(() => ({
   ...closedWindow,
   cloudOpen: false,
   customOpen: false,
   os: "mac",
-  purposes: {},
-  environmentOf: {},
-  runsHere: {},
-  fallback: INITIAL_FALLBACK,
   confirm: null,
-  thisMacPrompt: readThisMacPrompt(),
+  thisMacPrompt: read(THIS_MAC_PROMPT_KEY) === "done" ? "done" : "ask",
+  whereAgentsRun: read(WHERE_AGENTS_RUN_KEY) === "here" ? "here" : "cloud",
 }));
-
-const THIS_MAC_PROMPT_KEY = "uno:this-mac-prompt";
-
-function readThisMacPrompt(): "ask" | "done" {
-  try {
-    return localStorage.getItem(THIS_MAC_PROMPT_KEY) === "done" ? "done" : "ask";
-  } catch {
-    return "ask";
-  }
-}
 
 export const lifecycle = {
   openAdd: () => useLifecycle.setState({ ...closedWindow, addOpen: true }),
@@ -126,36 +127,16 @@ export const lifecycle = {
   showCommand: () => useLifecycle.setState({ showCommand: true }),
   paired: (pairing: MyComputerPairing) => useLifecycle.setState({ pairing, pairError: null }),
   pairFailed: (pairError: string) => useLifecycle.setState({ pairError }),
+  /** A code expired or failed: the next one is asked for. */
+  repair: () => useLifecycle.setState({ pairing: null, pairError: null }),
   connected: (computerId: string) => useLifecycle.setState({ computerId, step: "purpose" }),
-  setPurpose: (computerId: string, purpose: ComputerPurpose) =>
-    useLifecycle.setState((state) => ({
-      purposes: { ...state.purposes, [computerId]: purpose },
-    })),
   chosePurpose: (purpose: ComputerPurpose) =>
     useLifecycle.setState({ purposeChosen: purpose, step: "bring" }),
-  linkEnvironment: (computerId: string, environmentId: string | null) =>
-    useLifecycle.setState((state) => {
-      const next = { ...state.environmentOf };
-      if (environmentId === null) delete next[computerId];
-      else next[computerId] = environmentId;
-      return { environmentOf: next };
-    }),
   brought: (brought: BroughtWork | null) => useLifecycle.setState({ brought, step: "done" }),
-  setRunsHere: (computerId: string, on: boolean) =>
-    useLifecycle.setState((state) => ({ runsHere: { ...state.runsHere, [computerId]: on } })),
-  forget: (computerId: string) =>
-    useLifecycle.setState((state) => {
-      const purposes = { ...state.purposes };
-      const environmentOf = { ...state.environmentOf };
-      const runsHere = { ...state.runsHere };
-      delete purposes[computerId];
-      delete environmentOf[computerId];
-      delete runsHere[computerId];
-      return { purposes, environmentOf, runsHere };
-    }),
   confirm: (confirm: LifecycleConfirm | null) => useLifecycle.setState({ confirm }),
   /** The desktop app installed the helper on this Mac: straight to "What is it for?", Full picked. */
-  thisMacConnected: (computerId: string) =>
+  thisMacConnected: (computerId: string) => {
+    write(THIS_MAC_PROMPT_KEY, "done");
     useLifecycle.setState({
       ...closedWindow,
       addOpen: true,
@@ -163,30 +144,14 @@ export const lifecycle = {
       computerId,
       preselect: "full",
       thisMacPrompt: "done",
-    }),
+    });
+  },
   setThisMacPrompt: (thisMacPrompt: "ask" | "installing" | "done") => {
-    try {
-      if (thisMacPrompt === "done") localStorage.setItem(THIS_MAC_PROMPT_KEY, "done");
-      else localStorage.removeItem(THIS_MAC_PROMPT_KEY);
-    } catch {
-      // this page only
-    }
+    write(THIS_MAC_PROMPT_KEY, thisMacPrompt === "done" ? "done" : null);
     useLifecycle.setState({ thisMacPrompt });
   },
-  setFallback: (fallback: FallbackVariant) => {
-    saveFallback(fallback);
-    useLifecycle.setState({ fallback });
+  setWhereAgentsRun: (whereAgentsRun: WhereAgentsRun) => {
+    write(WHERE_AGENTS_RUN_KEY, whereAgentsRun === "here" ? "here" : null);
+    useLifecycle.setState({ whereAgentsRun });
   },
 };
-
-/** The `MyComputer` id behind a full computer's environment (null: not one of the person's own). */
-export function computerOfEnvironment(
-  environmentOf: Readonly<Record<string, string>>,
-  environmentId: string | null,
-): string | null {
-  if (environmentId === null) return null;
-  for (const [computerId, env] of Object.entries(environmentOf)) {
-    if (env === environmentId) return computerId;
-  }
-  return null;
-}

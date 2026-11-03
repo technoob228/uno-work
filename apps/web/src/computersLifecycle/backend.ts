@@ -1,87 +1,93 @@
 /**
- * Computers lifecycle: the parts that need a backend which doesn't exist yet
- * (SPEC "Порядок работ" 2–5) — the projects found on a computer and their
- * key names, syncing chosen projects and keys, a full computer's tunnel,
- * continuing a chat in the cloud, deleting a cloud computer from Work.
- *
- * In the demo each one is answered by `demo/assist/lifecycle.ts` through
- * `demoHooks.lc`; outside it they do the plain thing that exists today, or
- * nothing (the feature is off there, see flag.ts).
+ * Computers lifecycle: what isn't a `computers.*` RPC — the console (deleting
+ * or turning off a cloud computer), and the desktop app setting this Mac up by
+ * itself. In the demo (`demo/assist/lifecycle.ts`) `demoHooks.lc` answers these
+ * too; the RPCs themselves are answered by the demo's daemon.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import type {
+  DesktopConnectHelperState,
+  EnvironmentId,
+  MyComputerPairStatus,
+} from "@t3tools/contracts";
 
-import { accountRequest } from "../account/unoAccount";
+import { AccountHttpError, accountRequest } from "../account/unoAccount";
 import { demoHooks } from "../demo/demoFlag";
-
-export interface FoundProject {
-  readonly name: string;
-  readonly path: string;
-  /** Names from the project's `.env`, never the values. Empty: no `.env`. */
-  readonly keys: ReadonlyArray<string>;
-  /** A chat found on the computer ran in it. */
-  readonly fromChats: boolean;
-}
-
-export interface CloudContents {
-  readonly apps: ReadonlyArray<string>;
-  readonly sites: ReadonlyArray<string>;
-}
+import { ensureEnvironmentApi } from "../environmentApi";
 
 export interface LifecycleDemoHooks {
   /** The person pressed Download or copied the command: the helper comes up in a moment. */
   installStarted(): void;
-  /**
-   * The desktop app makes this Mac one of the person's computers: a pair code
-   * from their cloud computer, then the helper installed and paired locally.
-   * Resolves with the new computer's id.
-   */
+  /** The desktop app makes this Mac one of the computers. Resolves with its id. */
   installHere(): Promise<string>;
-  projects(computerId: string): ReadonlyArray<FoundProject>;
-  bring(input: {
-    computerId: string;
-    purpose: "tool" | "full";
-    projects: ReadonlyArray<{ name: string; keys: ReadonlyArray<string> }>;
-  }): void;
-  makeFull(computerId: string): Promise<string>;
-  makeTool(computerId: string): Promise<void>;
-  removeComputer(computerId: string): Promise<void>;
-  continueInCloud(
-    environmentId: string,
-    threadId: string,
-  ): Promise<{ environmentId: string; threadId: string }>;
-  cloudContents(boxId: number): CloudContents | null;
+  /** The desktop app: Uno's helper on this Mac. */
+  thisMacHelper(): DesktopConnectHelperState;
   deleteBox(boxId: number): Promise<void>;
   sleepBox(boxId: number): Promise<void>;
-  /** The chat shows "Waiting for …": the demo resumes it when the computer wakes. */
-  waiting(environmentId: string, threadId: string): void;
 }
 
 function demo(): Partial<LifecycleDemoHooks> {
   return (demoHooks.lc ?? {}) as Partial<LifecycleDemoHooks>;
 }
 
+/** Why deleting a cloud computer from here didn't happen. */
+export type DeleteRefusal = "last-on-plan" | "not-here" | null;
+
+export function deleteRefusal(cause: unknown): DeleteRefusal {
+  if (!(cause instanceof AccountHttpError)) return null;
+  if (cause.status === 409 && /LAST_COMPUTER_ON_PLAN/.test(cause.message)) return "last-on-plan";
+  // The console doesn't let Work delete computers yet (CONTRACT.md §4.2).
+  if (cause.status === 403 || cause.status === 404) return "not-here";
+  return null;
+}
+
+const PAIR_WAIT_MS = 90_000;
+const PAIR_POLL_MS = 1_500;
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function desktopHelper() {
+  return typeof window === "undefined" ? undefined : window.desktopBridge?.connectHelper;
+}
+
+const NO_HELPER: DesktopConnectHelperState = { installed: false, computerId: null, name: null };
+
 export const lifecycleBackend = {
+  thisMacHelper: async (): Promise<DesktopConnectHelperState> => {
+    const hook = demo().thisMacHelper;
+    if (hook) return hook();
+    return (await desktopHelper()?.state()) ?? NO_HELPER;
+  },
   installStarted: () => demo().installStarted?.(),
-  /** Null: this app can't set the Mac up by itself (not the desktop app, or no backend for it yet). */
-  canInstallHere: () => demo().installHere !== undefined,
-  installHere: async (): Promise<string | null> => (await demo().installHere?.()) ?? null,
-  projects: (computerId: string): ReadonlyArray<FoundProject> =>
-    demo().projects?.(computerId) ?? [],
-  bring: (input: Parameters<LifecycleDemoHooks["bring"]>[0]) => demo().bring?.(input),
-  /** A full computer: its chats start on it (the demo shows it as a computer of its own). */
-  makeFull: async (computerId: string): Promise<string | null> =>
-    (await demo().makeFull?.(computerId)) ?? null,
-  makeTool: async (computerId: string) => {
-    await demo().makeTool?.(computerId);
+  /** This app can set this computer up by itself (the desktop app). */
+  canInstallHere: () => demo().installHere !== undefined || desktopHelper() !== undefined,
+  /**
+   * The desktop app: a code from the cloud computer, the helper downloaded,
+   * checked and paired here by the app's main process; then the pairing's
+   * answer names the new computer.
+   */
+  installHere: async (hostId: EnvironmentId): Promise<string> => {
+    const hook = demo().installHere;
+    if (hook) return hook();
+    const helper = desktopHelper();
+    if (!helper) throw new Error("Only the Uno Work app can do this.");
+    const api = ensureEnvironmentApi(hostId).myComputer;
+    const pairing = await api.pair();
+    const installed = await helper.install({
+      url: pairing.url,
+      code: pairing.code,
+      ...(pairing.api ? { api: pairing.api } : {}),
+      ...(pairing.download ? { download: pairing.download } : {}),
+    });
+    if (!installed.ok) throw new Error(installed.message);
+    const deadline = Date.now() + PAIR_WAIT_MS;
+    let status: MyComputerPairStatus | null = null;
+    while (Date.now() < deadline) {
+      status = await api.pairStatus({ code: pairing.code }).catch(() => null);
+      if (status?.state === "claimed" && status.computerId) return status.computerId;
+      if (status?.state === "failed" || status?.state === "expired") break;
+      await wait(PAIR_POLL_MS);
+    }
+    throw new Error(status?.message ?? "This Mac didn’t connect. Try again.");
   },
-  removeComputer: async (computerId: string) => {
-    await demo().removeComputer?.(computerId);
-  },
-  canContinueInCloud: () => demo().continueInCloud !== undefined,
-  continueInCloud: async (environmentId: EnvironmentId, threadId: string) =>
-    (await demo().continueInCloud?.(environmentId, threadId)) ?? null,
-  cloudContents: (boxId: number | null): CloudContents | null =>
-    boxId === null ? null : (demo().cloudContents?.(boxId) ?? null),
   deleteBox: async (boxId: number) => {
     const hook = demo().deleteBox;
     if (hook) return hook(boxId);
@@ -92,5 +98,4 @@ export const lifecycleBackend = {
     if (hook) return hook(boxId);
     await accountRequest("POST", `/api/v1/boxes/${boxId}/sleep`, {});
   },
-  waiting: (environmentId: string, threadId: string) => demo().waiting?.(environmentId, threadId),
 };

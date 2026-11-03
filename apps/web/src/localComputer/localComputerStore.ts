@@ -7,7 +7,7 @@
 import type { MyComputerPairing } from "@t3tools/contracts";
 import { create } from "zustand";
 
-import { COMPUTERS_LIFECYCLE } from "../computersLifecycle/flag";
+import { computersLifecycleOn } from "../computersLifecycle/flag";
 import { lifecycle } from "../computersLifecycle/store";
 
 import {
@@ -62,7 +62,7 @@ function browserSystem() {
 export const localComputer = {
   openConnect: () => {
     // Computers lifecycle (02.11): every "connect your computer" goes to the one window.
-    if (COMPUTERS_LIFECYCLE) {
+    if (computersLifecycleOn()) {
       lifecycle.openOwn(browserSystem().os);
       return;
     }

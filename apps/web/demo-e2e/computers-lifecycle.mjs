@@ -1,8 +1,10 @@
 // Computers lifecycle (Misha 02.11, reports/day_2026-11-02/computers-lifecycle/SPEC.md):
 // one "Add computer" window from every entry, "What is it for?", "Bring your
 // work?", a full computer's chat waiting for its sleeping MacBook, the one
-// computer menu with Remove / Delete, and the three ways (a/b/c) to show the
-// secondary path "agents run on the laptop itself". Light theme, 1440 wide, ×2.
+// computer menu with Remove / Delete, and the secondary path "agents run on
+// the laptop itself" (variant b: the desktop app's Settings → This computer).
+// The demo's daemon answers the real RPCs (myComputer.*, computers.*), so this
+// walks the production components. Light theme, 1440 wide, ×2.
 //   demo-e2e/build-demo.sh && node demo-e2e/computers-lifecycle.mjs [shots-dir]
 import { mkdirSync } from "node:fs";
 
@@ -73,8 +75,8 @@ const openChip = async () => {
 const row = (label) =>
   page.getByTestId("computers-menu").locator("li").filter({ hasText: label }).first();
 
-// ── A. Fresh: connect the MacBook as a full computer (variant a) ─────────
-page = await newPage({ lc: "fresh", fallback: "a", mac: "online" });
+// ── A. Fresh: connect the MacBook as a full computer ─────────────────────
+page = await newPage({ lc: "fresh", mac: "online" });
 
 await step("home", async () => {
   await id("home-connect-choice").waitFor({ timeout: 20_000 });
@@ -152,11 +154,12 @@ await step("A new chat on MacBook", async () => {
   await go("#/computer");
   await id("home-computer-chip").click();
   await page.waitForTimeout(500);
-  const options = page.getByTestId("new-chat-computer-option");
+  const options = page.getByTestId("new-chat-own-computer-option");
   expect("The picker lists MacBook", await options.allInnerTexts(), "MacBook");
   await shot("a10-picker");
   await options.filter({ hasText: "MacBook" }).first().click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(800);
+  expect("Its home folder", await text("home-folder-chip"), "Home folder");
   expect("New chat starts on", await text("home-computer-chip"), "MacBook");
   const box = page.getByTestId("home-composer");
   await box.click();
@@ -164,8 +167,7 @@ await step("A new chat on MacBook", async () => {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(3000);
   await dismissBanners(page);
-  const chip = id("chat-computer-chip");
-  expect("The chat says where it runs", await chip.getAttribute("title"), "runs on MacBook");
+  expect("The chat says where it runs", await text("lc-chat-on-computer"), "on MacBook");
   await shot("a11-chat-on-macbook");
 });
 
@@ -197,21 +199,14 @@ await step("Asleep again → Continue in the cloud", async () => {
   await page.waitForTimeout(3000);
 });
 
-await step("The computer menu: MacBook (variant a)", async () => {
+await step("The computer menu: MacBook", async () => {
   await openChip();
   await row("MacBook").locator("button").first().click();
   await page.waitForTimeout(600);
   expect("Used as", await text("lc-purpose-switch"), "Full computer");
   expect("Remove", await text("lc-remove"), "Remove computer");
+  expect("No Advanced (variant b only)", String(await visible("lc-advanced")), "false");
   await shot("a16-menu-macbook");
-  await id("lc-advanced-toggle").click();
-  await page.waitForTimeout(300);
-  expect("Advanced", await text("lc-advanced"), "Run agents on this computer itself");
-  await id("lc-run-here").click();
-  await page.waitForTimeout(300);
-  expect("Runs here", await text("lc-runs-here-line"), "Agents run on MacBook itself");
-  await shot("a17-advanced-run-here");
-  await id("lc-run-here").click();
 });
 
 await step("Remove MacBook", async () => {
@@ -235,7 +230,6 @@ await step("Delete free-cloud (type the name)", async () => {
   await id("lc-delete-dialog").waitFor();
   const body = await text("lc-delete-dialog");
   expect("Lists what is lost", body, "Files outside synced projects");
-  expect("Lists its apps", body, "landing-preview");
   expect("What stays", body, "Synced projects and keys");
   expect("Disabled until the name", String(await id("lc-delete-confirm").isDisabled()), "true");
   await id("lc-delete-name").fill("free-cloud");
@@ -259,7 +253,7 @@ await step("The plan's last computer: only Turn off", async () => {
 await page.context().close();
 
 // ── B. Fresh: the MacBook as a tool for agents, from the computers menu ──
-page = await newPage({ lc: "fresh", fallback: "a", mac: "online" });
+page = await newPage({ lc: "fresh", mac: "online" });
 
 await step("Computers menu → Add computer → own (command) → Tool", async () => {
   await openChip();
@@ -282,7 +276,7 @@ await step("Computers menu → Add computer → own (command) → Tool", async (
 
 await step("A tool in the computers menu", async () => {
   await openChip();
-  const tool = page.getByTestId("lc-tool-row").first();
+  const tool = page.getByTestId("lc-own-row").first();
   expect("Listed as a tool", await tool.innerText(), "Tool for your agents");
   await tool.locator("button").first().click();
   await page.waitForTimeout(400);
@@ -346,7 +340,7 @@ await step("Dev Mode: SSH, trash and roles come back", async () => {
 await page.context().close();
 
 // ── D. The desktop app sets this Mac up itself ───────────────────────────
-page = await newPage({ lc: "fresh", fallback: "a", platform: "desktop", mac: "online" });
+page = await newPage({ lc: "fresh", platform: "desktop", mac: "online" });
 await step("Desktop app: Make this Mac one of your computers?", async () => {
   await id("lc-this-mac-prompt").waitFor({ timeout: 20_000 });
   expect("The card", await text("lc-this-mac-prompt"), "Make this Mac one of your computers?");
@@ -375,7 +369,7 @@ await step("Desktop app: What is it for? with A full computer picked", async () 
 await page.context().close();
 
 // ── Variant b: the desktop app's Settings → This computer ────────────────
-page = await newPage({ lc: "connected", fallback: "b", platform: "desktop", mac: "online" });
+page = await newPage({ lc: "connected", platform: "desktop", mac: "online" });
 await step("Variant b: Settings → This computer (desktop app)", async () => {
   await go("#/settings/computer");
   await id("lc-where-agents-run").waitFor({ timeout: 10_000 });
@@ -390,50 +384,22 @@ await step("Variant b: Settings → This computer (desktop app)", async () => {
   await id("lc-where-here").click();
   await page.waitForTimeout(300);
   await shot("v-b2-on-this-mac");
+  await id("lc-where-cloud").click();
 });
-await step("Variant b: not in the computer menu, not in the browser", async () => {
+await step("Variant b: not in the computer menu", async () => {
   await openChip();
   await row("MacBook").locator("button").first().click();
   await page.waitForTimeout(400);
-  expect("No Advanced in b", String(await visible("lc-advanced")), "false");
+  expect("No Advanced", String(await visible("lc-advanced")), "false");
   await page.keyboard.press("Escape");
 });
 await page.context().close();
 
-page = await newPage({ lc: "connected", fallback: "b", platform: "cloud", mac: "online" });
+page = await newPage({ lc: "connected", platform: "cloud", mac: "online" });
 await step("Variant b in the browser: no This computer", async () => {
   await go("#/settings/computer");
   await page.waitForTimeout(800);
   expect("Hidden in the web", String(await visible("lc-where-agents-run")), "false");
-});
-await page.context().close();
-
-// ── Variant c: the same, only in Dev Mode ────────────────────────────────
-page = await newPage({ lc: "connected", fallback: "c", platform: "desktop", mac: "online" });
-await step("Variant c: hidden without Dev Mode", async () => {
-  await go("#/settings/computer");
-  await page.waitForTimeout(800);
-  expect("Hidden", String(await visible("lc-where-agents-run")), "false");
-  await shot("v-c1-no-dev-mode");
-  await page.evaluate(() => {
-    localStorage.setItem("ui_dev_mode", "1");
-    window.dispatchEvent(new Event("uno:dev-mode-change"));
-  });
-  await go("#/settings/computer");
-  await id("lc-where-agents-run").waitFor({ timeout: 10_000 });
-  await shot("v-c2-dev-mode");
-});
-await page.context().close();
-
-// ── Variant a, from the start "already a full computer" ──────────────────
-page = await newPage({ lc: "connected", fallback: "a", mac: "online" });
-await step("Variant a: the computer menu's Advanced", async () => {
-  await openChip();
-  await row("MacBook").locator("button").first().click();
-  await page.waitForTimeout(400);
-  await id("lc-advanced-toggle").click();
-  await page.waitForTimeout(300);
-  await shot("v-a1-menu-advanced");
 });
 await step("The demo card", async () => {
   await page.keyboard.press("Escape");
