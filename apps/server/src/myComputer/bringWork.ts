@@ -264,14 +264,14 @@ export function createBringWork(deps: BringWorkDeps) {
       const projects: Array<FoundProject> = parsed.projects
         .filter((entry) => entry.path !== parsed.home)
         .map((entry) => ({
-        name: folderName(entry.path),
-        path: entry.path,
-        displayPath: displayPathOf(entry.path, parsed.home),
-        git: entry.git,
-        keys: entry.keys,
-        fromChats: fromChats.has(entry.path),
-        synced: brought.folders[entry.path] !== undefined,
-      }));
+          name: folderName(entry.path),
+          path: entry.path,
+          displayPath: displayPathOf(entry.path, parsed.home),
+          git: entry.git,
+          keys: entry.keys,
+          fromChats: fromChats.has(entry.path),
+          synced: brought.folders[entry.path] !== undefined,
+        }));
       scans.set(computerId, {
         state: "ready",
         message: null,

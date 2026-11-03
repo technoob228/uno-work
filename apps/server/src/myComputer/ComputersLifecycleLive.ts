@@ -288,6 +288,7 @@ const make = Effect.gen(function* () {
         );
       }
     }
+    const filesCarried = folder !== null;
     // An imported chat without a folder: an empty project of its own here.
     if (folder === null) {
       // Nothing copied (an imported chat without a folder, the home folder, a
@@ -330,6 +331,7 @@ const make = Effect.gen(function* () {
       },
       sourceMachineLabel: computerName,
       sourceBranch: null,
+      filesCarried,
     });
     const newThreadId = ThreadId.make(Crypto.randomUUID());
     const createdAt = new Date().toISOString();

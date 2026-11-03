@@ -139,6 +139,8 @@ export interface ContinueSeedInput {
   readonly sourceMachineLabel: string;
   /** Branch the source workspace was on; null when detached or unknown. */
   readonly sourceBranch: string | null;
+  /** False: the files stayed behind (the home folder, a removed computer). Default true. */
+  readonly filesCarried?: boolean;
   readonly options?: HandoffContextOptions;
 }
 
@@ -152,7 +154,9 @@ export const buildContinueSeed = (input: ContinueSeedInput): string => {
   const branchNote = input.sourceBranch ? ` on branch "${input.sourceBranch}"` : "";
   const header =
     `${CONTINUE_SEED_PREFIX}${input.sourceMachineLabel}] This chat continues "${input.thread.title}" from ${input.sourceMachineLabel}${branchNote}. ` +
-    "The project files were carried over exactly as they were there, including uncommitted changes, so the working tree already reflects the work below. " +
+    (input.filesCarried === false
+      ? `The files on ${input.sourceMachineLabel} did not come over: this project starts empty, so ask the person for what you need. `
+      : "The project files were carried over exactly as they were there, including uncommitted changes, so the working tree already reflects the work below. ") +
     "Pick up where the conversation left off.";
   const context = buildHandoffContext(input.thread, options);
   if (context === null) {
