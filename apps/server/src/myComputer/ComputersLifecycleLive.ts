@@ -68,7 +68,7 @@ const make = Effect.gen(function* () {
   const store = sharedPurposeStore(config.stateDir);
   const home = os.homedir();
 
-  const run = <A>(effect: Effect.Effect<A, unknown>) => Effect.runPromise(effect);
+  const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
   const dispatch = (command: Parameters<typeof engine.dispatch>[0]) =>
     run(engine.dispatch(command, { origin: ORIGIN }));
 

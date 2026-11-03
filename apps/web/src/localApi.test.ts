@@ -76,6 +76,15 @@ const rpcClientMock = {
     importDecline: vi.fn(),
     chatHistory: vi.fn(),
   },
+  computers: {
+    state: vi.fn(),
+    setPurpose: vi.fn(),
+    workStatus: vi.fn(),
+    workScan: vi.fn(),
+    bringWork: vi.fn(),
+    openFolder: vi.fn(),
+    continueInCloud: vi.fn(),
+  },
   projectSync: {
     status: vi.fn(),
     setEnabled: vi.fn(),

@@ -627,9 +627,7 @@ function BringStep() {
               {work.status?.scan.message ?? "Couldn’t look for projects."}
             </p>
           ) : projects.length === 0 ? (
-            <p className="px-1 py-1.5 text-sm text-muted-foreground">
-              No projects in ~/projects.
-            </p>
+            <p className="px-1 py-1.5 text-sm text-muted-foreground">No projects in ~/projects.</p>
           ) : (
             projects.map((project) => (
               <ProjectRow

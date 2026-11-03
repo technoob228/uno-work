@@ -24,7 +24,7 @@
 import path from "node:path";
 
 import type { MyComputer } from "@t3tools/contracts";
-import { Effect } from "effect";
+import { Data, Effect } from "effect";
 
 import type { UnoWorkTool, UnoWorkToolDeps, UnoWorkToolError } from "../unoWork/tools.ts";
 import { summarize } from "./activitySummary.ts";
@@ -33,6 +33,11 @@ import { MyComputerFailure } from "./myComputerCore.ts";
 import { ChannelFailure } from "./channel.ts";
 
 import type { ComputerWorkspacePlan } from "../provider/Services/ComputerWorkspacePolicy.ts";
+
+/** A call to the person's computer that threw: what it threw, as is. */
+class ComputerCallFailed extends Data.TaggedError("ComputerCallFailed")<{
+  readonly cause: unknown;
+}> {}
 
 export type { ComputerWorkspacePlan };
 
@@ -351,7 +356,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
     });
 
   const promise = <A>(run: (signal: AbortSignal) => Promise<A>) =>
-    Effect.tryPromise({ try: run, catch: (cause) => cause });
+    Effect.tryPromise({ try: run, catch: (cause) => new ComputerCallFailed({ cause }) });
 
   /** The computer, online: waits for it while it sleeps (interruptible). */
   const waitOnline = (
@@ -418,9 +423,9 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
           Effect.catch((cause) => Effect.succeed({ ok: false as const, cause })),
         );
         if (outcome.ok) return { value: outcome.value, plan };
-        if (retry && attempt === 0 && meansComputerGone(outcome.cause)) continue;
-        const message =
-          outcome.cause instanceof Error ? outcome.cause.message : String(outcome.cause);
+        const cause = outcome.cause.cause;
+        if (retry && attempt === 0 && meansComputerGone(cause)) continue;
+        const message = cause instanceof Error ? cause.message : String(cause);
         return yield* kit.fail(message);
       }
     });
