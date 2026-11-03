@@ -259,7 +259,11 @@ export function createBringWork(deps: BringWorkDeps) {
       const parsed = parseScan(result.text);
       const fromChats = new Set(extra);
       const brought = await readRecord(computerId);
-      const projects: Array<FoundProject> = parsed.projects.map((entry) => ({
+      // A chat that ran in the home folder doesn't make the home folder a
+      // project: it would carry ~/.ssh and ~/.aws along (projectCopy refuses it).
+      const projects: Array<FoundProject> = parsed.projects
+        .filter((entry) => entry.path !== parsed.home)
+        .map((entry) => ({
         name: folderName(entry.path),
         path: entry.path,
         displayPath: displayPathOf(entry.path, parsed.home),

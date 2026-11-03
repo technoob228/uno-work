@@ -34,7 +34,25 @@ export const COPY_EXCLUDES: ReadonlyArray<string> = [
   ".DS_Store",
   ".env",
   ".env.*",
+  // Keys and logins never travel as files, whatever folder holds them.
+  ".ssh",
+  ".aws",
+  ".gnupg",
+  ".kube",
+  ".netrc",
+  ".git-credentials",
+  ".uno-connect",
 ];
+
+/**
+ * Printed by the pack command when asked for the home folder itself (or the
+ * root): a chat started in "Home folder" would otherwise carry ~/.ssh,
+ * ~/.aws and every private file of the person to the cloud (stand 03.11).
+ */
+export const COPY_HOME_REFUSED = "UNO_COPY_HOME";
+
+export const HOME_NOT_COPIED =
+  "The home folder isn't copied to the cloud: it holds the person's keys and private files. Only project folders come over.";
 
 /** The biggest packed project carried over. */
 export const COPY_MAX_BYTES = 2 * 1024 * 1024 * 1024;
@@ -48,6 +66,8 @@ export function packCommand(dir: string, windows: boolean): string {
   if (windows) {
     const excludes = COPY_EXCLUDES.map((name) => `--exclude=${psQuote(name)}`).join(" ");
     return [
+      `$d = (Resolve-Path -LiteralPath ${psQuote(dir)}).ProviderPath.TrimEnd('\\')`,
+      `if ($d -eq $HOME.TrimEnd('\\') -or $d.Length -le 3) { Write-Output "${COPY_HOME_REFUSED}"; exit 4 }`,
       `$out = Join-Path $env:TEMP ("uno-copy-" + [guid]::NewGuid().ToString() + ".tgz")`,
       `tar -czf $out ${excludes} -C ${psQuote(dir)} .`,
       `if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`,
@@ -56,6 +76,8 @@ export function packCommand(dir: string, windows: boolean): string {
   }
   const excludes = COPY_EXCLUDES.map((name) => `--exclude=${shQuote(name)}`).join(" ");
   return [
+    `d=$(cd ${shQuote(dir)} && pwd -P) || exit 2`,
+    `if [ "$d" = "$(cd "$HOME" && pwd -P)" ] || [ "$d" = / ]; then echo ${COPY_HOME_REFUSED}; exit 4; fi`,
     `out=$(mktemp "\${TMPDIR:-/tmp}/uno-copy-XXXXXX") || exit 1`,
     `tar -czf "$out" ${excludes} -C ${shQuote(dir)} . || { rm -f "$out"; exit 3; }`,
     `printf 'UNO_COPY %s %s\\n' "$out" "$(wc -c < "$out" | tr -d ' ')"`,
@@ -111,6 +133,9 @@ export async function copyFolderFromComputer(input: {
     },
     input.signal,
   );
+  if (packed.text.includes(COPY_HOME_REFUSED)) {
+    throw new MyComputerFailure("home-folder", HOME_NOT_COPIED);
+  }
   const answer = parsePackAnswer(packed.text);
   if (packed.exitCode !== 0 || answer === null) {
     throw new MyComputerFailure(

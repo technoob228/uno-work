@@ -255,15 +255,26 @@ const make = Effect.gen(function* () {
     if (plan !== null) {
       const brought = await bring.broughtFolder(computerId, plan.path);
       if (online) {
-        folder = brought ?? (await bring.freeFolder(folderName(plan.path)));
-        await copyFolderFromComputer({
+        const target = brought ?? (await bring.freeFolder(folderName(plan.path)));
+        // The home folder never comes over (keys, private files): the chat
+        // continues in an empty project with its history.
+        const copied = await copyFolderFromComputer({
           core,
           computerId,
           source: plan.path,
-          destination: folder,
+          destination: target,
           threadId,
-        });
-        await bring.rememberFolder(computerId, plan.path, folder);
+        }).then(
+          () => true,
+          (cause: unknown) => {
+            if (cause instanceof MyComputerFailure && cause.kind === "home-folder") return false;
+            throw cause;
+          },
+        );
+        if (copied) {
+          folder = target;
+          await bring.rememberFolder(computerId, plan.path, folder);
+        }
       } else if (brought !== null) {
         folder = brought;
       } else {

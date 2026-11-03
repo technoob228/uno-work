@@ -5,7 +5,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createPublicKey, verify } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -24,7 +24,7 @@ import { makeWaitMarks, planOf } from "./ComputerWorkspaces.ts";
 import { computerRow, startFakeConsole, waitFor, type FakeConsole } from "./fakeConsole.testkit.ts";
 import { keyOwner, loadOrCreateBoxKey, signFrame } from "./frameSigning.ts";
 import { createMyComputerCore, parseComputers, parseComputersMeta } from "./myComputerCore.ts";
-import { packCommand, parsePackAnswer } from "./projectCopy.ts";
+import { COPY_HOME_REFUSED, packCommand, parsePackAnswer } from "./projectCopy.ts";
 import {
   countOccurrences,
   globToRegExp,
@@ -436,6 +436,29 @@ describe("copying a project over (pack command run in sh)", () => {
     expect(listing).not.toContain(".env");
     expect(listing).not.toContain("node_modules");
     rmSync(answer!.file);
+  });
+
+  it("never packs keys folders, and refuses the home folder itself (stand 03.11)", () => {
+    const home = path.join(dir, "home");
+    const project = path.join(home, "proj");
+    mkdirSync(path.join(home, ".ssh"), { recursive: true });
+    mkdirSync(path.join(project, ".aws"), { recursive: true });
+    writeFileSync(path.join(home, ".ssh", "id_rsa"), "PRIVATE");
+    writeFileSync(path.join(project, ".aws", "credentials"), "AWS");
+    writeFileSync(path.join(project, "index.js"), "1");
+    const answer = parsePackAnswer(sh(packCommand(project, false), { TMPDIR: dir, HOME: home }));
+    const listing = execFileSync("tar", ["-tzf", answer!.file], { encoding: "utf8" });
+    expect(listing).toContain("index.js");
+    expect(listing).not.toContain(".aws");
+    rmSync(answer!.file);
+    let out = "";
+    try {
+      sh(packCommand(home, false), { TMPDIR: dir, HOME: home });
+    } catch (error) {
+      out = String((error as { stdout?: string }).stdout ?? "");
+    }
+    expect(out).toContain(COPY_HOME_REFUSED);
+    expect(readdirSync(dir).filter((name) => name.startsWith("uno-copy-"))).toEqual([]);
   });
 
   it("parses a path with spaces", () => {

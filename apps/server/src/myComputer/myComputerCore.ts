@@ -73,7 +73,8 @@ export type MyComputerFailureKind =
   | "remote"
   | "timeout"
   | "cancelled"
-  | "too-large";
+  | "too-large"
+  | "home-folder";
 
 /** A failure with a sentence the agent (or the person) can act on. */
 export class MyComputerFailure extends Error {
