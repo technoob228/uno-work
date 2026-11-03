@@ -406,6 +406,50 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Looked through a folder on your computer",
     "Couldn't look through the folder on your computer",
   ],
+  // The project on the person's computer: a chat whose folder is there
+  // (computers lifecycle, full mode) works through these.
+  workspace_bash: [
+    "Running a command in the project on your computer…",
+    "Ran a command in the project on your computer",
+    "Couldn't run the command on your computer",
+  ],
+  workspace_read: [
+    "Reading a project file on your computer…",
+    (c) =>
+      named("Read", baseName(text(c.args, "file_path")), "Read a project file on your computer"),
+    "Couldn't read the file on your computer",
+  ],
+  workspace_write: [
+    "Saving a project file on your computer…",
+    (c) =>
+      named("Saved", baseName(text(c.args, "file_path")), "Saved a project file on your computer"),
+    "Couldn't save the file on your computer",
+  ],
+  workspace_edit: [
+    "Changing a project file on your computer…",
+    (c) =>
+      named(
+        "Changed",
+        baseName(text(c.args, "file_path")),
+        "Changed a project file on your computer",
+      ),
+    "Couldn't change the file on your computer",
+  ],
+  workspace_ls: [
+    "Opening a project folder on your computer…",
+    "Opened a project folder on your computer",
+    "Couldn't open the folder on your computer",
+  ],
+  workspace_glob: [
+    "Finding project files on your computer…",
+    "Found project files on your computer",
+    "Couldn't find files on your computer",
+  ],
+  workspace_grep: [
+    "Searching the project on your computer…",
+    "Searched the project on your computer",
+    "Couldn't search the project on your computer",
+  ],
   apps_list: ["Looking at your apps…", (c) => countOf(c, "apps", "apps"), "Couldn't read the apps"],
   app_start: [
     "Starting the app…",

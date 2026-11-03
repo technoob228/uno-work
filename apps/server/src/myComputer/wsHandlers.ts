@@ -8,6 +8,7 @@ import { Effect } from "effect";
 import { observeRpcEffect } from "../observability/RpcInstrumentation.ts";
 import { ChatImportService } from "./import/ChatImportService.ts";
 import { MyComputerService } from "./MyComputerService.ts";
+import { ComputersLifecycle } from "../computers/ComputersLifecycle.ts";
 
 const attributes = { "rpc.aggregate": "myComputer" };
 
@@ -15,6 +16,7 @@ export const MyComputerRpcLayer = WsMyComputerRpcGroup.toLayer(
   Effect.gen(function* () {
     const myComputer = yield* MyComputerService;
     const chatImport = yield* ChatImportService;
+    const lifecycle = yield* ComputersLifecycle;
     return WsMyComputerRpcGroup.of({
       [WS_METHODS.myComputerStatus]: (_input) =>
         observeRpcEffect(WS_METHODS.myComputerStatus, myComputer.status, attributes),
@@ -25,7 +27,8 @@ export const MyComputerRpcLayer = WsMyComputerRpcGroup.toLayer(
       [WS_METHODS.myComputerDisconnect]: ({ computerId }) =>
         observeRpcEffect(
           WS_METHODS.myComputerDisconnect,
-          myComputer.disconnect(computerId),
+          // Removed: what it was for goes with it (CONTRACT.md §2).
+          myComputer.disconnect(computerId).pipe(Effect.tap(() => lifecycle.forget(computerId))),
           attributes,
         ),
       [WS_METHODS.myComputerActivity]: ({ computerId, limit }) =>

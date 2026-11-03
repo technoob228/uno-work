@@ -186,19 +186,34 @@ function activityRaisesHand(kind: string): boolean {
 }
 
 /**
- * Writing into an imported chat comes with M5 and M6 (continue on the computer
- * or in the cloud). Until then the composer is gone from such a chat, and this
- * stops anything else that tries: an agent's tool, an old tab.
+ * The computers lifecycle fields (`project.computer`, `thread.computerWait`)
+ * are the daemon's to write (CONTRACT §7.6): a person's command or an agent's
+ * tool must not bind a project to a computer or fake a wait.
  */
-function requireNotImportedChat(input: {
+function requireSystemOrigin(input: {
   readonly command: OrchestrationCommand;
-  readonly thread: Pick<OrchestrationThread, "id" | "source">;
+  readonly origin: OrchestrationCommandOrigin | undefined;
+  readonly subject: string;
 }): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (input.thread.source == null) return Effect.void;
+  if (input.origin?.kind === "system") return Effect.void;
   return Effect.fail(
     new OrchestrationCommandInvariantError({
       commandType: input.command.type,
-      detail: `imported_chat_read_only: Chat '${input.thread.id}' was imported from a computer and cannot continue here yet.`,
+      detail: `computer_daemon_only: Only the daemon may set the computer of ${input.subject}.`,
+    }),
+  );
+}
+
+function requireNotDeleted(input: {
+  readonly command: OrchestrationCommand;
+  readonly deletedAt: string | null;
+  readonly subject: string;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (input.deletedAt === null) return Effect.void;
+  return Effect.fail(
+    new OrchestrationCommandInvariantError({
+      commandType: input.command.type,
+      detail: `${input.subject} is deleted.`,
     }),
   );
 }
@@ -354,6 +369,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (command.computer != null) {
+        yield* requireSystemOrigin({
+          command,
+          origin,
+          subject: `project '${command.projectId}'`,
+        });
+      }
 
       return {
         ...withEventBase({
@@ -369,7 +391,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           workspaceRoot: command.workspaceRoot,
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
+          ...(command.computer != null ? { computer: command.computer } : {}),
           createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
+    case "project.computer.set": {
+      const project = yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireSystemOrigin({ command, origin, subject: `project '${command.projectId}'` });
+      yield* requireNotDeleted({
+        command,
+        deletedAt: project.deletedAt,
+        subject: `Project '${command.projectId}'`,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "project.computer-set",
+        payload: {
+          projectId: command.projectId,
+          computer: command.computer,
           updatedAt: command.createdAt,
         },
       };
@@ -733,6 +784,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           source: command.source,
           ...(command.title !== undefined ? { title: command.title } : {}),
           updatedAt: command.source.lastActiveAt,
+        },
+      };
+    }
+
+    // Waiting is not activity: the event carries its own time, and neither the
+    // read model nor the projections move the chat's updatedAt for it.
+    case "thread.computer-wait.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      yield* requireSystemOrigin({ command, origin, subject: `chat '${command.threadId}'` });
+      yield* requireNotDeleted({
+        command,
+        deletedAt: thread.deletedAt,
+        subject: `Thread '${command.threadId}'`,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.computer-wait-set",
+        payload: {
+          threadId: command.threadId,
+          computerWait: command.computerWait,
+          updatedAt: command.createdAt,
         },
       };
     }
@@ -1211,7 +1292,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      yield* requireNotImportedChat({ command, thread: targetThread });
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1592,12 +1672,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.message.user.append": {
-      const appendThread = yield* requireThread({
+      yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      yield* requireNotImportedChat({ command, thread: appendThread });
       return {
         ...withEventBase({
           aggregateKind: "thread",

@@ -19,6 +19,7 @@ import { Context, Effect, Layer } from "effect";
 
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import {
   createMyComputerCore,
@@ -96,6 +97,13 @@ const make = Effect.gen(function* () {
         serverSettings.getSettings.pipe(
           Effect.map((settings) => settings.uno.boxToken?.trim() ?? ""),
           Effect.orElseSucceed(() => ""),
+        ),
+      ),
+    boxId: () =>
+      Effect.runPromise(
+        serverSettings.getSettings.pipe(
+          Effect.map((settings) => parseSettingsBoxId(settings.uno.boxId)),
+          Effect.orElseSucceed(() => null),
         ),
       ),
     baseUrl: controlPlaneBaseUrl,

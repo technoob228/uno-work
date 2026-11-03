@@ -260,6 +260,7 @@ function mapProject(
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     scripts: mapProjectScripts(project.scripts),
+    computer: project.computer ?? null,
   };
 }
 
@@ -293,6 +294,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     agentsClosedAt: thread.agentsClosedAt ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
+    computerWait: thread.computerWait ?? null,
   };
 }
 
@@ -327,6 +329,7 @@ function mapThreadShell(
     agentsClosedAt: thread.agentsClosedAt ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
+    computerWait: thread.computerWait ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -374,6 +377,7 @@ function mapThreadShell(
     pullRequests: thread.pullRequests ?? [],
     autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
     source: thread.source ?? null,
+    computerWait: thread.computerWait ?? null,
   };
   return {
     shell,
@@ -406,6 +410,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     agentsClosedAt: thread.agentsClosedAt ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
+    computerWait: thread.computerWait ?? null,
   };
 }
 
@@ -507,7 +512,8 @@ function sidebarThreadSummariesEqual(
     (left.personCallReason ?? null) === (right.personCallReason ?? null) &&
     (left.autoSettleDisabledAt ?? null) === (right.autoSettleDisabledAt ?? null) &&
     JSON.stringify(left.pullRequests ?? []) === JSON.stringify(right.pullRequests ?? []) &&
-    threadSourceStamp(left.source) === threadSourceStamp(right.source)
+    threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
+    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null)
   );
 }
 
@@ -552,7 +558,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&
     (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
-    threadSourceStamp(left.source) === threadSourceStamp(right.source)
+    threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
+    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null)
   );
 }
 

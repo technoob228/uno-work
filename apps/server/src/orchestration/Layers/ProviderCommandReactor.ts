@@ -94,6 +94,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { ServerConfig } from "../../config.ts";
+import { cachedImportedHistory } from "../../myComputer/import/chatImport.ts";
 import { HarnessSandboxPolicy } from "../../provider/Services/HarnessSandboxPolicy.ts";
 import { resolveAttachmentPathById } from "../../attachmentStore.ts";
 import { WorktreeCleanup } from "../../worktreeCleanup/WorktreeCleanup.ts";
@@ -907,13 +908,19 @@ const make = Effect.gen(function* () {
     const normalizedInput = toNonEmptyProviderInput(
       appendChatAttachmentsNote(input.messageText, attachmentsNote(normalizedAttachments)),
     );
+    // A chat imported from the person's computer goes on here: its earlier
+    // conversation is on that computer (cached here when opened), not in events.
+    const importedHistory =
+      thread.source != null && input.carriesHistory !== true
+        ? yield* Effect.promise(() => cachedImportedHistory(serverConfig.stateDir, thread.source!))
+        : [];
     const contextMessages =
       input.carriesHistory === true
         ? []
         : buildProviderContextMessages({
             messages: isUnoDispatcherThread(thread)
               ? yield* dispatcherHistory(thread)
-              : thread.messages,
+              : [...importedHistory, ...thread.messages],
             currentMessageText: input.messageText,
             currentAttachments: normalizedAttachments,
             attachmentsNote,

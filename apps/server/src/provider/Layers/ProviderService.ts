@@ -48,6 +48,12 @@ import {
   harnessSandboxSignature,
   type HarnessSandboxDecision,
 } from "../Services/HarnessSandboxPolicy.ts";
+import {
+  ComputerWorkspacePolicy,
+  computerWorkspaceSignature,
+  harnessCantUseComputerMessage,
+  type ComputerWorkspaceDecision,
+} from "../Services/ComputerWorkspacePolicy.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -248,6 +254,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   // decision changed since (the person narrowed or widened the assistant's
   // projects) is restarted before its next turn.
   const sandboxSignatures = new Map<ThreadId, string>();
+  // Chats whose project is on the person's own computer (computers
+  // lifecycle): the harness runs here, its tools there. Absent (tests): local.
+  const computerPolicy = Option.getOrUndefined(
+    yield* Effect.serviceOption(ComputerWorkspacePolicy),
+  );
+  const computerSignatures = new Map<ThreadId, string>();
 
   // Единая точка, через которую проходит всё, что отдают харнессы: вывод
   // инструментов, текст ассистента, ошибки. Маскируем секреты здесь — до
@@ -322,6 +334,48 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
       return decision;
     });
+
+  /**
+   * Where the chat's project lives: the plan for the adapter, or the turn's
+   * error when the chat can't run (the computer is a tool, removed; the
+   * harness can't work there; an assistant held to its projects).
+   */
+  const resolveComputerWorkspace = (input: {
+    readonly threadId: ThreadId;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+    readonly sandbox: HarnessSandboxDecision;
+  }): Effect.Effect<ComputerWorkspaceDecision, ProviderAdapterRequestError> =>
+    Effect.gen(function* () {
+      if (computerPolicy === undefined) return { _tag: "local" } as const;
+      const decision = yield* computerPolicy.decide({ threadId: input.threadId });
+      if (decision._tag === "local") return decision;
+      const refuse = (detail: string) =>
+        new ProviderAdapterRequestError({
+          provider: input.adapter.provider,
+          method: "computer-workspace",
+          detail,
+        });
+      if (decision._tag === "refuse") return yield* refuse(decision.message);
+      if (input.sandbox._tag === "sandbox") {
+        return yield* refuse(
+          `This assistant is held to selected projects, and ${decision.plan.computerName} is outside them.`,
+        );
+      }
+      if (input.adapter.capabilities.computerWorkspace !== true) {
+        return yield* refuse(
+          harnessCantUseComputerMessage(input.adapter.provider, decision.plan.computerName),
+        );
+      }
+      yield* Effect.logInfo("provider.session.computer-workspace", {
+        threadId: input.threadId,
+        provider: input.adapter.provider,
+        computerId: decision.plan.computerId,
+      });
+      return decision;
+    });
+
+  const computerStartFields = (decision: ComputerWorkspaceDecision) =>
+    decision._tag === "computer" ? { computerWorkspace: decision.plan } : {};
 
   /**
    * The mode the request asked for, narrowed to the ceiling of the assistant
@@ -488,6 +542,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         cwd: persistedCwd,
         adapter,
       });
+      const computer = yield* resolveComputerWorkspace({
+        threadId: input.binding.threadId,
+        adapter,
+        sandbox,
+      });
       yield* enforceLiveProcessCap({
         threadId: input.binding.threadId,
         instanceId: bindingInstanceId,
@@ -505,8 +564,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           input.binding.runtimeMode ?? "full-access",
         ),
         ...sandboxStartFields(sandbox),
+        ...computerStartFields(computer),
       });
       sandboxSignatures.set(input.binding.threadId, harnessSandboxSignature(sandbox));
+      computerSignatures.set(input.binding.threadId, computerWorkspaceSignature(computer));
       if (resumed.provider !== adapter.provider) {
         return yield* toValidationError(
           input.operation,
@@ -763,6 +824,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const sandbox = yield* resolveHarnessSandbox({ threadId, cwd: effectiveCwd, adapter });
+        const computer = yield* resolveComputerWorkspace({ threadId, adapter, sandbox });
         yield* enforceLiveProcessCap({ threadId, instanceId: resolvedInstanceId, adapter });
         const session = yield* adapter.startSession({
           ...input,
@@ -771,8 +833,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
           ...sandboxStartFields(sandbox),
+          ...computerStartFields(computer),
         });
         sandboxSignatures.set(threadId, harnessSandboxSignature(sandbox));
+        computerSignatures.set(threadId, computerWorkspaceSignature(computer));
 
         if (session.provider !== adapter.provider) {
           return yield* toValidationError(
@@ -858,6 +922,45 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }
   });
 
+  /**
+   * Before a turn: a chat that may no longer run where its project is (the
+   * computer became a tool, was removed) is refused; one whose place changed
+   * since its session started is restarted (the turn resumes it there).
+   */
+  const reconcileComputerWorkspace = Effect.fn("reconcileComputerWorkspace")(function* (
+    threadId: ThreadId,
+  ) {
+    if (computerPolicy === undefined) return;
+    const decision = yield* computerPolicy.decide({ threadId });
+    const binding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+    if (decision._tag === "refuse") {
+      return yield* new ProviderAdapterRequestError({
+        provider: binding?.provider ?? "unknown",
+        method: "computer-workspace",
+        detail: decision.message,
+      });
+    }
+    if (binding?.providerInstanceId === undefined) return;
+    const adapter = yield* registry.getByInstance(binding.providerInstanceId);
+    if (!(yield* adapter.hasSession(threadId))) return;
+    const started = computerSignatures.get(threadId) ?? "local";
+    if (computerWorkspaceSignature(decision) === started) return;
+    yield* Effect.logInfo("provider.session.computer-workspace-changed", {
+      threadId,
+      provider: adapter.provider,
+      from: started,
+      to: decision._tag,
+    });
+    yield* adapter.stopSession(threadId).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider.session.computer-restart-stop-failed", {
+          threadId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  });
+
   const sendTurn: ProviderServiceShape["sendTurn"] = Effect.fn("sendTurn")(function* (rawInput) {
     const parsed = yield* decodeInputOrValidationError({
       operation: "ProviderService.sendTurn",
@@ -885,6 +988,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     let metricModel = input.modelSelection?.model;
     return yield* Effect.gen(function* () {
       yield* reconcileHarnessSandbox(input.threadId);
+      yield* reconcileComputerWorkspace(input.threadId);
       const routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",

@@ -80,6 +80,17 @@ export interface OpenChannelInput {
   readonly connectTimeoutMs?: number;
   readonly idleCloseMs?: number;
   readonly onClosed?: () => void;
+  /**
+   * M7: the signed form of a request (`frameSigning.ts`), for a helper that
+   * verifies signatures. Absent: `v: 1` frames, for helpers from before M7.
+   */
+  readonly sign?: (id: string, frame: HelperRequest) => object;
+  /**
+   * The channel was idle for `idleCloseMs` and is about to close. Answering
+   * true keeps it open: the caller started a call on it (a helper update runs
+   * when nothing else does), and the idle clock starts again when that ends.
+   */
+  readonly onIdle?: () => boolean;
 }
 
 const OFFLINE_MESSAGE =
@@ -129,10 +140,11 @@ export function openComputerChannel(input: OpenChannelInput): ComputerChannel {
   const armIdle = () => {
     clearIdle();
     if (closed || calls.size > 0) return;
-    idleTimer = setTimeout(
-      () => shutDown(new ChannelFailure("closed", "Closed after being idle.")),
-      idleCloseMs,
-    );
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (input.onIdle?.() === true && calls.size > 0) return;
+      shutDown(new ChannelFailure("closed", "Closed after being idle."));
+    }, idleCloseMs);
     idleTimer.unref?.();
   };
 
@@ -195,7 +207,9 @@ export function openComputerChannel(input: OpenChannelInput): ComputerChannel {
   });
 
   const transmit = (id: string, frame: HelperRequest) => {
-    const text = JSON.stringify({ ...frame, id, v: FRAME_VERSION });
+    const text = JSON.stringify(
+      input.sign ? input.sign(id, frame) : { ...frame, id, v: FRAME_VERSION },
+    );
     if (Buffer.byteLength(text) > MAX_FRAME_BYTES) {
       throw new RangeError(`A frame of ${text.length} bytes is over the channel's limit.`);
     }

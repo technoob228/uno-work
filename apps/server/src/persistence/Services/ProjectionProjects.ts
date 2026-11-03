@@ -9,6 +9,7 @@
 import {
   IsoDateTime,
   ModelSelection,
+  ProjectComputer,
   ProjectId,
   ProjectScript,
   RepositoryIdentity,
@@ -24,6 +25,9 @@ export const ProjectionProject = Schema.Struct({
   workspaceRoot: Schema.String,
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  // The folder on the person's own computer (migration 060). Optional so rows
+  // built before it keep decoding; absent persists as NULL.
+  computer: Schema.optional(Schema.NullOr(ProjectComputer)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),

@@ -339,6 +339,93 @@ describe("orchestration projector", () => {
     expect(unarchived.threads[0]?.archivedAt).toBeNull();
   });
 
+  it("applies a project's computer and a chat's wait, leaving the chat's updatedAt", async () => {
+    const createdAt = "2026-11-03T09:00:00.000Z";
+    const computer = { computerId: "computer-1", computerName: "MacBook", path: "/Users/k/a" };
+    const computerWait = {
+      computerId: "computer-1",
+      computerName: "MacBook",
+      since: "2026-11-03T10:00:00.000Z",
+    };
+    const events = [
+      makeEvent({
+        sequence: 1,
+        type: "project.created",
+        aggregateKind: "project",
+        aggregateId: "project-1",
+        occurredAt: createdAt,
+        commandId: "cmd-project-create",
+        payload: {
+          projectId: "project-1",
+          title: "alpha",
+          workspaceRoot: "/tmp/alpha",
+          defaultModelSelection: null,
+          scripts: [],
+          computer,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      }),
+      makeEvent({
+        sequence: 2,
+        type: "thread.created",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: createdAt,
+        commandId: "cmd-thread-create",
+        payload: {
+          threadId: "thread-1",
+          projectId: "project-1",
+          title: "demo",
+          modelSelection: { provider: ProviderDriverKind.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      }),
+      makeEvent({
+        sequence: 3,
+        type: "thread.computer-wait-set",
+        aggregateKind: "thread",
+        aggregateId: "thread-1",
+        occurredAt: computerWait.since,
+        commandId: "cmd-wait",
+        payload: { threadId: "thread-1", computerWait, updatedAt: computerWait.since },
+      }),
+    ];
+    let model = createEmptyReadModel(createdAt);
+    for (const event of events) {
+      model = await Effect.runPromise(projectEvent(model, event));
+    }
+    expect(model.projects[0]?.computer).toEqual(computer);
+    expect(model.threads[0]).toMatchObject({ computerWait, updatedAt: createdAt });
+
+    model = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 4,
+          type: "project.computer-set",
+          aggregateKind: "project",
+          aggregateId: "project-1",
+          occurredAt: "2026-11-03T11:00:00.000Z",
+          commandId: "cmd-computer-clear",
+          payload: {
+            projectId: "project-1",
+            computer: null,
+            updatedAt: "2026-11-03T11:00:00.000Z",
+          },
+        }),
+      ),
+    );
+    expect(model.projects[0]).toMatchObject({
+      computer: null,
+      updatedAt: "2026-11-03T11:00:00.000Z",
+    });
+  });
+
   it("keeps projector forward-compatible for unhandled event types", async () => {
     const now = new Date().toISOString();
     const model = createEmptyReadModel(now);

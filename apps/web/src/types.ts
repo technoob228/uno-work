@@ -20,6 +20,8 @@ import type {
   ThreadAssistantRole,
   ThreadStartedBy,
   ThreadSource,
+  ThreadComputerWait,
+  ProjectComputer,
   ThreadController,
   ThreadPullRequest,
 } from "@t3tools/contracts";
@@ -126,6 +128,8 @@ export interface Project {
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
+  /** A folder on the person's own computer: chats run here, commands and files there. */
+  computer?: ProjectComputer | null | undefined;
 }
 
 export interface Thread {
@@ -162,6 +166,8 @@ export interface Thread {
   assistantRole?: ThreadAssistantRole | null | undefined;
   /** Where the chat came from, when it did not start in Uno Work. */
   source?: ThreadSource | null | undefined;
+  /** Its turn waits for the person's own computer (asleep, offline). */
+  computerWait?: ThreadComputerWait | null | undefined;
 }
 
 export interface ThreadShell {
@@ -191,6 +197,8 @@ export interface ThreadShell {
   assistantRole?: ThreadAssistantRole | null | undefined;
   /** Where the chat came from, when it did not start in Uno Work. */
   source?: ThreadSource | null | undefined;
+  /** Its turn waits for the person's own computer (asleep, offline). */
+  computerWait?: ThreadComputerWait | null | undefined;
 }
 
 export interface ThreadTurnState {
@@ -248,6 +256,8 @@ export interface SidebarThreadSummary {
   personCallReason?: string | null | undefined;
   /** Where the chat came from, when it did not start in Uno Work. */
   source?: ThreadSource | null | undefined;
+  /** Its turn waits for the person's own computer (asleep, offline). */
+  computerWait?: ThreadComputerWait | null | undefined;
 }
 
 export interface ThreadSession {

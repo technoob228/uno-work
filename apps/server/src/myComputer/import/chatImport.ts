@@ -77,6 +77,21 @@ function modelFor(tool: ImportedChatTool): ModelSelection {
 const hash = (...parts: ReadonlyArray<string>) =>
   Crypto.createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 32);
 
+/**
+ * The imported chat's history as last read from the computer (the cache the
+ * chat's view filled), oldest first; empty when it was never opened here.
+ * For its first turn here: the agent hears the conversation so far.
+ */
+export async function cachedImportedHistory(
+  stateDir: string,
+  source: Pick<ThreadComputerSource, "computerId" | "tool" | "sessionId">,
+): Promise<ReadonlyArray<{ readonly role: "user" | "assistant"; readonly text: string }>> {
+  const cached = await readHistoryCache(
+    historyCachePath(stateDir, source.computerId, hash(source.tool, source.sessionId)),
+  ).catch(() => null);
+  return cached?.messages.map((message) => ({ role: message.role, text: message.text })) ?? [];
+}
+
 export const importedThreadId = (computerId: string, tool: string, sessionId: string) =>
   ThreadId.make(`imported-${hash(computerId, tool, sessionId)}`);
 
@@ -344,6 +359,7 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
 
   const projectFor = async (
     computerId: string,
+    nameOfComputer: string,
     record: ImportRecord,
     cwd: string | null,
   ): Promise<ProjectId> => {
@@ -364,6 +380,11 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
         title: projectTitle(cwd),
         workspaceRoot,
         createWorkspaceRootIfMissing: true,
+        // The folder the chats ran in: a new turn there runs its commands on
+        // that computer (CONTRACT §7.2). No folder, nothing to point at.
+        ...(cwd !== null && cwd.trim().length > 0 && nameOfComputer.trim().length > 0
+          ? { computer: { computerId, computerName: nameOfComputer, path: cwd } }
+          : {}),
         createdAt: now().toISOString(),
       });
     }
@@ -386,7 +407,7 @@ export function createChatImport(deps: ChatImportDeps): ChatImport {
         try {
           // A crash after the dispatch and before the save lands here on resume.
           if ((await deps.getThread(threadId)) === null) {
-            const projectId = await projectFor(computerId, record, chat.cwd);
+            const projectId = await projectFor(computerId, name, record, chat.cwd);
             await deps.dispatch({
               type: "thread.create",
               commandId: commandId("thread"),

@@ -395,6 +395,17 @@ import {
   MyComputerStatus,
 } from "./myComputer.ts";
 import {
+  ComputerInput,
+  ComputersBringWorkInput,
+  ComputersContinueInCloudInput,
+  ComputersContinueInCloudResult,
+  ComputersOpenFolderInput,
+  ComputersOpenFolderResult,
+  ComputersSetPurposeInput,
+  ComputersState,
+  ComputerWorkStatus,
+} from "./computers.ts";
+import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -574,6 +585,15 @@ export const WS_METHODS = {
   myComputerImportStart: "myComputer.importStart",
   myComputerImportDecline: "myComputer.importDecline",
   myComputerChatHistory: "myComputer.chatHistory",
+
+  // Computers lifecycle (computers.ts): what a computer is for, its work, chats on it
+  computersState: "computers.state",
+  computersSetPurpose: "computers.setPurpose",
+  computersWorkStatus: "computers.workStatus",
+  computersWorkScan: "computers.workScan",
+  computersBringWork: "computers.bringWork",
+  computersOpenFolder: "computers.openFolder",
+  computersContinueInCloud: "computers.continueInCloud",
 
   // Uno account / billing methods
   unoCreateLlmTopUpAction: "uno.createLlmTopUpAction",
@@ -908,6 +928,48 @@ export const WsMyComputerImportDeclineRpc = Rpc.make(WS_METHODS.myComputerImport
 export const WsMyComputerChatHistoryRpc = Rpc.make(WS_METHODS.myComputerChatHistory, {
   payload: MyComputerChatHistoryInput,
   success: MyComputerChatHistory,
+  error: MyComputerError,
+});
+
+export const WsComputersStateRpc = Rpc.make(WS_METHODS.computersState, {
+  payload: Schema.Struct({}),
+  success: ComputersState,
+  error: MyComputerError,
+});
+
+export const WsComputersSetPurposeRpc = Rpc.make(WS_METHODS.computersSetPurpose, {
+  payload: ComputersSetPurposeInput,
+  success: ComputersState,
+  error: MyComputerError,
+});
+
+export const WsComputersWorkStatusRpc = Rpc.make(WS_METHODS.computersWorkStatus, {
+  payload: ComputerInput,
+  success: ComputerWorkStatus,
+  error: MyComputerError,
+});
+
+export const WsComputersWorkScanRpc = Rpc.make(WS_METHODS.computersWorkScan, {
+  payload: ComputerInput,
+  success: ComputerWorkStatus,
+  error: MyComputerError,
+});
+
+export const WsComputersBringWorkRpc = Rpc.make(WS_METHODS.computersBringWork, {
+  payload: ComputersBringWorkInput,
+  success: ComputerWorkStatus,
+  error: MyComputerError,
+});
+
+export const WsComputersOpenFolderRpc = Rpc.make(WS_METHODS.computersOpenFolder, {
+  payload: ComputersOpenFolderInput,
+  success: ComputersOpenFolderResult,
+  error: MyComputerError,
+});
+
+export const WsComputersContinueInCloudRpc = Rpc.make(WS_METHODS.computersContinueInCloud, {
+  payload: ComputersContinueInCloudInput,
+  success: ComputersContinueInCloudResult,
   error: MyComputerError,
 });
 
@@ -2616,6 +2678,17 @@ export const WsMyComputerRpcGroup = RpcGroup.make(
   WsMyComputerChatHistoryRpc,
 );
 
+/** Computers lifecycle (computers.ts), apart from the main group for the same reason. */
+export const WsComputersRpcGroup = RpcGroup.make(
+  WsComputersStateRpc,
+  WsComputersSetPurposeRpc,
+  WsComputersWorkStatusRpc,
+  WsComputersWorkScanRpc,
+  WsComputersBringWorkRpc,
+  WsComputersOpenFolderRpc,
+  WsComputersContinueInCloudRpc,
+);
+
 /** Pull requests in Dev mode, apart from the main group for the same reason. */
 export const WsPullRequestsRpcGroup = RpcGroup.make(
   WsPullRequestsListRpc,
@@ -2866,4 +2939,8 @@ export const WsMainRpcGroup = RpcGroup.make(
   WsOrchestrationSubscribeThreadRpc,
 );
 
-export const WsRpcGroup = WsMainRpcGroup.merge(WsMyComputerRpcGroup, WsPullRequestsRpcGroup);
+export const WsRpcGroup = WsMainRpcGroup.merge(
+  WsMyComputerRpcGroup,
+  WsComputersRpcGroup,
+  WsPullRequestsRpcGroup,
+);

@@ -56,6 +56,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { readAssistantLlmProvider } from "@t3tools/shared/assistantLlm";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { hermesWorkspaceOptions, joinNotes } from "../../myComputer/computerWorkspaceHarness.ts";
 import { ServerConfig } from "../../config.ts";
 import {
   ProviderAdapterProcessError,
@@ -753,6 +754,9 @@ export function makeHermesAdapter(
             );
           }
           const hermesProvider = hermesProviderIdOf(llmRoute);
+          const workspace = input.computerWorkspace
+            ? hermesWorkspaceOptions(input.computerWorkspace)
+            : null;
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
               fileSystem.writeFileString(
@@ -774,7 +778,14 @@ export function makeHermesAdapter(
                     }),
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
-                  ...(assistantContext !== null ? { environmentHint: assistantContext.hint } : {}),
+                  ...(joinNotes(assistantContext?.hint, workspace?.note) !== undefined
+                    ? { environmentHint: joinNotes(assistantContext?.hint, workspace?.note)! }
+                    : {}),
+                  // The project is on the person's computer: Hermes' own
+                  // terminal and files off, uno-work's workspace_* tools there.
+                  ...(workspace && !dispatcherOnly
+                    ? { disabledToolsets: workspace.disabledToolsets }
+                    : {}),
                   ...(dispatcherOnly
                     ? {
                         disabledToolsets: HERMES_DISPATCHER_DISABLED_TOOLSETS,
@@ -1649,7 +1660,11 @@ export function makeHermesAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: "in-session", harnessSandbox: true },
+      capabilities: {
+        sessionModelSwitch: "in-session",
+        harnessSandbox: true,
+        computerWorkspace: true,
+      },
       startSession,
       sendTurn,
       interruptTurn,

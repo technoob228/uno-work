@@ -13,11 +13,13 @@ import { isPersonOrigin, startedByFromOrigin } from "./commandOrigin.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
+  ProjectComputerSetPayload,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
+  ThreadComputerWaitSetPayload,
   ThreadControlChangedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -208,6 +210,7 @@ export function projectEvent(
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
+            ...(payload.computer != null ? { computer: payload.computer } : {}),
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             deletedAt: null,
@@ -242,6 +245,18 @@ export function projectEvent(
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
                   updatedAt: payload.updatedAt,
                 }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.computer-set":
+      return decodeForEvent(ProjectComputerSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? { ...project, computer: payload.computer, updatedAt: payload.updatedAt }
               : project,
           ),
         })),
@@ -388,6 +403,22 @@ export function projectEvent(
             ...(payload.title !== undefined ? { title: payload.title } : {}),
             source: payload.source,
             updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    // The chat's updatedAt stays put: waiting is not activity.
+    case "thread.computer-wait-set":
+      return decodeForEvent(
+        ThreadComputerWaitSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            computerWait: payload.computerWait,
           }),
         })),
       );

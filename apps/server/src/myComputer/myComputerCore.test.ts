@@ -67,7 +67,7 @@ describe("the console's routes", () => {
     expect(warnings).toEqual([]);
   });
 
-  it("speaks the five routes with the machine token", async () => {
+  it("speaks the six routes with the machine token", async () => {
     const core = makeCore();
     await expect(core.status()).resolves.toMatchObject({
       enabled: true,
@@ -76,6 +76,9 @@ describe("the console's routes", () => {
     await expect(core.pair()).resolves.toMatchObject({
       code: "7KQ2-M9XD",
       commands: { mac: "curl mac", linux: "curl linux", windows: "irm windows" },
+      // §4.3: the desktop installs the helper with these.
+      api: "https://app.uno4.work",
+      download: "https://app.uno4.work/cli/connect",
     });
     await expect(core.pairStatus("7KQ2-M9XD")).resolves.toEqual({
       state: "claimed",
@@ -87,6 +90,8 @@ describe("the console's routes", () => {
 
     expect(fake.requests.map((request) => `${request.method} ${request.path}`)).toEqual([
       "GET /api/v1/work/computers",
+      // M7: pairing registers this computer's public key first.
+      "PUT /api/v1/work/computers/box-key",
       "POST /api/v1/work/computers/pair",
       "GET /api/v1/work/computers/pair/7KQ2-M9XD",
       "DELETE /api/v1/work/computers/c1",

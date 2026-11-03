@@ -31,6 +31,13 @@ export const MyComputer = Schema.Struct({
   connectedAt: Schema.NullOr(Schema.String),
   lastSeenAt: Schema.NullOr(Schema.String),
   helperVersion: Schema.NullOr(Schema.String),
+  /** What it is for, as the console keeps it (computers.ts); `computers.state` stays the UI's source. */
+  mode: Schema.optionalKey(Schema.Literals(["tool", "full"])),
+  /**
+   * M7: the helper trusts this cloud computer's key. False: connect the computer
+   * again from here (same command). Null or absent: unknown (older helper).
+   */
+  trustsThisComputer: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
 });
 export type MyComputer = typeof MyComputer.Type;
 
@@ -38,6 +45,11 @@ export const MyComputerStatus = Schema.Struct({
   /** False: no console access here, or the account doesn't have the feature. */
   enabled: Schema.Boolean,
   computers: Schema.Array(MyComputer),
+  /**
+   * The computers lifecycle flag for this account (console: COMPUTERS_LIFECYCLE_USERS).
+   * Absent from older daemons and consoles: off. See computers.ts.
+   */
+  lifecycle: Schema.optionalKey(Schema.Boolean),
 });
 export type MyComputerStatus = typeof MyComputerStatus.Type;
 
@@ -54,6 +66,9 @@ export const MyComputerPairing = Schema.Struct({
   url: Schema.String,
   commands: MyComputerPairCommands,
   expiresAt: Schema.String,
+  /** The install script's API and DOWNLOAD (CONTRACT §4.3): the desktop installs the helper with them. */
+  api: Schema.optionalKey(Schema.String),
+  download: Schema.optionalKey(Schema.String),
 });
 export type MyComputerPairing = typeof MyComputerPairing.Type;
 

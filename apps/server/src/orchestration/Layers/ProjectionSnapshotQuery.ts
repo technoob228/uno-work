@@ -8,7 +8,9 @@ import {
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
+  ProjectComputer,
   ProjectScript,
+  ThreadComputerWait,
   TurnId,
   type RepositoryIdentity,
   type OrchestrationCheckpointSummary,
@@ -64,6 +66,7 @@ const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
+    computer: Schema.optional(Schema.NullOr(Schema.fromJsonString(ProjectComputer))),
   }),
 );
 const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
@@ -80,6 +83,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
       Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
     ),
     source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
+    computerWait: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadComputerWait))),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -226,6 +230,7 @@ function mapProjectShellRow(
     repositoryIdentity,
     defaultModelSelection: row.defaultModelSelection,
     scripts: row.scripts,
+    ...(row.computer != null ? { computer: row.computer } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -400,6 +405,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          computer_json AS "computer",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -447,6 +453,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
           source_json AS "source",
+          computer_wait_json AS "computerWait",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -647,6 +654,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          computer_json AS "computer",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -669,6 +677,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           workspace_root AS "workspaceRoot",
           default_model_selection_json AS "defaultModelSelection",
           scripts_json AS "scripts",
+          computer_json AS "computer",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           deleted_at AS "deletedAt"
@@ -752,6 +761,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_called_by_thread_id AS "personCalledByThreadId",
           person_call_reason AS "personCallReason",
           source_json AS "source",
+          computer_wait_json AS "computerWait",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -1136,6 +1146,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
                 defaultModelSelection: row.defaultModelSelection,
                 scripts: row.scripts,
+                ...(row.computer != null ? { computer: row.computer } : {}),
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 deletedAt: row.deletedAt,
@@ -1175,6 +1186,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 personCalledByThreadId: row.personCalledByThreadId ?? null,
                 personCallReason: row.personCallReason ?? null,
                 source: row.source ?? null,
+                ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1279,6 +1291,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   workspaceRoot: row.workspaceRoot,
                   defaultModelSelection: row.defaultModelSelection,
                   scripts: row.scripts,
+                  ...(row.computer != null ? { computer: row.computer } : {}),
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   deletedAt: row.deletedAt,
@@ -1394,6 +1407,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   personCalledByThreadId: row.personCalledByThreadId ?? null,
                   personCallReason: row.personCallReason ?? null,
                   source: row.source ?? null,
+                  ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1543,6 +1557,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     personCalledByThreadId: row.personCalledByThreadId ?? null,
                     personCallReason: row.personCallReason ?? null,
                     source: row.source ?? null,
+                    ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
                     session: sessionByThread.get(row.threadId) ?? null,
                     latestUserMessageAt: row.latestUserMessageAt,
                     hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -1623,6 +1638,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     repositoryIdentity,
                     defaultModelSelection: option.value.defaultModelSelection,
                     scripts: option.value.scripts,
+                    ...(option.value.computer != null ? { computer: option.value.computer } : {}),
                     createdAt: option.value.createdAt,
                     updatedAt: option.value.updatedAt,
                     deletedAt: option.value.deletedAt,
@@ -1777,6 +1793,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         personCalledByThreadId: threadRow.value.personCalledByThreadId ?? null,
         personCallReason: threadRow.value.personCallReason ?? null,
         source: threadRow.value.source ?? null,
+        ...(threadRow.value.computerWait != null
+          ? { computerWait: threadRow.value.computerWait }
+          : {}),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -1892,6 +1911,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         personCalledByThreadId: threadRow.value.personCalledByThreadId ?? null,
         personCallReason: threadRow.value.personCallReason ?? null,
         source: threadRow.value.source ?? null,
+        ...(threadRow.value.computerWait != null
+          ? { computerWait: threadRow.value.computerWait }
+          : {}),
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {

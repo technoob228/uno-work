@@ -490,11 +490,27 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             workspaceRoot: event.payload.workspaceRoot,
             defaultModelSelection: event.payload.defaultModelSelection,
             scripts: event.payload.scripts,
+            computer: event.payload.computer ?? null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             deletedAt: null,
           });
           return;
+
+        case "project.computer-set": {
+          const existingRow = yield* projectionProjectRepository.getById({
+            projectId: event.payload.projectId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionProjectRepository.upsert({
+            ...existingRow.value,
+            computer: event.payload.computer,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
 
         case "project.meta-updated": {
           const existingRow = yield* projectionProjectRepository.getById({
@@ -699,6 +715,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
             source: event.payload.source,
             updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        // Waiting is not activity: the chat's updated_at stays put.
+        case "thread.computer-wait-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            computerWait: event.payload.computerWait,
           });
           return;
         }

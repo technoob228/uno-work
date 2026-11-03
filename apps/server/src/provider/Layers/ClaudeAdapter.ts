@@ -99,6 +99,7 @@ import {
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { describeClaudeSystemMessage } from "./claudeSystemNotices.ts";
+import { claudeWorkspaceOptions, joinNotes } from "../../myComputer/computerWorkspaceHarness.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -3018,6 +3019,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       // `ps` via --mcp-config); the values ride in the env below.
       const { mcpServers: mcpServerEntries, env: mcpServerEnv } = claudeMcpServers(sessionMcp);
       const preApprovedMcpTools = claudePreApprovedTools(sessionMcp);
+      // The project is on the person's computer: Claude's own shell and file
+      // tools off, uno-work's workspace_* tools there (computerWorkspaceHarness.ts).
+      const workspace = input.computerWorkspace
+        ? claudeWorkspaceOptions(input.computerWorkspace)
+        : null;
+      const appendSystemPrompt = joinNotes(options?.appendSystemPrompt, workspace?.note);
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(Object.keys(mcpServerEntries).length > 0 ? { mcpServers: mcpServerEntries } : {}),
@@ -3027,7 +3034,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         systemPrompt: {
           type: "preset",
           preset: "claude_code",
-          ...(options?.appendSystemPrompt ? { append: options.appendSystemPrompt } : {}),
+          ...(appendSystemPrompt ? { append: appendSystemPrompt } : {}),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
@@ -3045,6 +3052,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
+        ...(workspace
+          ? { disallowedTools: workspace.disallowedTools, toolAliases: workspace.toolAliases }
+          : {}),
         canUseTool,
         env: {
           ...claudeEnvironment,
@@ -3428,6 +3438,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       harnessSandbox: true,
+      computerWorkspace: true,
     },
     startSession,
     sendTurn,
