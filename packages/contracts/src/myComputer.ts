@@ -66,6 +66,9 @@ export const MyComputerPairing = Schema.Struct({
   url: Schema.String,
   commands: MyComputerPairCommands,
   expiresAt: Schema.String,
+  /** The install script's API and DOWNLOAD (CONTRACT §4.3): the desktop installs the helper with them. */
+  api: Schema.optionalKey(Schema.String),
+  download: Schema.optionalKey(Schema.String),
 });
 export type MyComputerPairing = typeof MyComputerPairing.Type;
 

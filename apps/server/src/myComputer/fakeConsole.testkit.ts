@@ -154,6 +154,8 @@ export async function startFakeConsole(): Promise<FakeConsole> {
         url: "https://app.uno4.work/c/7KQ2M9XD",
         commands: { mac: "curl mac", linux: "curl linux", windows: "irm windows" },
         expiresAt: "2026-10-31T12:15:00Z",
+        api: "https://app.uno4.work",
+        download: "https://app.uno4.work/cli/connect/",
       });
     } else if (method === "GET" && path.startsWith("/api/v1/work/computers/pair/")) {
       json(response, 200, { state: "claimed", step: "done", message: null, computerId: 7 });

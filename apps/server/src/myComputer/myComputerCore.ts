@@ -325,7 +325,15 @@ function parsePairing(body: unknown): MyComputerPairing {
       windows: stringOr(commands.windows, ""),
     },
     expiresAt: stringOr(record.expiresAt, ""),
+    // A console from before doesn't send them: the desktop reads the script then.
+    ...(httpsUrl(record.api) ? { api: httpsUrl(record.api)! } : {}),
+    ...(httpsUrl(record.download) ? { download: httpsUrl(record.download)! } : {}),
   };
+}
+
+function httpsUrl(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  return /^https:\/\/[^\s]+$/.test(text) ? text.replace(/\/+$/, "") : null;
 }
 
 function consoleDetail(reply: { readonly status: number; readonly body: unknown }): string {
