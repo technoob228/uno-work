@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { renderBrief, SOURCE, TARGET } from "../../scripts/embed-agent-context.ts";
+import { WORKSPACE_TOOL_NAMES } from "../myComputer/workspaceTools.ts";
 import { UNO_WORK_TOOLS } from "../unoWork/tools.ts";
 import {
   UNO_WORK_TASK_RULES,
@@ -103,7 +104,9 @@ describe("Uno Work environment brief", () => {
   it("names every uno-work tool, and only tools that exist", () => {
     const brief = buildUnoWorkBrief();
     const names = new Set(UNO_WORK_TOOLS.map((tool) => tool.name));
-    for (const name of names) {
+    // workspace_* exist only in a chat on the person's own computer and are
+    // introduced there by their own hint, not by the general brief.
+    for (const name of [...names].filter((entry) => !WORKSPACE_TOOL_NAMES.has(entry))) {
       expect(brief, `brief should mention ${name}`).toContain(`\`${name}\``);
     }
     const mentioned = [...brief.matchAll(/`([a-z]+_[a-z_]+)`/g)].map((match) => match[1]!);
