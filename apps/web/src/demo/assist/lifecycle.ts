@@ -310,9 +310,12 @@ function macFolderProject(path: string): {
 
 function landImported(specs: ReadonlyArray<ImportedSpec>) {
   if (!ops) return;
+  // A second import (the MacBook connected again) makes new chats, not the first ones again.
+  const first = importedCount;
   importedCount += specs.length;
   specs.forEach((spec, index) => {
-    const id = `imp-${spec.tool}-${index}-${spec.title.toLowerCase().replace(/[^a-z]+/g, "-")}`;
+    const slug = spec.title.toLowerCase().replace(/[^a-z]+/g, "-");
+    const id = `imp-${spec.tool}-${first + index}-${slug}`;
     importedHistory.set(id, spec);
     if (isFull()) {
       // A full computer: the chat goes on on the MacBook, in its project's folder.
@@ -531,6 +534,8 @@ export function answerLifecycleRpc(machine: DemoMachine, tag: string, body: unkn
     case WS_METHODS.myComputerStatus:
       return { enabled: true, lifecycle: true, computers: macConnected ? [mac()] : [] };
     case WS_METHODS.myComputerPair:
+      // A new code waits for its own install: an earlier connection doesn't claim it.
+      installStartedAt = null;
       return undefined;
     case WS_METHODS.myComputerPairStatus: {
       if (installStartedAt !== null && Date.now() - installStartedAt > 2_500) {

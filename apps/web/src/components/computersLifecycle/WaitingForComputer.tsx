@@ -22,6 +22,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { CloudIcon, Loader2Icon, WrenchIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { waitForThreadInStore } from "../../assistant/useAssistantChat";
+
 import { CONTINUE_OFFER_MS, useComputersLifecycleOn } from "../../computersLifecycle/flag";
 import { ownComputerChatState } from "../../computersLifecycle/chatState";
 import { errorText, useOwnComputers } from "../../computersLifecycle/useComputers";
@@ -42,6 +44,9 @@ export function useContinueInCloud() {
         const target = await ensureEnvironmentApi(environmentId).computers.continueInCloud({
           threadId,
         });
+        // The new chat reaches the store by its event, maybe after this answer:
+        // opening it before then would land on Home.
+        await waitForThreadInStore(environmentId, target.threadId as ThreadId, 5_000);
         void navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId: target.threadId },

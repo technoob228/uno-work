@@ -15,8 +15,11 @@ import { computersQueryKeys, isNotAvailableYet, useComputersHostId } from "./use
 
 const WORK_POLL_MS = 1_500;
 
-function busy(status: ComputerWorkStatus | undefined): boolean {
-  return status?.scan.state === "scanning" || status?.bring.state === "running";
+function busy(status: ComputerWorkStatus | undefined, scanAsked: boolean): boolean {
+  if (status?.scan.state === "scanning" || status?.bring.state === "running") return true;
+  // A status read can land after the scan request and still say "idle": keep
+  // asking until the asked-for scan shows up.
+  return scanAsked && status?.scan.state === "idle";
 }
 
 export function useComputerWork(computerId: string | null, options: { scan?: boolean } = {}) {
@@ -29,7 +32,8 @@ export function useComputerWork(computerId: string | null, options: { scan?: boo
     enabled: hostId !== null && computerId !== null,
     staleTime: 0,
     retry: false,
-    refetchInterval: (current) => (busy(current.state.data) ? WORK_POLL_MS : false),
+    refetchInterval: (current) =>
+      busy(current.state.data, options.scan === true) ? WORK_POLL_MS : false,
     refetchIntervalInBackground: false,
   });
   const [scanFailed, setScanFailed] = useState<unknown>(null);
@@ -64,9 +68,17 @@ export function useComputerWork(computerId: string | null, options: { scan?: boo
   );
 
   const unavailable = isNotAvailableYet(query.error) || isNotAvailableYet(scanFailed);
+  const failed = query.error !== null || scanFailed !== null;
+  const scanState = query.data?.scan.state;
   return {
     status: query.data,
     unavailable,
+    /** Still looking for projects: nothing answered yet, or the scan hasn't landed. */
+    searching:
+      !failed &&
+      (scanState === undefined ||
+        scanState === "scanning" ||
+        (options.scan === true && scanState === "idle")),
     /** Asked and answered (or failed): an empty list is really empty. */
     settled: query.data !== undefined || query.error !== null || scanFailed !== null,
     scan,

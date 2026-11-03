@@ -529,8 +529,7 @@ function BringStep() {
   }, [computerId, environmentId]);
   const work = useComputerWork(computerId, { scan: true });
   const projects = work.unavailable ? [] : (work.status?.scan.projects ?? []);
-  const projectsSearching =
-    !work.unavailable && (!work.settled || work.status?.scan.state === "scanning");
+  const projectsSearching = !work.unavailable && work.searching;
   const [untickedTools, setUntickedTools] = useState<ReadonlySet<ImportedChatTool>>(new Set());
   /** Projects whose tick differs from `tickedByDefault`. */
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());

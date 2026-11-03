@@ -47,7 +47,7 @@ export function OwnComputerFolderPicker({
   const [open, setOpen] = useState(false);
   const work = useComputerWork(open ? computerId : null, { scan: open });
   const projects = work.status?.scan.projects ?? [];
-  const scanning = !work.settled || work.status?.scan.state === "scanning";
+  const scanning = work.searching;
   const [busyPath, setBusyPath] = useState<string | null>(null);
   const pick = async (path: string) => {
     setBusyPath(path);

@@ -8,7 +8,7 @@
 //   demo-e2e/build-demo.sh && node demo-e2e/computers-lifecycle.mjs [shots-dir]
 import { mkdirSync } from "node:fs";
 
-import { dismissBanners, launch, openDemo, serve } from "./harness.mjs";
+import { dismissBanners, launch, openDemo, send, serve } from "./harness.mjs";
 
 const out = process.argv[2] ?? null;
 if (out) mkdirSync(out, { recursive: true });
@@ -144,6 +144,9 @@ await step("Bring → ready", async () => {
   await id("lc-bring-start").click();
   await id("lc-add-done").waitFor({ timeout: 10_000 });
   expect("Ready", await text("lc-add-done"), "MacBook is ready");
+  expect("Projects copying", await text("lc-done-projects"), "landing");
+  // Copying goes on a few seconds, then the line says where they are.
+  await id("lc-done-projects").getByText("On all my computers").waitFor({ timeout: 20_000 });
   expect("Projects on all computers", await text("lc-done-projects"), "On all my computers");
   await shot("a09-done");
   await id("lc-done").click();
@@ -189,7 +192,10 @@ await step("MacBook wakes → the turn goes on", async () => {
 });
 
 await step("Asleep again → Continue in the cloud", async () => {
+  // Only a turn waits (CONTRACT §7.5): asleep, a new message waits for it.
   await page.evaluate(() => window.__lcDemo.sleep());
+  await send(page, "Now run the linter");
+  await id("lc-waiting-banner").waitFor({ timeout: 15_000 });
   await id("lc-continue-cloud").waitFor({ timeout: 35_000 });
   await id("lc-continue-cloud").click();
   await page.getByText("Continued from MacBook").first().waitFor({ timeout: 15_000 });
