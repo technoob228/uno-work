@@ -277,7 +277,7 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
   const storeFile = path.join(deps.stateDir, STORE_FILE);
   let store: Record<string, Stored> = {};
   const notes: Notes = { since: null, introSeen: false, askedOld: false };
-  let loaded = false;
+  let loading: Promise<void> | null = null;
   const watchers = new Map<string, () => void>();
   const quietUntil = new Map<string, number>();
   const pendingResolve = new Map<string, "mine" | "theirs" | "dismiss">();
@@ -338,9 +338,10 @@ export function createProjectSyncCore(deps: ProjectSyncDeps) {
     );
   };
 
-  const load = async () => {
-    if (loaded) return;
-    loaded = true;
+  // Every caller waits for the same first read: a second caller used to go on
+  // at once, add its project to `store`, and the read then replaced `store`.
+  const load = () => (loading ??= readStore());
+  const readStore = async () => {
     try {
       const raw = JSON.parse(await readFile(storeFile, "utf8")) as Partial<Notes> & {
         projects?: unknown;
