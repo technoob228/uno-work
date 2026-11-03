@@ -121,6 +121,7 @@ import { ServerSettingsService, type ServerSettingsShape } from "./serverSetting
 import { CredentialsVaultService, type CredentialsVaultShape } from "./credentialsVault.ts";
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
+import { ComputersLifecycle } from "./computers/ComputersLifecycle.ts";
 import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
@@ -638,6 +639,9 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ChatImportService)({}),
+          Layer.mock(ComputersLifecycle)({
+            state: Effect.succeed({ lifecycle: false, purposes: [] }),
+          }),
           Layer.mock(MyComputerService)({
             core: {} as MyComputerCore,
             status: Effect.succeed({ enabled: false, computers: [] }),

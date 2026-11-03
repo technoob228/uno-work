@@ -122,6 +122,7 @@ import {
 import { CredentialsVaultService } from "./credentialsVault.ts";
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { MyComputerRpcLayer } from "./myComputer/wsHandlers.ts";
+import { ComputersRpcLayer } from "./computers/wsHandlers.ts";
 import { PullRequestsRpcLayer } from "./pullRequests/wsHandlers.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
@@ -3113,6 +3114,7 @@ export const makeWsRpcHandlersLayer = (
 ) =>
   makeWsRpcLayer(sessionId, role, mobileCompat).pipe(
     Layer.merge(MyComputerRpcLayer),
+    Layer.merge(ComputersRpcLayer),
     Layer.merge(PullRequestsRpcLayer),
     Layer.provide(
       SourceControlDiscoveryLayer.layer.pipe(

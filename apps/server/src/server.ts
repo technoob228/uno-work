@@ -124,6 +124,7 @@ import { CredentialsVaultLive } from "./credentialsVault.ts";
 import { ProjectSyncServiceLive } from "./projectSync/ProjectSyncService.ts";
 import { ChatImportServiceLive } from "./myComputer/import/ChatImportService.ts";
 import { MyComputerServiceLive } from "./myComputer/MyComputerService.ts";
+import { ComputersLifecycleStubLive } from "./computers/ComputersLifecycle.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -526,7 +527,12 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       ProjectSyncServiceLive,
       // "Connect my computer": the person's own computers through the console,
       // and their chats from Claude Code, Codex and OpenCode through that tunnel.
-      ChatImportServiceLive.pipe(Layer.provideMerge(MyComputerServiceLive)),
+      // Computers lifecycle (computers/): what each own computer is for, its work.
+      Layer.mergeAll(
+        ChatImportServiceLive,
+        // computers lifecycle: backend swaps this for its live layer (CONTRACT.md §2)
+        ComputersLifecycleStubLive,
+      ).pipe(Layer.provideMerge(MyComputerServiceLive)),
       // Onboarding "Connect your tools" (console connectors, machine token) and
       // "Give it your material" (reading jobs, gateway key + Cloud storage).
       ConnectorsServiceLive,
