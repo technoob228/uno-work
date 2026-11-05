@@ -4,14 +4,21 @@ import {
   capThreadActivities,
   HTML_RENDER_ACTIVITY_KIND,
   HTML_RENDER_CSP,
+  HTML_RENDER_MESSAGE_GUIDE,
+  HTML_RENDER_MESSAGE_LIMITS,
   HTML_RENDER_SANDBOX,
   HTML_RENDER_THEME_GUIDE,
   htmlRenderFrameDocument,
+  htmlRenderMessageResult,
+  htmlRenderMessageVerdict,
+  htmlRenderSentMessage,
   htmlRenderTheme,
   injectHtmlRenderBootstrap,
   readHtmlRenderImageRequest,
   readHtmlRenderLinkRequest,
+  readHtmlRenderMessageRequest,
   readHtmlRenderReference,
+  normalizeHtmlRenderMessageText,
   withHtmlRenderTheme,
 } from "./htmlRender.ts";
 import { UNO_LIGHT_THEME_COLORS } from "./themePalettes.ts";
@@ -230,5 +237,113 @@ describe("capThreadActivities", () => {
     ];
     expect(capThreadActivities(list, 2).map((entry) => entry.id)).toEqual(["page", "a", "b"]);
     expect(capThreadActivities(list, 10)).toHaveLength(4);
+  });
+});
+
+const messageRequest = (params: unknown, id: unknown = "uno-msg-1") => ({
+  jsonrpc: "2.0",
+  id,
+  method: "ui/message",
+  params,
+});
+
+describe("a page answers the agent (ui/message)", () => {
+  const request = messageRequest;
+
+  it("reads the bootstrap's request and MCP Apps' content blocks", () => {
+    expect(
+      readHtmlRenderMessageRequest(
+        request({ role: "user", content: [{ type: "text", text: "Option A" }] }),
+      ),
+    ).toEqual({ id: "uno-msg-1", text: "Option A" });
+    expect(
+      readHtmlRenderMessageRequest(
+        request({ role: "user", content: { type: "text", text: "B" } }, 7),
+      ),
+    ).toEqual({ id: 7, text: "B" });
+    expect(readHtmlRenderMessageRequest(request({ text: "plain" }))).toEqual({
+      id: "uno-msg-1",
+      text: "plain",
+    });
+  });
+
+  it("refuses what isn't a user's text message", () => {
+    expect(readHtmlRenderMessageRequest(request({ role: "assistant", text: "x" }))).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest(
+        request({
+          content: [
+            { type: "text", text: "a" },
+            { type: "image", data: "…" },
+          ],
+        }),
+      ),
+    ).toBeUndefined();
+    expect(readHtmlRenderMessageRequest(request({ content: [] }))).toBeUndefined();
+    expect(readHtmlRenderMessageRequest(request({ text: "x" }, null))).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest({ ...request({ text: "x" }), method: "ui/open-link" }),
+    ).toBeUndefined();
+    expect(
+      readHtmlRenderMessageRequest({ ...request({ text: "x" }), jsonrpc: "1.0" }),
+    ).toBeUndefined();
+    expect(readHtmlRenderMessageRequest("ui/message")).toBeUndefined();
+  });
+
+  it("cleans the text the chat shows", () => {
+    expect(normalizeHtmlRenderMessageText("  a\r\nb\u0007\u202e\n\n\n\nc  ")).toBe("a\nb\n\nc");
+  });
+
+  const verdict = (overrides: Partial<Parameters<typeof htmlRenderMessageVerdict>[0]>) =>
+    htmlRenderMessageVerdict({
+      text: "Option A",
+      gesture: true,
+      now: 10_000,
+      sentAt: [],
+      ...overrides,
+    });
+
+  it("lets a pressed page send once in a while, and only then", () => {
+    expect(verdict({})).toEqual({ ok: true, text: "Option A" });
+    expect(verdict({ gesture: false })).toMatchObject({ ok: false });
+    expect(verdict({ text: " \n " })).toMatchObject({ ok: false, reason: "Nothing to send." });
+    expect(verdict({ text: "x".repeat(HTML_RENDER_MESSAGE_LIMITS.maxLength) }).ok).toBe(true);
+    expect(verdict({ text: "x".repeat(HTML_RENDER_MESSAGE_LIMITS.maxLength + 1) }).ok).toBe(false);
+  });
+
+  it("keeps a pace and a cap per page", () => {
+    const pace = HTML_RENDER_MESSAGE_LIMITS.minIntervalMs;
+    expect(verdict({ sentAt: [10_000 - pace + 1] }).ok).toBe(false);
+    expect(verdict({ sentAt: [10_000 - pace] }).ok).toBe(true);
+    const many = Array.from({ length: HTML_RENDER_MESSAGE_LIMITS.perPage }, (_, index) => index);
+    expect(verdict({ sentAt: many })).toMatchObject({ ok: false });
+    expect(verdict({ sentAt: many.slice(1) }).ok).toBe(true);
+  });
+
+  it("answers the page and tells it what it sent", () => {
+    expect(htmlRenderMessageResult("uno-msg-1", { ok: true, text: "x" })).toEqual({
+      jsonrpc: "2.0",
+      id: "uno-msg-1",
+      result: { ok: true },
+    });
+    expect(htmlRenderMessageResult(3, { ok: false, reason: "No." })).toEqual({
+      jsonrpc: "2.0",
+      id: 3,
+      result: { ok: false, reason: "No." },
+    });
+    expect(htmlRenderSentMessage(["a"])).toEqual({
+      jsonrpc: "2.0",
+      method: "uno/notifications/sent",
+      params: { messages: ["a"] },
+    });
+  });
+
+  it("gives every page the bridge, and tells the agent about it", () => {
+    const page = injectHtmlRenderBootstrap("<p>x</p>");
+    expect(page).toContain("window.uno=uno");
+    expect(page).toContain('"ui/message"');
+    expect(page).toContain("[data-uno-send]");
+    expect(HTML_RENDER_MESSAGE_GUIDE).toContain("data-uno-send");
+    expect(HTML_RENDER_MESSAGE_GUIDE).toContain("show_card");
   });
 });

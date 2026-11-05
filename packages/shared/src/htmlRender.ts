@@ -385,6 +385,134 @@ function rootRule(theme: HtmlRenderTheme): string {
 // Forward shortcuts after page handlers; text fields retain their keys.
 const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),n=0;if(!s)return;var b=${JSON.stringify(BASE_CSS)};function a(t){if(!t||typeof t!=="object"||!t.variables||typeof t.variables!=="object")return;var c=":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+b;}try{var m=/[#&]${THEME_FRAGMENT_KEY}=([^&]*)/.exec(location.hash);if(m){a(JSON.parse(decodeURIComponent(m[1])));history.replaceState(history.state,"",location.pathname+location.search);}}catch(e){}window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(HOST_CONTEXT_CHANGED_METHOD)}&&p&&p.styles)a({appearance:p.theme,variables:p.styles.variables});});document.addEventListener("click",function(e){var l=e.isTrusted?e.composedPath().find(function(t){return t&&t.matches&&t.matches("a[href]");}):null,u;if(!l)return;try{u=new URL(l.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol)||u.href.split("#")[0]===location.href.split("#")[0])return;if(window.parent!==window){e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",id:"t3-link-"+(++n),method:${JSON.stringify(OPEN_LINK_METHOD)},params:{url:u.href,metaKey:e.metaKey,ctrlKey:e.ctrlKey}},"*");}else{l.setAttribute("target","_blank");l.setAttribute("rel","noopener");}},true);if(window.parent!==window){var h,o,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);if(v===h)return;h=v;window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(HTML_RENDER_SIZE_CHANGED_METHOD)},params:{height:v}},"*");};if(window.ResizeObserver){o=new ResizeObserver(z);o.observe(document.documentElement);}document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z();});window.addEventListener("load",z);window.addEventListener("click",function(e){var t=e.composedPath()[0],u;if(!e.isTrusted||e.defaultPrevented||e.button!==0||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey||!t||t.tagName!=="IMG"||t.closest("a[href],button"))return;u=t.currentSrc||t.src;if(u)setTimeout(function(){if(!e.defaultPrevented)window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(OPEN_IMAGE_METHOD)},params:{src:u,name:t.alt||t.title||""}},"*");});});var K=[],B=[],C=${JSON.stringify(EVENT_CODE_SHORTCUT_KEYS)};window.addEventListener("message",function(e){var d=e.data,p=d&&d.params;if(e.source===window.parent&&d&&d.jsonrpc==="2.0"&&d.method===${JSON.stringify(SHORTCUTS_METHOD)}&&p&&Array.isArray(p.shortcuts)&&Array.isArray(p.blocked)){K=p.shortcuts;B=p.blocked;}});window.addEventListener("keydown",function(e){var t=e.composedPath()[0],c=e.code||"",l=e.key.toLowerCase(),x=/^[a-z]$/.test(l)?[l]:[l,/^Key[A-Z]$/.test(c)?c.slice(3).toLowerCase():"",C.hasOwnProperty(c)?C[c]:""],f,m=function(s){return s&&s.metaKey===e.metaKey&&s.ctrlKey===e.ctrlKey&&s.shiftKey===e.shiftKey&&s.altKey===e.altKey&&x.indexOf(s.key)>-1;};if(!e.isTrusted||e.isComposing||e.getModifierState("AltGraph")&&!/^[a-z0-9]$/i.test(e.key)||t&&(t.isContentEditable||/^(?:INPUT|TEXTAREA|SELECT)$/.test(t.tagName))||!K.some(m)||B.some(m))return;f=function(v){window.removeEventListener("keydown",f);if(v!==e||e.defaultPrevented)return;e.preventDefault();window.parent.postMessage({jsonrpc:"2.0",method:${JSON.stringify(KEY_DOWN_METHOD)},params:{key:e.key,code:e.code,metaKey:e.metaKey,ctrlKey:e.ctrlKey,shiftKey:e.shiftKey,altKey:e.altKey,repeat:e.repeat}},"*");};window.addEventListener("keydown",f);setTimeout(function(){window.removeEventListener("keydown",f);});},true);}})();`;
 
+// ── Uno Work: the page answers the agent ──────────────────────────────────
+//
+// A page may send the agent a message: `uno.send(text)`, or any element with
+// `data-uno-send="…"` (a form sends the text and its fields). It arrives as
+// the person's own message, visible in the chat (Misha, 05.11): a page can
+// never command the agent behind the person's back. The page's script can
+// forge anything it posts, so the app decides (`htmlRenderMessageVerdict`):
+// the frame focused with a live user activation, short text, a pace and a cap
+// per page. The bootstrap's own checks only spare an honest page a refusal.
+
+/** MCP Apps' name for "put this in the chat as the user's message". */
+const MESSAGE_METHOD = "ui/message";
+/** The app tells a page what it already sent, so a card shows itself answered after a reload. */
+const SENT_METHOD = "uno/notifications/sent";
+
+export const HTML_RENDER_MESSAGE_LIMITS = {
+  /** Characters in one message, after trimming. */
+  maxLength: 2000,
+  /** How recent a press must be in the page's own check (the app relies on the browser's activation, about 5 s in Chromium). */
+  gestureWindowMs: 2000,
+  /** One message per this long from one page. */
+  minIntervalMs: 1500,
+  /** Messages one page may ever send; after that the person writes in the chat. */
+  perPage: 20,
+} as const;
+
+const BRIDGE_TIMEOUT_MS = 8000;
+
+/** `window.uno` for the page. Plain ES5: it runs in whatever the page is. */
+const UNO_BRIDGE_SCRIPT = `(function(){if(window.uno)return;var W=${HTML_RENDER_MESSAGE_LIMITS.gestureWindowMs},framed=window.parent!==window,g=0,n=0,wait={},uno={sent:[]};function mark(e){if(e.isTrusted)g=Date.now();}window.addEventListener("pointerdown",mark,true);window.addEventListener("keydown",mark,true);uno.send=function(text){return new Promise(function(done){text=typeof text==="string"?text.trim():"";if(!text)return done({ok:false,reason:"Nothing to send."});if(!framed)return done({ok:false,reason:"This page isn't in a chat."});if(Date.now()-g>W)return done({ok:false,reason:"Press a button in the page to send."});var id="uno-msg-"+(++n);wait[id]=done;window.parent.postMessage({jsonrpc:"2.0",id:id,method:${JSON.stringify(MESSAGE_METHOD)},params:{role:"user",content:[{type:"text",text:text}]}},"*");setTimeout(function(){if(wait[id]){delete wait[id];done({ok:false,reason:"The chat didn't answer. Try again."});}},${BRIDGE_TIMEOUT_MS});});};window.uno=uno;window.addEventListener("message",function(e){var d=e.data,p=d&&d.params,r;if(e.source!==window.parent||!d||d.jsonrpc!=="2.0")return;if(d.method===${JSON.stringify(SENT_METHOD)}&&p&&Array.isArray(p.messages)){uno.sent=p.messages.filter(function(t){return typeof t==="string";});window.dispatchEvent(new CustomEvent("uno:sent",{detail:{messages:uno.sent.slice()}}));return;}if(typeof d.id==="string"&&wait[d.id]){r=wait[d.id];delete wait[d.id];r(d.result&&d.result.ok===true?{ok:true}:{ok:false,reason:String(d.result&&d.result.reason||d.error&&d.error.message||"Not sent.")});}});function run(el,text){if(el.getAttribute("data-uno-state")==="sending")return;el.setAttribute("data-uno-state","sending");uno.send(text).then(function(r){el.setAttribute("data-uno-state",r.ok?"sent":"failed");el.dispatchEvent(new CustomEvent("uno:result",{bubbles:true,detail:r}));});}document.addEventListener("click",function(e){var t=e.composedPath?e.composedPath()[0]:e.target,el=t&&t.closest?t.closest("[data-uno-send]"):null;if(!e.isTrusted||e.defaultPrevented||!el||el.tagName==="FORM")return;e.preventDefault();run(el,el.getAttribute("data-uno-send")||el.textContent||"");});document.addEventListener("submit",function(e){var f=e.target,lines;if(e.defaultPrevented||!f||!f.matches||!f.matches("form[data-uno-send]"))return;e.preventDefault();lines=[f.getAttribute("data-uno-send")||""];new FormData(f).forEach(function(v,k){if(typeof v==="string"&&v.trim())lines.push(k+": "+v.trim());});run(f,lines.join("\\n"));});})();`;
+
+/** A page asking to send the agent a message, as the person. */
+export function readHtmlRenderMessageRequest(
+  data: unknown,
+): { readonly id: string | number; readonly text: string } | undefined {
+  if (typeof data !== "object" || data === null) return undefined;
+  const { jsonrpc, id, method, params } = data as Record<string, unknown>;
+  if (jsonrpc !== "2.0" || method !== MESSAGE_METHOD) return undefined;
+  if (typeof id !== "string" && typeof id !== "number") return undefined;
+  if (typeof params !== "object" || params === null) return undefined;
+  const { role, text, content } = params as Record<string, unknown>;
+  if (role !== undefined && role !== "user") return undefined;
+  if (typeof text === "string") return { id, text };
+  // MCP Apps sends content blocks: one, or a list; only text ones count.
+  const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
+  const texts = blocks.flatMap((block) =>
+    typeof block === "object" &&
+    block !== null &&
+    (block as { type?: unknown }).type === "text" &&
+    typeof (block as { text?: unknown }).text === "string"
+      ? [(block as { text: string }).text]
+      : [],
+  );
+  return texts.length > 0 && texts.length === blocks.length
+    ? { id, text: texts.join("\n") }
+    : undefined;
+}
+
+/** What a message from a page reads like in the chat: no control characters, no runs of blank lines. */
+export function normalizeHtmlRenderMessageText(text: string): string {
+  return (
+    text
+      .replace(/\r\n?/g, "\n")
+      // oxlint-disable-next-line no-control-regex -- removing control characters is the point
+      .replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, "")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+export type HtmlRenderMessageVerdict =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Whether the app puts a page's message in the chat. `gesture`: what the app
+ * itself saw (the frame has focus and the browser reports a user activation),
+ * never what the page says. `sentAt`: when this page's earlier messages went.
+ */
+export function htmlRenderMessageVerdict(input: {
+  readonly text: string;
+  readonly gesture: boolean;
+  readonly now: number;
+  readonly sentAt: ReadonlyArray<number>;
+}): HtmlRenderMessageVerdict {
+  const limits = HTML_RENDER_MESSAGE_LIMITS;
+  if (!input.gesture) return { ok: false, reason: "Press a button in the page to send." };
+  const text = normalizeHtmlRenderMessageText(input.text);
+  if (text.length === 0) return { ok: false, reason: "Nothing to send." };
+  if (text.length > limits.maxLength) {
+    return {
+      ok: false,
+      reason: `Too long to send: keep it under ${limits.maxLength + 1} characters.`,
+    };
+  }
+  if (input.sentAt.length >= limits.perPage) {
+    return {
+      ok: false,
+      reason: `This page has sent ${limits.perPage} messages, its limit. Write in the chat.`,
+    };
+  }
+  const last = input.sentAt.length > 0 ? Math.max(...input.sentAt) : -Infinity;
+  if (input.now - last < limits.minIntervalMs) {
+    return { ok: false, reason: "One moment: the last message just went." };
+  }
+  return { ok: true, text };
+}
+
+export function htmlRenderMessageResult(id: string | number, verdict: HtmlRenderMessageVerdict) {
+  return {
+    jsonrpc: "2.0",
+    id,
+    result: verdict.ok ? { ok: true } : { ok: false, reason: verdict.reason },
+  } as const;
+}
+
+export function htmlRenderSentMessage(messages: ReadonlyArray<string>) {
+  return { jsonrpc: "2.0", method: SENT_METHOD, params: { messages: [...messages] } } as const;
+}
+
+/** For the agent: how a page answers it (`html_render`'s guide). */
+export const HTML_RENDER_MESSAGE_GUIDE = [
+  'Buttons that answer you: <button data-uno-send="text"> (a <form data-uno-send="text"> adds its fields as "name: value" lines) or uno.send(text), which resolves to {ok} or {ok:false,reason}.',
+  "It arrives as the person's visible message, only from a press in the page, at most one per 1.5 s and 20 per page. Use it for live games, pickers, forms.",
+  "For standard choices, quizzes and reports prefer show_card.",
+].join(" ");
+
 function bootstrapMarkup(markup: string): string {
   const dark = htmlRenderTheme(UNO_DARK_THEME_COLORS, "dark");
   const light = htmlRenderTheme(UNO_LIGHT_THEME_COLORS, "light");
@@ -396,6 +524,7 @@ function bootstrapMarkup(markup: string): string {
       : '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<style id="t3-theme">${defaultCss}</style>`,
     `<script>${BOOTSTRAP_SCRIPT}</script>`,
+    `<script>${UNO_BRIDGE_SCRIPT}</script>`,
   ].join("");
 }
 
