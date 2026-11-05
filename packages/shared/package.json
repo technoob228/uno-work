@@ -140,6 +140,10 @@
       "types": "./src/personCard.ts",
       "import": "./src/personCard.ts"
     },
+    "./personCardHtml": {
+      "types": "./src/personCardHtml.ts",
+      "import": "./src/personCardHtml.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
