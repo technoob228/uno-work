@@ -16,6 +16,7 @@ import {
   HTML_RENDER_MAX_FIT_HEIGHT,
   HTML_RENDER_MAX_HEIGHT,
   HTML_RENDER_MAX_TITLE_LENGTH,
+  HTML_RENDER_MESSAGE_GUIDE,
   HTML_RENDER_MIN_HEIGHT,
   HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
@@ -128,7 +129,7 @@ export const htmlRenderTools = (kit: HtmlToolKit): ReadonlyArray<UnoWorkTool> =>
   {
     name: "html_preview",
     group: "person",
-    description: `Check a page before html_render: a screenshot, contentHeight, the console and what was blocked. ${PAGE_RULES} Theme and layout rules are in html_render.`,
+    description: `Check a page before html_render: a screenshot, contentHeight, the console and what was blocked. ${PAGE_RULES} Theme, layout and answer-buttons rules are in html_render; uno.send doesn't send in a preview.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -173,7 +174,7 @@ export const htmlRenderTools = (kit: HtmlToolKit): ReadonlyArray<UnoWorkTool> =>
   {
     name: HTML_RENDER_TOOL_NAME,
     group: "person",
-    description: `Show a finished HTML page (chart, table, diagram, report, mockup) inline in this chat, above your final reply. Do not announce or restate the page. ${PAGE_RULES} The frame fits the page's height up to ${HTML_RENDER_MAX_FIT_HEIGHT}px. ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE}`,
+    description: `Show a finished HTML page (chart, table, diagram, report, mockup) inline in this chat, above your final reply. Do not announce or restate the page. ${PAGE_RULES} The frame fits the page's height up to ${HTML_RENDER_MAX_FIT_HEIGHT}px. ${HTML_RENDER_LAYOUT_GUIDE} ${HTML_RENDER_THEME_GUIDE} ${HTML_RENDER_MESSAGE_GUIDE}`,
     inputSchema: {
       type: "object",
       properties: {

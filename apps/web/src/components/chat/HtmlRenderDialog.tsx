@@ -14,6 +14,7 @@ export function HtmlRenderDialog(props: {
   readonly html: string;
   readonly title: string;
   readonly onClose: () => void;
+  readonly messages?: { readonly threadKey: string; readonly attachmentId: string };
 }) {
   const { onClose } = props;
   const [zoom, setZoom] = useState(1);
@@ -44,7 +45,12 @@ export function HtmlRenderDialog(props: {
       />
       <div className="relative z-10 h-[min(86vh,calc(100vh-110px))] w-[92vw] overflow-auto overscroll-contain rounded-lg bg-background p-4 shadow-2xl ring-1 ring-border/70 [container-type:size]">
         <div className="h-[100cqh] w-[100cqw]" style={{ zoom }}>
-          <HtmlRenderDocument html={props.html} title={props.title} className="block size-full" />
+          <HtmlRenderDocument
+            html={props.html}
+            title={props.title}
+            className="block size-full"
+            {...(props.messages ? { messages: props.messages } : {})}
+          />
         </div>
       </div>
       <div className="relative z-10 flex min-w-0 max-w-[92vw] items-center justify-center gap-3 text-xs text-white/80">

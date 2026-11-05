@@ -6,12 +6,18 @@
  * picture. Those messages may be forged by the page's script, so a link and a
  * picture need the frame focused and a recent gesture, and a key only counts
  * for commands that change what the reader sees.
+ *
+ * A page may also answer the agent (`uno.send`): with the same focus and
+ * gesture, it goes into the chat as the person's visible message
+ * (`htmlRenderPageMessages`), at a pace and with a cap per page.
  */
 import type { KeybindingCommand, KeybindingShortcut } from "@t3tools/contracts";
 import {
   type HtmlRenderShortcut,
   htmlRenderFrameDocument,
+  htmlRenderMessageResult,
   htmlRenderResult,
+  htmlRenderSentMessage,
   htmlRenderShortcutsMessage,
   htmlRenderThemeMessage,
   HTML_RENDER_SANDBOX,
@@ -19,6 +25,7 @@ import {
   readHtmlRenderImageRequest,
   readHtmlRenderKeyDown,
   readHtmlRenderLinkRequest,
+  readHtmlRenderMessageRequest,
   withHtmlRenderTheme,
 } from "@t3tools/shared/htmlRender";
 import {
@@ -33,6 +40,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
+import { pageMessagesSent, sendPageMessage } from "../../htmlRenderPageMessages";
 import { chatLinkTarget, openUntrustedLinkExternally } from "../../lib/externalLinks";
 import { useServerKeybindings } from "../../rpc/serverState";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -80,6 +88,8 @@ export function HtmlRenderDocument(props: {
   readonly title: string;
   readonly className?: string;
   readonly onContentHeight?: (height: number) => void;
+  /** The chat the page is in: what it sends goes there. Without it the page can't send. */
+  readonly messages?: { readonly threadKey: string; readonly attachmentId: string };
 }) {
   const theme = useHtmlRenderTheme();
   const { openUrl } = usePreviewPane();
@@ -117,11 +127,28 @@ export function HtmlRenderDocument(props: {
   useEffect(() => {
     postShortcuts();
   }, [shortcuts, blocked]);
+  const postSent = useEffectEvent(() => {
+    if (props.messages) post(htmlRenderSentMessage(pageMessagesSent(props.messages.attachmentId)));
+  });
 
   const onFrameMessage = useEffectEvent((frame: HTMLIFrameElement, event: MessageEvent) => {
     const height = readHtmlRenderContentHeight(event.data);
     if (height !== undefined) {
       props.onContentHeight?.(height);
+      return;
+    }
+    const message = readHtmlRenderMessageRequest(event.data);
+    if (message !== undefined) {
+      // Stricter than a link: no activation API, no message. Chromium keeps an
+      // activation about 5 s after a press anywhere in the window, so the frame
+      // must hold focus too; the page's own 2 s check is a courtesy only.
+      const gesture =
+        document.activeElement === frame && navigator.userActivation?.isActive === true;
+      const verdict = props.messages
+        ? sendPageMessage({ ...props.messages, text: message.text, gesture })
+        : ({ ok: false, reason: "This page can't send messages here." } as const);
+      post(htmlRenderMessageResult(message.id, verdict));
+      if (verdict.ok) postSent();
       return;
     }
     // A page can take focus by script; this stops opens on load, though not a
@@ -174,6 +201,7 @@ export function HtmlRenderDocument(props: {
           // Covers a theme change that landed while the page was loading.
           postTheme();
           postShortcuts();
+          postSent();
         }}
         // Match the blank document's scheme to avoid a white flash, then follow the app.
         className={cn("border-0 bg-transparent", props.className)}

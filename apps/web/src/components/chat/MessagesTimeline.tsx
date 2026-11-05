@@ -856,6 +856,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           <HtmlRenderFrame
             environmentId={ctx.activeThreadEnvironmentId}
             htmlRender={row.htmlRender}
+            threadKey={ctx.routeThreadKey}
           />
         </div>
       )}

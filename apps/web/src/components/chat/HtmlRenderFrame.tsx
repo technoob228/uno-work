@@ -12,7 +12,7 @@ import {
 } from "@t3tools/shared/htmlRender";
 import { useQuery } from "@tanstack/react-query";
 import { Maximize2Icon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { readEnvironmentApi } from "../../environmentApi";
 import { Button } from "../ui/button";
@@ -50,8 +50,10 @@ async function readPage(environmentId: EnvironmentId, path: string): Promise<str
 export function HtmlRenderFrame(props: {
   readonly environmentId: EnvironmentId | undefined;
   readonly htmlRender: HtmlRenderReference;
+  /** The chat the page is in; a page can answer the agent only with it. */
+  readonly threadKey?: string;
 }) {
-  const { environmentId, htmlRender } = props;
+  const { environmentId, htmlRender, threadKey } = props;
   const { attachmentId, path, title } = htmlRender;
   const [width, setWidth] = useState(HTML_RENDER_COLUMN_WIDTH);
   const [contentHeight, setContentHeight] = useState(() => measuredHeights.get(attachmentId));
@@ -82,6 +84,10 @@ export function HtmlRenderFrame(props: {
     [attachmentId],
   );
   const height = htmlRenderFrameHeight(htmlRender, width, contentHeight);
+  const messages = useMemo(
+    () => (threadKey === undefined ? undefined : { threadKey, attachmentId }),
+    [threadKey, attachmentId],
+  );
 
   if (page.isError) {
     return (
@@ -112,6 +118,7 @@ export function HtmlRenderFrame(props: {
             title={title}
             className="block size-full"
             onContentHeight={onContentHeight}
+            {...(messages ? { messages } : {})}
           />
           <div className="absolute end-2 top-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/html-render:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100">
             <Tooltip>
@@ -131,7 +138,12 @@ export function HtmlRenderFrame(props: {
             </Tooltip>
           </div>
           {expanded ? (
-            <HtmlRenderDialog html={page.data} title={title} onClose={() => setExpanded(false)} />
+            <HtmlRenderDialog
+              html={page.data}
+              title={title}
+              onClose={() => setExpanded(false)}
+              {...(messages ? { messages } : {})}
+            />
           ) : null}
         </>
       ) : (
