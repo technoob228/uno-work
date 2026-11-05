@@ -122,8 +122,10 @@ export function isAsleep(entry: ComputerEntry): boolean {
 
 /**
  * The call that brings a computer back: a sleeping one is woken from its
- * snapshot, a stopped one is started. An archived computer comes back only
- * from the console.
+ * snapshot, a stopped one is started. An archived one is started too: Start
+ * brings it back from the archive with the plan's checks (fishcode StartBox →
+ * UnarchiveBox) and says why when it can't. 05.11: Wake up on an archived
+ * computer did nothing at all (account 2440).
  */
 export function bringBackAction(status: string): "wake" | "start" | null {
   switch (status) {
@@ -133,6 +135,7 @@ export function bringBackAction(status: string): "wake" | "start" | null {
       return "wake";
     case "stopped":
     case "suspended":
+    case "archived":
       return "start";
     default:
       return null;

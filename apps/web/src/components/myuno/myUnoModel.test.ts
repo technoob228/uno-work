@@ -69,7 +69,7 @@ describe("computer rows", () => {
     expect(rowAction(other)).toBe("open");
     expect(rowAction(sleeping)).toBe("wake");
     expect(rowAction(stopped)).toBe("wake");
-    expect(rowAction(archived)).toBe("none");
+    expect(rowAction(archived)).toBe("wake");
     // A server is checked, not opened.
     expect(rowAction(running)).toBe("none");
     expect(rowAction(broken)).toBe("none");
@@ -83,7 +83,7 @@ describe("computer rows", () => {
     expect(bringBackAction("paused_ram")).toBe("wake");
     expect(bringBackAction("stopped")).toBe("start");
     expect(bringBackAction("suspended")).toBe("start");
-    expect(bringBackAction("archived")).toBeNull();
+    expect(bringBackAction("archived")).toBe("start");
     expect(bringBackAction("running")).toBeNull();
   });
 
