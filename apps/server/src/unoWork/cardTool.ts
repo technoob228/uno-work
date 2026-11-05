@@ -291,8 +291,16 @@ const showInChat = (deps: Deps, card: PersonCard, kit: CardToolKit) =>
     return true;
   });
 
-/** What the model is told after the card is up. */
-const shownResult = (card: PersonCard, shown: "chat" | "telegram" | "slack" | "uno-bot") => {
+/**
+ * What the model is told after the card is up. `answering`: this turn
+ * answers their Telegram / Slack message — its final text would go there
+ * too ("Done." when empty), so it ends with NO_REPLY (connectorReplies).
+ */
+const shownResult = (
+  card: PersonCard,
+  shown: "chat" | "telegram" | "slack" | "uno-bot",
+  answering = false,
+) => {
   const waits = card.kind !== "report" || (card.actions?.length ?? 0) > 0;
   const where =
     shown === "chat"
@@ -304,7 +312,12 @@ const shownResult = (card: PersonCard, shown: "chat" | "telegram" | "slack" | "u
     ok: true,
     shown,
     message: where,
-    next: waits ? END_TURN : "Reply with one short line at most, or nothing.",
+    next:
+      answering && shown !== "chat"
+        ? "End your turn now with exactly NO_REPLY: the card is already there. The person's answer comes to this chat as their next message."
+        : waits
+          ? END_TURN
+          : "Reply with one short line at most, or nothing.",
   };
 };
 
@@ -323,11 +336,11 @@ export const personCardTools = (kit: CardToolKit): ReadonlyArray<UnoWorkTool> =>
       Effect.gen(function* () {
         const card = yield* readCard(deps, args, kit);
         const where = args.where === "chat" || args.where === "messenger" ? args.where : "auto";
-        const messenger =
-          where === "messenger" ||
-          (where === "auto" &&
-            deps.answeringMessenger !== undefined &&
-            (yield* deps.answeringMessenger));
+        const answering =
+          where !== "chat" &&
+          deps.answeringMessenger !== undefined &&
+          (yield* deps.answeringMessenger);
+        const messenger = where === "messenger" || answering;
         let messengerNote: string | null = null;
         if (messenger && deps.messengerSend !== undefined) {
           const sent = yield* deps.messengerSend({
@@ -338,7 +351,7 @@ export const personCardTools = (kit: CardToolKit): ReadonlyArray<UnoWorkTool> =>
           });
           if (sent.delivered > 0 && sent.via !== "none") {
             return {
-              ...shownResult(card, sent.via),
+              ...shownResult(card, sent.via, answering),
               ...(sent.drawn !== undefined ? { drawn: sent.drawn } : {}),
               ...(sent.note ? { note: sent.note } : {}),
             };
