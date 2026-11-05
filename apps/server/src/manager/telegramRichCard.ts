@@ -451,6 +451,50 @@ export const removeQuiz = (
   quizzes: (state.quizzes ?? []).filter((entry) => entry.id !== quizId),
 });
 
+/** The stored quiz is still the one `expected` saw: same question, answers and poll. */
+const sameQuizStep = (stored: CardQuiz, expected: CardQuiz): boolean =>
+  stored.id === expected.id &&
+  stored.current === expected.current &&
+  stored.answers.length === expected.answers.length &&
+  stored.pollId === expected.pollId;
+
+/**
+ * Moves a quiz from the step `expected` saw to `next`, only if it is still
+ * there at that step: a quiz finished (its score sent) or moved on by someone
+ * else meanwhile — the idle flush, a second answer — is not brought back
+ * (no second score 30 minutes later). Run it inside one state update.
+ */
+export const advanceQuiz = (
+  state: ConnectorButtonsState,
+  expected: CardQuiz,
+  next: CardQuiz,
+): { readonly state: ConnectorButtonsState; readonly applied: boolean } => {
+  const quizzes = state.quizzes ?? [];
+  const stored = quizzes.find((entry) => entry.id === expected.id);
+  if (stored === undefined || !sameQuizStep(stored, expected)) return { state, applied: false };
+  return {
+    state: { ...state, quizzes: quizzes.map((entry) => (entry === stored ? next : entry)) },
+    applied: true,
+  };
+};
+
+/**
+ * Takes a quiz out to finish it, only if it is still at the step `expected`
+ * saw; `applied: false` — someone else finished or moved it: send no score.
+ */
+export const takeQuiz = (
+  state: ConnectorButtonsState,
+  expected: CardQuiz,
+): { readonly state: ConnectorButtonsState; readonly applied: boolean } => {
+  const quizzes = state.quizzes ?? [];
+  const stored = quizzes.find((entry) => entry.id === expected.id);
+  if (stored === undefined || !sameQuizStep(stored, expected)) return { state, applied: false };
+  return {
+    state: { ...state, quizzes: quizzes.filter((entry) => entry !== stored) },
+    applied: true,
+  };
+};
+
 /**
  * A `poll_answer` for the quiz's current poll: the picks are recorded and
  * the quiz moves on — `next` (send the next poll) or `done` (send the score).

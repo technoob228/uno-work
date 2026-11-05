@@ -208,6 +208,7 @@ import { longPollSignal } from "../../economy/wakeSignal.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import type { PersonCard } from "@t3tools/shared/personCard";
 import {
+  advanceQuiz,
   answerQuiz,
   cardButtons,
   cardPlainText,
@@ -225,6 +226,7 @@ import {
   RICH_MESSAGE_MAX_MEDIA,
   RICH_MESSAGE_MAX_UPLOAD_BYTES,
   richMediaField,
+  takeQuiz,
   type RichCardMedia,
 } from "../telegramRichCard.ts";
 import {
@@ -2287,16 +2289,41 @@ const makeTelegramConnector = Effect.gen(function* () {
       return { ok: true, error, drawn: "text" as const };
     });
 
-  /** A quiz ends (all answered, or left for a while): ONE message with the score. */
+  /**
+   * The quiz's state moves only from the step this caller saw (`advanceQuiz`,
+   * `takeQuiz`), inside one update: an answer and the idle flush racing never
+   * send two scores, nor bring a finished quiz back.
+   */
+  const changeQuiz = (
+    change: (state: ConnectorButtonsState) => {
+      readonly state: ConnectorButtonsState;
+      readonly applied: boolean;
+    },
+  ) =>
+    Effect.gen(function* () {
+      let applied = false;
+      yield* updateButtons((state) => {
+        const result = change(state);
+        applied = result.applied;
+        return result.state;
+      });
+      return applied;
+    });
+
+  /**
+   * A quiz ends (all answered, or left for a while): ONE message with the
+   * score. `seen`: the quiz as the caller read it; if it has moved since
+   * (another answer, the idle flush), someone else ends it and this sends nothing.
+   */
   const finishQuiz = (
     projectId: ProjectId,
     config: ManagerTelegramConnectorConfig,
     quiz: CardQuiz,
-    options: { readonly stopped?: boolean } = {},
+    options: { readonly stopped?: boolean; readonly seen?: CardQuiz } = {},
   ) =>
     Effect.gen(function* () {
-      yield* updateButtons((state) => removeQuiz(state, quiz.id));
-      if (quiz.answers.length === 0) return;
+      const taken = yield* changeQuiz((state) => takeQuiz(state, options.seen ?? quiz));
+      if (!taken || quiz.answers.length === 0) return;
       yield* answerAsPerson({
         projectId,
         config,
@@ -2331,13 +2358,16 @@ const makeTelegramConnector = Effect.gen(function* () {
       const step = answerQuiz(quiz, answer.option_ids ?? [], Date.now());
       if (step.kind === "ignore") return;
       if (step.kind === "done") {
-        yield* finishQuiz(projectId, config, step.quiz);
+        yield* finishQuiz(projectId, config, step.quiz, { seen: quiz });
         return;
       }
-      yield* updateButtons((state) => putQuiz(state, step.quiz));
+      // Only if nobody finished it meanwhile (the idle flush sent its score).
+      if (!(yield* changeQuiz((state) => advanceQuiz(state, quiz, step.quiz)))) return;
       const poll = yield* sendQuizPoll(config.botToken, step.quiz);
       if (poll.ok) {
-        yield* updateButtons((state) => putQuiz(state, { ...step.quiz, pollId: poll.pollId }));
+        yield* changeQuiz((state) =>
+          advanceQuiz(state, step.quiz, { ...step.quiz, pollId: poll.pollId }),
+        );
         return;
       }
       // The next question would not go: what was answered goes now.

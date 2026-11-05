@@ -13,6 +13,7 @@ import {
   type ConnectorButtonsState,
 } from "./connectorButtons.ts";
 import {
+  advanceQuiz,
   answerQuiz,
   cardButtons,
   cardPlainText,
@@ -30,6 +31,7 @@ import {
   removeQuiz,
   richMediaField,
   safeRichMarkdown,
+  takeQuiz,
 } from "./telegramRichCard.ts";
 
 const card = (input: unknown): PersonCard => {
@@ -319,6 +321,43 @@ describe("a quiz as quiz polls", () => {
     expect(quizSummaryText(answered, { stopped: true })).toBe(
       'Quiz «Capitals»: 1/1 right, answered 1 of 2 and stopped.\nQ1 ✓ "Paris"',
     );
+  });
+
+  it("an answer racing the idle flush: one score, the finished quiz doesn't come back", () => {
+    // The answer handler read the quiz at Q1 answered, poll p2 on screen…
+    const seen = { ...start(), answers: [[1]], current: 1, pollId: "p2", lastAtMs: 1_000 };
+    let state = putQuiz(EMPTY_BUTTONS_STATE, seen);
+    // …the flush took it meanwhile (and sent the "stopped" score)…
+    const flushed = takeQuiz(state, seen);
+    expect(flushed.applied).toBe(true);
+    state = flushed.state;
+    // …so the handler's next step changes nothing: no quiz to flush again later.
+    const step = answerQuiz(seen, [0], 2_000);
+    if (step.kind === "ignore") throw new Error("unreachable");
+    const late = advanceQuiz(state, seen, step.quiz);
+    expect(late.applied).toBe(false);
+    expect(late.state.quizzes).toEqual([]);
+    expect(idleQuizzes(late.state, Number.MAX_SAFE_INTEGER)).toEqual([]);
+    // And a second taker (the handler's "done") sends nothing either.
+    expect(takeQuiz(state, seen).applied).toBe(false);
+  });
+
+  it("an answer that moved the quiz on first: the flush's stale copy sends no score", () => {
+    const seen = { ...start(), answers: [[1]], current: 1, pollId: "p2", lastAtMs: 1_000 };
+    let state = putQuiz(EMPTY_BUTTONS_STATE, seen);
+    // The handler moved it on (as a longer quiz would): the next question, no poll yet.
+    const next = { ...seen, answers: [[1], [0]], current: 2, pollId: null, lastAtMs: 2_000 };
+    const moved = advanceQuiz(state, seen, next);
+    expect(moved.applied).toBe(true);
+    state = moved.state;
+    expect(state.quizzes?.[0]).toMatchObject({ current: 2, pollId: null });
+    // The flush still holds the copy at poll p2: it doesn't take the live quiz.
+    expect(takeQuiz(state, seen).applied).toBe(false);
+    expect(state.quizzes).toHaveLength(1);
+    // The poll id lands only on the step that was put.
+    const polled = advanceQuiz(state, state.quizzes![0]!, { ...state.quizzes![0]!, pollId: "p3" });
+    expect(polled.applied).toBe(true);
+    expect(findQuizByPoll(polled.state, "p3")?.id).toBe("quiz1");
   });
 
   it("the quizzes survive a restart and expire", () => {
