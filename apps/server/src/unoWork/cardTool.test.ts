@@ -11,7 +11,7 @@ import { runUnoWorkTool, UNO_WORK_TOOLS, type UnoWorkToolDeps } from "./tools.ts
 const tool = UNO_WORK_TOOLS.find((entry) => entry.name === "show_card")!;
 
 interface Recorded {
-  pages: Array<{ html: string; title: string; height: number }>;
+  pages: Array<{ html: string; title: string; height: number; source?: string }>;
   messages: Array<Record<string, unknown>>;
 }
 
@@ -34,7 +34,7 @@ const makeDeps = (
     },
     home,
     htmlRender: {
-      publish: (page: { html: string; title: string; height: number }) =>
+      publish: (page: { html: string; title: string; height: number; source?: string }) =>
         Effect.sync(() => {
           recorded.pages.push(page);
           return { attachmentId: "a1", title: page.title, height: page.height } as never;
@@ -98,6 +98,8 @@ describe("show_card", () => {
     expect(recorded.pages[0]!.html).toContain("Deploy now?");
     // The html_render bridge is in, so a press answers the chat.
     expect(recorded.pages[0]!.html).toContain("uno.send");
+    // Published as Uno's own card: the only pages whose presses send at once.
+    expect(recorded.pages[0]!.source).toBe("card");
   });
 
   it("a turn from Telegram: the card goes there, drawn natively", async () => {

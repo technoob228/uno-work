@@ -352,7 +352,11 @@ function renderMetric(metric: PersonCardMetric): string {
 
 const DATA_IMAGE = /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,[a-z0-9+/]+=*$/i;
 
-const baseName = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+const baseName = (path: string) =>
+  path
+    .replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .pop() || path;
 
 function renderAction(action: PersonCardAction, index: number, primaryIndex: number): string {
   const style = action.style ?? (index === primaryIndex ? "primary" : "plain");
@@ -625,7 +629,7 @@ function short(t){t=t.split("\\n")[0];return t.length>90?t.slice(0,89)+"\\u2026"
 function say(state,text){if(!status)return;status.setAttribute("data-state",state);status.textContent="";if(state==="sent")status.insertAdjacentHTML("beforeend",IC_CHECK);if(state==="error")status.insertAdjacentHTML("beforeend",IC_ALERT);var s=document.createElement("span");s.textContent=text;status.appendChild(s);}
 function send(text){var u=window.uno;if(!u||typeof u.send!=="function")return Promise.resolve({ok:false,reason:"Update Uno Work to answer here."});return u.send(clip(text)).then(function(r){return r||{ok:false};},function(){return{ok:false,reason:"Not sent."};});}
 function lock(note){locked=true;card.setAttribute("data-state","sent");all("button,input").forEach(function(el){el.disabled=true;});say("sent",note);}
-function submit(text,el,note,done){if(busy||locked)return;busy=true;card.setAttribute("data-busy","");if(el)el.setAttribute("data-sending","");say("sending","Sending\\u2026");send(text).then(function(r){busy=false;card.removeAttribute("data-busy");if(el)el.removeAttribute("data-sending");if(r.ok){lock(note||("Sent \\u00b7 "+short(text)));}else{say("error",r.reason||"Not sent. Try again.");}if(done)done(r.ok===true);});}
+function submit(text,el,note,done){if(busy||locked)return;busy=true;card.setAttribute("data-busy","");if(el)el.setAttribute("data-sending","");say("sending","Sending\\u2026");send(text).then(function(r){busy=false;card.removeAttribute("data-busy");if(el)el.removeAttribute("data-sending");if(r.ok){lock(r.queued==="composer"?"In your message box \\u00b7 press Enter to send":(note||("Sent \\u00b7 "+short(text))));}else{say("error",r.reason||"Not sent. Try again.");}if(done)done(r.ok===true);});}
 function sentList(){var u=window.uno;return u&&Array.isArray(u.sent)?u.sent:[];}
 function onHistory(fn){function run(list){if(!locked&&list.length)fn(list[list.length-1]);}window.addEventListener("uno:sent",function(e){run(e.detail&&Array.isArray(e.detail.messages)?e.detail.messages:[]);});run(sentList());}
 function typing(e){var t=e.target;return t&&(t.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));}

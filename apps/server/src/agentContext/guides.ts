@@ -218,7 +218,7 @@ export function buildUnoWorkGuide(
     case "cards":
       return [
         "## Cards: `show_card`",
-        "One tool for answering the person interactively; Uno draws it where they are: a page in this chat, or in their Telegram (a Rich Message with buttons; a quiz as Telegram quiz polls) when this turn answers their message from there. `where`: auto (default), chat or messenger. After the call END YOUR TURN: what they pick comes back to this chat as their next message, visible to them.",
+        "One tool for answering the person interactively; Uno draws it where they are: a page in this chat, or in their Telegram (a Rich Message with buttons; a quiz as Telegram quiz polls) when this turn answers their message from there. `where`: auto (default), chat or messenger. After the call END YOUR TURN: what they pick comes back to this chat as their next message, visible to them; in this chat its first line is `[from the card «title»]` (from your own page: `[from the page «title»]`).",
         "When — hard triggers:",
         "- The person must decide between options → kind `choice`: `question`, 2–8 `options` ({label, description?, recommended?, prompt?}); `multiple: true` lets them pick several (Telegram: toggles and Done); `allowOther: true` lets them type their own. Never ask a multiple-choice question as plain text.",
         '- Checking knowledge, a lesson, a game move with a right answer → kind `quiz`: 1–10 `questions` ({question, options: ["…"], correct: [index from 0], explanation?}). One message comes back at the end: the score and each answer.',
@@ -231,7 +231,7 @@ export function buildUnoWorkGuide(
         "A wrong call answers with what to fix and a call that works: fix it and call again.",
         "## When a card is not enough",
         "- Telegram, your own layout: `messenger_send` with `rich` (Rich Markdown or Rich HTML, buttons under it).",
-        '- This chat, your own page (a chart, a live game, a form): `html_preview`, then `html_render`. Its buttons answer you as the person\'s message: `<button data-uno-send="text">`, a `<form data-uno-send="text">` (adds its fields), or `window.uno.send("text")` from a click.',
+        '- This chat, your own page (a chart, a live game, a form): `html_preview`, then `html_render`. Its buttons answer you through the person: `<button data-uno-send="text">`, a `<form data-uno-send="text">` (adds its fields) or `window.uno.send("text")` from a click puts the text into their message box, and it reaches you when they press Enter (`uno.send` resolves to `{ok:true, queued:"composer"}`: show "press Enter to send"). Only `show_card` answers in one tap.',
         "- Turn-based games in Telegram: one quiz (or choice) card per move.",
         HTTP_FALLBACK_NOTE,
       ].join("\n\n");

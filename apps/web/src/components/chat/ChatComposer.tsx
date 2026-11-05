@@ -544,6 +544,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 // --------------------------------------------------------------------------
 
 export interface ChatComposerHandle {
+  /** The chat this box writes to (`scopedThreadKey`, or the draft's id). */
+  threadKey?: () => string;
   focusAtEnd: () => void;
   focusAt: (cursor: number) => void;
   openModelPicker: () => void;
@@ -3176,6 +3178,7 @@ export const ChatComposer = memo(
     useImperativeHandle(
       ref,
       () => ({
+        threadKey: () => composerDropKey,
         focusAtEnd: () => {
           if (composerEditorRef.current) {
             composerEditorRef.current.focusAtEnd();
@@ -3321,6 +3324,7 @@ export const ChatComposer = memo(
       [
         activeThread,
         composerDraftTarget,
+        composerDropKey,
         composerCursor,
         draftId,
         composerTerminalContexts,

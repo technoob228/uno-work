@@ -1160,7 +1160,7 @@ describe("telling and showing", () => {
   describe("a page in the chat", () => {
     const withPages = () => {
       const made = makeDeps();
-      const published: Array<{ html: string; title: string; height: number }> = [];
+      const published: Array<{ html: string; title: string; height: number; source?: string }> = [];
       const captured: Array<{ html: string; width: number; appearance: string }> = [];
       const deps: UnoWorkToolDeps = {
         ...made.deps,
@@ -1198,6 +1198,15 @@ describe("telling and showing", () => {
       expect(published[0]?.html).toContain('<style id="t3-theme">');
       expect(published[0]?.height).toBe(400);
       expect(JSON.stringify(result)).toContain("Don't mention or describe the page");
+      // The agent's own page is never published as Uno's card (its presses
+      // only fill the person's message box).
+      expect(published[0]).not.toHaveProperty("source");
+    });
+
+    it("an agent can't publish its page as a card", async () => {
+      const { deps, published } = withPages();
+      await run("html_render", deps, { html: "<p>x</p>", title: "x", source: "card" });
+      expect(published.every((page) => !("source" in page))).toBe(true);
     });
 
     it("takes a file, with images next to it, and keeps nothing of the path", async () => {

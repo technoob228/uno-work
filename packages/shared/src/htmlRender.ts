@@ -27,7 +27,17 @@ export interface HtmlRenderReference {
   readonly title: string;
   readonly height: number;
   readonly heights?: ReadonlyArray<readonly [width: number, height: number]>;
+  /**
+   * "card": drawn by Uno itself from `show_card` (our renderer, no agent
+   * script), so a press answers the agent at once. Set only by the daemon's
+   * show_card publish; any other page (the agent's own HTML, pages from
+   * before 05.11, pages carried to another computer) has none, and what it
+   * sends waits in the person's message box for their Enter.
+   */
+  readonly source?: HtmlRenderSource;
 }
+
+export type HtmlRenderSource = "card";
 
 export const HTML_RENDER_MEASURE_WIDTHS = [320, 375, 430, 520, 640, 728, 860, 1000, 1144] as const;
 
@@ -57,7 +67,7 @@ function readMeasuredHeights(value: unknown) {
 
 export function readHtmlRenderReference(value: unknown): HtmlRenderReference | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const { attachmentId, path, title, height, heights } = value as Record<string, unknown>;
+  const { attachmentId, path, title, height, heights, source } = value as Record<string, unknown>;
   if (
     typeof attachmentId !== "string" ||
     attachmentId.length === 0 ||
@@ -77,6 +87,7 @@ export function readHtmlRenderReference(value: unknown): HtmlRenderReference | u
     title: title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "HTML",
     height: clampHtmlRenderHeight(height),
     ...(measured === undefined ? {} : { heights: measured }),
+    ...(source === "card" ? { source: "card" as const } : {}),
   };
 }
 
@@ -86,6 +97,7 @@ export function htmlRenderReferencesEqual(left: HtmlRenderReference, right: Html
     left.path === right.path &&
     left.title === right.title &&
     left.height === right.height &&
+    left.source === right.source &&
     (left.heights ?? []).length === (right.heights ?? []).length &&
     (left.heights ?? []).every(
       ([width, height], index) =>
@@ -388,12 +400,20 @@ const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("t3-theme"),
 // ── Uno Work: the page answers the agent ──────────────────────────────────
 //
 // A page may send the agent a message: `uno.send(text)`, or any element with
-// `data-uno-send="…"` (a form sends the text and its fields). It arrives as
-// the person's own message, visible in the chat (Misha, 05.11): a page can
-// never command the agent behind the person's back. The page's script can
-// forge anything it posts, so the app decides (`htmlRenderMessageVerdict`):
-// the frame focused with a live user activation, short text, a pace and a cap
-// per page. The bootstrap's own checks only spare an honest page a refusal.
+// `data-uno-send="…"` (a form sends the text and its fields). Where it goes
+// depends on who wrote the page, which the daemon recorded at publish
+// (`HtmlRenderReference.source`), never on anything the page says:
+// - a `show_card` card (our renderer, no agent script) answers at once, as
+//   the person's visible message;
+// - any other page (the agent's own HTML can hide a script that "presses" on
+//   the person's next click) only puts the text into the person's message
+//   box; it goes when they press Enter (Misha, 05.11). The page is answered
+//   `{ok:true, queued:"composer"}` so it can say "press Enter to send".
+// Either way the message starts with where it came from
+// (`htmlRenderMessageMarker`), for the agent. The page's script can forge
+// anything it posts, so the app decides (`htmlRenderMessageVerdict`): the
+// frame focused with a live user activation, short text, a pace and a cap per
+// page. The bootstrap's own checks only spare an honest page a refusal.
 
 /** MCP Apps' name for "put this in the chat as the user's message". */
 const MESSAGE_METHOD = "ui/message";
@@ -414,7 +434,7 @@ export const HTML_RENDER_MESSAGE_LIMITS = {
 const BRIDGE_TIMEOUT_MS = 8000;
 
 /** `window.uno` for the page. Plain ES5: it runs in whatever the page is. */
-const UNO_BRIDGE_SCRIPT = `(function(){if(window.uno)return;var W=${HTML_RENDER_MESSAGE_LIMITS.gestureWindowMs},framed=window.parent!==window,g=0,n=0,wait={},uno={sent:[]};function mark(e){if(e.isTrusted)g=Date.now();}window.addEventListener("pointerdown",mark,true);window.addEventListener("keydown",mark,true);uno.send=function(text){return new Promise(function(done){text=typeof text==="string"?text.trim():"";if(!text)return done({ok:false,reason:"Nothing to send."});if(!framed)return done({ok:false,reason:"This page isn't in a chat."});if(Date.now()-g>W)return done({ok:false,reason:"Press a button in the page to send."});var id="uno-msg-"+(++n);wait[id]=done;window.parent.postMessage({jsonrpc:"2.0",id:id,method:${JSON.stringify(MESSAGE_METHOD)},params:{role:"user",content:[{type:"text",text:text}]}},"*");setTimeout(function(){if(wait[id]){delete wait[id];done({ok:false,reason:"The chat didn't answer. Try again."});}},${BRIDGE_TIMEOUT_MS});});};window.uno=uno;window.addEventListener("message",function(e){var d=e.data,p=d&&d.params,r;if(e.source!==window.parent||!d||d.jsonrpc!=="2.0")return;if(d.method===${JSON.stringify(SENT_METHOD)}&&p&&Array.isArray(p.messages)){uno.sent=p.messages.filter(function(t){return typeof t==="string";});window.dispatchEvent(new CustomEvent("uno:sent",{detail:{messages:uno.sent.slice()}}));return;}if(typeof d.id==="string"&&wait[d.id]){r=wait[d.id];delete wait[d.id];r(d.result&&d.result.ok===true?{ok:true}:{ok:false,reason:String(d.result&&d.result.reason||d.error&&d.error.message||"Not sent.")});}});function run(el,text){if(el.getAttribute("data-uno-state")==="sending")return;el.setAttribute("data-uno-state","sending");uno.send(text).then(function(r){el.setAttribute("data-uno-state",r.ok?"sent":"failed");el.dispatchEvent(new CustomEvent("uno:result",{bubbles:true,detail:r}));});}document.addEventListener("click",function(e){var t=e.composedPath?e.composedPath()[0]:e.target,el=t&&t.closest?t.closest("[data-uno-send]"):null;if(!e.isTrusted||e.defaultPrevented||!el||el.tagName==="FORM")return;e.preventDefault();run(el,el.getAttribute("data-uno-send")||el.textContent||"");});document.addEventListener("submit",function(e){var f=e.target,lines;if(e.defaultPrevented||!f||!f.matches||!f.matches("form[data-uno-send]"))return;e.preventDefault();lines=[f.getAttribute("data-uno-send")||""];new FormData(f).forEach(function(v,k){if(typeof v==="string"&&v.trim())lines.push(k+": "+v.trim());});run(f,lines.join("\\n"));});})();`;
+const UNO_BRIDGE_SCRIPT = `(function(){if(window.uno)return;var W=${HTML_RENDER_MESSAGE_LIMITS.gestureWindowMs},framed=window.parent!==window,g=0,n=0,wait={},uno={sent:[]};function mark(e){if(e.isTrusted)g=Date.now();}window.addEventListener("pointerdown",mark,true);window.addEventListener("keydown",mark,true);uno.send=function(text){return new Promise(function(done){text=typeof text==="string"?text.trim():"";if(!text)return done({ok:false,reason:"Nothing to send."});if(!framed)return done({ok:false,reason:"This page isn't in a chat."});if(Date.now()-g>W)return done({ok:false,reason:"Press a button in the page to send."});var id="uno-msg-"+(++n);wait[id]=done;window.parent.postMessage({jsonrpc:"2.0",id:id,method:${JSON.stringify(MESSAGE_METHOD)},params:{role:"user",content:[{type:"text",text:text}]}},"*");setTimeout(function(){if(wait[id]){delete wait[id];done({ok:false,reason:"The chat didn't answer. Try again."});}},${BRIDGE_TIMEOUT_MS});});};window.uno=uno;window.addEventListener("message",function(e){var d=e.data,p=d&&d.params,r;if(e.source!==window.parent||!d||d.jsonrpc!=="2.0")return;if(d.method===${JSON.stringify(SENT_METHOD)}&&p&&Array.isArray(p.messages)){uno.sent=p.messages.filter(function(t){return typeof t==="string";});window.dispatchEvent(new CustomEvent("uno:sent",{detail:{messages:uno.sent.slice()}}));return;}if(typeof d.id==="string"&&wait[d.id]){r=wait[d.id];delete wait[d.id];r(d.result&&d.result.ok===true?(d.result.queued==="composer"?{ok:true,queued:"composer"}:{ok:true}):{ok:false,reason:String(d.result&&d.result.reason||d.error&&d.error.message||"Not sent.")});}});function run(el,text){if(el.getAttribute("data-uno-state")==="sending")return;el.setAttribute("data-uno-state","sending");uno.send(text).then(function(r){el.setAttribute("data-uno-state",r.ok?(r.queued?"queued":"sent"):"failed");el.dispatchEvent(new CustomEvent("uno:result",{bubbles:true,detail:r}));});}document.addEventListener("click",function(e){var t=e.composedPath?e.composedPath()[0]:e.target,el=t&&t.closest?t.closest("[data-uno-send]"):null;if(!e.isTrusted||e.defaultPrevented||!el||el.tagName==="FORM")return;e.preventDefault();run(el,el.getAttribute("data-uno-send")||el.textContent||"");});document.addEventListener("submit",function(e){var f=e.target,lines;if(e.defaultPrevented||!f||!f.matches||!f.matches("form[data-uno-send]"))return;e.preventDefault();lines=[f.getAttribute("data-uno-send")||""];new FormData(f).forEach(function(v,k){if(typeof v==="string"&&v.trim())lines.push(k+": "+v.trim());});run(f,lines.join("\\n"));});})();`;
 
 /** A page asking to send the agent a message, as the person. */
 export function readHtmlRenderMessageRequest(
@@ -494,12 +514,49 @@ export function htmlRenderMessageVerdict(input: {
   return { ok: true, text };
 }
 
-export function htmlRenderMessageResult(id: string | number, verdict: HtmlRenderMessageVerdict) {
+/** Where a page's message went: sent, or waiting in the person's message box for their Enter. */
+export type HtmlRenderMessageDelivery =
+  | { readonly ok: true; readonly queued?: "composer" }
+  | { readonly ok: false; readonly reason: string };
+
+export function htmlRenderMessageResult(id: string | number, delivery: HtmlRenderMessageDelivery) {
   return {
     jsonrpc: "2.0",
     id,
-    result: verdict.ok ? { ok: true } : { ok: false, reason: verdict.reason },
+    result: !delivery.ok
+      ? { ok: false, reason: delivery.reason }
+      : delivery.queued === "composer"
+        ? { ok: true, queued: "composer" }
+        : { ok: true },
   } as const;
+}
+
+const MARKER_TITLE_LENGTH = 60;
+
+/**
+ * The first line of a message from a page, for the agent: which page sent it.
+ * `[from the card «Which plan?»]` (show_card) or `[from the page «Q3»]`.
+ */
+export function htmlRenderMessageMarker(input: {
+  readonly source: HtmlRenderSource | undefined;
+  readonly title: string;
+}): string {
+  const clean = normalizeHtmlRenderMessageText(input.title)
+    .replace(/[«»[\]\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const title =
+    clean.length > MARKER_TITLE_LENGTH ? `${clean.slice(0, MARKER_TITLE_LENGTH - 1)}…` : clean;
+  const what = input.source === "card" ? "card" : "page";
+  return title ? `[from the ${what} «${title}»]` : `[from the ${what}]`;
+}
+
+/** The message as the agent gets it: the marker line, then the page's text. */
+export function withHtmlRenderMessageMarker(
+  text: string,
+  input: { readonly source: HtmlRenderSource | undefined; readonly title: string },
+): string {
+  return `${htmlRenderMessageMarker(input)}\n${text}`;
 }
 
 export function htmlRenderSentMessage(messages: ReadonlyArray<string>) {
@@ -508,9 +565,9 @@ export function htmlRenderSentMessage(messages: ReadonlyArray<string>) {
 
 /** For the agent: how a page answers it (`html_render`'s guide). */
 export const HTML_RENDER_MESSAGE_GUIDE = [
-  'Buttons that answer you: <button data-uno-send="text"> (a <form data-uno-send="text"> adds its fields as "name: value" lines) or uno.send(text), which resolves to {ok} or {ok:false,reason}.',
-  "It arrives as the person's visible message, only from a press in the page, at most one per 1.5 s and 20 per page. Use it for live games, pickers, forms.",
-  "For standard choices, quizzes and reports prefer show_card.",
+  'Buttons that answer you: <button data-uno-send="text"> (a <form data-uno-send="text"> adds its fields as "name: value" lines) or uno.send(text).',
+  'On a page you write it doesn\'t send: the text goes into the person\'s message box and reaches you when they press Enter; uno.send resolves to {ok:true,queued:"composer"} (say "press Enter to send") or {ok:false,reason}. Only from a press in the page, at most one per 1.5 s and 20 per page.',
+  "For an answer in one tap (a choice, a quiz, a report's next step) use show_card.",
 ].join(" ");
 
 function bootstrapMarkup(markup: string): string {

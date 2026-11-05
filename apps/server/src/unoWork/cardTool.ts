@@ -287,6 +287,9 @@ const showInChat = (deps: Deps, card: PersonCard, kit: CardToolKit) =>
       html: prepared.html,
       title: pageTitle(card),
       height: estimateHeight(card),
+      // Our renderer, no agent script: a press answers at once. The only
+      // place a page gets it (html_render's pages fill the message box).
+      source: "card",
     });
     return true;
   });

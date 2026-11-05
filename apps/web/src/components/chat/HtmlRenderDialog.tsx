@@ -3,6 +3,7 @@ import { MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import type { PageMessageOrigin } from "../../htmlRenderPageMessages";
 import { Button } from "../ui/button";
 import { HtmlRenderDocument } from "./HtmlRenderDocument";
 
@@ -14,7 +15,7 @@ export function HtmlRenderDialog(props: {
   readonly html: string;
   readonly title: string;
   readonly onClose: () => void;
-  readonly messages?: { readonly threadKey: string; readonly attachmentId: string };
+  readonly messages?: PageMessageOrigin;
 }) {
   const { onClose } = props;
   const [zoom, setZoom] = useState(1);

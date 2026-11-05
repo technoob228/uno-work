@@ -1,18 +1,29 @@
 /**
- * A page in the chat answers the agent (`uno.send`, `data-uno-send`): the
- * message goes the way the person's own Enter does, through "Up next" — at
- * once when the agent is free, after its turn when it works, visible and
- * editable while it waits. The page never reaches the agent another way.
+ * A page in the chat answers the agent (`uno.send`, `data-uno-send`). Where it
+ * goes depends on who drew the page, as the daemon recorded it at publish
+ * (`HtmlRenderReference.source`), never on what the page says (Misha, 05.11):
+ * - a `show_card` card ("card": Uno's own renderer) goes the way the person's
+ *   own Enter does, through "Up next": at once when the agent is free, after
+ *   its turn when it works, visible and editable while it waits;
+ * - any other page (the agent's own HTML could hide a script that "presses"
+ *   on the person's next click) only puts the text into this chat's message
+ *   box, focused; it goes when the person presses Enter. Text already in the
+ *   box stays: the page's text is added below it (`attachFromPanel`).
+ * Either way the text starts with a line saying which page it came from
+ * (`withHtmlRenderMessageMarker`), so the agent knows.
  *
- * What each page sent is kept per page (localStorage): the pace and the cap
+ * What each card sent is kept per page (localStorage): the pace and the cap
  * hold across a reload, and a card shows itself answered when it comes back
  * into view (the list unmounts rows out of view; a reload starts the page
- * over).
+ * over). Text put into the box counts for the pace and the cap, but not as
+ * sent: the person may still delete it.
  */
 import {
   HTML_RENDER_MESSAGE_LIMITS,
   htmlRenderMessageVerdict,
-  type HtmlRenderMessageVerdict,
+  withHtmlRenderMessageMarker,
+  type HtmlRenderMessageDelivery,
+  type HtmlRenderSource,
 } from "@t3tools/shared/htmlRender";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
@@ -28,6 +39,8 @@ const MAX_PAGES = 300;
 interface SentFromPage {
   readonly at: number;
   readonly text: string;
+  /** Put into the message box, not sent: not in what the page is told it sent. */
+  readonly draft?: true;
 }
 
 interface PageMessagesState {
@@ -51,7 +64,16 @@ function readSent(value: unknown): Record<string, ReadonlyArray<SentFromPage>> {
         typeof (entry as SentFromPage).at === "number" &&
         typeof (entry as SentFromPage).text === "string",
     );
-    if (valid.length > 0) pages[attachmentId] = valid.slice(-HTML_RENDER_MESSAGE_LIMITS.perPage);
+    if (valid.length > 0) {
+      pages[attachmentId] = valid
+        .slice(-HTML_RENDER_MESSAGE_LIMITS.perPage)
+        .map(
+          (entry): SentFromPage =>
+            entry.draft === true
+              ? { at: entry.at, text: entry.text, draft: true }
+              : { at: entry.at, text: entry.text },
+        );
+    }
   }
   return pages;
 }
@@ -84,24 +106,36 @@ export const usePageMessagesStore = create<PageMessagesState>()(
   ),
 );
 
-/** What this page already sent, oldest first. */
+/** What this page already sent, oldest first (not what only went into the message box). */
 export function pageMessagesSent(attachmentId: string): ReadonlyArray<string> {
-  return (usePageMessagesStore.getState().sentByPage[attachmentId] ?? []).map(
-    (entry) => entry.text,
+  return (usePageMessagesStore.getState().sentByPage[attachmentId] ?? []).flatMap((entry) =>
+    entry.draft ? [] : [entry.text],
   );
 }
 
-/**
- * The app's decision on one message from a page, and the send when it's yes.
- * `gesture` is what the app saw itself (see `HtmlRenderDocument`).
- */
-export function sendPageMessage(input: {
+/** The page in the chat a message comes from, as the app knows it (not as the page says). */
+export interface PageMessageOrigin {
   readonly threadKey: string;
   readonly attachmentId: string;
-  readonly text: string;
-  readonly gesture: boolean;
-  readonly now?: number;
-}): HtmlRenderMessageVerdict {
+  /** From the page's reference: "card" only for show_card's pages. */
+  readonly source: HtmlRenderSource | undefined;
+  readonly title: string;
+}
+
+/**
+ * The app's decision on one message from a page, and where it goes when it's
+ * yes. `gesture` is what the app saw itself (see `HtmlRenderDocument`).
+ * `toComposer` puts text into this chat's message box and focuses it; false:
+ * no message box on screen.
+ */
+export function deliverPageMessage(
+  input: PageMessageOrigin & {
+    readonly text: string;
+    readonly gesture: boolean;
+    readonly toComposer: (text: string) => boolean;
+    readonly now?: number;
+  },
+): HtmlRenderMessageDelivery {
   const now = input.now ?? Date.now();
   const sent = usePageMessagesStore.getState().sentByPage[input.attachmentId] ?? [];
   const verdict = htmlRenderMessageVerdict({
@@ -111,7 +145,17 @@ export function sendPageMessage(input: {
     sentAt: sent.map((entry) => entry.at),
   });
   if (!verdict.ok) return verdict;
-  usePageMessagesStore.getState().record(input.attachmentId, { at: now, text: verdict.text });
-  useQueuedMessageStore.getState().enqueue(input.threadKey, verdict.text);
-  return verdict;
+  const text = withHtmlRenderMessageMarker(verdict.text, input);
+  if (input.source === "card") {
+    usePageMessagesStore.getState().record(input.attachmentId, { at: now, text: verdict.text });
+    useQueuedMessageStore.getState().enqueue(input.threadKey, text);
+    return { ok: true };
+  }
+  if (!input.toComposer(text)) {
+    return { ok: false, reason: "Open this chat to answer: the text goes into your message box." };
+  }
+  usePageMessagesStore
+    .getState()
+    .record(input.attachmentId, { at: now, text: verdict.text, draft: true });
+  return { ok: true, queued: "composer" };
 }
