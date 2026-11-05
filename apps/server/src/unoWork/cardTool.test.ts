@@ -106,6 +106,8 @@ describe("show_card", () => {
     expect(Exit.isSuccess(exit), errorOf(exit)).toBe(true);
     if (!Exit.isSuccess(exit)) return;
     expect(exit.value).toMatchObject({ ok: true, shown: "telegram", drawn: "rich" });
+    // Its final text would go to Telegram too: NO_REPLY.
+    expect((exit.value as { next: string }).next).toContain("exactly NO_REPLY");
     expect(recorded.pages).toEqual([]);
     expect(recorded.messages[0]!.card).toMatchObject({ kind: "quiz", title: "Capitals" });
     expect(String(recorded.messages[0]!.text)).toContain("Capital of France?");
@@ -153,9 +155,18 @@ describe("show_card", () => {
     const exit = await run(deps, { kind: "report", title: "Done", files: ["notes.txt"] });
     expect(Exit.isSuccess(exit), errorOf(exit)).toBe(true);
     expect(recorded.messages[0]!.cardFiles).toEqual([path.join(folder, "notes.txt")]);
-    // No actions: nothing to wait for.
+    // From Telegram: nothing more to say there.
     if (Exit.isSuccess(exit)) {
-      expect((exit.value as { next: string }).next).not.toMatch(/End your turn/);
+      expect((exit.value as { next: string }).next).toContain("exactly NO_REPLY");
+    }
+    // In the chat, a report without actions waits for nothing.
+    const { deps: chatDeps } = makeDeps({ fromMessenger: false, cwd: folder });
+    const inChat = await run(chatDeps, { kind: "report", title: "Done", files: ["notes.txt"] });
+    expect(Exit.isSuccess(inChat), errorOf(inChat)).toBe(true);
+    if (Exit.isSuccess(inChat)) {
+      expect((inChat.value as { next: string }).next).toBe(
+        "Reply with one short line at most, or nothing.",
+      );
     }
   });
 });
