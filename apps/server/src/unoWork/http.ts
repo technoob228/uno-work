@@ -73,6 +73,9 @@ import { UnoComputerService } from "../workspaceRegistry/UnoComputerService.ts";
 import { WorktreeCleanup } from "../worktreeCleanup/WorktreeCleanup.ts";
 import { ConnectorsService } from "../setupTools/ConnectorsService.ts";
 import { ManagerConnectorRepository } from "../persistence/Services/ManagerConnectors.ts";
+import { ManagerConnectorPendingReplyRepository } from "../persistence/Services/ManagerConnectorPendingReplies.ts";
+import { ManagerConnectorPendingReplyRepositoryLive } from "../persistence/Layers/ManagerConnectorPendingReplies.ts";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { openAssistantBotTokenRequest } from "../secretRequestNotify.ts";
@@ -443,6 +446,7 @@ const makeDeps = (input: {
       return remoteStarterOf(input.threadId, (id) => byId.get(id), incoming);
     }).pipe(Effect.orElseSucceed(() => null));
     const projectSync = Option.getOrNull(yield* Effect.serviceOption(ProjectSyncService));
+    const sqlClient = Option.getOrNull(yield* Effect.serviceOption(SqlClient.SqlClient));
     const threadPullRequests = Option.getOrNull(yield* Effect.serviceOption(ThreadPullRequests));
     const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
     const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
@@ -797,13 +801,35 @@ const makeDeps = (input: {
         notify
           .notify({ text, threadId: ThreadId.make(input.threadId), kind })
           .pipe(Effect.map((result) => ({ delivered: result.delivered }))),
-      messengerSend: ({ text, file, buttons }) =>
+      messengerSend: ({ text, file, buttons, card, cardImages, cardFiles, rich }) =>
         notify.sendToPerson({
           threadId: ThreadId.make(input.threadId),
           text,
           ...(file !== undefined ? { file } : {}),
           ...(buttons !== undefined ? { buttons: replyButtons(buttons) } : {}),
+          ...(card !== undefined ? { card } : {}),
+          ...(cardImages !== undefined ? { cardImages } : {}),
+          ...(cardFiles !== undefined ? { cardFiles } : {}),
+          ...(rich !== undefined ? { rich } : {}),
         }),
+      ...(sqlClient !== null
+        ? {
+            // show_card "auto": this turn answers a Telegram / Slack message
+            // (its connector reply is waiting for this very turn).
+            answeringMessenger: Effect.gen(function* () {
+              const pendingReplies = yield* ManagerConnectorPendingReplyRepository;
+              const rows = yield* pendingReplies.listByThread({
+                threadId: ThreadId.make(input.threadId),
+                limit: 20,
+              });
+              return rows.some((row) => row.status === "waiting");
+            }).pipe(
+              Effect.provide(ManagerConnectorPendingReplyRepositoryLive),
+              Effect.provideService(SqlClient.SqlClient, sqlClient),
+              Effect.orElseSucceed(() => false),
+            ),
+          }
+        : {}),
       openInApp: ({ view, path: filePath }) =>
         Effect.gen(function* () {
           if (!(yield* browserBridge.hasSubscribers)) {

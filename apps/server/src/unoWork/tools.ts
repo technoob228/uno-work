@@ -123,6 +123,8 @@ import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
 import type { SparkReply, SparkRequest } from "./sparkClient.ts";
 import { sparkTools } from "./sparkTools.ts";
 import { htmlRenderTools } from "./htmlTools.ts";
+import { personCardTools } from "./cardTool.ts";
+import type { PersonCard } from "@t3tools/shared/personCard";
 import { supportDraftTool } from "./supportDraftTool.ts";
 import { RECORDING_FRAMES, recordingFrames, recordingFramesSummary } from "./recordingFrames.ts";
 import {
@@ -415,14 +417,25 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
   readonly messengerSend?: (input: {
     readonly text: string;
     readonly file?: string;
-    readonly buttons?: ReadonlyArray<
-      ReadonlyArray<{ readonly label: string; readonly value: string }>
-    >;
+    readonly buttons?: ReadonlyArray<ReadonlyArray<ButtonSpec>>;
+    /** `show_card`: the card drawn natively there (`text` is its plain fallback). */
+    readonly card?: PersonCard;
+    readonly cardImages?: ReadonlyArray<string>;
+    readonly cardFiles?: ReadonlyArray<string>;
+    /** `messenger_send` `rich`: a Telegram Rich Message (Markdown or HTML). */
+    readonly rich?: { readonly markdown?: string; readonly html?: string };
   }) => Effect.Effect<{
     readonly delivered: number;
     readonly via: "telegram" | "slack" | "uno-bot" | "none";
     readonly note: string | null;
+    readonly drawn?: "rich" | "poll" | "text";
   }>;
+  /**
+   * This turn answers the person's Telegram / Slack message (an open
+   * connector reply of this chat): `show_card` "auto" draws there. Absent:
+   * never.
+   */
+  readonly answeringMessenger?: Effect.Effect<boolean>;
   readonly openInApp: (input: {
     readonly view: "office" | "files";
     readonly path: string;
@@ -758,6 +771,11 @@ export interface UnoWorkTool {
    * token may not delete sites).
    */
   readonly approvalClientAction?: (args: Record<string, unknown>) => ToolApprovalClientAction;
+  /**
+   * The tool reads its arguments itself (a forgiving validator with errors
+   * that show a working call, `show_card`): only "an object" is checked here.
+   */
+  readonly lenientArgs?: boolean;
   /** Checked before the person is asked: no card for a call that can't work. */
   readonly prepare?: (
     deps: UnoWorkToolDeps,
@@ -2986,7 +3004,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "messenger_send",
     group: "person",
     description:
-      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons: a question with 2–4 answers → buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify).",
+      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). A choice, a quiz or a report: use show_card with where \"messenger\" instead — it draws them there. The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. `rich`: your own Telegram Rich Message (Rich Markdown: headings, tables, lists; or Rich HTML), `text` then goes only where it can't show. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify).",
     inputSchema: {
       type: "object",
       properties: {
@@ -3007,10 +3025,25 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
               label: { type: "string", minLength: 1, maxLength: 40 },
               value: { type: "string", maxLength: 500 },
               row: { type: "integer", minimum: 0, maximum: 5 },
+              style: {
+                type: "string",
+                enum: ["primary", "success", "danger"],
+                description: "Telegram colour: blue, green, red.",
+              },
             },
             required: ["label"],
             additionalProperties: false,
           },
+        },
+        rich: {
+          type: "object",
+          description:
+            'Telegram Rich Message (Bot API sendRichMessage), one of: {"markdown":"# Title\n| a | b |\n|---|---|\n| 1 | 2 |"} or {"html":"<h2>Title</h2><table>…</table>"}. Media only by https URL. Up to 32768 characters.',
+          properties: {
+            markdown: { type: "string", maxLength: 32_000 },
+            html: { type: "string", maxLength: 32_000 },
+          },
+          additionalProperties: false,
         },
       },
       required: ["text"],
@@ -3031,10 +3064,32 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           buttons = normalized.rows;
         }
         const file = str(args, "file")?.trim();
+        const richArg =
+          typeof args.rich === "object" && args.rich !== null
+            ? (args.rich as { readonly markdown?: unknown; readonly html?: unknown })
+            : null;
+        const richMarkdown =
+          typeof richArg?.markdown === "string" && richArg.markdown.trim() !== ""
+            ? richArg.markdown
+            : undefined;
+        const richHtml =
+          typeof richArg?.html === "string" && richArg.html.trim() !== ""
+            ? richArg.html
+            : undefined;
+        if (richMarkdown !== undefined && richHtml !== undefined) {
+          return yield* toolError("rich: give markdown or html, not both.");
+        }
+        const rich =
+          richHtml !== undefined
+            ? { html: richHtml }
+            : richMarkdown !== undefined
+              ? { markdown: richMarkdown }
+              : undefined;
         const result = yield* deps.messengerSend({
           text,
           ...(file ? { file } : {}),
           ...(buttons ? { buttons } : {}),
+          ...(rich ? { rich } : {}),
         });
         if (result.delivered === 0) {
           return yield* toolError(result.note ?? "Not delivered.");
@@ -4516,6 +4571,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
 
   // A page in the chat instead of only text (htmlTools.ts)
   ...htmlRenderTools({ resolvePath: resolveUserPath, fail: toolError }),
+  ...personCardTools({ resolvePath: resolveUserPath, fail: toolError }),
   // The letter Fix Work leaves for the person to send (fixWork/).
   supportDraftTool(toolError),
   // Spark: one JS/Python file answers HTTPS, no server, free (sparkTools.ts)
@@ -4752,7 +4808,12 @@ export function runUnoWorkTool(
 ): Effect.Effect<unknown, UnoWorkToolError> {
   return Effect.gen(function* () {
     const args = (rawArgs ?? {}) as Record<string, unknown>;
-    const problem = validateArgs(tool.inputSchema, args);
+    const problem =
+      tool.lenientArgs === true
+        ? typeof args === "object" && !Array.isArray(args)
+          ? null
+          : "arguments must be an object."
+        : validateArgs(tool.inputSchema, args);
     if (problem !== null) {
       return yield* toolError(`Invalid arguments for ${tool.name}: ${problem}`);
     }
@@ -5092,7 +5153,7 @@ export function connectorMcpTool(
 }
 
 const MCP_INSTRUCTIONS =
-  "Tools for the Uno Work environment this chat runs in: this computer and its apps, widgets, files and cloud, other chats, the person's Inbox and right panel, sites, the Uno account and settings, plus the tools the person connected (Google Drive, Gmail & Calendar, Notion, GitHub) when they did. Call uno_guide for details. Tools that change things may wait for the person's Allow; if they decline, don't retry or work around it.";
+  "Tools for the Uno Work environment this chat runs in: this computer and its apps, widgets, files and cloud, other chats, the person's Inbox and right panel, sites, the Uno account and settings, plus the tools the person connected (Google Drive, Gmail & Calendar, Notion, GitHub) when they did. Call uno_guide for details. Tools that change things may wait for the person's Allow; if they decline, don't retry or work around it. A choice for the person, a quiz, or a finished result worth seeing: show_card (never a multiple-choice question as plain text), then end your turn.";
 
 export const UNO_WORK_MCP_SERVER: McpServerDefinition<UnoWorkToolDeps, UnoWorkToolError> = {
   serverInfo: { name: UNO_WORK_MCP_SERVER_NAME, version: "1.0.0" },

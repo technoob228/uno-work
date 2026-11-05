@@ -28,6 +28,7 @@ import {
   pickPersonChats,
 } from "../connectorNotify.ts";
 import { buttonsAsText, chatHeaderLine } from "../connectorButtons.ts";
+import { escapeRichText } from "../telegramRichCard.ts";
 import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import {
   driveLinkForFile,
@@ -47,6 +48,19 @@ import {
 } from "../Services/ConnectorNotify.ts";
 import { ManagerSlackService } from "./SlackConnector.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
+
+/** The chat's name over the agent's own Rich Message, in its own markup. */
+const withRichHeader = (
+  rich: { readonly markdown?: string; readonly html?: string },
+  header: string | null,
+): { readonly markdown?: string; readonly html?: string } => {
+  if (header === null) return rich;
+  if (rich.html !== undefined) {
+    const escaped = header.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    return { html: `<p>${escaped}</p>${rich.html}` };
+  }
+  return { markdown: `${escapeRichText(header)}\n\n${rich.markdown ?? ""}` };
+};
 
 const makeConnectorNotifyService = Effect.gen(function* () {
   const bindingRepository = yield* ManagerConnectorBindingRepository;
@@ -282,6 +296,29 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         }
         filePath = resolved.path;
       }
+      // A card's pictures and files: the same check as `file`, all or nothing.
+      const cardPaths = { images: [] as string[], files: [] as string[] };
+      if (input.card !== undefined) {
+        const roots = yield* sendableRootsOf(input.threadId);
+        for (const [key, list] of [
+          ["images", input.cardImages ?? []],
+          ["files", input.cardFiles ?? []],
+        ] as const) {
+          for (const raw of list) {
+            const resolved = yield* Effect.promise(() =>
+              resolveConnectorOutgoingFile(raw.trim(), roots, os.homedir()),
+            );
+            if (!resolved.ok) {
+              return {
+                delivered: 0,
+                via: "none" as const,
+                note: `Not sent: ${raw}: ${resolved.reason}.`,
+              };
+            }
+            cardPaths[key].push(resolved.path);
+          }
+        }
+      }
 
       const sizeOfFile =
         filePath === null
@@ -333,7 +370,29 @@ const makeConnectorNotifyService = Effect.gen(function* () {
             : `${chatHeaderLine(title)}\n${input.textWithoutButtons}`;
       let delivered = 0;
       let via: "telegram" | "slack" | "none" = "none";
+      let drawn: "rich" | "poll" | "text" | undefined;
+      const header = fromAssistant ? null : chatHeaderLine(title);
       for (const chat of chats) {
+        if (chat.kind === "telegram" && input.card !== undefined) {
+          const sent = yield* telegram.sendCard({
+            projectId: chat.connectorProjectId,
+            chatId: chat.chatId,
+            threadId: input.threadId,
+            card: input.card,
+            header,
+            images: cardPaths.images,
+            files: cardPaths.files,
+            routeReplies: !fromAssistant,
+            language,
+          });
+          if (sent.ok) {
+            delivered += 1;
+            via = "telegram";
+            if (sent.drawn !== "none") drawn = sent.drawn;
+          }
+          if (sent.error !== null) note = sent.error;
+          continue;
+        }
         if (chat.kind === "telegram") {
           const tooBig = sizeOfFile > TELEGRAM_BOT_UPLOAD_LIMIT_BYTES;
           const sent = yield* telegram.sendRich({
@@ -346,6 +405,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
             routeReplies: !fromAssistant,
             language,
             ...(input.buttonsTtlMs !== undefined ? { buttonsTtlMs: input.buttonsTtlMs } : {}),
+            ...(input.rich ? { rich: withRichHeader(input.rich, header) } : {}),
           });
           if (sent.ok) {
             delivered += 1;
@@ -383,9 +443,14 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           if (filePath !== null && !tooBig) {
             yield* slack.sendFile({ ...place, filePath });
           }
+          for (const cardFile of [...cardPaths.images, ...cardPaths.files]) {
+            yield* slack.sendFile({ ...place, filePath: cardFile });
+          }
         }
       }
-      if (chats.length > 0) return { delivered, via, note };
+      if (chats.length > 0) {
+        return { delivered, via, note, ...(drawn !== undefined ? { drawn } : {}) };
+      }
       // No Telegram / Slack linked to Uno Work: Uno's service bot, text only.
       const service = yield* sendToUnoBot(plainText);
       return service.delivered > 0
@@ -393,8 +458,8 @@ const makeConnectorNotifyService = Effect.gen(function* () {
             delivered: service.delivered,
             via: "uno-bot" as const,
             note:
-              buttons.length > 0 || filePath !== null
-                ? "Sent as text through Uno's bot: buttons and files need Telegram connected in Uno Work (Settings → Telegram)."
+              buttons.length > 0 || filePath !== null || input.card !== undefined
+                ? "Sent as text through Uno's bot: buttons, cards and files need Telegram connected in Uno Work (Settings → Telegram)."
                 : null,
           }
         : {
