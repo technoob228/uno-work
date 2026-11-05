@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.180 — 2026-11-05
+
+- Computers in one way: Add computer for a cloud computer or your own Mac, Windows or Linux; pick Tool (agents use it) or Full (chats run on its files, the agent stays in your cloud — Claude and Hermes). Bring your work: projects and key names, chosen keys go to the encrypted vault. If it sleeps, the chat waits and goes on, or you continue in the cloud. Remove / Delete from the computer's menu.
+- Commands from your cloud computer to your own computer are signed and checked there.
+
 ## v0.0.179 — 2026-11-02
 
 - Screen recordings: the agent hears what you said. If a recording couldn't be transcribed, the agent is told so and asks you instead of acting as if you said nothing.
