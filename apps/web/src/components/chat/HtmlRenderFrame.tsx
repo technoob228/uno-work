@@ -54,7 +54,7 @@ export function HtmlRenderFrame(props: {
   readonly threadKey?: string;
 }) {
   const { environmentId, htmlRender, threadKey } = props;
-  const { attachmentId, path, title } = htmlRender;
+  const { attachmentId, path, title, source } = htmlRender;
   const [width, setWidth] = useState(HTML_RENDER_COLUMN_WIDTH);
   const [contentHeight, setContentHeight] = useState(() => measuredHeights.get(attachmentId));
   const [expanded, setExpanded] = useState(false);
@@ -84,9 +84,11 @@ export function HtmlRenderFrame(props: {
     [attachmentId],
   );
   const height = htmlRenderFrameHeight(htmlRender, width, contentHeight);
+  // `source` from the daemon's record of the page, not from the page: only a
+  // show_card card answers at once; any other page fills the message box.
   const messages = useMemo(
-    () => (threadKey === undefined ? undefined : { threadKey, attachmentId }),
-    [threadKey, attachmentId],
+    () => (threadKey === undefined ? undefined : { threadKey, attachmentId, source, title }),
+    [threadKey, attachmentId, source, title],
   );
 
   if (page.isError) {

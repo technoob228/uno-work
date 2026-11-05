@@ -510,6 +510,8 @@ const makeDeps = (input: {
               ...stored,
               title: page.title.trim().slice(0, HTML_RENDER_MAX_TITLE_LENGTH) || "Page",
               height: clampHtmlRenderHeight(page.height),
+              // Only show_card passes it (cardTool.ts); html_render never does.
+              ...(page.source === "card" ? { source: "card" as const } : {}),
             };
             const createdAt = new Date().toISOString();
             // From the daemon, not from the harness's tool events: the same

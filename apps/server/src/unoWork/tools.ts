@@ -90,7 +90,7 @@ import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
 import { WORK_SITES_PATH, parseWorkSites } from "../sites/workSites.ts";
 import type { InboxPost } from "../inbox/inboxModel.ts";
-import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import type { HtmlRenderReference, HtmlRenderSource } from "@t3tools/shared/htmlRender";
 import type { LateToolApprovalOutcome, ToolApprovalOutcome } from "../browserBridge.ts";
 import { lateApprovalNote, queuedApprovalMessage } from "../personApproval.ts";
 import { McpContent, type McpServerDefinition } from "../mcp/mcpJsonRpc.ts";
@@ -249,6 +249,12 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
       readonly html: string;
       readonly title: string;
       readonly height: number;
+      /**
+       * "card": Uno drew it (`show_card` only — never from a tool's input):
+       * its presses answer the agent at once. Any other page only fills the
+       * person's message box (`HtmlRenderReference.source`).
+       */
+      readonly source?: HtmlRenderSource;
     }) => Effect.Effect<HtmlRenderReference, UnoWorkToolError>;
     readonly capture: (input: {
       readonly html: string;

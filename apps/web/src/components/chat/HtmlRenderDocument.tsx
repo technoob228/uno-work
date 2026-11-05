@@ -7,9 +7,10 @@
  * picture need the frame focused and a recent gesture, and a key only counts
  * for commands that change what the reader sees.
  *
- * A page may also answer the agent (`uno.send`): with the same focus and
- * gesture, it goes into the chat as the person's visible message
- * (`htmlRenderPageMessages`), at a pace and with a cap per page.
+ * A page may also answer the agent (`uno.send`), with the same focus and
+ * gesture, at a pace and with a cap per page (`htmlRenderPageMessages`): a
+ * show_card card as the person's visible message at once, any other page only
+ * into this chat's message box, sent when the person presses Enter.
  */
 import type { KeybindingCommand, KeybindingShortcut } from "@t3tools/contracts";
 import {
@@ -40,7 +41,12 @@ import {
 import { createPortal } from "react-dom";
 
 import { useHtmlRenderTheme } from "../../hooks/useHtmlRenderTheme";
-import { pageMessagesSent, sendPageMessage } from "../../htmlRenderPageMessages";
+import { useComposerHandleContext } from "../../composerHandleContext";
+import {
+  deliverPageMessage,
+  pageMessagesSent,
+  type PageMessageOrigin,
+} from "../../htmlRenderPageMessages";
 import { chatLinkTarget, openUntrustedLinkExternally } from "../../lib/externalLinks";
 import { useServerKeybindings } from "../../rpc/serverState";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -88,10 +94,11 @@ export function HtmlRenderDocument(props: {
   readonly title: string;
   readonly className?: string;
   readonly onContentHeight?: (height: number) => void;
-  /** The chat the page is in: what it sends goes there. Without it the page can't send. */
-  readonly messages?: { readonly threadKey: string; readonly attachmentId: string };
+  /** The chat the page is in and who drew it: what it sends goes there. Without it the page can't send. */
+  readonly messages?: PageMessageOrigin;
 }) {
   const theme = useHtmlRenderTheme();
+  const composerRef = useComposerHandleContext();
   const { openUrl } = usePreviewPane();
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [srcDoc] = useState(() => htmlRenderFrameDocument(withHtmlRenderTheme(props.html, theme)));
@@ -144,11 +151,25 @@ export function HtmlRenderDocument(props: {
       // must hold focus too; the page's own 2 s check is a courtesy only.
       const gesture =
         document.activeElement === frame && navigator.userActivation?.isActive === true;
-      const verdict = props.messages
-        ? sendPageMessage({ ...props.messages, text: message.text, gesture })
+      const origin = props.messages;
+      const delivery = origin
+        ? deliverPageMessage({
+            ...origin,
+            text: message.text,
+            gesture,
+            // Only the box of the chat the page is in: never another chat's.
+            toComposer: (text) => {
+              const composer = composerRef?.current;
+              if (!composer?.attachFromPanel || composer.threadKey?.() !== origin.threadKey) {
+                return false;
+              }
+              composer.attachFromPanel({ text });
+              return true;
+            },
+          })
         : ({ ok: false, reason: "This page can't send messages here." } as const);
-      post(htmlRenderMessageResult(message.id, verdict));
-      if (verdict.ok) postSent();
+      post(htmlRenderMessageResult(message.id, delivery));
+      if (delivery.ok && delivery.queued === undefined) postSent();
       return;
     }
     // A page can take focus by script; this stops opens on load, though not a
