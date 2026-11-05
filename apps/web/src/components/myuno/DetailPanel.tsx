@@ -411,7 +411,9 @@ function ComputerLive({
 
   const offText = entry.broken
     ? "No numbers — it isn't answering."
-    : "Asleep: nothing running, memory kept on disk. Wake it up to see its load.";
+    : box.status === "archived"
+      ? "Archived: its disk is kept in storage. Wake it up to bring it back."
+      : "Asleep: nothing running, memory kept on disk. Wake it up to see its load.";
 
   return (
     <section className="flex flex-col gap-3 border-t border-border/60 px-4 py-3.5">
