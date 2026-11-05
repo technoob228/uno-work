@@ -136,6 +136,10 @@
       "types": "./src/htmlRender.ts",
       "import": "./src/htmlRender.ts"
     },
+    "./personCard": {
+      "types": "./src/personCard.ts",
+      "import": "./src/personCard.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"
