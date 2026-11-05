@@ -184,9 +184,7 @@ function oneOf<T extends string>(value: unknown, allowed: ReadonlyArray<T>): T |
 
 /** Drops the fields left undefined, so optional fields are absent, not `undefined`. */
 function compact<T extends object>(value: { [K in keyof T]-?: T[K] | undefined }): T {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, entry]) => entry !== undefined),
-  ) as T;
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
 }
 
 function readAction(value: unknown, where: string): PersonCardAction {
@@ -231,13 +229,18 @@ function readQuiz(raw: Record<string, unknown>): PersonCardQuiz {
     const where = `questions[${index}]`;
     const question = record(entry, where);
     const options = list(question.options, `${where}.options`, L.quizOptions, L.minOptions).map(
-      (option, optionIndex) => text(option, `${where}.options[${optionIndex}]`, L.optionLabel, true),
+      (option, optionIndex) =>
+        text(option, `${where}.options[${optionIndex}]`, L.optionLabel, true),
     );
-    const correctRaw =
-      typeof question.correct === "number" ? [question.correct] : question.correct;
+    const correctRaw = typeof question.correct === "number" ? [question.correct] : question.correct;
     const correct = list(correctRaw, `${where}.correct`, options.length, 1).map((value) => {
       const index = typeof value === "string" ? Number(value) : value;
-      if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= options.length) {
+      if (
+        typeof index !== "number" ||
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= options.length
+      ) {
         fail(
           `${where}.correct must be option numbers from 0 to ${options.length - 1} (0 is the first option).`,
         );
@@ -251,7 +254,11 @@ function readQuiz(raw: Record<string, unknown>): PersonCardQuiz {
       explanation: text(question.explanation, `${where}.explanation`, L.explanation),
     });
   });
-  return compact<PersonCardQuiz>({ kind: "quiz", title: text(raw.title, "title", L.title), questions });
+  return compact<PersonCardQuiz>({
+    kind: "quiz",
+    title: text(raw.title, "title", L.title),
+    questions,
+  });
 }
 
 function readTable(value: unknown, where: string): PersonCardTable | undefined {
@@ -263,10 +270,14 @@ function readTable(value: unknown, where: string): PersonCardTable | undefined {
   const rows = list(raw.rows, `${where}.rows`, L.tableRows, 1).map((row, rowIndex) => {
     const cells = list(row, `${where}.rows[${rowIndex}]`, columns.length);
     if (cells.length !== columns.length) {
-      fail(`${where}.rows[${rowIndex}] has ${cells.length} cells; it needs ${columns.length}, one per column.`);
+      fail(
+        `${where}.rows[${rowIndex}] has ${cells.length} cells; it needs ${columns.length}, one per column.`,
+      );
     }
     return cells.map((cell, cellIndex) =>
-      cell === null || cell === undefined ? "" : (text(cell, `${where}.rows[${rowIndex}][${cellIndex}]`, L.tableCell) ?? ""),
+      cell === null || cell === undefined
+        ? ""
+        : (text(cell, `${where}.rows[${rowIndex}][${cellIndex}]`, L.tableCell) ?? ""),
     );
   });
   return { columns, rows };
@@ -312,14 +323,54 @@ function readReport(raw: Record<string, unknown>): PersonCardReport {
   });
 }
 
+const LEAKED_ARGUMENT =
+  /<arg_key>([^<]*)<\/arg_key>\s*<arg_value>([\s\S]*?)(?:<\/arg_value>|(?=<arg_key>)|$)/g;
+
+function leakedValue(value: string): unknown {
+  const trimmed = value.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
+ * Some fast models (GLM's tool format) leak the next arguments into a string:
+ * `"kind": "choice<arg_key>multiple</arg_key><arg_value>true"`. Seen on
+ * uno/fast 05.11; the intent is plain, so the pairs become fields again.
+ */
+function repairLeakedArguments(raw: Record<string, unknown>): Record<string, unknown> {
+  const repaired: Record<string, unknown> = { ...raw };
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== "string" || !value.includes("<arg_key>")) continue;
+    repaired[key] = value.slice(0, value.indexOf("<arg_key>")).trim();
+    for (const [, leakedKey, leakedRaw] of value.matchAll(LEAKED_ARGUMENT)) {
+      const name = leakedKey?.trim();
+      if (name && !(name in repaired)) repaired[name] = leakedValue(leakedRaw ?? "");
+    }
+  }
+  return repaired;
+}
+
+/** A card without `kind` (a weak model forgot it): its fields say which it is. */
+function guessKind(raw: Record<string, unknown>): PersonCardKind | undefined {
+  if (Array.isArray(raw.questions)) return "quiz";
+  if (Array.isArray(raw.options) && raw.question !== undefined) return "choice";
+  if (raw.title !== undefined && (raw.summary ?? raw.sections ?? raw.metrics ?? raw.actions)) {
+    return "report";
+  }
+  return undefined;
+}
+
 /**
  * Reads what an agent passed. Forgiving where intent is clear (a string for an
  * option, a single number for `correct`), strict where a guess would mislead.
  */
 export function validatePersonCard(input: unknown): PersonCardValidation {
   try {
-    const raw = record(input, "The card");
-    const kind = raw.kind ?? raw.type;
+    const raw = repairLeakedArguments(record(input, "The card"));
+    const kind = raw.kind ?? raw.type ?? guessKind(raw);
     switch (kind) {
       case "choice":
         return { ok: true, card: readChoice(raw) };
@@ -377,7 +428,9 @@ export function personCardToMarkdown(card: PersonCard): string {
       if (card.metrics) {
         lines.push("");
         for (const metric of card.metrics) {
-          lines.push(`- ${metric.label}: **${metric.value}**${metric.note ? ` (${metric.note})` : ""}`);
+          lines.push(
+            `- ${metric.label}: **${metric.value}**${metric.note ? ` (${metric.note})` : ""}`,
+          );
         }
       }
       for (const section of card.sections ?? []) {
