@@ -13,6 +13,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import type { PersonCard } from "@t3tools/shared/personCard";
 import { Context } from "effect";
 import type { Effect } from "effect";
 
@@ -37,6 +38,20 @@ export interface PersonMessageInput {
   readonly textWithoutButtons?: string;
   /** An approval request: not counted against the chat's message limit. */
   readonly approval?: boolean;
+  /**
+   * `show_card`: the card drawn natively (Telegram: a Rich Message or quiz
+   * polls; telegramRichCard.ts); `text` is its plain Markdown for Slack and
+   * Uno's service bot. `file` / `buttons` are ignored with a card.
+   */
+  readonly card?: PersonCard;
+  /** The card's pictures and files as the agent gave them: checked like `file`. */
+  readonly cardImages?: ReadonlyArray<string>;
+  readonly cardFiles?: ReadonlyArray<string>;
+  /**
+   * `messenger_send` `rich`: the agent's own Telegram Rich Message (Markdown
+   * or HTML); `text` goes where it is refused.
+   */
+  readonly rich?: { readonly markdown?: string; readonly html?: string } | null;
 }
 
 export interface PersonMessageResult {
@@ -45,6 +60,8 @@ export interface PersonMessageResult {
   readonly via: "telegram" | "slack" | "uno-bot" | "none";
   /** Why something was not sent (the file, the buttons, the rate limit). */
   readonly note: string | null;
+  /** A card in Telegram: a Rich Message, quiz polls, or the plain fallback. */
+  readonly drawn?: "rich" | "poll" | "text";
 }
 
 export interface ConnectorNotifyServiceShape {

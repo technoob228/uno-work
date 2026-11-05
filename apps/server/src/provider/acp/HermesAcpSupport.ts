@@ -509,6 +509,7 @@ export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<
     "account_overview",
     "notify",
     "messenger_send",
+    "show_card",
     "settings_read",
     "github_pr_comment",
     "report_publish",

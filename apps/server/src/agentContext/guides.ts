@@ -23,6 +23,7 @@ export const UNO_WORK_GUIDE_TOPICS = [
   "widgets",
   "storage",
   "notify",
+  "cards",
   "browser",
   "chats",
   "secrets",
@@ -211,8 +212,28 @@ export function buildUnoWorkGuide(
         "## You (the agent) telling the person",
         'Call `notify` with a short title in plain words (who/what first: "Notes app is ready", "Backup failed"), an optional body and where Open leads (`open`: a file, an app of this computer, a URL; default this chat). It lands in the Inbox bell of Uno Work; `alsoMessenger: true` also sends it to the person\'s Telegram/Slack when one is connected. One notification per outcome, not per step.',
         "## Writing to the person's Telegram / Slack",
-        "`messenger_send` {text, file, buttons} writes to the person where they are, through the bot they connected (theirs or Uno's), even if they never used the assistant. The message is headed with this chat's title; their reply to it, and their tap on a button, come back to this chat as their message. `buttons`: up to 12 short labels (`label`; optional `value`, sent back instead of the label; optional `row` to group them) — use them for yes/no and 2–4 choices, then end your turn and wait. `file`: a file of this computer (a photo, a document, a voice note), checked like `send_file`. One message per outcome, a phone screen at most. Approvals (Allow / Deny) reach Telegram with buttons by themselves: don't repeat them. Slack gets the text, the options as a list and the file by its path.",
+        '`messenger_send` {text, file, buttons, rich} writes to the person where they are, through the bot they connected (theirs or Uno\'s), even if they never used the assistant. The message is headed with this chat\'s title; their reply to it, and their tap on a button, come back to this chat as their message. A choice, a quiz or a report: `show_card` with `where: "messenger"` instead (see `uno_guide("cards")`). `buttons`: up to 12 short labels (`label`; optional `value`, sent back instead of the label; optional `row`; optional `style` primary | success | danger). `rich`: your own Telegram Rich Message, `{"markdown": "…"}` (headings, tables, lists, `![](https://…)` media by URL) or `{"html": "…"}`; `text` goes where it can\'t show. `file`: a file of this computer (a photo, a document, a voice note), checked like `send_file`. One message per outcome, a phone screen at most. Approvals (Allow / Deny) reach Telegram with buttons by themselves: don\'t repeat them. Slack gets the text, the options as a list and the file by its path.',
         section(apps, "Apps that tell the person something"),
+      ].join("\n\n");
+    case "cards":
+      return [
+        "## Cards: `show_card`",
+        "One tool for answering the person interactively; Uno draws it where they are: a page in this chat, or in their Telegram (a Rich Message with buttons; a quiz as Telegram quiz polls) when this turn answers their message from there. `where`: auto (default), chat or messenger. After the call END YOUR TURN: what they pick comes back to this chat as their next message, visible to them.",
+        "When — hard triggers:",
+        "- The person must decide between options → kind `choice`: `question`, 2–8 `options` ({label, description?, recommended?, prompt?}); `multiple: true` lets them pick several (Telegram: toggles and Done); `allowOther: true` lets them type their own. Never ask a multiple-choice question as plain text.",
+        '- Checking knowledge, a lesson, a game move with a right answer → kind `quiz`: 1–10 `questions` ({question, options: ["…"], correct: [index from 0], explanation?}). One message comes back at the end: the score and each answer.',
+        "- You finished a task with a result worth seeing (numbers, a comparison, findings, files) → kind `report`: `title`, `summary`, `metrics` ({label, value, note?, tone: good | bad | neutral}), `sections` ({heading?, markdown?, table? {columns, rows}}), `images` and `files` (paths on this computer), and 2–4 `actions` ({label, prompt?, style?}) for what to do next.",
+        "- Plain conversational answers stay text. One card per turn.",
+        "Examples:",
+        '{"kind":"choice","question":"Which plan?","options":[{"label":"Small","description":"$5, one bot"},{"label":"Plus","recommended":true}]}',
+        '{"kind":"quiz","title":"Capitals","questions":[{"question":"Capital of France?","options":["Lyon","Paris"],"correct":[1],"explanation":"Paris since 508."}]}',
+        '{"kind":"report","title":"Site checked","summary":"2 problems, both easy","metrics":[{"label":"Speed","value":"92/100","tone":"good"}],"sections":[{"heading":"Problems","markdown":"- No favicon\\n- Slow hero image"}],"actions":[{"label":"Fix both","style":"success"},{"label":"Leave it"}]}',
+        "A wrong call answers with what to fix and a call that works: fix it and call again.",
+        "## When a card is not enough",
+        "- Telegram, your own layout: `messenger_send` with `rich` (Rich Markdown or Rich HTML, buttons under it).",
+        '- This chat, your own page (a chart, a live game, a form): `html_preview`, then `html_render`. Its buttons answer you as the person\'s message: `<button data-uno-send="text">`, a `<form data-uno-send="text">` (adds its fields), or `window.uno.send("text")` from a click.',
+        "- Turn-based games in Telegram: one quiz (or choice) card per move.",
+        HTTP_FALLBACK_NOTE,
       ].join("\n\n");
     case "browser":
       return [
@@ -226,7 +247,7 @@ export function buildUnoWorkGuide(
     case "chats":
       return [
         "## Chats",
-        "`chats_list` (scope children, project or all), `chat_create` (a new chat with a first message; `cwd` puts it in any folder, e.g. a project), `chat_message`, `chat_status` (with `waitMs` to wait for an answer). A chat you create starts at once; the person sees you created it and can write in it too. You may write into any free chat, even one the person wrote in — except a chat the person closed to agents (409 `agents_closed`: don't retry, tell the person). The person can hide chats started by agents or by Uno; `chat_call_person` (this chat or another by `threadId`, with a short `reason`) shows one as theirs until they open it, and `chat_person_not_needed` takes it back. A question or an approval calls them anyway.",
+        '`chats_list` (scope children, project or all), `chat_create` (a new chat with a first message; `cwd` puts it in any folder, e.g. a project), `chat_message`, `chat_status` (with `waitMs` to wait for an answer). A chat you create starts at once; the person sees you created it and can write in it too. You may write into any free chat, even one the person wrote in — except a chat the person closed to agents (409 `agents_closed`: don\'t retry, tell the person). The person can hide chats started by agents or by Uno; `chat_call_person` (this chat or another by `threadId`, with a short `reason`) shows one as theirs until they open it, and `chat_person_not_needed` takes it back. A question or an approval calls them anyway. Asking the person something with options, a quiz, a result with next steps: `show_card` (`uno_guide("cards")`).',
         HTTP_FALLBACK_NOTE,
         buildAgentThreadsInstructions(),
       ].join("\n\n");

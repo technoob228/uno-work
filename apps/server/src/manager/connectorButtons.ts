@@ -42,16 +42,22 @@ export const APPROVAL_BUTTONS_TTL_MS = 24 * 60 * 60_000;
 export const REPLY_ROUTE_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_GROUPS = 500;
 const MAX_ROUTES = 2_000;
+const MAX_QUIZZES = 100;
 
 /** Prefix of our `callback_data` (versioned: a future format can coexist). */
 const CALLBACK_PREFIX = "ub1";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
+/** Telegram's button colours (`InlineKeyboardButton.style`, Bot API 9.4). */
+export type ButtonStyle = "primary" | "success" | "danger";
+export const BUTTON_STYLES: ReadonlyArray<ButtonStyle> = ["primary", "success", "danger"];
+
 /** A button as an agent asks for it. `value` defaults to the label. */
 export interface ButtonSpec {
   readonly label: string;
   readonly value: string;
+  readonly style?: ButtonStyle;
 }
 
 /** What pressing a button does. */
@@ -65,11 +71,19 @@ export type ConnectorButtonAction =
       readonly decision: "accept" | "decline";
     }
   /** A Uno Work tool approval (the card, `personApproval.ts`). */
-  | { readonly kind: "tool-approval"; readonly requestId: string; readonly approved: boolean };
+  | { readonly kind: "tool-approval"; readonly requestId: string; readonly approved: boolean }
+  /**
+   * An option of a card's choice with `multiple` (`show_card`): a press picks
+   * or unpicks it (the group stays); `value` is what it sends once picked.
+   */
+  | { readonly kind: "toggle"; readonly value: string }
+  /** "Done" under the toggles: the picked options go as the person's message. */
+  | { readonly kind: "submit" };
 
 export interface ConnectorButton {
   readonly label: string;
   readonly action: ConnectorButtonAction;
+  readonly style?: ButtonStyle;
 }
 
 export interface ButtonGroup {
@@ -88,7 +102,47 @@ export interface ButtonGroup {
   readonly caption?: boolean;
   /** The person's language, for the lines added later. */
   readonly language?: "ru" | "en";
+  /**
+   * The message is a Rich Message (`sendRichMessage`): once pressed it keeps
+   * its content and its keyboard turns into one "✔ <label>" line.
+   */
+  readonly rich?: boolean;
+  /** Toggle buttons picked so far (indexes in reading order). */
+  readonly picked?: ReadonlyArray<number>;
   readonly createdAtMs: number;
+  readonly expiresAtMs: number;
+}
+
+/** A question of a card quiz sent as Telegram quiz polls, one at a time. */
+export interface CardQuizQuestion {
+  readonly question: string;
+  readonly options: ReadonlyArray<string>;
+  readonly correct: ReadonlyArray<number>;
+  readonly explanation?: string;
+}
+
+/**
+ * A `show_card` quiz in Telegram: native quiz polls (non-anonymous, so the
+ * bot gets each `poll_answer`), the next one after each answer; at the end
+ * ONE message with the score goes to the chat as the person's.
+ */
+export interface CardQuiz {
+  readonly id: string;
+  readonly connectorProjectId: string;
+  readonly chatId: string;
+  readonly threadId: string;
+  readonly title: string | null;
+  readonly questions: ReadonlyArray<CardQuizQuestion>;
+  /** The question on screen now. */
+  readonly current: number;
+  /** Its poll (set once Telegram accepted it). */
+  readonly pollId: string | null;
+  /** The person's picks per answered question, in order. */
+  readonly answers: ReadonlyArray<ReadonlyArray<number>>;
+  readonly language?: "ru" | "en";
+  readonly createdAtMs: number;
+  /** The last send or answer: a quiz left half done is closed after a while. */
+  readonly lastAtMs: number;
   readonly expiresAtMs: number;
 }
 
@@ -103,6 +157,8 @@ export interface SentMessageRoute {
 export interface ConnectorButtonsState {
   readonly groups: ReadonlyArray<ButtonGroup>;
   readonly routes: ReadonlyArray<SentMessageRoute>;
+  /** Card quizzes in progress (absent in states written before 05.11). */
+  readonly quizzes?: ReadonlyArray<CardQuiz>;
 }
 
 export const EMPTY_BUTTONS_STATE: ConnectorButtonsState = { groups: [], routes: [] };
@@ -121,7 +177,11 @@ const parseButton = (raw: unknown): ButtonSpec | string => {
     return label === null ? "a button needs a label" : { label, value: label };
   }
   if (typeof raw !== "object" || raw === null) return "a button is {label, value}";
-  const record = raw as { readonly label?: unknown; readonly value?: unknown };
+  const record = raw as {
+    readonly label?: unknown;
+    readonly value?: unknown;
+    readonly style?: unknown;
+  };
   const label = cleanLabel(record.label);
   if (label === null) return "a button needs a label";
   if (label.length > MAX_BUTTON_LABEL_CHARS) {
@@ -134,7 +194,8 @@ const parseButton = (raw: unknown): ButtonSpec | string => {
   if (value.length > MAX_BUTTON_VALUE_CHARS) {
     return `a value is over ${MAX_BUTTON_VALUE_CHARS} characters`;
   }
-  return { label, value };
+  const style = BUTTON_STYLES.find((entry) => entry === record.style);
+  return style === undefined ? { label, value } : { label, value, style };
 };
 
 /**
@@ -183,8 +244,15 @@ export const normalizeButtonRows = (
     }
     return { ok: true, rows };
   }
-  const sideBySide = all.length <= 3 && all.every((button) => button.label.length <= 14);
-  return { ok: true, rows: sideBySide ? [all] : all.map((button) => [button]) };
+  return { ok: true, rows: layoutButtons(all) };
+};
+
+/** A flat list laid out: up to three short labels side by side, else one per row. */
+export const layoutButtons = <T extends { readonly label: string }>(
+  buttons: ReadonlyArray<T>,
+): ReadonlyArray<ReadonlyArray<T>> => {
+  const sideBySide = buttons.length <= 3 && buttons.every((button) => button.label.length <= 14);
+  return sideBySide ? [buttons] : buttons.map((button) => [button]);
 };
 
 /** Agent buttons as actions: each answers with its value. */
@@ -195,6 +263,7 @@ export const replyButtons = (
     row.map((button) => ({
       label: button.label,
       action: { kind: "reply", value: button.value } as const,
+      ...(button.style !== undefined ? { style: button.style } : {}),
     })),
   );
 
@@ -226,21 +295,73 @@ export const parseCallbackData = (
 export interface TelegramInlineButton {
   readonly text: string;
   readonly callback_data: string;
+  readonly style?: ButtonStyle;
 }
 
-/** `reply_markup` of the message: the group's rows, buttons numbered in reading order. */
+/** The mark of a picked toggle (a multiple choice). */
+export const PICKED_MARK = "✅";
+
+/**
+ * `reply_markup` of the message: the group's rows, buttons numbered in
+ * reading order; a picked toggle shows {@link PICKED_MARK}.
+ */
 export const buildInlineKeyboard = (
-  group: Pick<ButtonGroup, "id" | "rows">,
+  group: Pick<ButtonGroup, "id" | "rows" | "picked">,
 ): { readonly inline_keyboard: ReadonlyArray<ReadonlyArray<TelegramInlineButton>> } => {
   let index = 0;
+  const picked = new Set(group.picked ?? []);
   return {
     inline_keyboard: group.rows.map((row) =>
-      row.map((button) => ({
-        text: button.label,
-        callback_data: callbackDataFor(group.id, index++),
-      })),
+      row.map((button) => {
+        const at = index++;
+        const mark = button.action.kind === "toggle" && picked.has(at) ? `${PICKED_MARK} ` : "";
+        return {
+          text: `${mark}${button.label}`,
+          callback_data: callbackDataFor(group.id, at),
+          ...(button.style !== undefined ? { style: button.style } : {}),
+        };
+      }),
     ),
   };
+};
+
+/** A toggle pressed: its index joins the picked ones, or leaves them. */
+export const toggleGroupPick = (
+  state: ConnectorButtonsState,
+  groupId: string,
+  index: number,
+): { readonly state: ConnectorButtonsState; readonly group: ButtonGroup | null } => {
+  let changed: ButtonGroup | null = null;
+  const groups = state.groups.map((group) => {
+    if (group.id !== groupId) return group;
+    const picked = new Set(group.picked ?? []);
+    if (picked.has(index)) picked.delete(index);
+    else picked.add(index);
+    changed = { ...group, picked: [...picked].toSorted((left, right) => left - right) };
+    return changed;
+  });
+  return { state: { ...state, groups }, group: changed };
+};
+
+/** What "Done" sends: the values of the picked toggles, in reading order; null: none. */
+export const pickedValues = (group: ButtonGroup): ReadonlyArray<string> | null => {
+  const picked = new Set(group.picked ?? []);
+  const values = group.rows
+    .flat()
+    .flatMap((button, index) =>
+      button.action.kind === "toggle" && picked.has(index) ? [button.action.value] : [],
+    );
+  return values.length === 0 ? null : values;
+};
+
+/** The labels of the picked toggles, for the "✔ …" line. */
+export const pickedLabels = (group: ButtonGroup): ReadonlyArray<string> => {
+  const picked = new Set(group.picked ?? []);
+  return group.rows
+    .flat()
+    .flatMap((button, index) =>
+      button.action.kind === "toggle" && picked.has(index) ? [button.label] : [],
+    );
 };
 
 const buttonAt = (group: ButtonGroup, index: number): ConnectorButton | null =>
@@ -256,6 +377,11 @@ export const pruneButtonsState = (
   routes: state.routes
     .filter((route) => nowMs - route.atMs < REPLY_ROUTE_TTL_MS)
     .slice(-MAX_ROUTES),
+  ...(state.quizzes !== undefined
+    ? {
+        quizzes: state.quizzes.filter((quiz) => quiz.expiresAtMs > nowMs).slice(-MAX_QUIZZES),
+      }
+    : {}),
 });
 
 export const addButtonGroup = (
@@ -329,7 +455,11 @@ export const groupsForRequest = (
 /** Drop malformed entries of a state read from disk. */
 export const decodeButtonsState = (raw: unknown): ConnectorButtonsState => {
   if (typeof raw !== "object" || raw === null) return EMPTY_BUTTONS_STATE;
-  const record = raw as { readonly groups?: unknown; readonly routes?: unknown };
+  const record = raw as {
+    readonly groups?: unknown;
+    readonly routes?: unknown;
+    readonly quizzes?: unknown;
+  };
   const groups = Array.isArray(record.groups)
     ? record.groups.filter(
         (group): group is ButtonGroup =>
@@ -355,7 +485,22 @@ export const decodeButtonsState = (raw: unknown): ConnectorButtonsState => {
           typeof route.atMs === "number",
       )
     : [];
-  return { groups, routes };
+  const quizzes = Array.isArray(record.quizzes)
+    ? record.quizzes.filter(
+        (quiz): quiz is CardQuiz =>
+          typeof quiz === "object" &&
+          quiz !== null &&
+          typeof quiz.id === "string" &&
+          typeof quiz.chatId === "string" &&
+          typeof quiz.connectorProjectId === "string" &&
+          typeof quiz.threadId === "string" &&
+          typeof quiz.current === "number" &&
+          typeof quiz.expiresAtMs === "number" &&
+          Array.isArray(quiz.questions) &&
+          Array.isArray(quiz.answers),
+      )
+    : [];
+  return quizzes.length > 0 ? { groups, routes, quizzes } : { groups, routes };
 };
 
 // ── A press ──────────────────────────────────────────────────────────────

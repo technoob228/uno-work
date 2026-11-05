@@ -152,6 +152,7 @@ import {
   toNormalizedMessage,
   mediaLimitReply,
   TELEGRAM_BOT_UPLOAD_LIMIT_BYTES,
+  TELEGRAM_PHOTO_UPLOAD_LIMIT_BYTES,
   TELEGRAM_SEND_FILE_HINT,
   type TelegramIncomingMessage,
   type TelegramMediaDescriptor,
@@ -189,6 +190,27 @@ import {
 } from "../channelRelay.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import type { PersonCard } from "@t3tools/shared/personCard";
+import {
+  answerQuiz,
+  cardButtons,
+  cardPlainText,
+  cardRichMarkdown,
+  findQuizByPoll,
+  idleQuizzes,
+  newCardQuiz,
+  nothingPickedToast,
+  pickedMessage,
+  putQuiz,
+  quizIntroText,
+  quizPollParams,
+  quizSummaryText,
+  removeQuiz,
+  RICH_MESSAGE_MAX_MEDIA,
+  RICH_MESSAGE_MAX_UPLOAD_BYTES,
+  richMediaField,
+  type RichCardMedia,
+} from "../telegramRichCard.ts";
 import {
   addButtonGroup,
   addSentMessageRoute,
@@ -202,13 +224,17 @@ import {
   groupsForRequest,
   newButtonGroupId,
   parseCallbackData,
+  pickedLabels,
+  pickedValues,
   pressedLine,
   pressToastText,
+  toggleGroupPick,
   pruneButtonsState,
   removeButtonGroup,
   requestGoneLine,
   setGroupMessageId,
   type ButtonGroup,
+  type CardQuiz,
   type ConnectorButton,
   type ConnectorButtonsState,
 } from "../connectorButtons.ts";
@@ -243,6 +269,17 @@ export interface ManagerTelegramServiceShape {
   readonly sendRich: (input: TelegramRichMessage) => Effect.Effect<{
     readonly ok: boolean;
     readonly error: string | null;
+  }>;
+  /**
+   * A `show_card` card to the person (telegramRichCard.ts): a choice or a
+   * report as a Rich Message with our buttons, a quiz as quiz polls; where
+   * Telegram (or the relay) refuses that, the old message with buttons.
+   * `drawn` says what went. Never fails.
+   */
+  readonly sendCard: (input: TelegramCardMessage) => Effect.Effect<{
+    readonly ok: boolean;
+    readonly error: string | null;
+    readonly drawn: "rich" | "poll" | "text" | "none";
   }>;
   /**
    * An approval request was answered (in the app, with /approve, by a
@@ -333,6 +370,26 @@ export interface TelegramRichMessage {
   /** Approval buttons live shorter than a choice. */
   readonly buttonsTtlMs?: number;
   readonly language?: "ru" | "en";
+  /**
+   * `messenger_send` `rich`: the agent's own Rich Message (Markdown or HTML,
+   * Bot API `InputRichMessage`), the buttons under it; `text` is what goes
+   * where a Rich Message is refused.
+   */
+  readonly rich?: { readonly markdown?: string; readonly html?: string } | null;
+}
+
+export interface TelegramCardMessage {
+  readonly projectId: ProjectId;
+  readonly chatId: string;
+  readonly threadId: ThreadId;
+  readonly card: PersonCard;
+  /** "💬 <chat>" for a work chat; null for the assistant itself. */
+  readonly header: string | null;
+  /** The report's pictures and files, absolute, checked against the sendable roots. */
+  readonly images?: ReadonlyArray<string>;
+  readonly files?: ReadonlyArray<string>;
+  readonly routeReplies?: boolean;
+  readonly language?: "ru" | "en";
 }
 
 /** A press of an inline button (`allowed_updates` includes it). */
@@ -344,13 +401,21 @@ export interface TelegramCallbackQuery {
   readonly data?: string;
 }
 
-/** Updates the poller asks for: messages, and presses of our buttons. */
-export const TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query"] as const;
+/** An answer to one of our quiz polls (they are non-anonymous). */
+export interface TelegramPollAnswer {
+  readonly poll_id: string;
+  readonly user?: { readonly id: number; readonly is_bot?: boolean };
+  readonly option_ids?: ReadonlyArray<number>;
+}
+
+/** Updates the poller asks for: messages, presses of our buttons, answers to our quizzes. */
+export const TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query", "poll_answer"] as const;
 
 export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: TelegramIncomingMessage;
   readonly callback_query?: TelegramCallbackQuery;
+  readonly poll_answer?: TelegramPollAnswer;
   /**
    * Set by Uno's assistant bot relay (`tga_`) on a `/start <code>` the
    * console already answered ("Connected to …"): link locally, say nothing.
@@ -1384,6 +1449,46 @@ const makeTelegramConnector = Effect.gen(function* () {
 
   // ── Inline buttons ────────────────────────────────────────────────────
 
+  /**
+   * A press (a button, "Done", the end of a quiz) answers the chat it
+   * belongs to as the person's message — visible in the chat, answered
+   * back in Telegram like anything they type.
+   */
+  const answerAsPerson = (input: {
+    readonly projectId: ProjectId;
+    readonly config: ManagerTelegramConnectorConfig;
+    readonly chatId: string;
+    readonly chatLabel: string;
+    readonly threadId: string;
+    readonly text: string;
+    readonly replyKey: string;
+    readonly replyTo: string | null;
+    readonly language: ReplyLanguage;
+  }) =>
+    Effect.gen(function* () {
+      const { threadId, runtimeMode, interactionMode } = yield* ensureThreadForChat({
+        target: { kind: "thread", threadId: ThreadId.make(input.threadId) },
+        chatId: input.chatId,
+        chatLabel: input.chatLabel,
+        config: input.config,
+        senderRole: "owner",
+      });
+      yield* replies.enqueue({
+        connectorProjectId: input.projectId,
+        replyKey: input.replyKey,
+        chatId: input.chatId,
+        replyTo: input.replyTo,
+        replyThread: null,
+        threadId,
+        language: input.language,
+        dispatch: { text: input.text, attachments: [], runtimeMode, interactionMode },
+        extraMeta: { hotKey: hotWindowKey(input.projectId, input.chatId) },
+      });
+      yield* Effect.logInfo("telegram button answered a chat").pipe(
+        Effect.annotateLogs({ projectId: input.projectId, chatId: input.chatId, threadId }),
+      );
+    });
+
   const callBotJson = (botToken: string, method: string, body: Record<string, unknown>) =>
     fetchJson(telegramApi(botToken, method), {
       method: "POST",
@@ -1404,13 +1509,24 @@ const makeTelegramConnector = Effect.gen(function* () {
    */
   const finishButtonMessage = (
     botToken: string,
-    group: Pick<ButtonGroup, "chatId" | "messageId" | "text" | "caption">,
+    group: Pick<ButtonGroup, "chatId" | "messageId" | "text" | "caption" | "rich">,
     line: string,
   ) =>
     Effect.gen(function* () {
       if (group.messageId === null) return;
       const target = { chat_id: group.chatId, message_id: group.messageId };
       const removeKeyboard = { reply_markup: { inline_keyboard: [] } };
+      if (group.rich === true) {
+        // A Rich Message keeps its content (pictures, tables): only the
+        // keyboard turns into the line, as a disabled button (Bot API 10.3).
+        const answer = yield* callBotJson(botToken, "editMessageReplyMarkup", {
+          ...target,
+          reply_markup: { inline_keyboard: [[{ text: line.slice(0, 60), disabled: {} }]] },
+        });
+        if (answer.ok === true) return;
+        yield* callBotJson(botToken, "editMessageReplyMarkup", { ...target, ...removeKeyboard });
+        return;
+      }
       if (group.text !== undefined) {
         const method = group.caption === true ? "editMessageCaption" : "editMessageText";
         const field = group.caption === true ? "caption" : "text";
@@ -1495,6 +1611,30 @@ const makeTelegramConnector = Effect.gen(function* () {
         return;
       }
       const { group, button } = press;
+      if (button.action.kind === "toggle") {
+        // A multiple choice: the option is picked or unpicked, the group lives on.
+        const index = group.rows.flat().indexOf(button);
+        const next = yield* updateButtons((state) => toggleGroupPick(state, group.id, index).state);
+        const toggled = next.groups.find((entry) => entry.id === group.id) ?? null;
+        yield* answerCallback(config.botToken, query.id);
+        const messageId = group.messageId ?? message.message_id ?? null;
+        if (toggled !== null && messageId !== null) {
+          yield* callBotJson(config.botToken, "editMessageReplyMarkup", {
+            chat_id: chatId,
+            message_id: messageId,
+            reply_markup: buildInlineKeyboard(toggled),
+          });
+        }
+        return;
+      }
+      if (button.action.kind === "submit" && pickedValues(group) === null) {
+        yield* answerCallback(
+          config.botToken,
+          query.id,
+          nothingPickedToast(group.language ?? language),
+        );
+        return;
+      }
       yield* updateButtons((state) => removeButtonGroup(state, group.id));
       const finish = (line: string) =>
         finishButtonMessage(
@@ -1503,31 +1643,29 @@ const makeTelegramConnector = Effect.gen(function* () {
           line,
         );
       const action = button.action;
+      const answerChat = (text: string) =>
+        answerAsPerson({
+          projectId,
+          config,
+          chatId,
+          chatLabel: message.chat?.title ?? message.chat?.username ?? chatId,
+          threadId: group.threadId,
+          text,
+          replyKey: `${chatId}:cb:${query.id}`,
+          replyTo: message.message_id === undefined ? null : String(message.message_id),
+          language: group.language ?? language,
+        });
       switch (action.kind) {
+        case "submit": {
+          yield* answerCallback(config.botToken, query.id);
+          yield* finish(pressedLine(pickedLabels(group).join(", ")));
+          yield* answerChat(pickedMessage(pickedValues(group) ?? [], group.language ?? language));
+          return;
+        }
         case "reply": {
           yield* answerCallback(config.botToken, query.id);
           yield* finish(pressedLine(button.label));
-          const { threadId, runtimeMode, interactionMode } = yield* ensureThreadForChat({
-            target: { kind: "thread", threadId: ThreadId.make(group.threadId) },
-            chatId,
-            chatLabel: message.chat?.title ?? message.chat?.username ?? chatId,
-            config,
-            senderRole: "owner",
-          });
-          yield* replies.enqueue({
-            connectorProjectId: projectId,
-            replyKey: `${chatId}:cb:${query.id}`,
-            chatId,
-            replyTo: message.message_id === undefined ? null : String(message.message_id),
-            replyThread: null,
-            threadId,
-            language: group.language ?? language,
-            dispatch: { text: action.value, attachments: [], runtimeMode, interactionMode },
-            extraMeta: { hotKey: hotWindowKey(projectId, chatId) },
-          });
-          yield* Effect.logInfo("telegram button answered a chat").pipe(
-            Effect.annotateLogs({ projectId, chatId, threadId }),
-          );
+          yield* answerChat(action.value);
           return;
         }
         case "approval": {
@@ -1645,7 +1783,35 @@ const makeTelegramConnector = Effect.gen(function* () {
         readonly messageId: number | null;
         readonly error: string | null;
       };
-      if (asCaption) {
+      // The agent's own Rich Message first; refused (an old relay, a markup
+      // Telegram won't take) → the plain message below, as before.
+      const richSent =
+        input.rich !== undefined &&
+        input.rich !== null &&
+        (input.rich.markdown !== undefined || input.rich.html !== undefined)
+          ? yield* sendRichMessageRaw(via.botToken, input.chatId, input.rich, [], replyMarkup)
+          : null;
+      if (richSent !== null && !richSent.ok) {
+        yield* Effect.logInfo("telegram rich message refused, sending plain text").pipe(
+          Effect.annotateLogs({ chatId: input.chatId, description: richSent.description }),
+        );
+      }
+      if (richSent?.ok === true) {
+        yield* recordDelivery(via.projectId, true, null);
+        if (group !== null) {
+          yield* updateButtons((state) => ({
+            ...state,
+            groups: state.groups.map((entry) =>
+              entry.id === group.id ? { ...entry, rich: true, caption: false } : entry,
+            ),
+          }));
+        }
+        sent = { ok: true, messageId: richSent.messageId, error: null };
+        if (filePath !== null) {
+          const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, filePath);
+          if (!file.ok) sent = { ...sent, error: file.error };
+        }
+      } else if (asCaption) {
         sent = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, filePath, {
           caption: text,
           ...markup,
@@ -1714,6 +1880,416 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       return { ok: true, error: sent.error };
     });
+
+  /**
+   * `sendRichMessage` (Bot API 10.1): `rich_message` = InputRichMessage
+   * (exactly one of markdown / html), local files uploaded in the same
+   * multipart request as `attach://<id>` (InputRichMessageMedia, 10.2).
+   * One attempt: a refusal falls back to the old message at the caller.
+   */
+  const sendRichMessageRaw = (
+    botToken: string,
+    chatId: string,
+    rich: { readonly markdown?: string; readonly html?: string },
+    media: ReadonlyArray<RichCardMedia>,
+    replyMarkup: unknown,
+  ): Effect.Effect<{
+    readonly ok: boolean;
+    readonly messageId: number | null;
+    readonly description: string | null;
+  }> =>
+    Effect.tryPromise({
+      try: async () => {
+        const richMessage = {
+          ...(rich.html !== undefined ? { html: rich.html } : { markdown: rich.markdown ?? "" }),
+          ...(media.length > 0 ? { media: richMediaField(media) } : {}),
+        };
+        const url = telegramApi(botToken, "sendRichMessage");
+        let response: Response;
+        if (media.length === 0) {
+          response = await fetch(url, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              rich_message: richMessage,
+              ...(replyMarkup !== undefined ? { reply_markup: replyMarkup } : {}),
+            }),
+          });
+        } else {
+          const form = new FormData();
+          form.append("chat_id", chatId);
+          form.append("rich_message", JSON.stringify(richMessage));
+          if (replyMarkup !== undefined) form.append("reply_markup", JSON.stringify(replyMarkup));
+          for (const entry of media) {
+            const bytes = await fsPromises.readFile(entry.path);
+            form.append(entry.id, new Blob([new Uint8Array(bytes)]), entry.name);
+          }
+          response = await fetch(url, { method: "POST", body: form });
+        }
+        return (await response.json()) as TelegramApiResponse;
+      },
+      catch: (cause) => redactConnectorSecrets(String(cause)),
+    }).pipe(
+      Effect.map((answer) =>
+        answer.ok === true
+          ? { ok: true, messageId: sentMessageId(answer.result), description: null }
+          : { ok: false, messageId: null, description: answer.description ?? "refused" },
+      ),
+      Effect.catch((description) => Effect.succeed({ ok: false, messageId: null, description })),
+    );
+
+  /** A report's pictures and files: which go inside the Rich Message, which after it. */
+  const planCardMedia = (images: ReadonlyArray<string>, files: ReadonlyArray<string>) =>
+    Effect.promise(async () => {
+      const embedded: RichCardMedia[] = [];
+      const after: string[] = [];
+      let bytes = 0;
+      const entries = [
+        ...images.map((path) => ({ path, picture: true })),
+        ...files.map((path) => ({ path, picture: false })),
+      ];
+      for (const [index, entry] of entries.entries()) {
+        const size = await fsPromises.stat(entry.path).then(
+          (stat) => (stat.isFile() ? stat.size : -1),
+          () => -1,
+        );
+        if (
+          size < 0 ||
+          size > TELEGRAM_BOT_UPLOAD_LIMIT_BYTES ||
+          bytes + size > RICH_MESSAGE_MAX_UPLOAD_BYTES ||
+          embedded.length >= RICH_MESSAGE_MAX_MEDIA
+        ) {
+          // sendTelegramFile says why one can't go (too big, gone).
+          after.push(entry.path);
+          continue;
+        }
+        bytes += size;
+        const photo = entry.picture && size <= TELEGRAM_PHOTO_UPLOAD_LIMIT_BYTES;
+        embedded.push({
+          id: `${photo ? "img" : "doc"}${index + 1}`,
+          kind: photo ? "photo" : "document",
+          path: entry.path,
+          name: nodePath.basename(entry.path),
+        });
+      }
+      return { embedded, after };
+    });
+
+  /** The message id and reply route of a sent card. */
+  const rememberCardMessage = (input: {
+    readonly connectorProjectId: ProjectId;
+    readonly chatId: string;
+    readonly threadId: ThreadId;
+    readonly groupId: string | null;
+    readonly messageId: number | null;
+    readonly routeReplies: boolean;
+    readonly nowMs: number;
+  }) =>
+    input.messageId === null
+      ? Effect.void
+      : updateButtons((state) => {
+          const messageId = input.messageId!;
+          const withId =
+            input.groupId === null ? state : setGroupMessageId(state, input.groupId, messageId);
+          return input.routeReplies
+            ? addSentMessageRoute(
+                withId,
+                {
+                  connectorProjectId: input.connectorProjectId,
+                  chatId: input.chatId,
+                  messageId,
+                  threadId: input.threadId,
+                  atMs: input.nowMs,
+                },
+                input.nowMs,
+              )
+            : withId;
+        }).pipe(Effect.asVoid);
+
+  /** The quiz's current question as a native quiz poll; its poll id, or why not. */
+  const sendQuizPoll = (botToken: string, quiz: CardQuiz) =>
+    callBotJson(botToken, "sendPoll", { chat_id: quiz.chatId, ...quizPollParams(quiz) }).pipe(
+      Effect.map((answer) => {
+        const result = answer.result as
+          | { readonly message_id?: number; readonly poll?: { readonly id?: string } }
+          | undefined;
+        const pollId = result?.poll?.id;
+        return answer.ok === true && typeof pollId === "string"
+          ? { ok: true as const, pollId, messageId: result?.message_id ?? null }
+          : { ok: false as const, description: answer.description ?? "sendPoll refused" };
+      }),
+    );
+
+  const sendCard: ManagerTelegramServiceShape["sendCard"] = (input) =>
+    Effect.gen(function* () {
+      const config = yield* readRow(input.projectId);
+      if (config === null || !config.enabled) {
+        return { ok: false, error: "Telegram is not connected.", drawn: "none" as const };
+      }
+      const via = yield* resolveSendRow(input.projectId, config);
+      if (via === null) {
+        return { ok: false, error: "Telegram is not connected.", drawn: "none" as const };
+      }
+      const language = input.language ?? "en";
+      const nowMs = Date.now();
+      const card = input.card;
+      const routeReplies = input.routeReplies === true;
+      const plainText = cardPlainText(card, input.header, language).slice(
+        0,
+        TELEGRAM_MESSAGE_LIMIT,
+      );
+
+      if (card.kind === "quiz") {
+        const intro = yield* sendTelegramText(
+          via.projectId,
+          via.botToken,
+          input.chatId,
+          quizIntroText(card, input.header, language),
+        );
+        if (!intro.ok) {
+          return {
+            ok: false,
+            error: intro.description ?? "Telegram refused the message.",
+            drawn: "none" as const,
+          };
+        }
+        yield* rememberCardMessage({
+          connectorProjectId: via.projectId,
+          chatId: input.chatId,
+          threadId: input.threadId,
+          groupId: null,
+          messageId: intro.messageId ?? null,
+          routeReplies,
+          nowMs,
+        });
+        const quiz = newCardQuiz({
+          id: newButtonGroupId(),
+          card,
+          connectorProjectId: via.projectId,
+          chatId: input.chatId,
+          threadId: input.threadId,
+          language,
+          nowMs,
+        });
+        const poll = yield* sendQuizPoll(via.botToken, quiz);
+        if (poll.ok) {
+          yield* updateButtons((state) => putQuiz(state, { ...quiz, pollId: poll.pollId }));
+          return { ok: true, error: null, drawn: "poll" as const };
+        }
+        yield* Effect.logInfo("telegram quiz poll refused, sending the quiz as text").pipe(
+          Effect.annotateLogs({ chatId: input.chatId, description: poll.description }),
+        );
+        const text = yield* sendTelegramText(
+          via.projectId,
+          via.botToken,
+          input.chatId,
+          cardPlainText(card, null, language).slice(0, TELEGRAM_MESSAGE_LIMIT),
+        );
+        if (!text.ok) {
+          return {
+            ok: false,
+            error: text.description ?? "Telegram refused the message.",
+            drawn: "none" as const,
+          };
+        }
+        yield* rememberCardMessage({
+          connectorProjectId: via.projectId,
+          chatId: input.chatId,
+          threadId: input.threadId,
+          groupId: null,
+          messageId: text.messageId ?? null,
+          routeReplies,
+          nowMs,
+        });
+        return { ok: true, error: null, drawn: "text" as const };
+      }
+
+      const plan =
+        card.kind === "report"
+          ? yield* planCardMedia(input.images ?? [], input.files ?? [])
+          : { embedded: [], after: [] };
+      const rows = cardButtons(card, language);
+      const group: ButtonGroup | null =
+        rows.length === 0
+          ? null
+          : {
+              id: newButtonGroupId(),
+              connectorProjectId: via.projectId,
+              chatId: input.chatId,
+              messageId: null,
+              threadId: input.threadId,
+              rows,
+              text: plainText,
+              rich: true,
+              language,
+              createdAtMs: nowMs,
+              expiresAtMs: nowMs + CHOICE_BUTTONS_TTL_MS,
+            };
+      if (group !== null) yield* updateButtons((state) => addButtonGroup(state, group, nowMs));
+      const replyMarkup = group === null ? undefined : buildInlineKeyboard(group);
+      const markdown = cardRichMarkdown(card, {
+        header: input.header,
+        language,
+        media: plan.embedded,
+        notEmbedded: plan.after.map((path) => nodePath.basename(path)),
+      });
+      const rich = yield* sendRichMessageRaw(
+        via.botToken,
+        input.chatId,
+        { markdown },
+        plan.embedded,
+        replyMarkup,
+      );
+      if (rich.ok) {
+        yield* recordDelivery(via.projectId, true, null);
+        yield* rememberCardMessage({
+          connectorProjectId: via.projectId,
+          chatId: input.chatId,
+          threadId: input.threadId,
+          groupId: group?.id ?? null,
+          messageId: rich.messageId,
+          routeReplies,
+          nowMs,
+        });
+        let error: string | null = null;
+        for (const path of plan.after) {
+          const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, path, {
+            language,
+          });
+          if (!file.ok) error = file.error;
+        }
+        return { ok: true, error, drawn: "rich" as const };
+      }
+      yield* Effect.logInfo("telegram rich card refused, sending plain text").pipe(
+        Effect.annotateLogs({ chatId: input.chatId, description: rich.description }),
+      );
+      if (group !== null) {
+        yield* updateButtons((state) => ({
+          ...state,
+          groups: state.groups.map((entry) =>
+            entry.id === group.id ? { ...entry, rich: false } : entry,
+          ),
+        }));
+      }
+      const sent = yield* sendTelegramText(
+        via.projectId,
+        via.botToken,
+        input.chatId,
+        plainText,
+        replyMarkup === undefined ? {} : { replyMarkup },
+      );
+      if (!sent.ok) {
+        if (group !== null) yield* updateButtons((state) => removeButtonGroup(state, group.id));
+        return {
+          ok: false,
+          error: sent.description ?? "Telegram refused the message.",
+          drawn: "none" as const,
+        };
+      }
+      yield* rememberCardMessage({
+        connectorProjectId: via.projectId,
+        chatId: input.chatId,
+        threadId: input.threadId,
+        groupId: group?.id ?? null,
+        messageId: sent.messageId ?? null,
+        routeReplies,
+        nowMs,
+      });
+      let error: string | null = null;
+      for (const path of [...plan.embedded.map((entry) => entry.path), ...plan.after]) {
+        const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, path, {
+          language,
+        });
+        if (!file.ok) error = file.error;
+      }
+      return { ok: true, error, drawn: "text" as const };
+    });
+
+  /** A quiz ends (all answered, or left for a while): ONE message with the score. */
+  const finishQuiz = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    quiz: CardQuiz,
+    options: { readonly stopped?: boolean } = {},
+  ) =>
+    Effect.gen(function* () {
+      yield* updateButtons((state) => removeQuiz(state, quiz.id));
+      if (quiz.answers.length === 0) return;
+      yield* answerAsPerson({
+        projectId,
+        config,
+        chatId: quiz.chatId,
+        chatLabel: quiz.chatId,
+        threadId: quiz.threadId,
+        text: quizSummaryText(quiz, options),
+        replyKey: `${quiz.chatId}:quiz:${quiz.id}`,
+        replyTo: null,
+        language: quiz.language ?? "en",
+      });
+    });
+
+  /** An answer to a quiz poll: only the owner's, only for the question on screen. */
+  const handlePollAnswer = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    answer: TelegramPollAnswer,
+  ) =>
+    Effect.gen(function* () {
+      const quiz = findQuizByPoll(yield* Ref.get(buttonsRef), answer.poll_id);
+      if (quiz === null || quiz.connectorProjectId !== projectId) return;
+      const userId = answer.user?.id;
+      if (userId === undefined || answer.user?.is_bot === true) return;
+      const routedRows = yield* routedRowsOf(projectId);
+      const access = mergeRoutedAccess(
+        config,
+        routedRows.map((row) => row.config),
+      );
+      const owner = String(userId) === quiz.chatId || access.ownerUserIds.includes(String(userId));
+      if (!owner) return;
+      const step = answerQuiz(quiz, answer.option_ids ?? [], Date.now());
+      if (step.kind === "ignore") return;
+      if (step.kind === "done") {
+        yield* finishQuiz(projectId, config, step.quiz);
+        return;
+      }
+      yield* updateButtons((state) => putQuiz(state, step.quiz));
+      const poll = yield* sendQuizPoll(config.botToken, step.quiz);
+      if (poll.ok) {
+        yield* updateButtons((state) => putQuiz(state, { ...step.quiz, pollId: poll.pollId }));
+        return;
+      }
+      // The next question would not go: what was answered goes now.
+      yield* finishQuiz(projectId, config, step.quiz, { stopped: true });
+    }).pipe(
+      Effect.catchTag("TelegramRoutingError", (error) =>
+        Effect.logWarning("telegram quiz answer not routed").pipe(
+          Effect.annotateLogs({ projectId, reason: error.message }),
+        ),
+      ),
+    );
+
+  /** Quizzes left half answered: their score goes to the chat (once per poll cycle). */
+  const flushIdleQuizzes = Effect.gen(function* () {
+    const idle = idleQuizzes(yield* Ref.get(buttonsRef), Date.now());
+    for (const quiz of idle) {
+      const projectId = ProjectId.make(quiz.connectorProjectId);
+      const config = yield* readRow(projectId);
+      if (config === null) {
+        yield* updateButtons((state) => removeQuiz(state, quiz.id));
+        continue;
+      }
+      yield* finishQuiz(projectId, config, quiz, { stopped: true }).pipe(
+        Effect.catchTag("TelegramRoutingError", () =>
+          updateButtons((state) => removeQuiz(state, quiz.id)).pipe(Effect.asVoid),
+        ),
+      );
+    }
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("telegram idle quizzes not flushed").pipe(Effect.annotateLogs({ cause })),
+    ),
+  );
 
   const retireRequestButtons: ManagerTelegramServiceShape["retireRequestButtons"] = (requestId) =>
     Effect.gen(function* () {
@@ -1900,6 +2476,10 @@ const makeTelegramConnector = Effect.gen(function* () {
     Effect.gen(function* () {
       if (update.callback_query !== undefined) {
         yield* handleCallbackQuery(projectId, config, update.callback_query);
+        return;
+      }
+      if (update.poll_answer !== undefined) {
+        yield* handlePollAnswer(projectId, config, update.poll_answer);
         return;
       }
       const message = update.message;
@@ -2543,6 +3123,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       return;
     }
     yield* pruneInboxIfDue;
+    yield* flushIdleQuizzes;
     // Poll all enabled bots concurrently; each long-polls up to 10s.
     yield* Effect.forEach(enabled, ({ projectId, config }) => pollConnector(projectId, config), {
       concurrency: 4,
@@ -2695,6 +3276,7 @@ const makeTelegramConnector = Effect.gen(function* () {
     getRuntimeStatus,
     sendText,
     sendRich,
+    sendCard,
     retireRequestButtons,
     startPairing,
     sendTestMessage,

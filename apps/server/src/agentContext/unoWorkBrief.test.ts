@@ -50,7 +50,10 @@ describe("Uno Work environment brief", () => {
     // ~25 for `report_publish` (Misha 30.10: a report came as two screens of text
     // and paths he can't open; the details are uno_guide("sites")), ~60 for the
     // my_computer_* line (Connect my computer, 31.10: details in uno_guide).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2245);
+    // ~135 for cards (Misha 05.11: agents answer with `show_card` — a choice,
+    // a quiz, a report with next steps — whenever it fits, even a weak model;
+    // hard triggers and one example here, the rest in uno_guide("cards")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2385);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
