@@ -36,7 +36,6 @@ import * as os from "node:os";
 
 import { AiProviderKeys } from "../../aiProviders/AiProviderKeys.ts";
 import { ServerConfig } from "../../config.ts";
-import { HERMES_CLAUDE_PLUGIN_CATALOG_NAME } from "../../provider/acp/HermesAcpSupport.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -44,6 +43,7 @@ import { fetchHermesModelCatalog } from "../../provider/Layers/HermesProvider.ts
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { HarnessSetup } from "../../provider/setup/HarnessSetupService.ts";
 import {
+  HERMES_CLAUDE_PLUGIN_VERSION,
   HERMES_CLAUDE_READY_ENV,
   HERMES_CLAUDE_READY_VERSION,
   HERMES_UV_TOOL_ARGS_CLAUDE_READY,
@@ -75,6 +75,7 @@ import {
   stripAnsi,
   subscriptionStatuses,
 } from "../assistantSubscriptions.ts";
+import { installClaudePlugin } from "../claudePluginInstall.ts";
 import {
   ManagerAssistantLlm,
   type ManagerAssistantLlmShape,
@@ -200,57 +201,35 @@ const makeManagerAssistantLlm = Effect.gen(function* () {
     });
 
   /**
-   * The Claude plugin in the shared Hermes home (catalog-pinned by Hermes):
-   * `hermes plugins install claude-subscription-directsdk`. A model-provider
-   * plugin needs no enabling — Hermes imports it from `plugins/`.
+   * The Claude plugin in the shared Hermes home, from its repository at the
+   * commit Work pins (claudePluginInstall.ts) — not by catalog name, which
+   * Hermes 0.21.5 no longer resolves (09.11).
    */
   const ensureClaudePlugin = Effect.gen(function* () {
     if (yield* Effect.promise(() => claudePluginInstalled(sharedHome))) return;
     const binary = yield* hermesBinary;
-    // `--yes-deps` (answer the dependency question without a terminal) came
-    // with Hermes 0.22; 0.21 doesn't know it and installs without asking.
     const hermesVersion = (yield* harnessStatus).version;
-    const consentFlag = hermesVersionAtLeast(hermesVersion, "0.22.0") ? ["--yes-deps"] : [];
-    const result = yield* Effect.promise(
-      () =>
-        new Promise<{ readonly ok: boolean; readonly output: string }>((resolve) => {
-          let output = "";
-          let handle: HarnessProcessHandle | null = null;
-          const timer = setTimeout(() => handle?.kill(), PLUGIN_INSTALL_TIMEOUT_MS);
-          handle = spawnHarnessProcess({
-            command: binary,
-            args: [
-              "plugins",
-              "install",
-              HERMES_CLAUDE_PLUGIN_CATALOG_NAME,
-              ...consentFlag,
-              "--no-enable",
-            ],
-            env: hermesEnv(),
-            cwd: os.homedir(),
-            onOutput: (chunk) => {
-              output += chunk;
-            },
-            onExit: (exit) => {
-              clearTimeout(timer);
-              resolve({ ok: exit.code === 0 && exit.error === undefined, output });
-            },
-          });
-          handle.endInput();
-        }),
+    const result = yield* Effect.promise(() =>
+      installClaudePlugin({
+        binary,
+        hermesVersion,
+        sharedHome,
+        env: hermesEnv(),
+        cwd: os.homedir(),
+        timeoutMs: PLUGIN_INSTALL_TIMEOUT_MS,
+      }),
     );
-    const installed = yield* Effect.promise(() => claudePluginInstalled(sharedHome));
-    if (!installed) {
+    if (!result.installed) {
       yield* Effect.logWarning("assistant: Claude plugin install failed").pipe(
-        Effect.annotateLogs({ ok: result.ok, tail: lastLines(result.output, 6) }),
+        Effect.annotateLogs({ tail: lastLines(result.output, 6) }),
       );
       return yield* new ManagerAssistantError({
-        detail: `Couldn't connect Uno to your Claude plan on this computer.${
-          result.output ? ` Hermes said: ${lastLines(result.output, 2)}` : ""
-        }`,
+        detail: result.detail ?? "Couldn't connect Uno to your Claude plan on this computer.",
       });
     }
-    yield* Effect.logInfo("assistant: Claude plugin installed");
+    yield* Effect.logInfo("assistant: Claude plugin installed").pipe(
+      Effect.annotateLogs({ version: HERMES_CLAUDE_PLUGIN_VERSION }),
+    );
   });
 
   let hermesUpdate: {

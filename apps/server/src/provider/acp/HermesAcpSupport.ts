@@ -194,8 +194,6 @@ export function applyHermesLlmRoute(
 
 /** Folder name of the Claude plugin in a Hermes home's `plugins/` (its manifest name). */
 export const HERMES_CLAUDE_PLUGIN_DIR = "claude-subscription-directsdk-experimental";
-/** Catalog name `hermes plugins install` takes. */
-export const HERMES_CLAUDE_PLUGIN_CATALOG_NAME = "claude-subscription-directsdk";
 
 /**
  * What a chat's own HERMES_HOME borrows from the shared Hermes home
