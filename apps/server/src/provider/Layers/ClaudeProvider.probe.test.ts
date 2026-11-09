@@ -29,7 +29,11 @@ function fakeClaude(name: string, body: string): ClaudeSettings {
 describe("probeClaudeCapabilities", () => {
   it.live("answers nothing when Claude Code crashes on start", () =>
     Effect.gen(function* () {
-      const probe = yield* probeClaudeCapabilities(fakeClaude("crash", "exit 3"), {
+      // Reads the SDK's initialize line first: a child that exits before the
+      // SDK's write makes the SDK throw EPIPE from its stdin, outside any
+      // promise (CI 09.11, 3 of 30 on Linux) — a real but separate risk.
+      const crash = fakeClaude("crash", 'read -r _\necho "claude: failed to start" >&2\nexit 3');
+      const probe = yield* probeClaudeCapabilities(crash, {
         PATH: process.env.PATH,
       });
       assert.strictEqual(probe, undefined);
