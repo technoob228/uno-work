@@ -11,6 +11,7 @@
 ## v0.0.181 — 2026-11-09
 
 - Claude models come from your installed Claude Code: a new model (today Claude Fable 5.2) shows up in the picker by itself, no Uno Work update needed. "Fable", "Opus", "Sonnet" mean what your Claude Code means by them. An older Claude Code gets an Update button for the newest models.
+- Switching the Uno assistant to your own Claude plan works again: Uno sets up the Claude connection itself, at a version we checked, instead of failing with “Couldn't connect Uno to your Claude plan”.
 
 ## v0.0.180 — 2026-11-05
 
