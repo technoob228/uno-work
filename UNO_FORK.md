@@ -330,6 +330,14 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Старые чаты** хранят конкретный slug (`claude-fable-5-1`), он остаётся в списке; лимит плана «Weekly · Fable» матчится по семейству (`planLimitRules.ts`) и покрывает 5.2.
 - **Новая модель Claude:** обычно ничего делать не надо. Добавить во встроенный список — когда нужны свои опции или «Update» для старых CLI.
 
+### 15. Плагин Claude для ассистента — по закреплённому коммиту (0.0.181)
+
+09.11 каталог плагинов Hermes перерос 2 МиБ, Hermes 0.21.5 (наш пин `v2026.9.24`) его отбрасывает и имени `claude-subscription-directsdk` больше не знает: переключение ассистента на свой Claude падало у всех, у кого плагина ещё не было.
+
+- **Ставим из репозитория, не по имени.** `manager/claudePluginInstall.ts`: `hermes plugins install https://github.com/NousResearch/hermes-official-plugins.git#claude-subscription-directsdk --ref <SHA> --no-enable` (+ `--yes-deps` с Hermes 0.22). Пин — `HERMES_CLAUDE_PLUGIN_SHA` рядом с `HERMES_CLAUDE_READY_REF` (`harnessInstallCommands.ts`): 0.3.5, тот же коммит, что в каталоге main 09.11, `requires_hermes >=0.21.4`. На 0.21.5 проверено: ставится за ~3 с, сканер пропускает без `--force`, провайдер грузится. Старый репозиторий плагина архивирован (переехал в hermes-official-plugins).
+- **Обновить плагин** — сменить SHA осознанно: проверить `requires_hermes` в `plugin.yaml` и поставить на нашем Hermes. Уже стоящий плагин Work не трогает (проверка — `plugin.yaml` в `<shared>/plugins/claude-subscription-directsdk-experimental`).
+- **Ошибка человеку — наша фраза** (нет сети / нет git / долго / общая), строки Hermes только в лог.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:
