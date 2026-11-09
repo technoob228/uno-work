@@ -57,6 +57,22 @@ export const HERMES_UV_TOOL_ARGS: ReadonlyArray<string> = [
 export const HERMES_CLAUDE_READY_REF = "v2026.9.24";
 export const HERMES_CLAUDE_READY_VERSION = "0.21.5";
 
+/**
+ * The Claude plugin (Nous' official `claude-subscription-directsdk`), pinned
+ * like Hermes above: Work installs it from its repository at this commit,
+ * not by its catalog name. Hermes 0.21.5 drops the live catalog once it
+ * outgrew 2 MiB (09.11) and then knows no such name — switching the
+ * assistant to the person's Claude failed for everyone without the plugin.
+ * 0.3.5 is the catalog's own pin of 09.11 (Fable 5.2), `requires_hermes
+ * >=0.21.4`; checked on 0.21.5: installs in ~3 s, the scan passes, Hermes
+ * loads the provider. An upgrade is a deliberate change of this commit.
+ */
+export const HERMES_CLAUDE_PLUGIN_REPO =
+  "https://github.com/NousResearch/hermes-official-plugins.git";
+export const HERMES_CLAUDE_PLUGIN_SUBDIR = "claude-subscription-directsdk";
+export const HERMES_CLAUDE_PLUGIN_SHA = "6313fad5ddf2c060e7b16782f4860c0d5cdbfcac";
+export const HERMES_CLAUDE_PLUGIN_VERSION = "0.3.5";
+
 export const HERMES_UV_TOOL_ARGS_CLAUDE_READY: ReadonlyArray<string> = [
   "tool",
   "install",

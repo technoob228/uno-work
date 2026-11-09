@@ -2,7 +2,8 @@
  * The person's own subscriptions as the Uno assistant can run on them
  * (Misha 14.10: "choose what powers it — Uno AI or your subscription").
  *
- * - Claude — Nous' official Hermes plugin `claude-subscription-directsdk`:
+ * - Claude — Nous' official Hermes plugin `claude-subscription-directsdk`
+ *   (Work installs it pinned, claudePluginInstall.ts):
  *   every turn runs the official, unmodified Claude Code CLI signed in on
  *   this computer (the same sign-in Uno Work shows under Settings → AI →
  *   Agents); Anthropic counts it against the plan's Agent SDK allowance.
