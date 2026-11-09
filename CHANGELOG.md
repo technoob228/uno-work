@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.181 — 2026-11-09
+
+- Claude models come from your installed Claude Code: a new model (today Claude Fable 5.2) shows up in the picker by itself, no Uno Work update needed. "Fable", "Opus", "Sonnet" mean what your Claude Code means by them. An older Claude Code gets an Update button for the newest models.
+
 ## v0.0.180 — 2026-11-05
 
 - Computers in one way: Add computer for a cloud computer or your own Mac, Windows or Linux; pick Tool (agents use it) or Full (chats run on its files, the agent stays in your cloud — Claude and Hermes). Bring your work: projects and key names, chosen keys go to the encrypted vault. If it sleeps, the chat waits and goes on, or you continue in the cloud. Remove / Delete from the computer's menu.
