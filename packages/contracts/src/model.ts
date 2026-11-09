@@ -269,8 +269,12 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
   [CLAUDE_DRIVER_KIND]: {
-    // Family names → the newest model of the family this build knows.
-    fable: "claude-fable-5-1",
+    // Family names → the newest model of the family this build knows. Where
+    // the instance's own list says otherwise (Claude Code's `fable`, `opus`,
+    // `sonnet` → `ServerProviderModel.aliases`), that wins: resolveSelectableModel.
+    fable: "claude-fable-5-2",
+    "fable-5.2": "claude-fable-5-2",
+    "claude-fable-5.2": "claude-fable-5-2",
     "fable-5.1": "claude-fable-5-1",
     "claude-fable-5.1": "claude-fable-5-1",
     "fable-5": "claude-fable-5",

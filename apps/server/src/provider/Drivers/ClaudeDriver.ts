@@ -40,6 +40,7 @@ import {
   makePendingClaudeProvider,
   probeClaudeCapabilities,
 } from "../Layers/ClaudeProvider.ts";
+import { makeClaudeCliModelMemory } from "../Layers/claudeModelCatalog.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeUnoClaudeAvailability } from "./unoClaudeAvailability.ts";
 import {
@@ -292,9 +293,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
-      // (keyed by auth mode too: on Uno AI the probe runs with the gateway env).
+      // Keyed by auth mode too (on Uno AI the probe runs with the gateway env)
+      // and by the CLI version (an updated Claude Code lists its new models
+      // at the next check, not 5 minutes later).
       const capabilitiesProbeCache = yield* Cache.make({
-        capacity: 2,
+        capacity: 4,
         timeToLive: CAPABILITIES_PROBE_TTL,
         lookup: (key: string) =>
           probeClaudeCapabilities(
@@ -304,6 +307,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
               : processEnv,
           ).pipe(Effect.provideService(Path.Path, path)),
       });
+      // The CLI's last model list per version + sign-in: a probe that misses
+      // on a busy machine keeps the models it listed (claudeModelCatalog.ts).
+      const cliModelMemory = makeClaudeCliModelMemory();
       const capabilitiesCacheKey = yield* makeClaudeCapabilitiesCacheKey(effectiveConfig);
 
       // A probe that could not verify auth (typically: not signed in yet) is
@@ -313,8 +319,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       // signed in yet): kept, it hid a sign-in for up to 5 minutes — the
       // refresh right after it still read "no plan", so Settings → AI asked
       // to sign in to Claude again (cap walkthrough 28.10, P3).
-      const resolveCapabilities = (_settings: ClaudeSettings, mode: ClaudeAuthMode) => {
-        const key = `${capabilitiesCacheKey}\0${mode}`;
+      const resolveCapabilities = (
+        _settings: ClaudeSettings,
+        mode: ClaudeAuthMode,
+        version: string | null,
+      ) => {
+        // The mode stays last: the lookup reads it from the key's end.
+        const key = `${capabilitiesCacheKey}\0${version ?? "?"}\0${mode}`;
         return Cache.get(capabilitiesProbeCache, key).pipe(
           Effect.tap((capabilities) =>
             capabilities === undefined ||
@@ -336,6 +347,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
           },
           ...(unoAvailable ? { available: () => Effect.promise(() => unoAvailable()) } : {}),
         },
+        cliModelMemory,
       ).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),

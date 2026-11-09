@@ -15,7 +15,7 @@ import {
   type ThreadController,
   type ThreadId,
 } from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
 
 import { resolveModel } from "../provider/autoBootstrapModelSelection.ts";
 
@@ -362,9 +362,12 @@ export function resolveProviderModelSelection(input: {
       message: `Provider "${instance.instanceId}" не установлен или выключен на этой машине.`,
     };
   }
+  // "fable" is what this instance means by it (Claude Code's own alias, else
+  // the newest Fable it lists); a model it doesn't list goes as written.
   const model =
     input.model !== undefined
-      ? normalizeModelSlug(input.model, instance.driver)
+      ? (resolveSelectableModel(instance.driver, input.model, instance.models) ??
+        normalizeModelSlug(input.model, instance.driver))
       : resolveModel(instance);
   if (model === null) {
     return {

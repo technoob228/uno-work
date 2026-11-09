@@ -37,7 +37,10 @@ const modelWords = (name: string): string =>
     .filter(Boolean)
     .join("-")}-`;
 
-/** "Fable" is `claude-fable-5-1`, "Sonnet 5" also the alias `sonnet`. */
+/**
+ * By family word, not by version: "Fable" covers `claude-fable-5-2`,
+ * `claude-fable-5-1` and the alias `fable`; "Sonnet 5" also the alias `sonnet`.
+ */
 function scopeCoversModel(scope: string, model: string | null | undefined): boolean {
   if (!model) return false;
   const family = scope.trim().split(/\s+/)[0] ?? "";

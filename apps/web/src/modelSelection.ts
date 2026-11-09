@@ -75,6 +75,8 @@ export interface AppModelOption {
   subProvider?: string;
   capabilities?: ServerProvider["models"][number]["capabilities"];
   isCustom: boolean;
+  /** The harness's own names for it (Claude Code: `fable`) — resolveSelectableModel. */
+  aliases?: ReadonlyArray<string>;
 }
 
 function toAppModelOption(model: ServerProvider["models"][number]): AppModelOption {
@@ -86,6 +88,7 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
   if (model.shortName) option.shortName = model.shortName;
   if (model.subProvider) option.subProvider = model.subProvider;
   if (model.capabilities) option.capabilities = model.capabilities;
+  if (model.aliases && model.aliases.length > 0) option.aliases = model.aliases;
   return option;
 }
 

@@ -58,6 +58,12 @@ export const ServerProviderModel = Schema.Struct({
   subProvider: Schema.optional(TrimmedNonEmptyString),
   isCustom: Schema.Boolean,
   capabilities: Schema.NullOr(ModelCapabilities),
+  /**
+   * Other names the harness itself gives this model — Claude Code resolves
+   * `fable` to its default Fable, so "fable" means what the installed CLI
+   * means by it (resolveSelectableModel). Absent from older servers.
+   */
+  aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 

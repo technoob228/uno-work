@@ -119,6 +119,10 @@ describe("a limit on one model", () => {
 
   it("stops that model, by its family, and no other", () => {
     expect(blocksWork(scoped("Fable"), "claude-fable-5-1")).toBe(true);
+    // A newer Fable the CLI brought (09.11: 5.2, Claude Code 2.1.321) and its alias.
+    expect(blocksWork(scoped("Fable"), "claude-fable-5-2")).toBe(true);
+    expect(blocksWork(scoped("Fable"), "fable")).toBe(true);
+    expect(blocksWork(scoped("Fable 5.2"), "claude-fable-5-2")).toBe(true);
     expect(blocksWork(scoped("Sonnet 5"), "claude-sonnet-5-5")).toBe(true);
     expect(blocksWork(scoped("Sonnet 5"), "sonnet")).toBe(true);
     expect(blocksWork(scoped("GPT-5.3-Codex-Spark"), "gpt-5.3-codex-spark")).toBe(true);

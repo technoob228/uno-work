@@ -319,6 +319,17 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - Сообщений в событиях нет: история читается с компьютера при открытии (`myComputer.chatHistory`) и лежит файлом в `<stateDir>/my-computer/<id>/history/`. В логи и журнал она не пишется. `ChatView` подменяет `serverMessages` на историю и вместо `ChatComposer` показывает `ImportedChatNote`; `MessagesTimeline` получил пропс `emptyText`.
 - Snoozed без таймера: `SNOOZED_UNTIL_OPENED` (дата 9999 года в обычном `snoozedUntil`), снимается `thread.unsnooze` при открытии (`useImportedChat`). Импортированный чат в сайдбаре считается завершённым ходом на `source.lastActiveAt` (`Sidebar.yourTurn.ts`), в счётчик Dock не входит.
 
+### 14. Модели Claude из CLI (0.0.181)
+
+Решение Миши 09.11 (вышла Fable 5.2): новые модели Claude приходят сами, без релиза Work на каждую.
+
+- **Источник правды — установленный Claude Code.** `probeClaudeCapabilities` (ClaudeProvider.ts) читает `Query.supportedModels()` того же запуска, что даёт аккаунт и слэш-команды: промпт не уходит, токенов нет, 0,2–0,4 с на Mac, таймаут 20 с. Запрос идёт при проверке провайдера (раз в 5 минут и по Refresh), не на ход. Кэш пробы — по бинарю + HOME + **версии CLI** + режиму входа (своя подписка / Uno AI): обновлённый CLI отвечает на следующей проверке. Последний ответ на (версия, режим) хранится (`makeClaudeCliModelMemory`): проба, не успевшая на занятой машине, не выкидывает модели из списка.
+- **Сборка списка** — `provider/Layers/claudeModelCatalog.ts` (чистые функции, тесты `claudeModelCatalog.test.ts`, `ClaudeProvider.probe.test.ts`): встроенный список `CLAUDE_FALLBACK_MODELS` (запасной и источник опций: шкалы Reasoning, 1M, минимальные версии CLI) + то, что CLI перечислил. Встроенная модель показывается, если CLI её перечислил или версия CLI не ниже минимума; ничего, чего CLI не назвал, не выкидывается (с ключом API и на Uno AI CLI перечисляет только `opus/fable/sonnet/haiku`). Незнакомая модель — под id CLI («Claude Sonnet 5.5»), опции из ответа CLI (`supportedEffortLevels`, `supportsFastMode`), 1M — только у opus/sonnet/fable (по умолчанию 200k), встаёт в список рядом со своим семейством. Её опции запоминаются (`rememberClaudeModels`), ход берёт те же, что показал пикер.
+- **«Update»** (`updateAvailable`) — если CLI старше минимума известной модели и сам её не перечислил. Минимумы: Fable 5.2 — 2.1.321, Opus 5.5 — 2.1.280, Fable 5.1 — 2.1.257 и т. д.
+- **Алиасы.** `ServerProviderModel.aliases` (необязательное поле контракта): что CLI называет `fable`/`opus`/`sonnet`/`haiku`. `resolveSelectableModel` (shared/model.ts) берёт их раньше таблицы сборки; нет алиаса и новейшей модели семейства в списке — новейшая из перечисленных (только для голого имени семейства, явная версия не подменяется). Так «fable» у агентов (`agentThreads/logic.ts`), в маршрутах ассистента (`personRouting.ts`) и в вебе = Fable по умолчанию у установленного CLI. Таблица `MODEL_SLUG_ALIASES_BY_PROVIDER` — запасная (`fable` → `claude-fable-5-2`).
+- **Старые чаты** хранят конкретный slug (`claude-fable-5-1`), он остаётся в списке; лимит плана «Weekly · Fable» матчится по семейству (`planLimitRules.ts`) и покрывает 5.2.
+- **Новая модель Claude:** обычно ничего делать не надо. Добавить во встроенный список — когда нужны свои опции или «Update» для старых CLI.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

@@ -16,6 +16,8 @@ const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
 export interface SelectableModelOption {
   slug: string;
   name: string;
+  /** Names the harness itself gives the model (`ServerProviderModel.aliases`: Claude Code's `fable`). */
+  aliases?: ReadonlyArray<string> | undefined;
 }
 
 export function createModelCapabilities(input: {
@@ -279,13 +281,63 @@ export function resolveSelectableModel(
     return byName.slug;
   }
 
+  // The harness's own name for a model (Claude Code: `fable` → its default
+  // Fable) wins over this build's table, which only knows what it shipped with.
+  const lower = trimmed.toLowerCase();
+  const byAlias = options.find((option) =>
+    option.aliases?.some((alias) => alias.toLowerCase() === lower),
+  );
+  if (byAlias) {
+    return byAlias.slug;
+  }
+
   const normalized = normalizeModelSlug(trimmed, provider);
   if (!normalized) {
     return null;
   }
 
   const resolved = options.find((option) => option.slug === normalized);
-  return resolved ? resolved.slug : null;
+  if (resolved) {
+    return resolved.slug;
+  }
+  // A bare family name ("fable") whose newest model this instance doesn't
+  // list (an older CLI): the newest of that family it does list.
+  return /\d/.test(trimmed) ? null : (newestOfFamily(normalized, options)?.slug ?? null);
+}
+
+/** `claude-fable-5-2` → family `claude-fable-` and version [5, 2]; null without a trailing version. */
+function slugFamilyVersion(
+  slug: string,
+): { readonly family: string; readonly version: ReadonlyArray<number> } | null {
+  const match = /^(.*?-)(\d+(?:-\d+)*)$/.exec(slug);
+  return match ? { family: match[1]!, version: match[2]!.split("-").map(Number) } : null;
+}
+
+function newestOfFamily(
+  slug: string,
+  options: ReadonlyArray<SelectableModelOption>,
+): SelectableModelOption | undefined {
+  const wanted = slugFamilyVersion(slug);
+  if (!wanted) return undefined;
+  let best:
+    | { readonly option: SelectableModelOption; readonly version: ReadonlyArray<number> }
+    | undefined;
+  for (const option of options) {
+    const parsed = slugFamilyVersion(option.slug);
+    if (!parsed || parsed.family !== wanted.family) continue;
+    if (!best || compareVersionParts(parsed.version, best.version) > 0) {
+      best = { option, version: parsed.version };
+    }
+  }
+  return best?.option;
+}
+
+function compareVersionParts(a: ReadonlyArray<number>, b: ReadonlyArray<number>): number {
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 /**

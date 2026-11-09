@@ -29,7 +29,7 @@ import {
   isProviderAvailable,
 } from "@t3tools/contracts";
 import { personRoute, thinkingOption, type PersonRoute } from "@t3tools/shared/assistantMemory";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
 
 import { resolveModel } from "../provider/autoBootstrapModelSelection.ts";
 
@@ -88,6 +88,9 @@ const FAMILIES = ["opus", "sonnet", "haiku", "fable", "codex", "mini", "nano"] a
  * newest of the same family (the ROUTING notes' rule), else as written.
  */
 function offeredModel(provider: ServerProvider, model: string): string {
+  // The provider's own names first (Claude Code: `fable` → its default Fable).
+  const offered = resolveSelectableModel(provider.driver, model, provider.models);
+  if (offered !== null) return offered;
   const slug = normalizeModelSlug(model, provider.driver) ?? model;
   if (provider.models.length === 0 || provider.models.some((entry) => entry.slug === slug)) {
     return slug;

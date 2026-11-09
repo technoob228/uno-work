@@ -169,6 +169,40 @@ describe("resolveProviderModelSelection", () => {
     });
   });
 
+  it("reads `fable` the way the installed Claude Code does", () => {
+    // Claude Code 2.1.321 says `fable` is Fable 5.2 (ServerProviderModel.aliases).
+    const current = provider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      models: ["claude-fable-5-1"],
+    });
+    const withAlias: ServerProvider = {
+      ...current,
+      models: [
+        {
+          slug: "claude-fable-5-2",
+          name: "Claude Fable 5.2",
+          isCustom: false,
+          capabilities: null,
+          aliases: ["fable"],
+        },
+        ...current.models,
+      ],
+    };
+    expect(
+      resolveProviderModelSelection({ provider: "claude", model: "fable", providers: [withAlias] }),
+    ).toEqual({ ok: true, selection: { instanceId: "claudeAgent", model: "claude-fable-5-2" } });
+    // An older CLI without Fable 5.2: the newest Fable it has, not a model it can't run.
+    const older = provider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      models: ["claude-fable-5-1", "claude-fable-5"],
+    });
+    expect(
+      resolveProviderModelSelection({ provider: "claude", model: "fable", providers: [older] }),
+    ).toEqual({ ok: true, selection: { instanceId: "claudeAgent", model: "claude-fable-5-1" } });
+  });
+
   it("understands `claude` as the Claude driver", () => {
     const resolved = resolveProviderModelSelection({
       provider: "claude",

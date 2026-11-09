@@ -77,7 +77,8 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", claude)).toBe("claude-sonnet-5");
     expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5-5");
-    expect(normalizeModelSlug("fable", claude)).toBe("claude-fable-5-1");
+    expect(normalizeModelSlug("fable", claude)).toBe("claude-fable-5-2");
+    expect(normalizeModelSlug("fable-5.1", claude)).toBe("claude-fable-5-1");
     expect(normalizeModelSlug("claude-sonnet-4.6", claude)).toBe("claude-sonnet-4-6");
   });
 
@@ -121,6 +122,37 @@ describe("resolveSelectableModel", () => {
     expect(resolveSelectableModel(ProviderDriverKind.make("claudeAgent"), "sonnet", options)).toBe(
       "claude-sonnet-5",
     );
+  });
+
+  const claude = ProviderDriverKind.make("claudeAgent");
+
+  it("follows the harness's own alias over the build's table", () => {
+    // Claude Code 2.1.321: `sonnet` → Sonnet 5.5, `fable` → Fable 5.2.
+    const options = [
+      { slug: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", aliases: ["sonnet"] },
+      { slug: "claude-sonnet-5", name: "Claude Sonnet 5" },
+      { slug: "claude-fable-5-2", name: "Claude Fable 5.2", aliases: ["fable"] },
+      { slug: "claude-fable-5-1", name: "Claude Fable 5.1" },
+    ];
+    expect(resolveSelectableModel(claude, "sonnet", options)).toBe("claude-sonnet-5-5");
+    expect(resolveSelectableModel(claude, "Fable", options)).toBe("claude-fable-5-2");
+    // A version asked for by name stays that version.
+    expect(resolveSelectableModel(claude, "fable-5.1", options)).toBe("claude-fable-5-1");
+    expect(resolveSelectableModel(claude, "claude-sonnet-5", options)).toBe("claude-sonnet-5");
+  });
+
+  it("gives the newest listed model of a family when the build's newest isn't listed", () => {
+    // An older CLI (2.1.316) without Fable 5.2 and without aliases in the list.
+    const options = [
+      { slug: "claude-opus-5-5", name: "Claude Opus 5.5" },
+      { slug: "claude-fable-5", name: "Claude Fable 5" },
+      { slug: "claude-fable-5-1", name: "Claude Fable 5.1" },
+    ];
+    expect(resolveSelectableModel(claude, "fable", options)).toBe("claude-fable-5-1");
+    // An explicit version that isn't listed is not swapped for another one.
+    expect(resolveSelectableModel(claude, "claude-fable-5-2", options)).toBeNull();
+    expect(resolveSelectableModel(claude, "fable-5.2", options)).toBeNull();
+    expect(resolveSelectableModel(claude, "haiku", options)).toBeNull();
   });
 });
 

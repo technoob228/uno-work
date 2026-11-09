@@ -33,6 +33,7 @@ import {
   type ClaudeCliModel,
   checkClaudeProviderStatus,
 } from "./ClaudeProvider.ts";
+import { makeClaudeCliModelMemory } from "./claudeModelCatalog.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "./ProviderEventLoggers.ts";
 import { ProviderInstanceRegistryHydrationLive } from "./ProviderInstanceRegistryHydration.ts";
@@ -1333,7 +1334,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.218 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.218 is too old for Claude Fable 5.2. Upgrade to v2.1.321 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1363,7 +1364,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.196 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.196 is too old for Claude Fable 5.2. Upgrade to v2.1.321 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1388,7 +1389,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           );
           assert.strictEqual(
             status.message,
-            "Claude Code v2.1.110 is too old for Claude Opus 5.5. Upgrade to v2.1.280 or newer to access it.",
+            "Claude Code v2.1.110 is too old for Claude Fable 5.2. Upgrade to v2.1.321 or newer to access it.",
           );
         }).pipe(
           Effect.provide(
@@ -1408,7 +1409,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
       );
 
       it.effect(
-        "lists Claude Opus 5.5 and Fable 5.1 from Claude Code 2.1.280, no update needed",
+        "lists Claude Opus 5.5 and Fable 5.2 from Claude Code 2.1.321, no update needed",
         () =>
           Effect.gen(function* () {
             const status = yield* checkClaudeProviderStatus(
@@ -1417,6 +1418,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             );
             const slugs = status.models.map((model) => model.slug);
             assert.strictEqual(slugs[0], "claude-opus-5-5");
+            assert.strictEqual(slugs.includes("claude-fable-5-2"), true);
             assert.strictEqual(slugs.includes("claude-fable-5-1"), true);
             assert.strictEqual(slugs.includes("claude-sonnet-5"), true);
             assert.strictEqual(
@@ -1429,11 +1431,118 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             Effect.provide(
               mockSpawnerLayer((args) => {
                 const joined = args.join(" ");
-                if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+                if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
                 throw new Error(`Unexpected args: ${joined}`);
               }),
             ),
           ),
+      );
+
+      it.effect("offers an update for Fable 5.2 on Claude Code 2.1.280 (Opus 5.5 stays)", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            claudeCapabilities(),
+          );
+          const slugs = new Set(status.models.map((model) => model.slug));
+          assert.strictEqual(slugs.has("claude-opus-5-5"), true);
+          assert.strictEqual(slugs.has("claude-fable-5-1"), true);
+          assert.strictEqual(slugs.has("claude-fable-5-2"), false);
+          assert.strictEqual(status.updateAvailable, true);
+          assert.strictEqual(
+            status.message,
+            "Claude Code v2.1.280 is too old for Claude Fable 5.2. Upgrade to v2.1.321 or newer to access it.",
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      // A crashed or hung probe answers nothing (ClaudeProvider.probe.test.ts).
+      it.effect("keeps the built-ins when the CLI probe answered nothing", () =>
+        Effect.gen(function* () {
+          const status = yield* checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            noClaudeCapabilities,
+          );
+          const slugs = new Set(status.models.map((model) => model.slug));
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(slugs.has("claude-fable-5-2"), true);
+          assert.strictEqual(slugs.has("claude-opus-4-6"), true);
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
+              if (joined === "auth status --json")
+                return {
+                  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                  stderr: "",
+                  code: 0,
+                };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect(
+        "keeps the models the CLI listed when a later probe times out (same version and sign-in)",
+        () => {
+          const memory = makeClaudeCliModelMemory();
+          let answer: "list" | "miss" = "list";
+          const probe = () =>
+            answer === "list"
+              ? claudeCapabilities({
+                  subscriptionType: "max",
+                  models: [{ value: "sonnet", resolvedModel: "claude-sonnet-5-5" }],
+                })()
+              : noClaudeCapabilities();
+          const check = checkClaudeProviderStatus(
+            defaultClaudeSettings,
+            probe,
+            {},
+            undefined,
+            memory,
+          );
+          return Effect.gen(function* () {
+            const first = yield* check;
+            assert.strictEqual(
+              first.models.some((model) => model.slug === "claude-sonnet-5-5"),
+              true,
+            );
+            answer = "miss";
+            const second = yield* check;
+            assert.strictEqual(
+              second.models.some((model) => model.slug === "claude-sonnet-5-5"),
+              true,
+            );
+            assert.deepStrictEqual(
+              second.models.find((model) => model.slug === "claude-sonnet-5-5")?.aliases,
+              ["sonnet"],
+            );
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) => {
+                const joined = args.join(" ");
+                if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
+                if (joined === "auth status --json")
+                  return {
+                    stdout: '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}\n',
+                    stderr: "",
+                    code: 0,
+                  };
+                throw new Error(`Unexpected args: ${joined}`);
+              }),
+            ),
+          );
+        },
       );
 
       it.effect("offers an update while the CLI is too old for the newest models", () =>
@@ -1526,7 +1635,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           Effect.provide(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.280\n", stderr: "", code: 0 };
+              if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
               if (joined === "auth status --json")
                 return { stdout: '{"loggedIn":false,"authMethod":"none"}\n', stderr: "", code: 0 };
               throw new Error(`Unexpected args: ${joined}`);
@@ -1942,7 +2051,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           Effect.provide(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.296\n", stderr: "", code: 0 };
+              if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
               if (joined === "auth status --json")
                 return {
                   stdout:
@@ -1969,7 +2078,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           Effect.provide(
             mockSpawnerLayer((args) => {
               const joined = args.join(" ");
-              if (joined === "--version") return { stdout: "2.1.296\n", stderr: "", code: 0 };
+              if (joined === "--version") return { stdout: "2.1.321\n", stderr: "", code: 0 };
               if (joined === "auth status --json") return { stdout: "", stderr: "busy", code: 1 };
               throw new Error(`Unexpected args: ${joined}`);
             }),
