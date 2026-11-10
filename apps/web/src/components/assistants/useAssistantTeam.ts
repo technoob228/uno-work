@@ -203,10 +203,30 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
   }, [environmentIds, projects, summaryLists]);
   const profiles = fromDaemon ? daemon.profiles : storeProfiles;
 
+  // Computers whose daemon answered with its list: an assistant folder there
+  // that the list leaves out was deleted or moved away (kept 7 days) — not shown.
+  const listed = useMemo(
+    () =>
+      new Set(
+        environmentIds.filter(
+          (_environmentId, index) =>
+            summaryLists[index] !== null && summaryLists[index] !== undefined,
+        ),
+      ),
+    [environmentIds, summaryLists],
+  );
+
   return useMemo(() => {
     const members: TeamMember[] = [];
     for (const project of projects) {
       if (!isAssistantProjectId(project.id)) continue;
+      if (
+        fromDaemon &&
+        listed.has(project.environmentId) &&
+        !daemon.summaries.has(assistantKeyOf(project.environmentId, project.id))
+      ) {
+        continue;
+      }
       // The release has Uno alone (Misha 16.10): other assistant folders —
       // "New assistant" from 0.0.106 — stay under Settings → Assistants.
       // The team is the mock's (?demo=w0138).
@@ -268,6 +288,7 @@ export function useAssistantTeam(teamShownOverride?: boolean): ReadonlyArray<Tea
   }, [
     daemon.summaries,
     fromDaemon,
+    listed,
     homeEnvironmentId,
     labels,
     profiles,
