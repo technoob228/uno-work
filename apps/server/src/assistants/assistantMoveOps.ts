@@ -683,6 +683,33 @@ export const makeAssistantMoveOps = Effect.gen(function* () {
         yield* putConnectorRow(projectId, { kind: connector.kind, config: connector.config });
         activated.push(connector.kind);
       }
+      // It lived here before: its link to Uno's bot / Slack app here (bound
+      // to this computer) works again, unless its own one just came along.
+      const cameBack = moves.outgoing[projectId];
+      for (const row of cameBack?.connectorRows ?? []) {
+        if (connectorVia(row.kind, row.config) !== "relay") continue;
+        if (activated.includes(row.kind) || current.some((entry) => entry.kind === row.kind)) {
+          continue;
+        }
+        yield* promise("Couldn't record the move", () =>
+          updateMoves(config.stateDir, (now) => {
+            const entry = now.incoming[projectId];
+            return entry === undefined
+              ? now
+              : {
+                  ...now,
+                  incoming: {
+                    ...now.incoming,
+                    [projectId]: { ...entry, activated: [...entry.activated, row.kind] },
+                  },
+                };
+          }),
+        );
+        yield* putConnectorRow(projectId, row);
+        activated.push(row.kind);
+        const relinked = relink.indexOf(row.kind);
+        if (relinked >= 0) relink.splice(relinked, 1);
+      }
       const reminderIds = yield* insertReminders(projectId, bundle.reminders);
       yield* promise("Couldn't record the move", () =>
         updateMoves(config.stateDir, (now) => {
