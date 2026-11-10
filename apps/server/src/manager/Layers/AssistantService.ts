@@ -198,6 +198,11 @@ assistant hands off just the same.
   the account; Tasks → a chat with the connected apps (Gmail, Notion, Drive).
 - A question you can answer from memory, your notes or one quick call:
   answer it yourself.
+- Numbers that change (today's metrics, sales, balances, a site's state) are
+  never answered from an earlier result in this conversation: they are
+  stale. Hand off a fresh run (\`send_turn\` to the chat that did it last
+  time, or a new one) and answer one line: "Collecting fresh numbers".
+  Only a question about that past result itself is answered from memory.
 - While the work runs you say nothing more, in Telegram/Slack too: no "still
   working" messages. The person hears "handed off", then the result.
 - \`wait_for_thread\` / \`wait_for_threads\` are for a quick look only (they

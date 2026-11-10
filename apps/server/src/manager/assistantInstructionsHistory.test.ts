@@ -289,6 +289,7 @@ describe("AGENTS.md of assistants made by older versions", () => {
       'a `show_card` report (see "Cards"), not bullets',
     );
     expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("[Full report](url)");
+    expect(ASSISTANT_INSTRUCTIONS_TEMPLATE).toContain("never answered from an earlier result");
     expect(SHIPPED_ASSISTANT_INSTRUCTIONS.at(-1)).toBe(RELEASED_2026_11_10_1);
     expect(instructionsVersion(RELEASED_2026_11_10_1)).toBe("2026-11-10.1");
     expect(RELEASED_2026_11_10_1).toContain("then 3-5 short bullets");
