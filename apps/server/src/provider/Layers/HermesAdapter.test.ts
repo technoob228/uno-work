@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as os from "node:os";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -515,3 +515,161 @@ it.effect(
     }).pipe(Effect.provide(makeWedgedHermesLayer())),
   30_000,
 );
+
+// ── The projects an assistant manages (assistants/projectsHint.ts) ──────
+
+const PROJECTS_BLOCK = [
+  "The person's projects on this computer — you manage them all (1). A task about one of them → chat_create with its folder as `cwd`.",
+  "- uno-project · ~/projects/uno-project — UNO: hosting, client servers and their tickets. [its instructions: CLAUDE.md]",
+].join("\n");
+
+/** What `session/prompt` carried, in order (the mock agent's request log). */
+async function promptTexts(logPath: string): Promise<ReadonlyArray<string>> {
+  const raw = await readFile(logPath, "utf8").catch(() => "");
+  return raw
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map(
+      (line) =>
+        JSON.parse(line) as {
+          method?: string;
+          params?: { prompt?: ReadonlyArray<{ type: string; text?: string }> };
+        },
+    )
+    .filter((request) => request.method === "session/prompt")
+    .map((request) => (request.params?.prompt ?? []).map((part) => part.text ?? "").join("\n"));
+}
+
+const assistantProjectsState: { block: string | null; hermesHome: string; log: string } = {
+  block: PROJECTS_BLOCK,
+  hermesHome: "",
+  log: "",
+};
+
+const assistantProjectsLayer = it.layer(
+  Layer.effect(
+    HermesAdapter,
+    Effect.gen(function* () {
+      const mock = yield* Effect.promise(() => makeMockHermes());
+      assistantProjectsState.hermesHome = mock.hermesHome;
+      assistantProjectsState.log = path.join(path.dirname(mock.wrapperPath), "requests.ndjson");
+      return yield* makeHermesAdapter(
+        Schema.decodeSync(HermesSettings)({ binaryPath: mock.wrapperPath }),
+        {
+          environment: {
+            HERMES_HOME: mock.hermesHome,
+            T3_ACP_REQUEST_LOG_PATH: assistantProjectsState.log,
+          },
+          assistantProjects: () => Effect.sync(() => assistantProjectsState.block),
+        },
+      );
+    }),
+  ).pipe(
+    Layer.provideMerge(
+      ServerConfig.layerTest(process.cwd(), { prefix: "t3code-hermes-adapter-projects-" }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+/** A named assistant's folder: the marker is what makes it one. */
+async function makeAssistantWorkspace(): Promise<string> {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "hermes-assistant-ws-"));
+  await mkdir(dir, { recursive: true });
+  await writeFile(
+    path.join(dir, ".uno-assistant.json"),
+    JSON.stringify({ projectId: "assistant-chief" }),
+    "utf8",
+  );
+  await writeFile(path.join(dir, "SOUL.md"), "# Who I am\nТы Купер, помощник Миши.\n", "utf8");
+  return dir;
+}
+
+assistantProjectsLayer("an assistant's projects reach its session", (it) => {
+  it.effect(
+    "a new session has them in its system prompt, and its cursor says with which list",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* HermesAdapter;
+        const cwd = yield* Effect.promise(() => makeAssistantWorkspace());
+        const threadId = ThreadId.make("chief-new");
+        assistantProjectsState.block = PROJECTS_BLOCK;
+
+        const session = yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd,
+          runtimeMode: "full-access",
+        });
+        const config = yield* Effect.promise(() =>
+          readFile(
+            path.join(assistantProjectsState.hermesHome, "threads", threadId, "config.yaml"),
+            "utf8",
+          ),
+        );
+        assert.include(config, "environment_hint");
+        assert.include(config, "Your projects");
+        assert.include(config, "~/projects/uno-project");
+        const cursor = session.resumeCursor as { projectsStamp?: string };
+        assert.isString(cursor.projectsStamp);
+
+        // The list is in the prompt already: the message goes as it is.
+        yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+        // A project added while the session runs comes with the next message, once.
+        assistantProjectsState.block = `${PROJECTS_BLOCK}\n- site · ~/projects/site`;
+        yield* adapter.sendTurn({ threadId, input: "and now?", attachments: [] });
+        yield* adapter.sendTurn({ threadId, input: "third", attachments: [] });
+        const prompts = (yield* Effect.promise(() =>
+          promptTexts(assistantProjectsState.log),
+        )).slice(-3);
+        assert.notInclude(prompts[0]!, "Your projects");
+        assert.include(prompts[1]!, "[Your projects changed since this session started");
+        assert.include(prompts[1]!, "- site · ~/projects/site");
+        assert.isTrue(prompts[1]!.endsWith("and now?"));
+        assert.notInclude(prompts[2]!, "Your projects");
+
+        yield* adapter.stopSession(threadId);
+      }),
+  );
+
+  it.effect(
+    "a session from before the list (Cooper's, 10.11) comes back and gets it with the first message",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* HermesAdapter;
+        const cwd = yield* Effect.promise(() => makeAssistantWorkspace());
+        const threadId = ThreadId.make("chief-old");
+        assistantProjectsState.block = PROJECTS_BLOCK;
+
+        // Hermes froze that session's system prompt when it was created: the
+        // new config.yaml does not reach it. Its cursor has no stamp.
+        const session = yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd,
+          runtimeMode: "full-access",
+          resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
+        });
+        const cursor = session.resumeCursor as { sessionId: string; projectsStamp?: string };
+        assert.strictEqual(cursor.sessionId, "mock-session-1");
+        // Still "built without the list": the next restart says it again.
+        assert.isUndefined(cursor.projectsStamp);
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "Сервер bright-falcon #1086: не могу войти по SSH",
+          attachments: [],
+        });
+        yield* adapter.sendTurn({ threadId, input: "ну что?", attachments: [] });
+        const prompts = (yield* Effect.promise(() =>
+          promptTexts(assistantProjectsState.log),
+        )).slice(-2);
+        assert.include(prompts[0]!, "<Your projects>");
+        assert.include(prompts[0]!, "- uno-project · ~/projects/uno-project — UNO");
+        assert.isTrue(prompts[0]!.endsWith("Сервер bright-falcon #1086: не могу войти по SSH"));
+        assert.notInclude(prompts[1]!, "Your projects");
+
+        yield* adapter.stopSession(threadId);
+      }),
+  );
+});

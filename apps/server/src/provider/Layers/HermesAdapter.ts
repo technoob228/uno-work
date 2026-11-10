@@ -108,7 +108,11 @@ import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { hermesSandboxExtras } from "../../sandbox/harnessSandboxExtras.ts";
-import { projectsChangedNote } from "../../assistants/projectsHint.ts";
+import {
+  projectsChangedNote,
+  projectsInPrompt,
+  projectsStamp,
+} from "../../assistants/projectsHint.ts";
 import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -344,13 +348,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseHermesResume(raw: unknown): { sessionId: string; promptStamp?: string } | undefined {
+function parseHermesResume(
+  raw: unknown,
+): { sessionId: string; promptStamp?: string; projectsStamp?: string } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== HERMES_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
   return {
     sessionId: raw.sessionId.trim(),
     ...(typeof raw.promptStamp === "string" ? { promptStamp: raw.promptStamp } : {}),
+    ...(typeof raw.projectsStamp === "string" ? { projectsStamp: raw.projectsStamp } : {}),
   };
 }
 
@@ -749,9 +756,12 @@ export function makeHermesAdapter(
           // status or dispatch turn needs no file reads (assistantContextHint).
           // The projects it manages go there too, with their folders: where
           // a hand-off goes is known from the first message (projectsHint.ts).
-          const assistantProjects = inAssistantWorkspace
-            ? yield* readAssistantProjects(cwd)
-            : undefined;
+          // undefined: not an assistant, or a daemon without the projects
+          // service — nothing is tracked.
+          const assistantProjects =
+            inAssistantWorkspace && options?.assistantProjects
+              ? yield* readAssistantProjects(cwd)
+              : undefined;
           const assistantContext = inAssistantWorkspace
             ? yield* readAssistantContext(cwd, assistantProjects ?? null)
             : null;
@@ -1020,6 +1030,18 @@ export function makeHermesAdapter(
             ),
           );
 
+          // The projects in this session's system prompt. Hermes froze the
+          // prompt when the session was created: one that came back holds
+          // the list it was built with (its cursor's stamp) — none at all
+          // when it dates from before the list. The cursor keeps that stamp.
+          const resumed = resumeSessionId !== undefined && started.sessionId === resumeSessionId;
+          const promptProjectsStamp =
+            assistantProjects === undefined
+              ? undefined
+              : resumed
+                ? resumeCursor?.projectsStamp
+                : projectsStamp(assistantProjects);
+
           const now = yield* nowIso;
           const session: ProviderSession = {
             provider: PROVIDER,
@@ -1033,6 +1055,7 @@ export function makeHermesAdapter(
               schemaVersion: HERMES_RESUME_VERSION,
               sessionId: started.sessionId,
               ...(promptStamp !== undefined ? { promptStamp } : {}),
+              ...(promptProjectsStamp !== undefined ? { projectsStamp: promptProjectsStamp } : {}),
             },
             createdAt: now,
             updatedAt: now,
@@ -1070,7 +1093,16 @@ export function makeHermesAdapter(
                     .pipe(Effect.orElseSucceed(() => "")),
                 )
               : undefined,
-            projectsSeen: assistantProjects,
+            // A session that came back with another list (or none) in its
+            // prompt gets the list of now with its first message.
+            projectsSeen:
+              assistantProjects === undefined
+                ? undefined
+                : projectsInPrompt({
+                    current: assistantProjects,
+                    resumed,
+                    resumedStamp: resumeCursor?.projectsStamp,
+                  }),
             replyTextTurnId: undefined,
             completedTurnId: undefined,
             billingFailure: undefined,
@@ -1230,7 +1262,6 @@ export function makeHermesAdapter(
         Effect.orElseSucceed(() => null),
       );
 
-    /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
     /** The "Your projects" block of the assistant a workspace belongs to; null: none. */
     const readAssistantProjects = (cwd: string) =>
       Effect.gen(function* () {
@@ -1240,6 +1271,7 @@ export function makeHermesAdapter(
           : null;
       });
 
+    /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
     const readAssistantContext = (cwd: string, projects: string | null) =>
       Effect.gen(function* () {
         const read = (name: string) =>

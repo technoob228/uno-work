@@ -20,6 +20,8 @@
  *
  * @module assistants/projectsHint
  */
+import { createHash } from "node:crypto";
+
 import { sanitizeUntrustedField } from "../untrustedContent.ts";
 
 /** Projects shown with a line about them; the rest are named only. */
@@ -231,6 +233,40 @@ export function assistantProjectsBlock(input: {
   }
   return [head, ...rest].join("\n");
 }
+
+/**
+ * Which list a session's system prompt was built with. Hermes freezes the
+ * system prompt of a session and resumes it across restarts, so a session
+ * that comes back says by this stamp (kept in its resume cursor) whether its
+ * prompt holds the list of now.
+ */
+export function projectsStamp(block: string | null): string {
+  return createHash("sha256")
+    .update(block ?? "")
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * What a session's system prompt holds of the projects, as the first value
+ * `projectsChangedNote` compares against:
+ * - a fresh session, or one resumed with the same list: the list of now;
+ * - resumed, built before the list existed (no stamp): nothing — the first
+ *   message brings the list;
+ * - resumed, built with another list: unknown — the first message brings the
+ *   list of now, or says there are none.
+ */
+export function projectsInPrompt(input: {
+  readonly current: string | null;
+  readonly resumed: boolean;
+  readonly resumedStamp: string | undefined;
+}): string | null {
+  if (!input.resumed || input.resumedStamp === projectsStamp(input.current)) return input.current;
+  return input.resumedStamp === undefined ? null : PROJECTS_OTHER_LIST;
+}
+
+/** A list that equals no real one (a block is never empty). */
+const PROJECTS_OTHER_LIST = "";
 
 /**
  * The projects changed while the session ran (a new project, another folder,

@@ -14,6 +14,8 @@ import {
   homeRelativeFolder,
   projectBrief,
   projectsChangedNote,
+  projectsInPrompt,
+  projectsStamp,
   type AssistantProjectEntry,
 } from "./projectsHint.ts";
 
@@ -273,6 +275,48 @@ describe("projectsChangedNote — a new project reaches a running session", () =
 
   it("says so when the last project is gone", () => {
     expect(projectsChangedNote("old", null)).toContain("you have no projects on this computer now");
+  });
+});
+
+describe("projectsInPrompt — a session that comes back has the system prompt it was built with", () => {
+  const list = "The person's projects on this computer — you manage them all (1).\n- site · ~/site";
+
+  it("a fresh session has the list of now: nothing to add", () => {
+    const seen = projectsInPrompt({ current: list, resumed: false, resumedStamp: undefined });
+    expect(projectsChangedNote(seen, list)).toBeNull();
+    expect(projectsInPrompt({ current: null, resumed: false, resumedStamp: undefined })).toBeNull();
+  });
+
+  it("a session from before the list (Cooper's, 10.11) gets it with the first message", () => {
+    const seen = projectsInPrompt({ current: list, resumed: true, resumedStamp: undefined });
+    expect(projectsChangedNote(seen, list)).toContain(`<Your projects>\n${list}\n</Your projects>`);
+    // No projects then and none now: nothing to say.
+    const none = projectsInPrompt({ current: null, resumed: true, resumedStamp: undefined });
+    expect(projectsChangedNote(none, null)).toBeNull();
+  });
+
+  it("a session that comes back with the same list is left alone", () => {
+    const seen = projectsInPrompt({
+      current: list,
+      resumed: true,
+      resumedStamp: projectsStamp(list),
+    });
+    expect(projectsChangedNote(seen, list)).toBeNull();
+  });
+
+  it("a session built with another list gets the list of now, or hears there are none", () => {
+    const stale = projectsStamp("an older list");
+    const seen = projectsInPrompt({ current: list, resumed: true, resumedStamp: stale });
+    expect(projectsChangedNote(seen, list)).toContain("the current list");
+    const gone = projectsInPrompt({ current: null, resumed: true, resumedStamp: stale });
+    expect(projectsChangedNote(gone, null)).toContain("you have no projects on this computer now");
+    // "No projects" has its own stamp: a session built without any stays quiet.
+    const still = projectsInPrompt({
+      current: null,
+      resumed: true,
+      resumedStamp: projectsStamp(null),
+    });
+    expect(projectsChangedNote(still, null)).toBeNull();
   });
 });
 

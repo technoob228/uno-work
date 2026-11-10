@@ -306,6 +306,9 @@ const program = Effect.gen(function* () {
     }),
   );
 
+  // How Hermes' driver applies the model to a session that came back.
+  yield* agent.handleSetSessionModel(() => Effect.succeed({}));
+
   yield* agent.handleCancel(({ sessionId }) =>
     Effect.sync(() => {
       cancelledSessions.add(String(sessionId ?? "mock-session-1"));
