@@ -8,6 +8,13 @@
 
 ---
 
+## v0.0.183 — 2026-11-10
+
+- Cards from your agents and assistant. When an agent asks you to choose, shows a result or checks what you learned, it now sends a card (`show_card`): a choice with a recommended option, a report with numbers, sections and "what next" buttons, or a quiz. In the Work chat the card is a page you answer with a click; your pick goes to the agent as your message.
+- Telegram: cards are live widgets. In your private chat with the assistant's bot a card is a small app inside the message (Telegram Bot API 10.4): tap an option, open a section of a report, take a quiz question by question and see the score. Older Telegram apps, groups and reports with pictures get a Rich Message with buttons, or plain text. Agents can also send their own mini app into Telegram (`messenger_send` with `widget`: a game, a calculator, a live board) and update it (`widget_update`).
+- A page an agent draws in the chat (`html_render`) can talk back: its buttons put the answer into your message box, you press Enter.
+- My Uno: Wake up now brings an archived computer back (the button did nothing).
+
 ## v0.0.182 — 2026-11-10
 
 - Telegram groups: choose who your assistant answers in each group — only you, people you pick, or everyone. Settings → Assistant → Groups: a switch per group and the people who wrote to the bot there, picked by name. A group you called the bot in shows up by itself, with an Add button (no chat id to type). People you let in talk in a chat of their own, and anything the assistant does for them waits for your OK. Agents can set it too: the `assistant_groups` tool (changing always asks you first). Needs the assistant's own bot.
