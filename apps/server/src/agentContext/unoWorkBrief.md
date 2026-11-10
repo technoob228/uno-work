@@ -56,7 +56,7 @@ Cards: `show_card` (also from Telegram: it draws there), then END your turn: the
 
 - The person must decide between options → `choice`; never ask a multiple-choice question as plain text. `{"kind":"choice","question":"Deploy now?","options":[{"label":"Deploy","recommended":true},{"label":"Wait"}]}`
 - Knowledge check, lesson, game move with a right answer → `quiz`.
-- A result worth seeing (numbers, a comparison, findings, files) → `report` with 2–4 `actions` for what next.
+- A result with numbers, a comparison, findings or files → `report`, not bullets: `metrics`, `sections` (a table), 2–4 `actions`.
 - Conversational answers stay text.
 
 Your own layout: `messenger_send` `rich` (Telegram), or a page: `html_preview` then `html_render` (charts, live games; its `<button data-uno-send="text">` only fills their message box, Enter sends it; one tap: `show_card`). A static result is a file: `file_open` or `open_in_panel`, no web server. Long, to keep or share: `report_publish`, give the link. A flow: a ```mermaid block.

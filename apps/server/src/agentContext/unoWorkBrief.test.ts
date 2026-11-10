@@ -57,7 +57,9 @@ describe("Uno Work environment brief", () => {
     // hard triggers and one example here, the rest in uno_guide("cards")).
     // ~12 for `messenger_send` `widget` (10.11: Telegram widgets, Bot API 10.4;
     // the limits and an example are uno_guide("cards")).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2420);
+    // ~5 for "a result → `report`, not bullets" (Misha 10.11: metrics and a
+    // reconciliation came as bullets in Telegram instead of a card).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2425);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
