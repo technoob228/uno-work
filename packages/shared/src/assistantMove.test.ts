@@ -9,7 +9,7 @@ import {
   runAssistantMove,
   splitMovableAutomations,
   TELEGRAM_POLL_HANDOVER_MS,
-} from "./assistantMove";
+} from "./assistantMove.ts";
 
 const bundle = (overrides: Partial<AssistantMoveBundle> = {}): AssistantMoveBundle => ({
   version: ASSISTANT_MOVE_BUNDLE_VERSION,
@@ -146,10 +146,8 @@ describe("runAssistantMove", () => {
 
   it("a target without automations refuses before anything moves", async () => {
     const { deps, calls } = fakeDeps({ automations: 1 });
-    const noAutomations: AssistantMoveDeps = {
-      ...deps,
-      target: { ...deps.target, createAutomation: undefined },
-    } as AssistantMoveDeps;
+    const { createAutomation: _none, ...target } = deps.target;
+    const noAutomations: AssistantMoveDeps = { ...deps, target };
     await expect(runAssistantMove(input, noAutomations)).rejects.toThrow(/need a cloud computer/);
     expect(calls).toEqual(["export", "import", "discard"]);
   });
