@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.186 — 2026-11-10
+
+- Your assistant knows your projects. It sees every project on its computer with its folder, so a task, a client's ticket or a forwarded letter about a project goes to a chat in that project, with the project's own instructions. Before, a new assistant could answer "this isn't for me".
+- Work an assistant starts on another computer comes back whole: it gets the answer with its conclusion and the link to the report. Before, it got only the first lines.
+
 ## v0.0.185 — 2026-11-10
 
 - An assistant you moved to another computer, or deleted, no longer stays in the sidebar of the computer it left as "Set up".
