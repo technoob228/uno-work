@@ -51,13 +51,13 @@ describe("Uno Work environment brief", () => {
     // and paths he can't open; the details are uno_guide("sites")), ~60 for the
     // my_computer_* line (Connect my computer, 31.10: details in uno_guide).
     // ~15 for `assistant_groups` (10.11: who the assistant answers in Telegram groups).
-    // ~6 for `assistant_move` (10.11: an assistant moves to another computer).
+    // ~10 for `assistant_move` (10.11: an assistant moves to another computer).
     // ~135 for cards (Misha 05.11: agents answer with `show_card` — a choice,
     // a quiz, a report with next steps — whenever it fits, even a weak model;
     // hard triggers and one example here, the rest in uno_guide("cards")).
     // ~12 for `messenger_send` `widget` (10.11: Telegram widgets, Bot API 10.4;
     // the limits and an example are uno_guide("cards")).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2410);
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2420);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
