@@ -7,6 +7,10 @@
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
 
+## UI rules
+
+- **Never** put a colored stripe on the side of a card, callout, toast, message or active row (`border-left: 3px solid …` on a rounded box, `box-shadow: inset 2px 0 0`, `border-l-4`, a pseudo-element bar) — the clearest tell of vibe-coded UI (Misha, 10.11.2026). Use background, weight, an icon, or a full border. `node scripts/check-no-side-stripe.mjs` enforces it; connector lines, chart ticks and plain grey markdown quotes are marked `/* side-stripe-ok: reason */`.
+
 ## Desktop Dev Startup
 
 - Use `bun dev:desktop` from the repo root for the full Uno Work app. `bun dev`/`bun dev:web` is not a desktop-app smoke test.

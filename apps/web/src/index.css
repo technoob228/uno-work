@@ -388,7 +388,7 @@ code {
 }
 
 .preview-markdown blockquote {
-  border-left: 3px solid var(--border);
+  border-left: 3px solid var(--border); /* side-stripe-ok: цитата в markdown, серая, без фона и скруглений */
   padding-left: 0.9em;
   color: var(--muted-foreground);
   font-style: italic;
@@ -545,7 +545,7 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--border); /* side-stripe-ok: цитата в markdown, серая, без фона и скруглений */
   padding-left: 0.8rem;
   color: var(--muted-foreground);
 }
