@@ -140,10 +140,9 @@ const pendingSavedEnvironmentConnections = new Map<
   PendingSavedEnvironmentConnection
 >();
 /**
- * Saved environments whose daemon refused the stored session (401 on the ws
- * token, or a session check that came back "not authenticated"). The stored
- * token is signed with its own expiry, so once refused it never works again:
- * the next reconnect must get a new one instead of retrying the dead one.
+ * Saved environments whose daemon refused the stored session with a 401. The
+ * stored token is signed with its own expiry, so once refused it never works
+ * again: the next reconnect must get a new one instead of retrying the dead one.
  */
 const rejectedSavedCredentials = new Set<EnvironmentId>();
 /** Failed automatic renewals in a row, per cloud computer. */
@@ -1414,9 +1413,6 @@ async function refreshSavedEnvironmentMetadata(
         }),
   ]);
 
-  if (!sessionState.authenticated && !record.desktopSsh) {
-    rejectedSavedCredentials.add(record.environmentId);
-  }
   const role = sessionState.authenticated ? (sessionState.role ?? roleHint ?? null) : null;
   useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
     authState: sessionState.authenticated ? "authenticated" : "requires-auth",
