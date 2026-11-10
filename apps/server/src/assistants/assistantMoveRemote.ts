@@ -133,7 +133,7 @@ export const moveAssistantToOtherComputer = (input: {
           `Uno Work on ${target.name} is too old to take assistants; update it first`,
         );
       }
-      if (reply.status !== 200) {
+      if (reply.status < 200 || reply.status >= 300) {
         throw new Error(remoteErrorText(reply.body) ?? `HTTP ${reply.status}`);
       }
       return reply.body as A;
