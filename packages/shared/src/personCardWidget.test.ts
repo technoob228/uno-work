@@ -115,7 +115,7 @@ const BIG_REPORT = {
 };
 
 describe("renderPersonCardWidget: every kind is a widget", () => {
-  it("a single choice: options with keys, the recommended one marked, a caption for old apps", () => {
+  it("a single choice: options with keys, the recommended one marked; its words are the caption", () => {
     const widget = render({
       kind: "choice",
       question: "Which plan?",
@@ -126,16 +126,19 @@ describe("renderPersonCardWidget: every kind is a widget", () => {
     });
     const markup = markupOf(widget.html);
     expect(markup).toContain('data-p="w1:AbCdEfGhIjKl:"');
-    expect(markup).toContain('<p class="hd">💬 Fix the site</p>');
-    expect(markup).toContain('<p class="q">Which plan?</p>');
+    // Who speaks and the question are the message's text above the widget, not in it.
+    expect(markup).not.toContain("Fix the site");
+    expect(markup).not.toContain("Which plan?");
     expect(markup).toContain('<button class="o" data-i="0">');
     expect(markup).toContain('<button class="o r" data-i="1">');
     expect(markup).toContain("⭐ recommended");
     expect(markup).toContain('<span class="d">$5, one bot</span>');
     expect(markup).not.toContain('class="bt pr go');
-    expect(widget.caption).toBe(
-      "💬 Fix the site\n\nWhich plan?\n\n1. Small\n2. Plus ⭐ recommended\n\nReply with a number or text",
-    );
+    expect(widget.caption).toBe("💬 Fix the site\nWhich plan?");
+    expect(widget.captionBold).toEqual({
+      offset: "💬 Fix the site\n".length,
+      length: "Which plan?".length,
+    });
     expect(widget.chatData).toBeUndefined();
   });
 
@@ -158,7 +161,8 @@ describe("renderPersonCardWidget: every kind is a widget", () => {
     expect(markup).toContain(">Готово</button>");
     expect(markup).toContain("Можно выбрать несколько · Или напишите свой ответ в чат");
     expect(markup).not.toContain('class="hd"');
-    expect(widget.caption).toContain("Ответьте номером или текстом");
+    expect(widget.caption).toBe("Какие страницы?");
+    expect(widget.captionBold).toEqual({ offset: 0, length: "Какие страницы?".length });
   });
 
   it("a report: metric tiles with tones, sections folded (first open), a table, actions", () => {
@@ -176,9 +180,10 @@ describe("renderPersonCardWidget: every kind is a widget", () => {
     expect(markup).toMatch(
       /<div class="ac"><button class="bt a pr" data-i="1">Show me the image<\/button><button class="bt a su" data-i="0">Fix both<\/button><button class="bt a da" data-i="2">Leave it<\/button><\/div>/,
     );
-    expect(widget.caption).toContain("Site checked: 3 problems");
-    expect(widget.caption).toContain("Speed: 92/100");
-    expect(widget.caption).toContain("Next: Fix both · Show me the image · Leave it");
+    // The title and the summary are the caption; the widget starts with the numbers.
+    expect(widget.caption.startsWith("💬 Fix the site\nSite checked: 3 problems")).toBe(true);
+    expect(widget.caption).not.toContain("Speed");
+    expect(markup).not.toContain("Site checked: 3 problems");
   });
 
   it("a short report with one section shows it flat", () => {
@@ -217,9 +222,8 @@ describe("renderPersonCardWidget: every kind is a widget", () => {
     expect(markup).toContain('<span class="t l">Lyon</span>');
     expect(markup).toContain('<div class="pg"><i></i><i></i></div>');
     expect(markup).toContain('<section id="sc" hidden>');
-    expect(widget.caption).toBe(
-      "💬 Fix the site\n\n🧩 Capitals · 2 questions\nUpdate Telegram to take the quiz",
-    );
+    expect(widget.caption).toBe("💬 Fix the site\n🧩 Capitals · 2 questions");
+    expect(markup).not.toContain('class="qh"');
   });
 });
 
@@ -408,20 +412,34 @@ describe("renderPersonCardWidget: where it can't be a widget", () => {
     ).toBeNull();
   });
 
-  it("8 options with long descriptions: descriptions dropped to fit 600 px, not the card", () => {
+  it("8 options with long descriptions: cut to one line to fit 600 px, not the card", () => {
     const tall = {
       ...BIG_CHOICE,
       options: BIG_CHOICE.options.map((option) => ({ ...option, description: lorem(30) })),
     };
-    const widget = render(tall);
-    expect(markupOf(widget.html)).not.toContain('class="d"');
-    expect(markupOf(widget.html)).toContain("Plan 8");
+    const markup = markupOf(render(tall).html);
+    expect(markup).toContain('<div class="os d1">');
+    expect(markup).toContain('class="d"');
+    expect(markup).toContain("Plan 8");
   });
 
-  it("6 options with descriptions: cut to one line to fit 600 px", () => {
+  it("8 options with two-line labels: descriptions dropped to fit 600 px", () => {
+    const tall = {
+      ...BIG_CHOICE,
+      options: BIG_CHOICE.options.map((option, index) => ({
+        ...option,
+        label: `Plan ${index + 1} ${"with a long name ".repeat(4)}`.slice(0, 58).trim(),
+      })),
+    };
+    const markup = markupOf(render(tall).html);
+    expect(markup).not.toContain('class="d"');
+    expect(markup).toContain("Plan 8");
+  });
+
+  it("6 options with descriptions fit whole (the question is above the widget)", () => {
     const six = { ...BIG_CHOICE, title: undefined, options: BIG_CHOICE.options.slice(0, 6) };
     const markup = markupOf(render(six).html);
-    expect(markup).toContain('<div class="os d1">');
+    expect(markup).not.toContain("os d1");
     expect(markup).toContain('class="d"');
   });
 

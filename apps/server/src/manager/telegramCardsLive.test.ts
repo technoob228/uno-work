@@ -525,7 +525,12 @@ it.live("a choice as a widget: one tap answers the query, sets chat_data and the
     expect(sent).toEqual({ ok: true, error: null, drawn: "widget" });
     const widget = callsTo("sendWidget")[0]!;
     expect(widget.body).toMatchObject({ chat_id: String(CHAT), allow_queries: true });
-    expect(String(widget.body.caption)).toContain("Reply with a number or text");
+    // The card's words are the message's text above the widget, the question bold.
+    expect(widget.body.caption).toBe("💬 Fix the site\nWhich plan?");
+    expect(widget.body.show_caption_above_media).toBe(true);
+    expect(widget.body.caption_entities).toEqual([
+      { type: "bold", offset: "💬 Fix the site\n".length, length: "Which plan?".length },
+    ]);
     expect(callsTo("sendRichMessage")).toEqual([]);
     const messageId = nextMessageId;
     const prefix = prefixOf(widget);
@@ -683,9 +688,7 @@ it.live(
       });
       expect(sent).toEqual({ ok: true, error: null, drawn: "widget" });
       expect(callsTo("sendPoll")).toEqual([]);
-      expect(String(callsTo("sendWidget")[0]?.body.caption)).toContain(
-        "Update Telegram to take the quiz",
-      );
+      expect(callsTo("sendWidget")[0]?.body.caption).toBe("🧩 Capitals · 2 questions");
       const messageId = nextMessageId;
       const prefix = prefixOf(callsTo("sendWidget")[0]);
 

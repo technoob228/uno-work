@@ -52,8 +52,13 @@ export interface PersonCardWidgetOptions {
 
 export interface PersonCardWidget {
   readonly html: string;
-  /** Plain text under the widget; what an old Telegram app shows instead of it. */
+  /**
+   * The card's words (who speaks, title, question or summary): the message's
+   * text above the widget, the notification, and all an old Telegram app shows.
+   */
   readonly caption: string;
+  /** The caption's main line, to send as bold (`caption_entities`, UTF-16 units). */
+  readonly captionBold?: { readonly offset: number; readonly length: number };
   /** The card's first `chat_data`; absent: nothing picked yet. */
   readonly chatData?: string;
 }
@@ -112,8 +117,9 @@ const GAP = 8;
 const FRAME_PX = 12 + 24;
 
 /** Blocks stacked in the card: their heights plus the gaps between them. */
-const stack = (header: string | null, blocks: ReadonlyArray<number>): number => {
-  const all = [...(header === null ? [] : [17]), ...blocks];
+// The header ("💬 chat"), the title and the question are in the caption, above the widget.
+const stack = (_header: string | null, blocks: ReadonlyArray<number>): number => {
+  const all = blocks;
   return FRAME_PX + all.reduce((sum, height) => sum + height, 0) + (all.length - 1) * GAP;
 };
 
@@ -163,7 +169,7 @@ i,em{font-style:normal}
 .hd{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .h{font-size:1.1em;font-weight:700}
 .q{font-weight:600}
-.st{position:absolute;left:12px;bottom:5px;max-width:66%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{position:absolute;left:12px;right:64px;bottom:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .er{color:var(--dn)}
 .bt{display:flex;align-items:center;justify-content:center;width:100%;min-height:44px;padding:8px 14px;border:0;border-radius:12px;background:var(--s2);color:var(--ak);font:inherit;font-weight:600;transition:opacity .15s,transform .12s}
 .bt:active,.o:active{transform:scale(.98)}
@@ -363,11 +369,10 @@ interface Draw {
 }
 
 function frame(draw: Draw, body: string, style: string, script: string, extra = ""): string {
-  const { header, requestPrefix } = draw.options;
+  const { requestPrefix } = draw.options;
   return (
     `<style>${style}</style>` +
     `<div class="c" id="c" data-p="${esc(requestPrefix)}"${extra}>` +
-    (header === null ? "" : `<p class="hd">${esc(header)}</p>`) +
     body +
     '<p class="st" id="st"></p></div>' +
     `<script>${script}</script>`
@@ -399,8 +404,6 @@ function choiceMarkup(card: PersonCardChoice, draw: Draw): string {
       : null,
   ].filter((hint): hint is string => hint !== null);
   const body =
-    (card.title ? `<p class="h">${esc(card.title)}</p>` : "") +
-    `<p class="q">${esc(card.question)}</p>` +
     `<div class="os${multiple ? " m" : ""}${draw.lean === 1 ? " d1" : ""}">${options}</div>` +
     (hints.length > 0 ? `<p class="hn">${esc(hints.join(" · "))}</p>` : "") +
     (multiple ? `<button class="bt pr go x">${say(language, "Готово", "Done")}</button>` : "");
@@ -448,8 +451,7 @@ function sectionContent(section: PersonCardSection): string {
 
 function reportMarkup(card: PersonCardReport, draw: Draw, layout: ReportLayout): string {
   const { language } = draw.options;
-  const parts: string[] = [`<p class="h">${esc(card.title)}</p>`];
-  if (card.summary) parts.push(`<p class="sm">${esc(card.summary)}</p>`);
+  const parts: string[] = [];
   if (card.metrics) {
     const tiles = card.metrics
       .map(
@@ -524,11 +526,6 @@ function quizMarkup(card: PersonCardQuiz, draw: Draw): string {
     })
     .join("");
   const body =
-    `<div class="qh"><p class="h">${esc(card.title ?? say(language, "Квиз", "Quiz"))}</p>` +
-    (total > 1
-      ? `<span class="hn">${total} ${say(language, "вопр.", total === 1 ? "question" : "questions")}</span>`
-      : "") +
-    "</div>" +
     (total > 1 ? `<div class="pg">${"<i></i>".repeat(total)}</div>` : "") +
     questions +
     `<section id="sc" hidden><p class="big"><b>0</b><small>/${total}</small></p><ol></ol></section>` +
@@ -541,36 +538,31 @@ function quizMarkup(card: PersonCardQuiz, draw: Draw): string {
   );
 }
 
-// ── Caption (old Telegram apps show only this) ───────────────────────────
+// ── Caption ──────────────────────────────────────────────────────────────
 
-function caption(card: PersonCard, options: PersonCardWidgetOptions): string {
+/**
+ * The words of the card, as the message's own text ABOVE the widget
+ * (`show_caption_above_media`): who speaks, the title, the question or the
+ * summary. The widget does not repeat them (Misha, 10.11: the caption under
+ * the card said everything twice). It is also the notification's text and
+ * all an old Telegram app shows. `bold`: the range of its main line (UTF-16).
+ */
+function caption(
+  card: PersonCard,
+  options: PersonCardWidgetOptions,
+): { readonly text: string; readonly bold: { readonly offset: number; readonly length: number } } {
   const { header, language } = options;
-  const lines: string[] = header === null ? [] : [header, ""];
+  const before = header === null ? "" : `${header}\n`;
+  let main: string;
+  let rest: string | undefined;
   switch (card.kind) {
     case "choice":
-      if (card.title) lines.push(card.title);
-      lines.push(card.question, "");
-      card.options.forEach((option, index) => {
-        const mark = option.recommended ? ` ⭐ ${say(language, "советую", "recommended")}` : "";
-        lines.push(`${index + 1}. ${option.label}${mark}`);
-      });
-      lines.push("", say(language, "Ответьте номером или текстом", "Reply with a number or text"));
+      main = card.title ?? card.question;
+      rest = card.title ? card.question : undefined;
       break;
     case "report":
-      lines.push(card.title);
-      if (card.summary) lines.push(card.summary);
-      if (card.metrics) {
-        lines.push("");
-        for (const metric of card.metrics.slice(0, 4)) {
-          lines.push(`${metric.label}: ${metric.value}${metric.note ? ` (${metric.note})` : ""}`);
-        }
-      }
-      if (card.actions) {
-        lines.push(
-          "",
-          `${say(language, "Дальше", "Next")}: ${card.actions.map((action) => action.label).join(" · ")}`,
-        );
-      }
+      main = card.title;
+      rest = card.summary;
       break;
     case "quiz": {
       const count = card.questions.length;
@@ -578,14 +570,16 @@ function caption(card: PersonCard, options: PersonCardWidgetOptions): string {
         count === 1
           ? say(language, "1 вопрос", "1 question")
           : say(language, `${count} вопросов`, `${count} questions`);
-      lines.push(
-        `🧩 ${card.title ?? say(language, "Квиз", "Quiz")} · ${what}`,
-        say(language, "Обновите Telegram, чтобы пройти квиз", "Update Telegram to take the quiz"),
-      );
+      main = `🧩 ${card.title ?? say(language, "Квиз", "Quiz")} · ${what}`;
       break;
     }
   }
-  return clip(lines.join("\n").trim(), PERSON_CARD_WIDGET_LIMITS.captionChars);
+  const text = clip(
+    `${before}${main}${rest ? `\n${rest}` : ""}`,
+    PERSON_CARD_WIDGET_LIMITS.captionChars,
+  );
+  const length = Math.max(0, Math.min(main.length, text.length - before.length));
+  return { text, bold: { offset: before.length, length } };
 }
 
 // ── Fitting ───────────────────────────────────────────────────────────────
@@ -602,8 +596,6 @@ function choiceHeight(card: PersonCardChoice, header: string | null, lean: Draw[
     return Math.max(44, 21 + label * 20 + description);
   });
   return stack(header, [
-    ...(card.title ? [lines(card.title, 32) * 22] : []),
-    lines(card.question, 36) * 20,
     rows(options),
     ...(card.multiple || card.allowOther ? [16] : []),
     ...(card.multiple ? [44] : []),
@@ -616,7 +608,6 @@ function quizFits(card: PersonCardQuiz, header: string | null, lean: Draw["lean"
     const explanation =
       20 + (question.explanation && lean === 0 ? lines(question.explanation, 34) * 17 : 0);
     const height = stack(header, [
-      20,
       ...(card.questions.length > 1 ? [4] : []),
       lines(question.question, 36) * 20,
       ...(question.correct.length > 1 ? [16] : []),
@@ -656,9 +647,10 @@ function reportLayout(card: PersonCardReport, header: string | null): ReportLayo
   const metricRow = metrics.some((metric) => metric.note !== undefined) ? 60 : 46;
   const metricRows =
     metrics.length >= 5 ? Math.ceil(metrics.length / 3) : Math.ceil(metrics.length / 2);
+  // Only a title and a summary: nothing for a widget to draw.
+  if (metrics.length === 0 && sections.length === 0 && (card.actions?.length ?? 0) === 0)
+    return null;
   const blocks = [
-    lines(card.title, 32) * 22,
-    ...(card.summary ? [lines(card.summary) * 20] : []),
     ...(metrics.length > 0 ? [rows(Array.from({ length: metricRows }, () => metricRow))] : []),
     ...(card.actions ? [actionsHeight(card.actions)] : []),
   ];
@@ -711,7 +703,8 @@ export function renderPersonCardWidget(
       }
     }
     if (html !== null && fitsBudget(html, options)) {
-      return { html, caption: caption(card, options) };
+      const words = caption(card, options);
+      return { html, caption: words.text, captionBold: words.bold };
     }
   }
   return null;

@@ -2148,6 +2148,9 @@ const makeTelegramConnector = Effect.gen(function* () {
     widget: {
       readonly html: string;
       readonly caption: string;
+      /** A card: its words go above the widget, the main line bold. */
+      readonly captionAbove?: boolean;
+      readonly captionBold?: { readonly offset: number; readonly length: number };
       readonly chatData?: string;
       readonly width?: number;
       readonly height?: number;
@@ -2170,6 +2173,18 @@ const makeTelegramConnector = Effect.gen(function* () {
         chat_id: chatId,
         html: widget.html,
         caption: widget.caption.slice(0, WIDGET_CAPTION_MAX_CHARS),
+        ...(widget.captionAbove === true ? { show_caption_above_media: true } : {}),
+        ...(widget.captionBold !== undefined && widget.captionBold.length > 0
+          ? {
+              caption_entities: [
+                {
+                  type: "bold",
+                  offset: widget.captionBold.offset,
+                  length: widget.captionBold.length,
+                },
+              ],
+            }
+          : {}),
         ...(widget.chatData !== undefined ? { chat_data: widget.chatData } : {}),
         ...(widget.width !== undefined ? { width: widget.width } : {}),
         ...(widget.height !== undefined ? { height: widget.height } : {}),
@@ -2360,6 +2375,8 @@ const makeTelegramConnector = Effect.gen(function* () {
       const sent = yield* sendWidgetRaw(via.botToken, input.chatId, {
         html: rendered.html,
         caption: rendered.caption,
+        captionAbove: true,
+        ...(rendered.captionBold !== undefined ? { captionBold: rendered.captionBold } : {}),
         ...(rendered.chatData !== undefined ? { chatData: rendered.chatData } : {}),
         allowQueries: group !== null || quiz !== null,
       });
