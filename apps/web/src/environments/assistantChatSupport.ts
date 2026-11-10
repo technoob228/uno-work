@@ -98,3 +98,25 @@ export function useEnvironmentSupportsAssistantSandbox(
   if (primary?.environmentId === environmentId) return descriptorSupportsAssistantSandbox(primary);
   return saved;
 }
+
+/** Whether the daemon moves assistants to and from it (10.11, `assistantMove`). */
+export function descriptorSupportsAssistantMove(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.assistantMove === true;
+}
+
+/** `(environmentId) => whether that computer's Uno Work can move assistants`. */
+export function useAssistantMoveSupport(): (environmentId: string | null | undefined) => boolean {
+  const primary = usePrimaryEnvironmentDescriptor();
+  const byId = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  return (environmentId) => {
+    if (!environmentId) return false;
+    if (primary?.environmentId === environmentId) return descriptorSupportsAssistantMove(primary);
+    return descriptorSupportsAssistantMove(
+      (byId as Record<string, { descriptor?: ExecutionEnvironmentDescriptor | null } | undefined>)[
+        environmentId
+      ]?.descriptor,
+    );
+  };
+}

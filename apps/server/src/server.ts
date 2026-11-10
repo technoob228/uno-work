@@ -48,6 +48,7 @@ import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { assistantCallsRouteLayers } from "./assistants/assistantCallsHttp.ts";
 import { AssistantCallsServiceLive } from "./assistants/AssistantCallsService.ts";
 import { automationsRouteLayers } from "./automations/http.ts";
+import { assistantMoveRouteLayers } from "./assistants/assistantMoveHttp.ts";
 import { AutomationEventLoopLive } from "./automations/eventLoop.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
 import { AssistantTeamLive } from "./assistants/assistantTeamLive.ts";
@@ -812,6 +813,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   ...setupToolsRouteLayers,
   ...assistantCallsRouteLayers,
   ...automationsRouteLayers,
+  // An assistant moves to another computer of the account (10.11).
+  ...assistantMoveRouteLayers,
 ).pipe(
   Layer.provide(browserApiCorsLayer),
   // Provided last, so built first: the outermost global middleware. A request

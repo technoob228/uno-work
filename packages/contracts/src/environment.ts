@@ -68,6 +68,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       projects it was given. False / absent: an assistant here sees every
       file of the computer; "only selected projects" needs its own computer. */
   assistantSandbox: Schema.optionalKey(Schema.Boolean),
+  /** An assistant moves between computers (10.11): `/api/manager/assistant/move/*`
+      export / import / activate / discard / release / unrelease. Absent: the
+      app doesn't offer "Move" to or from this computer. */
+  assistantMove: Schema.optionalKey(Schema.Boolean),
   /** Server answers `uno.computer.planLimits` (Home's "AI plan limits",
       0.0.157). Absent: clients don't offer the widget for this computer. */
   planLimits: Schema.optionalKey(Schema.Boolean),

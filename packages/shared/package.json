@@ -204,6 +204,10 @@
       "types": "./src/assistantLlm.ts",
       "import": "./src/assistantLlm.ts"
     },
+    "./assistantMove": {
+      "types": "./src/assistantMove.ts",
+      "import": "./src/assistantMove.ts"
+    },
     "./assistantMemory": {
       "types": "./src/assistantMemory.ts",
       "import": "./src/assistantMemory.ts"

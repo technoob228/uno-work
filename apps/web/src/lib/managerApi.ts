@@ -46,6 +46,12 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+import type {
+  AssistantMoveActivateResult,
+  AssistantMoveBundle,
+  AssistantMoveComputer,
+  AssistantMoveImportResult,
+} from "@t3tools/shared/assistantMove";
 
 import {
   environmentFetchJson,
@@ -792,3 +798,44 @@ export function listStartedBy(input: EnvironmentScoped): Promise<ManagerStartedB
     pathname: "/api/manager/started-by",
   });
 }
+
+// ── Moving an assistant between computers (10.11) ─────────────────────
+
+const MOVE_PATH = "/api/manager/assistant/move";
+
+/** One step of a move on one computer (`@t3tools/shared/assistantMove`). */
+function moveStep<T>(environmentId: EnvironmentId, step: string, body: unknown): Promise<T> {
+  return environmentFetchJson<T>({
+    environmentId,
+    pathname: `${MOVE_PATH}/${step}`,
+    method: "POST",
+    body,
+  });
+}
+
+export const assistantMoveApi = {
+  exportBundle: (
+    environmentId: EnvironmentId,
+    input: { readonly projectId: string; readonly name: string; readonly computerName: string },
+  ) => moveStep<AssistantMoveBundle>(environmentId, "export", input),
+  importBundle: (
+    environmentId: EnvironmentId,
+    input: { readonly bundle: AssistantMoveBundle; readonly from: AssistantMoveComputer },
+  ) => moveStep<AssistantMoveImportResult>(environmentId, "import", input),
+  activate: (
+    environmentId: EnvironmentId,
+    input: {
+      readonly projectId: string;
+      readonly bundle: AssistantMoveBundle;
+      readonly from: AssistantMoveComputer;
+    },
+  ) => moveStep<AssistantMoveActivateResult>(environmentId, "activate", input),
+  discard: (environmentId: EnvironmentId, projectId: string) =>
+    moveStep<{ ok: boolean }>(environmentId, "discard", { projectId }),
+  release: (
+    environmentId: EnvironmentId,
+    input: { readonly projectId: string; readonly to: AssistantMoveComputer },
+  ) => moveStep<{ ok: boolean }>(environmentId, "release", input),
+  unrelease: (environmentId: EnvironmentId, projectId: string) =>
+    moveStep<{ ok: boolean }>(environmentId, "unrelease", { projectId }),
+};

@@ -79,6 +79,35 @@ describe("where it works", () => {
     );
   });
 
+  it("Uno moves between computers whose Uno Work moves assistants (10.11)", () => {
+    const canMove = (id: string | null) => id === "env-work" || id === "env-nap";
+    const uno = worksOnOptions({ isUno: true, hereEnvironmentId: "env-work", machines, canMove });
+    expect(uno.map((option) => option.kind)).toEqual(["here", "cloud", "cloud"]);
+    // Asleep is still asleep; an older Uno Work is named.
+    expect(uno[1]).toMatchObject({
+      environmentId: "env-nap",
+      blocked: "It's asleep — wake it first.",
+    });
+    const older = worksOnOptions({
+      isUno: true,
+      hereEnvironmentId: "env-work",
+      machines: machines.map((machine) =>
+        machine.environmentId === "env-nap" ? { ...machine, status: "online" } : machine,
+      ),
+      canMove: (id) => id === "env-work",
+    });
+    expect(older[1]).toMatchObject({ blocked: expect.stringContaining("older") });
+    // A computer that can't move assistants keeps its Uno.
+    expect(
+      worksOnOptions({
+        isUno: true,
+        hereEnvironmentId: "env-work",
+        machines,
+        canMove: () => false,
+      }),
+    ).toHaveLength(1);
+  });
+
   it("never lists the computer it is on as a cloud computer; cloud rows carry the console's name", () => {
     const options = worksOnOptions({
       isUno: false,

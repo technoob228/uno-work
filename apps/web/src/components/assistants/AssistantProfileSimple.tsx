@@ -622,6 +622,25 @@ export function AssistantProfileSimple(props: {
                       )}
                     </div>
                   </Row>
+                  {/* Where it lives, one click from moving it (10.11). */}
+                  <Row label="Computer">
+                    <div
+                      className="flex flex-wrap items-center gap-1"
+                      data-testid="assistant-profile-computer"
+                    >
+                      <span>{member.computerLabel || homeMachine?.label || "This computer"}</span>
+                      {member.revoked ? null : (
+                        <button
+                          type="button"
+                          onClick={() => setTab("where")}
+                          className="ml-1 cursor-pointer text-xs text-primary hover:underline"
+                          data-testid="assistant-profile-computer-move"
+                        >
+                          Move…
+                        </button>
+                      )}
+                    </div>
+                  </Row>
                   <TeamRoutines member={member} machine={homeMachine} />
                 </Section>
 

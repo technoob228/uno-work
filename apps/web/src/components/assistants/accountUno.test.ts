@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pickAccountUno, pickHomeEnvironmentId } from "./accountUno";
+import { pickAccountUno, pickHomeEnvironmentId, unoMoveClaims } from "./accountUno";
 
 describe("the account's home computer", () => {
   it("is the cloud computer when it is up", () => {
@@ -22,6 +22,40 @@ describe("the account's home computer", () => {
     expect(pickHomeEnvironmentId([])).toBeNull();
   });
 });
+
+describe("where Uno moved (10.11)", () => {
+  const rows = [
+    { kind: "local", environmentId: "mac", status: "online", isPrimary: true },
+    { kind: "uno_box", environmentId: "kinship", status: "online", isPrimary: false },
+    { kind: "uno_box", environmentId: "stage", status: "online", isPrimary: false },
+  ] as never;
+
+  it("the computer Uno moved to last wins over the first cloud computer", () => {
+    const claims = unoMoveClaims([
+      {
+        environmentId: "kinship",
+        assistants: [uno({ movedTo: { boxId: 2531, name: "stage", at: "t1" } })],
+      },
+      { environmentId: "stage", assistants: [uno({ movedInAt: "2026-11-10T21:00:00Z" })] },
+    ]);
+    expect(pickHomeEnvironmentId(rows, claims)).toBe("stage");
+  });
+
+  it("without a claim the app skips a computer Uno left", () => {
+    const claims = unoMoveClaims([
+      {
+        environmentId: "kinship",
+        assistants: [uno({ movedTo: { boxId: 1, name: "x", at: "t" } })],
+      },
+    ]);
+    expect(pickHomeEnvironmentId(rows, claims)).toBe("stage");
+    expect(pickHomeEnvironmentId(rows)).toBe("kinship");
+  });
+});
+
+function uno(move: Record<string, unknown>) {
+  return { projectId: "assistant-home", move } as never;
+}
 
 describe("one Uno per account", () => {
   const unos = [

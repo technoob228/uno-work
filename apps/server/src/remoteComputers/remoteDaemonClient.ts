@@ -254,10 +254,11 @@ export function makeRemoteDaemonClient(deps: RemoteDaemonClientDeps) {
 
   async function send(
     baseUrl: string,
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     token: string | null,
     body: unknown,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
   ): Promise<RemoteDaemonReply> {
     let response: Response;
     try {
@@ -269,7 +270,7 @@ export function makeRemoteDaemonClient(deps: RemoteDaemonClientDeps) {
           ...(body !== undefined ? { "content-type": "application/json" } : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       return { status: 0, body: null };
@@ -292,9 +293,11 @@ export function makeRemoteDaemonClient(deps: RemoteDaemonClientDeps) {
   const request = async (input: {
     readonly boxId: number;
     readonly computerName: string;
-    readonly method: "GET" | "POST";
+    readonly method: "GET" | "POST" | "DELETE";
     readonly path: string;
     readonly body?: unknown;
+    /** A big request (an assistant's bundle) gets longer than the default 20 s. */
+    readonly timeoutMs?: number;
   }): Promise<RemoteDaemonReply> => {
     for (let attempt = 0; ; attempt += 1) {
       const session = await sessionFor(input.boxId, input.computerName);
@@ -304,6 +307,7 @@ export function makeRemoteDaemonClient(deps: RemoteDaemonClientDeps) {
         input.path,
         session.token,
         input.body,
+        input.timeoutMs,
       );
       const retryable = reply.status === 401 || reply.status === 0 || reply.status >= 502;
       if (!retryable || attempt >= 1) {

@@ -18,12 +18,22 @@
  * Pure orchestration: every call goes through `deps` (tests fake them).
  */
 import {
+  type AssistantMoveListedAutomation,
+  type AssistantMoveOutcome,
+  type AssistantMoveStep,
+  runAssistantMove,
+  splitMovableAutomations,
+} from "@t3tools/shared/assistantMove";
+import {
+  type EnvironmentId,
   type AssistantAppLevel,
   type AssistantPreset,
   type AssistantTeamUpdateInput,
   isAssistantProjectId,
   type ManagerAssistantTeam,
 } from "@t3tools/contracts";
+
+import type { assistantMoveApi } from "../../lib/managerApi";
 
 /** The files that carry an assistant's memory and rules between computers. */
 export const MOVED_FILES = ["SOUL.md", "USER.md", "NOTES.md", "ROUTING.md"] as const;
@@ -172,4 +182,88 @@ export async function moveAssistantToComputer(
   }
   await deps.deleteAssistant(from.environmentId, from.projectId);
   return { projectId: created.projectId, missingProjects: missing };
+}
+
+// ── The whole assistant, through both computers' daemons (10.11) ──────
+
+/** A computer of the move as the app knows it. */
+export interface MoveComputer {
+  readonly environmentId: string;
+  readonly name: string;
+  readonly boxId: number | null;
+}
+
+/**
+ * Everything that makes it the same assistant — folder, settings, its own
+ * bot, reminders, automations, a text copy of its chats — moves with
+ * `@t3tools/shared/assistantMove` (copy → check → switch, undone on any
+ * failure). Both computers need an Uno Work that moves assistants
+ * (`assistantMove`); Uno moves this way only.
+ */
+export function moveWholeAssistant(
+  input: {
+    readonly projectId: string;
+    readonly name: string;
+    readonly from: MoveComputer;
+    readonly to: MoveComputer;
+  },
+  api: {
+    readonly move: typeof assistantMoveApi;
+    readonly listAutomations: (environmentId: string) => Promise<{
+      readonly available: boolean;
+      readonly automations: ReadonlyArray<AssistantMoveListedAutomation>;
+    }>;
+    readonly createAutomation: (
+      environmentId: string,
+      input: Record<string, unknown>,
+    ) => Promise<{ readonly id: number }>;
+    readonly deleteAutomation: (environmentId: string, id: number) => Promise<void>;
+  },
+  onStep: (step: AssistantMoveStep) => void,
+): Promise<AssistantMoveOutcome> {
+  const { from, to } = input;
+  const fromEnv = from.environmentId as EnvironmentId;
+  const toEnv = to.environmentId as EnvironmentId;
+  const fromComputer = { name: from.name, boxId: from.boxId };
+  const toComputer = { name: to.name, boxId: to.boxId };
+  return runAssistantMove(
+    { projectId: input.projectId, name: input.name, from: fromComputer, to: toComputer },
+    {
+      source: {
+        exportBundle: (projectId) =>
+          api.move.exportBundle(fromEnv, { projectId, name: input.name, computerName: from.name }),
+        release: (release) => api.move.release(fromEnv, release).then(() => undefined),
+        unrelease: (projectId) => api.move.unrelease(fromEnv, projectId).then(() => undefined),
+        listAutomations: async (projectId) => {
+          const listed = await api.listAutomations(from.environmentId);
+          return listed.available
+            ? splitMovableAutomations(listed.automations, projectId)
+            : { move: [], stay: [] };
+        },
+        deleteAutomation: (id) => api.deleteAutomation(from.environmentId, id),
+      },
+      target: {
+        importBundle: (body) => api.move.importBundle(toEnv, body),
+        activate: (body) => api.move.activate(toEnv, body),
+        discard: (projectId) => api.move.discard(toEnv, projectId).then(() => undefined),
+        createAutomation: (body) => api.createAutomation(to.environmentId, body),
+        deleteAutomation: (id) => api.deleteAutomation(to.environmentId, id),
+      },
+    },
+    onStep,
+  );
+}
+
+/** What the progress line says at each step. */
+export function moveStepLine(step: AssistantMoveStep, to: string): string {
+  switch (step) {
+    case "copy":
+      return `Copying to ${to}…`;
+    case "check":
+      return `Checking it's up on ${to}…`;
+    case "switch":
+      return `Switching to ${to}…`;
+    case "done":
+      return "Done";
+  }
 }

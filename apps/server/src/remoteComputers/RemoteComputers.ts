@@ -93,6 +93,20 @@ export interface RemoteComputersServiceShape {
     threadId: string,
     status: Pick<ManagerRemoteChatStatus, "state" | "lastMessage" | "title">,
   ) => Effect.Effect<void>;
+  /**
+   * One owner request to another computer's daemon (an assistant moving
+   * there, `assistant_move`); unreachable is an error, any answer is a reply.
+   */
+  readonly request: (input: {
+    readonly boxId: number;
+    readonly computerName: string;
+    readonly method: "GET" | "POST" | "DELETE";
+    readonly path: string;
+    readonly body?: unknown;
+    readonly timeoutMs?: number;
+  }) => Effect.Effect<RemoteDaemonReply, RemoteComputerError>;
+  /** This computer as the account names it, and its box id (null on a laptop). */
+  readonly self: Effect.Effect<{ readonly name: string; readonly boxId: number | null }>;
 }
 
 export class RemoteComputersService extends Context.Service<
@@ -343,12 +357,26 @@ export const makeRemoteComputersService = (options?: {
         }),
       ).pipe(Effect.ignoreCause({ log: true }));
 
+    const request: RemoteComputersServiceShape["request"] = (input) =>
+      Effect.gen(function* () {
+        const { credential } = yield* identity;
+        const client = clientFor(credential);
+        return yield* fromPromise(() => client.request(input));
+      });
+
+    const self: RemoteComputersServiceShape["self"] = Effect.gen(function* () {
+      const { ownBoxId } = yield* identity;
+      return { name: yield* ownName, boxId: ownBoxId };
+    }).pipe(Effect.orElseSucceed(() => ({ name: "this computer", boxId: null })));
+
     return {
       resolveTarget,
       startChat,
       chatStatus,
       outgoing,
       noteStatus,
+      request,
+      self,
     } satisfies RemoteComputersServiceShape;
   });
 

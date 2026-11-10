@@ -619,6 +619,11 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
         : "Checked Telegram groups",
     "Couldn't change the Telegram group",
   ],
+  assistant_move: [
+    "Moving the assistant…",
+    (c) => named("Moved to", text(c.result, "to"), "Moved the assistant"),
+    "Couldn't move the assistant",
+  ],
   assistant_connect: [
     "Checking your assistant…",
     (c) =>

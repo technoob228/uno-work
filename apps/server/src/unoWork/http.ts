@@ -137,6 +137,8 @@ import { isAssistantConversationThread } from "../manager/assistantPush.ts";
 import { readIncomingRemoteChats, remoteStarterOf } from "../remoteComputers/remoteChatStore.ts";
 import { AssistantPushService, type AssistantPushChat } from "../manager/Services/AssistantPush.ts";
 import { AutomationsService } from "../automations/AutomationsService.ts";
+import { moveAssistantToOtherComputer } from "../assistants/assistantMoveRemote.ts";
+import { ManagerAssistantService } from "../manager/Services/AssistantService.ts";
 import { OutsideThreads } from "../automations/outsideThreads.ts";
 
 const LOG_MAX_BYTES = 64 * 1024;
@@ -335,6 +337,15 @@ const makeDeps = (input: {
     const gatewayKey = Option.getOrNull(yield* Effect.serviceOption(UnoGatewayKey));
     const secretStore = Option.getOrNull(yield* Effect.serviceOption(ServerSecretStore));
     // What the assistant's bot-token card needs (Inbox, messenger, the late answer).
+    // What `assistant_move` needs (this computer's assistants, the other computer's daemon).
+    const moveServices = yield* Effect.context<
+      | ServerConfig
+      | ProjectionSnapshotQuery
+      | OrchestrationEngineService
+      | ManagerAssistantService
+      | ManagerConnectorRepository
+      | ManagerCapabilityTokenRepository
+    >();
     const secretServices = yield* Effect.context<
       | BrowserBridge
       | InboxService
@@ -869,6 +880,11 @@ const makeDeps = (input: {
       },
       settings: serverSettings.getSettings,
       ...(providerRegistry === null ? {} : { providers: providerRegistry.getProviders }),
+      assistantMove: (move) =>
+        moveAssistantToOtherComputer({ assistant: move.assistant, computerId: move.to }).pipe(
+          Effect.provideContext(moveServices),
+          Effect.mapError((error) => new UnoWorkToolError({ message: error.message })),
+        ),
       // The built-in assistant (assistant_connect): its pinned chat, its
       // Telegram, the connected tools — read-only; the window is the person's.
       assistant: {

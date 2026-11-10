@@ -587,6 +587,15 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
     };
   };
   /**
+   * `assistant_move`: one of this computer's assistants to another computer of
+   * the account (assistantMoveRemote.ts). Absent (tests, older wiring): the
+   * tool says it isn't here.
+   */
+  readonly assistantMove?: (input: {
+    readonly assistant: string | null;
+    readonly to: string | null;
+  }) => Effect.Effect<unknown, UnoWorkToolError>;
+  /**
    * Automations of the calling chat (`automation_*`, `automations_list`),
    * bound to it. Absent (tests, older wiring): the tools say they aren't here.
    */
@@ -3764,6 +3773,45 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           })(),
           tellThePerson: assistantConnectAdvice({ status, asked, step }),
         };
+      }),
+  },
+
+  {
+    name: "assistant_move",
+    group: "person",
+    description:
+      'Move an assistant of THIS computer to another computer of the person\'s Uno account, when they want it to live elsewhere ("move Uno to stage-work"). Everything that makes it the same assistant goes along: its folder (memory, rules, skills), settings (role, permission level, model), its own Telegram bot / Slack app, pending reminders and its automations; a text copy of its chats goes into its folder (history/), and the chats stay readable here. `to`: the other computer — its name or id from account_overview ("stage-work", "box-2531"). `assistant`: its name; leave it out for Uno. Copy, check there, then switch: a failure changes nothing here. Uno\'s shared bot / Slack app belongs to a computer: when the result lists `relink`, tell the person to connect it again there (one tap). The person always approves; it takes up to a few minutes.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        to: {
+          type: "string",
+          minLength: 1,
+          description: "The computer it moves to: its name or id from account_overview.",
+        },
+        assistant: {
+          type: "string",
+          minLength: 1,
+          description: "Which assistant of this computer (its name); leave it out for Uno.",
+        },
+      },
+      required: ["to"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) =>
+      `Move ${str(args, "assistant") ?? "Uno"} to ${str(args, "to") ?? "another computer"}`,
+    approvalDetail: () =>
+      "Its memory, settings, own bot, reminders and automations go there, and it stops answering here. Its old chats stay readable here.",
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        if (!deps.assistantMove) {
+          return yield* toolError("Moving assistants isn't in this Uno Work. Update it first.");
+        }
+        return yield* deps.assistantMove({
+          assistant: str(args, "assistant") ?? null,
+          to: str(args, "to") ?? null,
+        });
       }),
   },
 

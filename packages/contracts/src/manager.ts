@@ -1082,6 +1082,27 @@ export type ManagerAskUserInput = typeof ManagerAskUserInput.Type;
 /** Request ids of `ask_user` cards: answered by the daemon, not the provider. */
 export const ASSISTANT_ASK_REQUEST_PREFIX = "uno-ask:";
 
+/**
+ * Where an assistant moved (assistant move, 10.11): `movedTo` on the computer
+ * it left (its chats stay readable there, Undo gives it back), `movedInAt` on
+ * the computer it lives on now — the app shows the account's Uno from the
+ * computer that claimed it last.
+ */
+export const ManagerAssistantMoveMark = Schema.Struct({
+  movedTo: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        boxId: Schema.NullOr(Schema.Number),
+        name: Schema.String,
+        at: Schema.String,
+      }),
+    ),
+  ),
+  movedInAt: Schema.optional(Schema.NullOr(Schema.String)),
+  movedFrom: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type ManagerAssistantMoveMark = typeof ManagerAssistantMoveMark.Type;
+
 export const ManagerAssistantSummary = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1095,6 +1116,8 @@ export const ManagerAssistantSummary = Schema.Struct({
   profile: Schema.optional(Schema.NullOr(ManagerAssistantProfile)),
   /** Who it is on the team, and its app levels (absent on older daemons). */
   team: Schema.optional(ManagerAssistantTeamView),
+  /** Whether it moved here or away (absent: it never moved; older daemons). */
+  move: Schema.optional(ManagerAssistantMoveMark),
 });
 export type ManagerAssistantSummary = typeof ManagerAssistantSummary.Type;
 

@@ -51,6 +51,7 @@ describe("Uno Work environment brief", () => {
     // and paths he can't open; the details are uno_guide("sites")), ~60 for the
     // my_computer_* line (Connect my computer, 31.10: details in uno_guide).
     // ~15 for `assistant_groups` (10.11: who the assistant answers in Telegram groups).
+    // ~6 for `assistant_move` (10.11: an assistant moves to another computer).
     // ~135 for cards (Misha 05.11: agents answer with `show_card` — a choice,
     // a quiz, a report with next steps — whenever it fits, even a weak model;
     // hard triggers and one example here, the rest in uno_guide("cards")).

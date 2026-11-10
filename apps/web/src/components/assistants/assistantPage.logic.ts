@@ -124,7 +124,8 @@ export const WORKS_ON_LINE = {
 /**
  * Where an assistant can work: where it is now, the person's other cloud
  * computers (one the app isn't connected to yet can't take it), a new
- * computer of its own. Uno is its computer's own assistant: only "here".
+ * computer of its own. Uno moves only between computers whose Uno Work
+ * moves whole assistants (`canMove`); otherwise it stays "here".
  */
 export function worksOnOptions(input: {
   readonly isUno: boolean;
@@ -132,6 +133,12 @@ export function worksOnOptions(input: {
   /** The name the page shows for where it is (wins over the machine row's). */
   readonly hereLabel?: string | null;
   readonly machines: ReadonlyArray<WorksOnMachine>;
+  /**
+   * Whether a computer's Uno Work moves whole assistants (10.11). Given: Uno
+   * can move too (between computers that both can), and a computer that
+   * can't is named as such. Absent: as before — Uno stays.
+   */
+  readonly canMove?: (environmentId: string | null) => boolean;
 }): ReadonlyArray<WorksOnOption> {
   const here = input.machines.find((machine) => machine.environmentId === input.hereEnvironmentId);
   const hereBoxId = here?.boxId ?? null;
@@ -149,7 +156,9 @@ export function worksOnOptions(input: {
       line: hereIsLaptop ? WORKS_ON_LINE.laptop : WORKS_ON_LINE.cloudHere,
     },
   ];
-  if (input.isUno) return options;
+  const canMove = input.canMove;
+  const movesFromHere = canMove !== undefined && canMove(input.hereEnvironmentId);
+  if (input.isUno && !movesFromHere) return options;
   for (const machine of input.machines) {
     if (machine.kind === "computer" || isHere(machine)) continue;
     options.push({
@@ -160,11 +169,14 @@ export function worksOnOptions(input: {
       blocked:
         machine.environmentId === null
           ? "Open it in Uno Work once, then assistants can move there."
-          : machine.status === "online"
-            ? null
-            : "It's asleep — wake it first.",
+          : machine.status !== "online"
+            ? "It's asleep — wake it first."
+            : input.isUno && canMove !== undefined && !canMove(machine.environmentId)
+              ? "Its Uno Work is older — it updates itself on restart."
+              : null,
     });
   }
+  if (input.isUno) return options;
   options.push({ kind: "own", label: "A computer of its own", line: WORKS_ON_LINE.own });
   return options;
 }

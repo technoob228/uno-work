@@ -109,6 +109,7 @@ import {
   writeAppAccess,
 } from "../assistants/localAssistantStore.ts";
 import { applyAssistantAccess } from "../assistants/assistantAccess.ts";
+import { moveMarkOf, readMoves } from "../assistants/assistantMoveFiles.ts";
 import { realignAssistantThreadModes } from "../assistants/assistantThreadModes.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import {
@@ -524,9 +525,19 @@ export const managerAssistantsListRouteLayer = HttpRouter.add(
                 Effect.orElseSucceed(() => false),
               )
             : false;
+          // Whether each moved here or away (assistant move, 10.11).
+          const { stateDir } = yield* ServerConfig;
+          const moves = yield* Effect.promise(() => readMoves(stateDir).catch(() => null));
+          const marked =
+            moves === null
+              ? list
+              : list.map((item) => {
+                  const move = moveMarkOf(moves, item.projectId);
+                  return move === null ? item : { ...item, move };
+                });
           return HttpServerResponse.jsonUnsafe(
             {
-              assistants: list,
+              assistants: marked,
               assistantSandbox,
               assistantsEnabled,
             } satisfies ManagerAssistantsList,

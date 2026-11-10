@@ -127,6 +127,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       assistantLlm: true,
       assistantConversations: true,
       assistantSandbox,
+      assistantMove: true,
       planLimits: true,
       planResume: true,
       providerAccounts: true,

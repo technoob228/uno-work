@@ -30,6 +30,7 @@ import { type ReactNode, useState } from "react";
 
 import { useMachineRows } from "../../hooks/useMachineRows";
 import {
+  assistantMoveApi,
   createAssistant,
   deleteLocalAssistant,
   getAssistantApps,
@@ -41,6 +42,17 @@ import {
   writeAssistantFile,
 } from "../../lib/managerApi";
 import { cn } from "../../lib/utils";
+import {
+  createAutomation as createAutomationOn,
+  deleteAutomation as deleteAutomationOn,
+  listAutomations as listAutomationsOn,
+} from "../../lib/automationsApi";
+import { useAssistantMoveSupport } from "../../environments/assistantChatSupport";
+import {
+  type AssistantMoveListedAutomation,
+  type AssistantMoveStep,
+  describeAssistantMove,
+} from "@t3tools/shared/assistantMove";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -58,7 +70,7 @@ import {
   worksOnWishLine,
 } from "./assistantPage.logic";
 import { AVATARS, type AvatarTone } from "./assistantTeam.logic";
-import { moveAssistantToComputer } from "./moveAssistant";
+import { moveAssistantToComputer, moveStepLine, moveWholeAssistant } from "./moveAssistant";
 import type { TeamMember } from "./useAssistantTeam";
 import { ASSISTANT_COMPUTERS_KEY } from "./useAssistants";
 import { useTeamActions } from "./useTeamActions";
@@ -669,6 +681,8 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
   const actions = useTeamActions();
   const [confirm, setConfirm] = useState<string | null>(null);
   const [moving, setMoving] = useState(false);
+  const [step, setStep] = useState<AssistantMoveStep | null>(null);
+  const canMove = useAssistantMoveSupport();
   const here = machines.find((machine) => machine.environmentId === member.environmentId);
   const hereIsLaptop = here === undefined || here.kind === "computer";
   const options = worksOnOptions({
@@ -683,11 +697,74 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
       kind: machine.kind,
       status: machine.status,
     })),
+    canMove: (environmentId) => canMove(environmentId),
   });
   const wish = worksOnWishLine(member.summary?.team?.team.worksOnWish ?? null);
   const name = member.profile.name;
+  const hereLabel = member.computerLabel || here?.box?.name || here?.label || "this computer";
+
+  /** The whole assistant (folder, settings, bot, reminders, automations) — 10.11. */
+  const moveWhole = async (environmentId: string, label: string) => {
+    const there = machines.find((machine) => machine.environmentId === environmentId);
+    setMoving(true);
+    try {
+      const outcome = await moveWholeAssistant(
+        {
+          projectId: member.projectId,
+          name,
+          from: {
+            environmentId: member.environmentId,
+            name: hereLabel,
+            boxId: here?.box?.id ?? null,
+          },
+          to: { environmentId, name: label, boxId: there?.box?.id ?? null },
+        },
+        {
+          move: assistantMoveApi,
+          listAutomations: (env) =>
+            listAutomationsOn({ environmentId: env as EnvironmentId }).then((listed) => ({
+              available: listed.available,
+              automations: listed.automations as ReadonlyArray<AssistantMoveListedAutomation>,
+            })),
+          createAutomation: (env, input) =>
+            createAutomationOn({
+              environmentId: env as EnvironmentId,
+              automation: input as never,
+            }).then((made) => ({ id: made.id })),
+          deleteAutomation: (env, id) =>
+            deleteAutomationOn({ environmentId: env as EnvironmentId, id }),
+        },
+        setStep,
+      );
+      await actions.refresh();
+      void queryClient.invalidateQueries({ queryKey: ASSISTANT_COMPUTERS_KEY });
+      void queryClient.invalidateQueries({ queryKey: ["uno-assistants"] });
+      toastManager.add({
+        type: "success",
+        title: `${name} lives on ${label} now`,
+        description: describeAssistantMove(outcome, { name, from: hereLabel, to: label }),
+      });
+      await navigate({
+        to: "/assistants",
+        search: { view: "profile", env: environmentId, project: outcome.projectId },
+      });
+    } catch (cause) {
+      toastManager.add({
+        type: "error",
+        title: `Couldn't move ${name}`,
+        description: errorText(cause, `${label} didn't answer. Nothing changed here.`),
+      });
+    } finally {
+      setMoving(false);
+      setStep(null);
+      setConfirm(null);
+    }
+  };
 
   const move = async (environmentId: string, label: string) => {
+    if (canMove(member.environmentId) && canMove(environmentId)) {
+      return moveWhole(environmentId, label);
+    }
     setMoving(true);
     try {
       const result = await moveAssistantToComputer(
@@ -800,9 +877,27 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
                 {option.kind === "cloud" && option.blocked ? option.blocked : option.line}
               </span>
               {confirm === key ? (
-                <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
-                  Move {name} to {option.label}? Its memory, rules, apps, duties and mail rules go
-                  there; its chats stay here. The one here is kept 7 days.
+                <span
+                  className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs"
+                  data-testid="assistant-works-on-confirm"
+                >
+                  {moving && step !== null ? (
+                    <span data-testid="assistant-works-on-progress">
+                      {moveStepLine(step, option.label)}
+                    </span>
+                  ) : option.kind === "cloud" &&
+                    canMove(member.environmentId) &&
+                    canMove(option.environmentId) ? (
+                    <span>
+                      Move {name} to {option.label}? Its memory, settings, own bot, reminders and
+                      automations go there; it stops answering here. Old chats stay readable here.
+                    </span>
+                  ) : (
+                    <span>
+                      Move {name} to {option.label}? Its memory, rules, apps, duties and mail rules
+                      go there; its chats stay here. The one here is kept 7 days.
+                    </span>
+                  )}
                   <Button
                     size="xs"
                     disabled={moving}
@@ -845,9 +940,11 @@ export function TeamWorksOn(props: { readonly member: TeamMember }) {
           </div>
         );
       })}
-      {member.isUno ? (
+      {member.isUno && options.length === 1 ? (
         <p className="border-t border-border/70 px-3 py-2 text-xs text-muted-foreground">
-          Uno is this computer's own assistant: every computer has its own Uno.
+          {canMove(member.environmentId)
+            ? "Connect another cloud computer to Uno Work to move Uno there."
+            : "Uno moves once this computer's Uno Work updates (it updates itself on restart)."}
         </p>
       ) : wish ? (
         <p className="border-t border-border/70 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
