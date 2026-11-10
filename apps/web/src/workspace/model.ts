@@ -1,6 +1,6 @@
 /**
  * The workspace as the account's API gives it (`GET /api/v1/workspace`,
- * proposed 10.11 — see reports/day_2026-11-10/workspace-vision/API.md):
+ * proposed 10.11 — the verbs are listed in ./api.ts):
  * the workspace (chats, assistants, apps, memory) lives in the account's
  * cloud; everything it runs on is its hardware — computers (cloud, local,
  * asleep), Spark functions, data, Drive, git, addresses. Pure: the screens

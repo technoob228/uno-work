@@ -308,6 +308,13 @@ const flows = [
         await openMainChat(page, "work");
       });
       await shot("chat");
+      await page
+        .locator('[data-testid="sidebar-assistant"][data-assistant="assistant-home"]')
+        .getByTestId("sidebar-assistant-face")
+        .click();
+      await page.getByTestId("assistant-profile-tab-where").click();
+      await page.waitForTimeout(1500);
+      await shot("assistant-where");
       await page.getByTestId("sidebar-nav-home").click();
       await go(page, "#/my-uno");
       await page.waitForTimeout(1500);
