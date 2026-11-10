@@ -17,7 +17,8 @@ import { isRemoteEnvironmentAuthHttpError } from "../remote/api";
  * into a password prompt storm.
  *
  * Environments that fail in a way no retry can fix (the machine's ssh host
- * key changed, its address no longer resolves, its auth endpoints are gone)
+ * key changed, its address no longer resolves, its auth endpoints are gone,
+ * its saved access expired and could not be renewed)
  * are marked "needs attention" the same way: automatic retries stop until
  * the person presses Reconnect. Before this, such an environment was retried
  * forever (thousands of failures a day in one user's log).
@@ -26,7 +27,11 @@ import { isRemoteEnvironmentAuthHttpError } from "../remote/api";
 const SELF_HEAL_BACKOFF_BASE_MS = 1_000;
 const SELF_HEAL_BACKOFF_MAX_MS = 64_000;
 
-export type PermanentFailureKind = "host-key-changed" | "address-not-found" | "endpoint-missing";
+export type PermanentFailureKind =
+  | "host-key-changed"
+  | "address-not-found"
+  | "endpoint-missing"
+  | "access-expired";
 
 export interface PermanentFailure {
   readonly kind: PermanentFailureKind;
@@ -36,6 +41,27 @@ export interface PermanentFailure {
   readonly confirmAfter: number;
   /** …and how long that streak must have lasted (rules out a short outage). */
   readonly minStreakMs: number;
+}
+
+/**
+ * The computer refused the saved session (it expired, was revoked, or the
+ * computer no longer knows it) and a fresh one could not be obtained without
+ * the person: a cloud computer could not be re-paired through the Uno account,
+ * or the computer was paired by hand and only a new pairing link can fix it.
+ * Thrown by the connection service once it has given up; retrying the same
+ * dead session is pointless, so automatic retries stop.
+ */
+export class SavedEnvironmentAccessExpiredError extends Error {
+  constructor(message: string, options?: { readonly cause?: unknown }) {
+    super(message, options);
+    this.name = "SavedEnvironmentAccessExpiredError";
+  }
+}
+
+export function isSavedEnvironmentAccessExpiredError(
+  error: unknown,
+): error is SavedEnvironmentAccessExpiredError {
+  return error instanceof SavedEnvironmentAccessExpiredError;
 }
 
 const HOST_KEY_CHANGED_RE =
@@ -51,6 +77,15 @@ const SSH_HTTP_NOT_FOUND_RE = /\[ssh_http:404\]/;
  * transient and keeps the normal backoff.
  */
 export function classifyPermanentFailure(error: unknown): PermanentFailure | null {
+  if (isSavedEnvironmentAccessExpiredError(error)) {
+    return {
+      kind: "access-expired",
+      message:
+        "Uno Work's saved access to this computer expired and could not be renewed automatically. Press Reconnect to try again. If that does not help, remove the computer and add it again.",
+      confirmAfter: 1,
+      minStreakMs: 0,
+    };
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (HOST_KEY_CHANGED_RE.test(message)) {
     return {
