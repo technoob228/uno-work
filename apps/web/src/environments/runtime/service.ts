@@ -62,10 +62,12 @@ import {
   configureSelfHeal,
   getSelfHealNeedsAttention,
   healSavedEnvironment,
+  isSavedEnvironmentAccessExpiredError,
   markSelfHealAuthRequired,
   noteSavedEnvironmentFailure,
   noteSavedEnvironmentHealthy,
   resetSelfHeal,
+  SavedEnvironmentAccessExpiredError,
 } from "./selfHeal";
 import {
   useStore,
@@ -137,6 +139,22 @@ const pendingSavedEnvironmentConnections = new Map<
   EnvironmentId,
   PendingSavedEnvironmentConnection
 >();
+/**
+ * Saved environments whose daemon refused the stored session (401 on the ws
+ * token, or a session check that came back "not authenticated"). The stored
+ * token is signed with its own expiry, so once refused it never works again:
+ * the next reconnect must get a new one instead of retrying the dead one.
+ */
+const rejectedSavedCredentials = new Set<EnvironmentId>();
+/** Failed automatic renewals in a row, per cloud computer. */
+const unoBoxAccessRenewFailures = new Map<EnvironmentId, number>();
+const pendingUnoBoxAccessRenewals = new Map<EnvironmentId, Promise<void>>();
+/**
+ * Automatic renewals in a row before the computer is left for the person
+ * (self-heal backoff spaces them 1s, 2s, 4s… apart). A manual Reconnect starts
+ * the count over.
+ */
+const UNO_BOX_ACCESS_RENEW_MAX_FAILURES = 5;
 const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
 const lastAppliedProjectionVersionByEnvironment = new Map<
@@ -1292,6 +1310,11 @@ function createSavedEnvironmentClient(
                 bearerToken,
               });
         } catch (error) {
+          // The daemon refused the stored session itself: remember it, so the
+          // heal run below renews the access instead of retrying this token.
+          if (!record.desktopSsh && isRemoteEnvironmentAuthHttpError(error) && error.status === 401) {
+            rejectedSavedCredentials.add(environmentId);
+          }
           // A ws token that cannot be issued usually means the forwarded port
           // is dead — WS-level retries cannot fix that. Escalate to the full
           // heal path (re-ensures the tunnel) and keep the failure visible —
@@ -1391,6 +1414,9 @@ async function refreshSavedEnvironmentMetadata(
         }),
   ]);
 
+  if (!sessionState.authenticated && !record.desktopSsh) {
+    rejectedSavedCredentials.add(record.environmentId);
+  }
   const role = sessionState.authenticated ? (sessionState.role ?? roleHint ?? null) : null;
   useSavedEnvironmentRuntimeStore.getState().patch(record.environmentId, {
     authState: sessionState.authenticated ? "authenticated" : "requires-auth",
@@ -1509,7 +1535,9 @@ async function ensureSavedEnvironmentConnection(
             lastError: "Saved environment is missing its saved credential. Pair it again.",
             lastErrorAt: isoNow(),
           });
-          throw new Error("Saved environment is missing its saved credential.");
+          throw new SavedEnvironmentAccessExpiredError(
+            "Saved environment is missing its saved credential.",
+          );
         }
       } else {
         const prepared = await prepareSavedEnvironmentRecordForConnection(record);
@@ -1610,9 +1638,11 @@ async function ensureSavedEnvironmentConnection(
           }
           if (!activeRecord.desktopSsh) {
             await removeSavedEnvironmentBearerToken(activeRecord.environmentId);
-            throw new Error("Saved environment credential expired. Pair it again.", {
-              cause: error,
-            });
+            rejectedSavedCredentials.add(activeRecord.environmentId);
+            throw new SavedEnvironmentAccessExpiredError(
+              "Saved environment credential expired. Pair it again.",
+              { cause: error },
+            );
           }
 
           const issued = await issueDesktopSshBearerSession(activeRecord);
@@ -1938,6 +1968,121 @@ export async function disconnectSavedEnvironment(environmentId: EnvironmentId): 
   }
 }
 
+function isSavedCredentialRejected(environmentId: EnvironmentId, error: unknown): boolean {
+  return (
+    rejectedSavedCredentials.has(environmentId) ||
+    isSavedEnvironmentAccessExpiredError(error) ||
+    (isRemoteEnvironmentAuthHttpError(error) && error.status === 401)
+  );
+}
+
+function describeRenewFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.trim() || "unknown error";
+}
+
+/**
+ * Pairs a cloud computer again through the Uno account: the account's daemon
+ * (the primary environment) mints a one-time link, and pairing with it stores
+ * a fresh session and reconnects. Same steps as the Connect button, minus the
+ * wake — a computer that just answered "session expired" is awake.
+ */
+function renewUnoBoxAccess(record: SavedEnvironmentRecord, unoBoxId: number): Promise<void> {
+  const pending = pendingUnoBoxAccessRenewals.get(record.environmentId);
+  if (pending) {
+    return pending;
+  }
+  const run = (async () => {
+    const primary = maybeCreatePrimaryEnvironmentConnection();
+    if (!primary) {
+      throw new Error("No Uno account connection is available to renew the access.");
+    }
+    const link = await primary.client.unoCloud.connectBox({ boxId: unoBoxId });
+    // An attempt still in flight holds the refused session; pairing must not
+    // join it.
+    const stalePending = pendingSavedEnvironmentConnections.get(record.environmentId);
+    if (stalePending) {
+      stalePending.cancelled = true;
+      pendingSavedEnvironmentConnections.delete(record.environmentId);
+    }
+    const renewed = await addSavedEnvironment({
+      label: record.label,
+      pairingUrl: link.url,
+      unoBoxId,
+    });
+    // A computer rebuilt from an image answers under a new id: the old record
+    // can never connect again, so it goes the way a replaced ssh record does.
+    if (renewed.environmentId !== record.environmentId) {
+      await removeSavedEnvironment(record.environmentId);
+    }
+  })().finally(() => {
+    if (pendingUnoBoxAccessRenewals.get(record.environmentId) === run) {
+      pendingUnoBoxAccessRenewals.delete(record.environmentId);
+    }
+  });
+  pendingUnoBoxAccessRenewals.set(record.environmentId, run);
+  return run;
+}
+
+/**
+ * A saved session lives 30 days on the daemon and is then refused for good.
+ * For a cloud computer the Uno account can simply issue a new one, so the
+ * person never has to remove the computer and connect it again. Returns true
+ * when the access was renewed and the environment is connected. Throws
+ * `SavedEnvironmentAccessExpiredError` when nothing more can be done without
+ * the person, which stops automatic retries (see selfHeal).
+ */
+async function recoverRejectedSavedCredential(
+  record: SavedEnvironmentRecord,
+  error: unknown,
+  options: { readonly interactive: boolean },
+): Promise<boolean> {
+  const environmentId = record.environmentId;
+  if (record.desktopSsh || !isSavedCredentialRejected(environmentId, error)) {
+    return false;
+  }
+  if (record.unoBoxId === undefined) {
+    // Paired by hand: only a new pairing link from that computer helps.
+    throw isSavedEnvironmentAccessExpiredError(error)
+      ? error
+      : new SavedEnvironmentAccessExpiredError(
+          "Saved environment credential expired. Pair it again.",
+          { cause: error },
+        );
+  }
+  if (options.interactive) {
+    unoBoxAccessRenewFailures.delete(environmentId);
+  } else if (
+    (unoBoxAccessRenewFailures.get(environmentId) ?? 0) >= UNO_BOX_ACCESS_RENEW_MAX_FAILURES
+  ) {
+    throw new SavedEnvironmentAccessExpiredError(
+      `Uno Work could not renew its access to ${record.label}.`,
+      { cause: error },
+    );
+  }
+
+  try {
+    await renewUnoBoxAccess(record, record.unoBoxId);
+  } catch (renewError) {
+    if (isSavedEnvironmentConnectionCancelledError(renewError)) {
+      return true;
+    }
+    const failures = (unoBoxAccessRenewFailures.get(environmentId) ?? 0) + 1;
+    unoBoxAccessRenewFailures.set(environmentId, failures);
+    if (options.interactive || failures >= UNO_BOX_ACCESS_RENEW_MAX_FAILURES) {
+      throw new SavedEnvironmentAccessExpiredError(
+        `Uno Work could not renew its access to ${record.label}: ${describeRenewFailure(renewError)}`,
+        { cause: renewError },
+      );
+    }
+    // Leave it to the next heal run (backoff applies) to try again.
+    throw renewError;
+  }
+  rejectedSavedCredentials.delete(environmentId);
+  unoBoxAccessRenewFailures.delete(environmentId);
+  return true;
+}
+
 async function performSavedEnvironmentReconnect(
   environmentId: EnvironmentId,
   options: { readonly interactive: boolean },
@@ -1952,11 +2097,25 @@ async function performSavedEnvironmentReconnect(
   if (!connection) {
     setRuntimeConnecting(environmentId);
     try {
+      if (!record.desktopSsh && rejectedSavedCredentials.has(environmentId)) {
+        // The stored session was already refused: do not try it again.
+        throw new SavedEnvironmentAccessExpiredError(
+          "Saved environment credential expired. Pair it again.",
+        );
+      }
       await ensureSavedEnvironmentConnection(record);
       return;
     } catch (error) {
       if (isSavedEnvironmentConnectionCancelledError(error)) {
         return;
+      }
+      try {
+        if (await recoverRejectedSavedCredential(record, error, options)) {
+          return;
+        }
+      } catch (recoveryError) {
+        setRuntimeError(environmentId, recoveryError);
+        throw recoveryError;
       }
       setRuntimeError(environmentId, error);
       throw error;
@@ -1967,6 +2126,12 @@ async function performSavedEnvironmentReconnect(
   try {
     if (record.desktopSsh) {
       await prepareSavedEnvironmentRecordForConnection(record, { nonInteractive });
+    } else if (rejectedSavedCredentials.has(environmentId)) {
+      // This connection holds a session the daemon already refused; asking it
+      // to reconnect would only repeat the refusal.
+      throw new SavedEnvironmentAccessExpiredError(
+        "Saved environment credential expired. Pair it again.",
+      );
     }
     await connection.reconnect();
   } catch (error) {
@@ -1989,6 +2154,14 @@ async function performSavedEnvironmentReconnect(
         setRuntimeError(environmentId, recoveryError);
         throw recoveryError;
       }
+    }
+    try {
+      if (await recoverRejectedSavedCredential(record, error, options)) {
+        return;
+      }
+    } catch (recoveryError) {
+      setRuntimeError(environmentId, recoveryError);
+      throw recoveryError;
     }
     setRuntimeError(environmentId, error);
     throw error;
@@ -2041,6 +2214,8 @@ export async function removeSavedEnvironment(environmentId: EnvironmentId): Prom
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);
   useStore.getState().removeEnvironmentState(environmentId);
   lastAppliedProjectionVersionByEnvironment.delete(environmentId);
+  rejectedSavedCredentials.delete(environmentId);
+  unoBoxAccessRenewFailures.delete(environmentId);
   await removeSavedEnvironmentBearerToken(environmentId);
 }
 
@@ -2101,6 +2276,8 @@ export async function addSavedEnvironment(input: {
     await persistSavedEnvironmentRegistryRollback(registrySnapshot);
     throw new Error("Unable to persist saved environment credentials.");
   }
+  // The session just issued replaces whatever was refused before.
+  rejectedSavedCredentials.delete(environmentId);
   useSavedEnvironmentRegistryStore.getState().upsert(record);
   if (staleDesktopSshRecord) {
     await removeSavedEnvironment(staleDesktopSshRecord.environmentId);
@@ -2226,6 +2403,9 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
   lastBrowserResumeReconnectAt = Number.NEGATIVE_INFINITY;
   lastAppliedProjectionVersionByEnvironment.clear();
   pendingSavedEnvironmentConnections.clear();
+  rejectedSavedCredentials.clear();
+  unoBoxAccessRenewFailures.clear();
+  pendingUnoBoxAccessRenewals.clear();
   for (const key of Array.from(threadDetailSubscriptions.keys())) {
     disposeThreadDetailSubscriptionByKey(key);
   }
