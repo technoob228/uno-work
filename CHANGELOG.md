@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.182 — 2026-11-10
+
+- Telegram groups: choose who your assistant answers in each group — only you, people you pick, or everyone. Settings → Assistant → Groups: a switch per group and the people who wrote to the bot there, picked by name. A group you called the bot in shows up by itself, with an Add button (no chat id to type). People you let in talk in a chat of their own, and anything the assistant does for them waits for your OK. Agents can set it too: the `assistant_groups` tool (changing always asks you first). Needs the assistant's own bot.
+
 ## v0.0.181 — 2026-11-09
 
 - Claude models come from your installed Claude Code: a new model (today Claude Fable 5.2) shows up in the picker by itself, no Uno Work update needed. "Fable", "Opus", "Sonnet" mean what your Claude Code means by them. An older Claude Code gets an Update button for the newest models.
