@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.185 — 2026-11-10
+
+- An assistant you moved to another computer, or deleted, no longer stays in the sidebar of the computer it left as "Set up".
+
 ## v0.0.184 — 2026-11-10
 
 - Move your assistant to another computer. Its page shows where it lives ("Computer: kinship · Move…"); Environment lists your other cloud computers with Move here. Everything that makes it the same assistant goes along: its memory, rules and skills, its settings (role, permission level, model), its own Telegram bot or Slack app, pending reminders and its automations; a text copy of its chats lands in its folder (history/), and the chats stay readable where they ran. Uno moves too — the app now shows Uno from the computer you moved it to, not the first cloud computer in the list. It copies and checks first, then switches: if anything fails, it stays where it was. Uno's shared bot and Slack app belong to a computer, so you connect them again there with one tap. Agents can do it too: the `assistant_move` tool (you always approve).
