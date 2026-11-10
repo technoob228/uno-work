@@ -93,6 +93,7 @@ import { CustomHarnessFilesLive } from "./provider/customHarness/CustomHarnessFi
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { ProviderEventLoggersLive } from "./provider/Layers/ProviderEventLoggers.ts";
 import { CustomMcpServersLive } from "./mcp/customMcpServers.ts";
+import { AssistantProjectsLive } from "./assistants/assistantProjects.ts";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { AssistantHarnessSandboxPolicyLive } from "./assistants/assistantSandboxPolicy.ts";
 import { currentHarnessBudget } from "./provider/harnessBudget.ts";
@@ -626,7 +627,16 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // logger instances.
   // Custom MCP servers (settings.mcpServers) share the slot: every driver
   // reads the live list when it starts a session.
-  Layer.provideMerge(Layer.mergeAll(ProviderEventLoggersLive, CustomMcpServersLive)),
+  // So do an assistant's projects (assistants/assistantProjects.ts): the
+  // Hermes driver puts them into its system prompt. It reads two tables, so
+  // it takes the persistence layer itself (the same instance: memoized).
+  Layer.provideMerge(
+    Layer.mergeAll(
+      ProviderEventLoggersLive,
+      CustomMcpServersLive,
+      AssistantProjectsLive.pipe(Layer.provide(PersistenceLayerLive)),
+    ),
+  ),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
   // `ProviderRegistryLive` pulled `OpenCodeRuntimeLive` in for itself, but
   // the rewritten registry reads snapshots off the instance registry and

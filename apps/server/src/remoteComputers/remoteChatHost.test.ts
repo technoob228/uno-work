@@ -11,7 +11,12 @@ import {
 import { Effect, Option } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { defaultProjectFor, lastUsedModel, makeRemoteChatHost } from "./remoteChatHost.ts";
+import {
+  defaultProjectFor,
+  lastUsedModel,
+  makeRemoteChatHost,
+  REMOTE_CHAT_LAST_MESSAGE_CHARS,
+} from "./remoteChatHost.ts";
 import type { IncomingRemoteChat } from "./remoteChatStore.ts";
 
 const T0 = "2026-10-28T10:00:00.000Z";
@@ -55,6 +60,8 @@ function host(options: {
   readonly projects?: ReadonlyArray<OrchestrationProjectShell>;
   readonly threads?: ReadonlyArray<OrchestrationThreadShell>;
   readonly ledger?: ReadonlyMap<string, string>;
+  /** The chat's last answer; the short default otherwise. */
+  readonly answer?: string;
 }) {
   const projects = options.projects ?? [project(SITE), project(UNO)];
   const threads = new Map((options.threads ?? []).map((entry) => [entry.id as string, entry]));
@@ -96,7 +103,7 @@ function host(options: {
           threads.has(id)
             ? Option.some({
                 ...threads.get(id),
-                messages: [{ role: "assistant", text: "Fixed it, tests pass." }],
+                messages: [{ role: "assistant", text: options.answer ?? "Fixed it, tests pass." }],
               } as unknown as OrchestrationThread)
             : Option.none(),
         ),
@@ -228,6 +235,42 @@ describe("remote chat host", () => {
     );
     const status = await Effect.runPromise(remoteHost.status(threadId));
     expect(status.body).toMatchObject({ state: "done", lastMessage: "Fixed it, tests pass." });
+  });
+
+  it("a long answer travels with its conclusion: the asking computer reads nothing else", async () => {
+    // 10.11, bright-falcon #1086: 600 characters from the start ended at
+    // "Checked:", and the assistant that asked never saw "Your call".
+    const answer = [
+      "**Done:** the server is found.",
+      `**Checked:** ${"the panel's code, the database and the logs. ".repeat(200)}`,
+      "**Your call:** someone with the provider's account has to add the key. [Report](https://r-1.uno4.me/x)",
+    ].join("\n\n");
+    const { remoteHost, threads } = host({ threads: [thread("local")], answer });
+    const created = await Effect.runPromise(
+      remoteHost.create({ text: "Look into the ticket", runtimeMode: "full-access", startedBy }),
+    );
+    expect(created).toMatchObject({ status: 200 });
+    const threadId = (created.body as { threadId: string }).threadId;
+    threads.set(
+      threadId,
+      thread(threadId, {
+        latestTurn: {
+          turnId: "turn-1",
+          state: "completed",
+          requestedAt: T0,
+          startedAt: T0,
+          completedAt: T0,
+          assistantMessageId: null,
+        } as never,
+      }),
+    );
+    const status = await Effect.runPromise(remoteHost.status(threadId));
+    const lastMessage = (status.body as { lastMessage: string }).lastMessage;
+    expect(answer.length).toBeGreaterThan(REMOTE_CHAT_LAST_MESSAGE_CHARS);
+    expect(lastMessage.length).toBeLessThanOrEqual(REMOTE_CHAT_LAST_MESSAGE_CHARS);
+    expect(lastMessage.startsWith("**Done:** the server is found.")).toBe(true);
+    expect(lastMessage).toContain("**Your call:** someone with the provider's account");
+    expect(lastMessage.endsWith("[Report](https://r-1.uno4.me/x)")).toBe(true);
   });
 
   it("started-by lists this computer's assistants' chats and other computers'", async () => {

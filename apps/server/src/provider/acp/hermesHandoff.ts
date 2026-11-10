@@ -127,8 +127,9 @@ function notesTail(notes: string, max: number): string {
 /**
  * An assistant session's own files as one block for Hermes'
  * `agent.environment_hint` (the stable, cached part of its system prompt):
- * who it is (SOUL.md), the person (USER.md), the newest NOTES.md and the
- * ROUTING.md table (read before every hand-off). Hermes
+ * who it is (SOUL.md), the person (USER.md), the newest NOTES.md, the
+ * ROUTING.md table (read before every hand-off) and the projects it manages
+ * with their folders (where a hand-off goes). Hermes
  * already loads AGENTS.md from the working directory, and SOUL.md only from
  * its HERMES_HOME (where it would replace Hermes' own identity), so these
  * would otherwise cost a file read on every status or dispatch turn.
@@ -143,6 +144,8 @@ export function buildAssistantContextHint(input: {
   readonly routing: string;
   /** Its duties and rules from its team record (`assistants/profileHint.ts`). */
   readonly profile?: string | null;
+  /** The projects it manages, with their folders (`assistants/projectsHint.ts`). */
+  readonly projects?: string | null;
   readonly readAt: string;
 }): { readonly hint: string; readonly withNotes: boolean } | null {
   const soul = meaningful(input.soul);
@@ -150,7 +153,15 @@ export function buildAssistantContextHint(input: {
   const notes = meaningful(input.notes);
   const routing = routingTable(input.routing);
   const profile = input.profile?.trim() ? input.profile.trim() : null;
-  if (soul === null && user === null && notes === null && routing === null && profile === null) {
+  const projects = input.projects?.trim() ? input.projects.trim() : null;
+  if (
+    soul === null &&
+    user === null &&
+    notes === null &&
+    routing === null &&
+    profile === null &&
+    projects === null
+  ) {
     return null;
   }
   const sections = [
@@ -162,6 +173,9 @@ export function buildAssistantContextHint(input: {
       `<Your profile — Uno Work keeps it, the person edits it on your page>\n${profile}\n</Your profile>`,
     );
   }
+  // Not a file of this folder, but what the folder is for: read by Uno Work
+  // from the person's projects when the session started.
+  if (projects !== null) sections.push(`<Your projects>\n${projects}\n</Your projects>`);
   if (soul !== null)
     sections.push(`<SOUL.md>\n${clip(soul, ASSISTANT_CONTEXT_SOUL_CHARS)}\n</SOUL.md>`);
   if (user !== null)

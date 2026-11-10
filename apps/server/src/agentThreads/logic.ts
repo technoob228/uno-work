@@ -239,16 +239,24 @@ export function messageAuthor(
   return message.role;
 }
 
-export function lastAssistantText(
+/** The chat's last answer, whole; null while there is none. */
+export function lastAssistantMessage(
   messages: ReadonlyArray<Pick<OrchestrationMessage, "role" | "text">>,
 ): string | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message !== undefined && message.role === "assistant" && message.text.trim().length > 0) {
-      return message.text.slice(0, AGENT_THREAD_LAST_ASSISTANT_TEXT_CHARS);
+      return message.text;
     }
   }
   return null;
+}
+
+/** The start of the chat's last answer: a preview for a list of chats. */
+export function lastAssistantText(
+  messages: ReadonlyArray<Pick<OrchestrationMessage, "role" | "text">>,
+): string | null {
+  return lastAssistantMessage(messages)?.slice(0, AGENT_THREAD_LAST_ASSISTANT_TEXT_CHARS) ?? null;
 }
 
 /** `waitMs` from a JSON body: a number or a numeric string, clamped. */

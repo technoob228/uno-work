@@ -46,14 +46,14 @@ import * as crypto from "node:crypto";
 
 import {
   defaultTitleFromText,
-  lastAssistantText,
+  lastAssistantMessage,
   normalizeWorkspacePath,
   resolveProviderModelSelection,
 } from "../agentThreads/logic.ts";
 import { makeRegisterFolder } from "../agentThreads/registerFolder.ts";
 import { owningAssistant } from "../assistants/localAssistantStore.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
-import { isAssistantConversationThread } from "../manager/assistantPush.ts";
+import { clipMiddle, isAssistantConversationThread } from "../manager/assistantPush.ts";
 import { workStatusState } from "../manager/workStatus.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
 import { capRuntimeMode, inheritProjectThreadModes } from "../orchestration/projectThreadModes.ts";
@@ -63,8 +63,12 @@ import type { IncomingRemoteChat } from "./remoteChatStore.ts";
 
 /** Component of the system origin every remote chat command carries. */
 export const REMOTE_CHAT_ORIGIN_COMPONENT = "remote-chat";
-/** How much of the last answer a status line carries. */
-export const REMOTE_CHAT_LAST_MESSAGE_CHARS = 600;
+/**
+ * How much of the last answer a status carries: the computer that asked can
+ * read nothing else of the chat, so its beginning and its end both go
+ * (`clipMiddle`). Was 600 from the start, which cut the conclusion (10.11).
+ */
+export const REMOTE_CHAT_LAST_MESSAGE_CHARS = 4_000;
 const MAX_TEXT_CHARS = 20_000;
 const MAX_TITLE_CHARS = 120;
 
@@ -392,7 +396,9 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
       const latest = shell.value.latestTurn;
       const turns = latest === null ? [] : [latest];
       const detail = yield* deps.projections.getThreadDetailById(threadId);
-      const last = Option.isSome(detail) ? lastAssistantText(detail.value.messages) : null;
+      // The whole answer, then its beginning and end: `lastAssistantText` is
+      // a 600-character preview from the start, and the conclusion is at the end.
+      const last = Option.isSome(detail) ? lastAssistantMessage(detail.value.messages) : null;
       const state =
         shell.value.archivedAt !== null
           ? "stopped"
@@ -403,7 +409,7 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
           threadId,
           title: shell.value.title,
           state,
-          lastMessage: last === null ? null : last.slice(0, REMOTE_CHAT_LAST_MESSAGE_CHARS),
+          lastMessage: last === null ? null : clipMiddle(last, REMOTE_CHAT_LAST_MESSAGE_CHARS),
           updatedAt: shell.value.updatedAt,
         } satisfies ManagerRemoteChatStatus,
       };

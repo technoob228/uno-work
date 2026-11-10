@@ -1910,7 +1910,11 @@ export const ManagerRemoteChatStatus = Schema.Struct({
   title: Schema.String,
   /** running | waiting-for-you | done | failed | idle */
   state: Schema.String,
-  /** The last assistant message, trimmed (≤ 600 chars); null while nothing yet. */
+  /**
+   * The last assistant message; a long one keeps its beginning and end
+   * (≤ 4000 chars; ≤ 600 from its start on daemons before 0.0.186). null
+   * while nothing yet.
+   */
   lastMessage: Schema.NullOr(Schema.String),
   updatedAt: IsoDateTime,
 });

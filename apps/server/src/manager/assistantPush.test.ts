@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assistantPushEnabled,
+  clipMiddle,
   decideTurnStart,
   dueBatches,
   EMPTY_PUSH_STATE,
@@ -14,10 +15,12 @@ import {
   noticeFromRemoteStatus,
   pruneWatches,
   remotePollEveryMs,
+  PUSH_EXCERPT_CHARS,
   PUSH_MAX_HOLD_MS,
   PUSH_MAX_TURNS_PER_HOUR,
   PUSH_NOTICE_MARKER,
   PUSH_QUIET_MS,
+  PUSH_REMOTE_EXCERPT_CHARS,
   upsertWatch,
   type PushNotice,
   type PushState,
@@ -458,6 +461,36 @@ describe("remote chats (another computer of the account)", () => {
         nowMs,
       }),
     ).toBeNull();
+  });
+
+  it("a long answer keeps its conclusion and its report link (bright-falcon #1086, 10.11)", () => {
+    // The chat's transcript is on the other computer: the answer is all the
+    // assistant gets. 600 characters from the start ended at "Checked:".
+    const answer = [
+      "**Done:** сервер найден — это клиентский VPS, заказ #1086 «bright-falcon».",
+      `**Checked:** ${"проверил код панели, базу и логи. ".repeat(40)}`,
+      "**Your call:** нужен человек с доступом к кабинету провайдера. Детали — в [отчёте](https://r-8go2ej396h.uno4.me/__open?t=1).",
+    ].join("\n\n");
+    expect(answer.length).toBeGreaterThan(PUSH_EXCERPT_CHARS * 2);
+    const done = noticeFromRemoteStatus({
+      watch,
+      status: { ...status("done"), lastMessage: answer },
+      sentKeys: new Set(),
+      nowMs,
+    });
+    const text = formatPushNotice([done!.notice]);
+    expect(text).toContain("сервер найден");
+    expect(text).toContain("**Your call:** нужен человек с доступом к кабинету провайдера");
+    expect(text).toContain("https://r-8go2ej396h.uno4.me/__open?t=1");
+    expect(text).toContain("a link in it (its report) → give that very link");
+
+    const huge = `START ${"x".repeat(3 * PUSH_REMOTE_EXCERPT_CHARS)} THE END`;
+    const clipped = clipMiddle(huge, PUSH_REMOTE_EXCERPT_CHARS);
+    expect(clipped.length).toBeLessThanOrEqual(PUSH_REMOTE_EXCERPT_CHARS);
+    expect(clipped.startsWith("START")).toBe(true);
+    expect(clipped.endsWith("THE END")).toBe(true);
+    expect(clipped).toContain("[… the middle is cut …]");
+    expect(clipMiddle("short", 100)).toBe("short");
   });
 
   it("waiting for the person keeps watching", () => {

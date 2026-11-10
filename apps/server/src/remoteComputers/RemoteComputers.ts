@@ -24,6 +24,7 @@ import type {
 import { Context, Effect, Layer, Option } from "effect";
 
 import { readAppAccess } from "../assistants/localAssistantStore.ts";
+import { clipMiddle } from "../manager/assistantPush.ts";
 import { ServerConfig } from "../config.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
@@ -45,6 +46,9 @@ import {
   type OutgoingRemoteChat,
 } from "./remoteChatStore.ts";
 import { resolveComputerRef } from "./target.ts";
+
+/** How much of a remote chat's last answer the ledger of started chats keeps. */
+export const REMOTE_CHAT_LEDGER_MESSAGE_CHARS = 1_200;
 
 export const REMOTE_CHATS_PATH = "/api/manager/remote-chats";
 
@@ -351,7 +355,12 @@ export const makeRemoteComputersService = (options?: {
       Effect.promise(() =>
         updateOutgoingRemoteChat(config.stateDir, threadId, {
           state: status.state,
-          lastMessage: status.lastMessage,
+          // The ledger holds hundreds of chats and is rewritten on every
+          // poll: a status line's worth, not the whole answer.
+          lastMessage:
+            status.lastMessage === null
+              ? null
+              : clipMiddle(status.lastMessage, REMOTE_CHAT_LEDGER_MESSAGE_CHARS),
           ...(status.title.length > 0 ? { title: status.title } : {}),
           checkedAt: new Date().toISOString(),
         }),

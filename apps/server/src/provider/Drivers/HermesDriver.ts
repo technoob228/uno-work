@@ -22,7 +22,7 @@ import {
   UNO_GATEWAY_BASE_URL,
 } from "@t3tools/contracts";
 import type { ServerProvider } from "@t3tools/contracts";
-import { Duration, Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Duration, Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as os from "node:os";
 
@@ -64,6 +64,7 @@ import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withUserLocalBinOnPath } from "../setup/harnessProcess.ts";
 import { assistantsMvpEnabled } from "../../assistants/assistantsFeature.ts";
+import { AssistantProjects } from "../../assistants/assistantProjects.ts";
 import { assistantProfileBlock } from "../../assistants/profileHint.ts";
 import { readTeam } from "../../assistants/teamStore.ts";
 import {
@@ -147,6 +148,10 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const unoApiKey = yield* gatewayKey.harnessKey();
       const providerKeys = yield* AiProviderKeys;
       const customMcpServers = yield* customMcpServersGetter;
+      // The projects an assistant manages, for its system prompt. Optional
+      // like the other late services: a test layer without it runs without
+      // the block; the daemon provides it next to the custom MCP servers.
+      const assistantProjects = Option.getOrNull(yield* Effect.serviceOption(AssistantProjects));
 
       // Per-session LLM route (contracts: aiProviders.ts). The gateway key is
       // read fresh per session — on a Work box it often lands after start.
@@ -316,6 +321,10 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
               assistantProfileBlock(team, { isUno: projectId === ASSISTANT_PROJECT_ID }),
             ),
           ),
+        // The projects it manages, with their folders (projectsHint.ts).
+        ...(assistantProjects !== null
+          ? { assistantProjects: (projectId: string) => assistantProjects.blockFor(projectId) }
+          : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       });

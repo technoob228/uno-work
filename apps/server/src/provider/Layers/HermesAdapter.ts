@@ -108,6 +108,7 @@ import { repairHermesSessionHistory } from "../acp/hermesSessionRepair.ts";
 import { linkThreadHome } from "../acp/hermesThreadHomeLinks.ts";
 import { sharedSkillsRoot } from "../../skills/skillInstaller.ts";
 import { hermesSandboxExtras } from "../../sandbox/harnessSandboxExtras.ts";
+import { projectsChangedNote } from "../../assistants/projectsHint.ts";
 import { lockHermesSkillHub } from "../../assistants/skillHubLock.ts";
 import { type HermesAdapterShape } from "../Services/HermesAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
@@ -215,6 +216,13 @@ export interface HermesAdapterLiveOptions {
    * (tests): only its files.
    */
   readonly assistantProfile?: (projectId: string) => Effect.Effect<string | null>;
+  /**
+   * The projects an assistant manages, by its project id
+   * (`assistants/projectsHint.ts`), for its session's system prompt; read
+   * again on every turn, so a new project reaches a running session. Absent
+   * (tests): none.
+   */
+  readonly assistantProjects?: (projectId: string) => Effect.Effect<string | null>;
 }
 
 /** Marker of an assistant workspace (AssistantService): its NOTES.md is the assistant's memory. */
@@ -294,6 +302,12 @@ interface HermesSessionContext {
    * outside an assistant folder. A changed file rides along the next turn.
    */
   routingSeen: string | null | undefined;
+  /**
+   * The "Your projects" block the model last saw (system prompt or a turn);
+   * undefined outside an assistant folder. A changed list rides along the
+   * next turn.
+   */
+  projectsSeen: string | null | undefined;
   /** The last turn that has streamed assistant text (the 402 check looks at a turn's first text only). */
   replyTextTurnId: TurnId | undefined;
   /** The last turn whose `turn.completed` has gone out. */
@@ -733,7 +747,14 @@ export function makeHermesAdapter(
             .pipe(Effect.orElseSucceed(() => false));
           // SOUL.md / USER.md / the newest NOTES.md in the system prompt: a
           // status or dispatch turn needs no file reads (assistantContextHint).
-          const assistantContext = inAssistantWorkspace ? yield* readAssistantContext(cwd) : null;
+          // The projects it manages go there too, with their folders: where
+          // a hand-off goes is known from the first message (projectsHint.ts).
+          const assistantProjects = inAssistantWorkspace
+            ? yield* readAssistantProjects(cwd)
+            : undefined;
+          const assistantContext = inAssistantWorkspace
+            ? yield* readAssistantContext(cwd, assistantProjects ?? null)
+            : null;
           // The Uno chat is a dispatcher: no terminal, files, browser or web
           // of its own (HERMES_DISPATCHER_DISABLED_TOOLSETS). Other
           // assistants keep Hermes' tools.
@@ -1049,6 +1070,7 @@ export function makeHermesAdapter(
                     .pipe(Effect.orElseSucceed(() => "")),
                 )
               : undefined,
+            projectsSeen: assistantProjects,
             replyTextTurnId: undefined,
             completedTurnId: undefined,
             billingFailure: undefined,
@@ -1209,7 +1231,16 @@ export function makeHermesAdapter(
       );
 
     /** The assistant's own files for {@link buildAssistantContextHint} (missing ones are empty). */
-    const readAssistantContext = (cwd: string) =>
+    /** The "Your projects" block of the assistant a workspace belongs to; null: none. */
+    const readAssistantProjects = (cwd: string) =>
+      Effect.gen(function* () {
+        const projectId = yield* readMarkerProjectId(cwd);
+        return projectId !== null && options?.assistantProjects
+          ? yield* options.assistantProjects(projectId).pipe(Effect.orElseSucceed(() => null))
+          : null;
+      });
+
+    const readAssistantContext = (cwd: string, projects: string | null) =>
       Effect.gen(function* () {
         const read = (name: string) =>
           fileSystem.readFileString(nodePath.join(cwd, name)).pipe(Effect.orElseSucceed(() => ""));
@@ -1224,6 +1255,7 @@ export function makeHermesAdapter(
           notes: yield* read(ASSISTANT_NOTES_FILE),
           routing: yield* read("ROUTING.md"),
           profile,
+          projects,
           readAt: yield* nowIso,
         });
       });
@@ -1316,6 +1348,18 @@ export function makeHermesAdapter(
           const changed = routingChangedNote(ctx.routingSeen, routing);
           if (changed !== null) {
             ctx.routingSeen = routingTable(routing);
+            handoffText = `${changed}\n\n${handoffText}`;
+          }
+        }
+        if (
+          ctx.projectsSeen !== undefined &&
+          ctx.session.cwd !== undefined &&
+          options?.assistantProjects
+        ) {
+          const projects = yield* readAssistantProjects(ctx.session.cwd);
+          const changed = projectsChangedNote(ctx.projectsSeen, projects);
+          if (changed !== null) {
+            ctx.projectsSeen = projects;
             handoffText = `${changed}\n\n${handoffText}`;
           }
         }

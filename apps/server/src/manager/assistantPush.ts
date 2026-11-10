@@ -50,6 +50,13 @@ export const PUSH_CALLER_ROUTE_TTL_MS = 10 * 60_000;
 export const PUSH_SENT_KEYS_LIMIT = 500;
 /** How much of the chat's last answer the notice carries. */
 export const PUSH_EXCERPT_CHARS = 600;
+/**
+ * ...and of a chat on another computer: its transcript can't be read from
+ * here (`read_thread_detail`), so the answer itself is all the assistant
+ * gets. 600 characters cut "Тикет: bright-falcon #1086" (10.11) before its
+ * conclusion and the link to its report.
+ */
+export const PUSH_REMOTE_EXCERPT_CHARS = 4_000;
 /** First line of every notice — how the assistant (and a reader) tells it from the person. */
 /** Shared with the client, which shows the notice as a quiet line, not the person's bubble. */
 export const PUSH_NOTICE_MARKER = WORK_UPDATE_NOTICE_PREFIX;
@@ -275,6 +282,18 @@ const clip = (text: string, max: number) =>
   text.length <= max ? text : `${text.slice(0, max).trimEnd()}…`;
 
 /**
+ * A long answer keeps its beginning and its end: what was done comes first,
+ * the conclusion, what is asked of the person and the links come last.
+ */
+export const clipMiddle = (text: string, max: number): string => {
+  if (text.length <= max) return text;
+  const mark = "\n[… the middle is cut …]\n";
+  const room = Math.max(0, max - mark.length);
+  const head = Math.ceil(room * 0.4);
+  return `${text.slice(0, head).trimEnd()}${mark}${text.slice(text.length - (room - head)).trimStart()}`;
+};
+
+/**
  * What a settled probe of a watched chat tells its assistant, or null: not
  * its outcome (an older turn, nothing ran) or already told (`sentKeys`).
  * A `needs_you` keeps the watch (the turn goes on once answered); anything
@@ -414,7 +433,9 @@ export const noticeFromRemoteStatus = (input: {
       elapsedMs: Math.max(0, input.nowMs - toMs(watch.startedAt)),
       changedFiles: null,
       excerpt:
-        replyText.length > 0 ? wrapUntrustedContent(clip(replyText, PUSH_EXCERPT_CHARS)) : null,
+        replyText.length > 0
+          ? wrapUntrustedContent(clipMiddle(replyText, PUSH_REMOTE_EXCERPT_CHARS))
+          : null,
       request:
         outcome === "needs_you"
           ? wrapUntrustedContent(`open Uno Work on ${remote.computerName} to answer it`)
@@ -531,7 +552,7 @@ const NOT_STARTED_HINT =
 /** A chat on another computer: its transcript is there, not readable from here. */
 const REMOTE_OUTCOME_HINT: Readonly<Record<PushOutcome, string>> = {
   completed:
-    "It ran on another computer: judge it by its last answer below. When the answer has no proof of the result, tell the person what it says and where to look (that chat in Uno Work on that computer).",
+    "It ran on another computer: judge it by its last answer below (a long one has its middle cut). Tell the person its conclusion and what it asks of them; a link in it (its report) → give that very link. When the answer has no proof of the result, tell the person what it says and where to look (that chat in Uno Work on that computer).",
   failed: OUTCOME_HINT.failed,
   stopped: OUTCOME_HINT.stopped,
   needs_you:
