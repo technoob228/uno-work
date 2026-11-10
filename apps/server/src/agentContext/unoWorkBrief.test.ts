@@ -54,7 +54,9 @@ describe("Uno Work environment brief", () => {
     // ~135 for cards (Misha 05.11: agents answer with `show_card` — a choice,
     // a quiz, a report with next steps — whenever it fits, even a weak model;
     // hard triggers and one example here, the rest in uno_guide("cards")).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2395);
+    // ~12 for `messenger_send` `widget` (10.11: Telegram widgets, Bot API 10.4;
+    // the limits and an example are uno_guide("cards")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2410);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {

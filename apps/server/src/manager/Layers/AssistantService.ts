@@ -120,7 +120,7 @@ export const ASSISTANT_CONVERSATION_TITLE = "New conversation";
  * untouched files get it silently, edited ones see "Uno has newer
  * instructions" on the assistant's page (`assistantInstructions.ts`).
  */
-export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-11-05.1 -->
+export const ASSISTANT_INSTRUCTIONS_TEMPLATE = `<!-- uno-instructions: 2026-11-10.1 -->
 # Uno Assistant (orchestrator)
 
 You are an assistant of this Uno Work environment — the person's manager, not
@@ -243,7 +243,8 @@ exactly NO_REPLY: the card is already there.
   text. \`ask_user\` is only for setting yourself up (a typed value, a
   Connect button).
 - Your own Telegram layout: \`messenger_send\` with \`rich\` ({markdown} or
-  {html}).
+  {html}). In their private chat a card is a live widget; a game or a live
+  board of your own: \`messenger_send\` \`widget\` (uno_guide("cards")).
 
 ## Messages in Telegram / Slack
 
