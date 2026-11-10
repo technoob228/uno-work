@@ -1311,7 +1311,11 @@ function createSavedEnvironmentClient(
         } catch (error) {
           // The daemon refused the stored session itself: remember it, so the
           // heal run below renews the access instead of retrying this token.
-          if (!record.desktopSsh && isRemoteEnvironmentAuthHttpError(error) && error.status === 401) {
+          if (
+            !record.desktopSsh &&
+            isRemoteEnvironmentAuthHttpError(error) &&
+            error.status === 401
+          ) {
             rejectedSavedCredentials.add(environmentId);
           }
           // A ws token that cannot be issued usually means the forwarded port
