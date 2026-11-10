@@ -10,6 +10,7 @@ import {
   widgetPickState,
   widgetQuizState,
   type PersonCardWidgetOptions,
+  ruPlural,
 } from "./personCardWidget.ts";
 
 const card = (input: unknown): PersonCard => {
@@ -224,6 +225,26 @@ describe("renderPersonCardWidget: every kind is a widget", () => {
     expect(markup).toContain('<section id="sc" hidden>');
     expect(widget.caption).toBe("💬 Fix the site\n🧩 Capitals · 2 questions");
     expect(markup).not.toContain('class="qh"');
+  });
+});
+
+describe("ruPlural", () => {
+  it("1 вопрос, 3 вопроса, 5 вопросов, 11 вопросов, 21 вопрос", () => {
+    const words = (count: number) => ruPlural(count, "вопрос", "вопроса", "вопросов");
+    expect([1, 2, 3, 4, 5, 10, 11, 12, 14, 21, 22, 25].map(words)).toEqual([
+      "вопрос",
+      "вопроса",
+      "вопроса",
+      "вопроса",
+      "вопросов",
+      "вопросов",
+      "вопросов",
+      "вопросов",
+      "вопросов",
+      "вопрос",
+      "вопроса",
+      "вопросов",
+    ]);
   });
 });
 

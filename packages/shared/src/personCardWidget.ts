@@ -538,6 +538,15 @@ function quizMarkup(card: PersonCardQuiz, draw: Draw): string {
   );
 }
 
+/** Russian plural: 1 вопрос, 3 вопроса, 5 вопросов, 11 вопросов, 21 вопрос. */
+export const ruPlural = (count: number, one: string, few: string, many: string): string => {
+  const tens = count % 100;
+  const units = count % 10;
+  if (tens >= 11 && tens <= 14) return many;
+  if (units === 1) return one;
+  return units >= 2 && units <= 4 ? few : many;
+};
+
 // ── Caption ──────────────────────────────────────────────────────────────
 
 /**
@@ -566,10 +575,11 @@ function caption(
       break;
     case "quiz": {
       const count = card.questions.length;
-      const what =
-        count === 1
-          ? say(language, "1 вопрос", "1 question")
-          : say(language, `${count} вопросов`, `${count} questions`);
+      const what = say(
+        language,
+        `${count} ${ruPlural(count, "вопрос", "вопроса", "вопросов")}`,
+        count === 1 ? "1 question" : `${count} questions`,
+      );
       main = `🧩 ${card.title ?? say(language, "Квиз", "Quiz")} · ${what}`;
       break;
     }

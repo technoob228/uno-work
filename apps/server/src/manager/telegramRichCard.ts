@@ -24,6 +24,7 @@ import {
   type PersonCardQuiz,
   type PersonCardReport,
 } from "@t3tools/shared/personCard";
+import { ruPlural } from "@t3tools/shared/personCardWidget";
 
 import {
   layoutButtons,
@@ -330,10 +331,11 @@ export const quizIntroText = (
   language: ReplyLanguage,
 ): string => {
   const count = card.questions.length;
-  const what =
-    count === 1
-      ? say(language, "1 вопрос", "1 question")
-      : say(language, `${count} вопросов`, `${count} questions`);
+  const what = say(
+    language,
+    `${count} ${ruPlural(count, "вопрос", "вопроса", "вопросов")}`,
+    count === 1 ? "1 question" : `${count} questions`,
+  );
   const title = card.title
     ? `🧩 ${card.title} · ${what}`
     : `🧩 ${say(language, "Квиз", "Quiz")} · ${what}`;
