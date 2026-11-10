@@ -17,6 +17,8 @@
  * Everything here reads and changes what its computer keeps. The mock's page
  * (`?demo=w0138`) is `AssistantProfilePage.tsx`.
  */
+import { AssistantHands } from "../../workspace/AssistantHands";
+import { WORKSPACE_VISION } from "../../workspace/flag";
 import { scopeProjectRef } from "@t3tools/client-runtime";
 import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -543,8 +545,8 @@ export function AssistantProfileSimple(props: {
                 </div>
                 <p className="text-xs text-muted-foreground" data-testid="assistant-profile-line">
                   {member.isUno
-                    ? `Your main assistant · sees all your computers and apps · lives on ${member.computerLabel || "your cloud computer"}`
-                    : `${profile.roles[0] ? `${profile.roles[0]} · ` : ""}works next to Uno · shares its memory · lives on ${member.computerLabel || "your cloud computer"}`}
+                    ? `Your main assistant · sees all your computers and apps · lives ${WORKSPACE_VISION ? "in your workspace" : `on ${member.computerLabel || "your cloud computer"}`}`
+                    : `${profile.roles[0] ? `${profile.roles[0]} · ` : ""}works next to Uno · shares its memory · lives ${WORKSPACE_VISION ? "in your workspace" : `on ${member.computerLabel || "your cloud computer"}`}`}
                 </p>
                 {setupLine ? (
                   <p
@@ -742,9 +744,18 @@ export function AssistantProfileSimple(props: {
                 role="tabpanel"
                 data-testid="assistant-profile-panel-where"
               >
-                <Section title="Where it works" testId="assistant-profile-works-on-section">
-                  <TeamWorksOn member={member} />
-                </Section>
+                {WORKSPACE_VISION ? (
+                  <Section
+                    title="Computers it works on"
+                    testId="assistant-profile-works-on-section"
+                  >
+                    <AssistantHands name={name} />
+                  </Section>
+                ) : (
+                  <Section title="Where it works" testId="assistant-profile-works-on-section">
+                    <TeamWorksOn member={member} />
+                  </Section>
+                )}
 
                 {/* Its projects are changed right here; the level has its one switch below (29.10). */}
                 <Section title="Its projects" testId="assistant-profile-where">

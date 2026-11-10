@@ -17,6 +17,7 @@
 import { create } from "zustand";
 
 import { DEMO_ASSIST } from "../demo/demoFlag";
+import { WORKSPACE_VISION } from "../workspace/flag";
 
 export type LcStart = "fresh" | "connected" | "off";
 
@@ -55,7 +56,11 @@ function readStart(): LcStart {
     return asked;
   }
   const saved = stored(LC_START_KEY);
-  return saved === "connected" || saved === "off" ? saved : "fresh";
+  if (saved === "connected" || saved === "off" || saved === "fresh") return saved;
+  // The workspace vision's demo (10.11) starts with the MacBook as a computer
+  // of its own (its terminal and files answer from it), not the lifecycle's
+  // "brain in the cloud" pairing: `?lc=fresh` shows that one.
+  return WORKSPACE_VISION ? "off" : "fresh";
 }
 
 /** How the demo starts (always "off" outside it). */

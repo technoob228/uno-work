@@ -39,6 +39,8 @@ import {
 import "./seedTabs";
 import { DEMO_ASSIST, useDemoStore } from "./demoFlag";
 import { isWoken, startLinks, trackClient } from "./assist/links";
+import { startWorkspaceDemo, workspaceHandlers } from "./assist/workspace";
+import { answerTerminalRpc } from "./assist/terminal";
 import { demoMetrics } from "./assist/metrics";
 import {
   type DemoInboxInput,
@@ -318,6 +320,13 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   if (DEMO_ASSIST) {
     const lcAnswer = answerLifecycleRpc(machine, String(tag), body);
     if (lcAnswer !== undefined) return lcAnswer;
+  }
+  // Workspace vision: a terminal answers on its own computer (assist/terminal.ts).
+  if (DEMO_ASSIST) {
+    const terminalAnswer = answerTerminalRpc(machine, String(tag), body, (method, value) =>
+      harnesses.get(machine.environmentId)?.emitStreamValue(method, value),
+    );
+    if (terminalAnswer !== undefined) return terminalAnswer;
   }
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
   const fileAnswer = answerFileRpc(machine, body);
@@ -1813,6 +1822,7 @@ const lifecycleOps: LifecycleOps = {
 
 function startAssist() {
   startLinks();
+  startWorkspaceDemo();
   startLifecycle(lifecycleOps);
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
@@ -1892,7 +1902,9 @@ export async function startDemo(): Promise<void> {
       }),
     ),
     // The assistants base: its daemons and account answer first (assist/daemon.ts).
-    ...(DEMO_ASSIST ? [...daemonHandlers(assistDaemonHooks), ...accountHandlers()] : []),
+    ...(DEMO_ASSIST
+      ? [...workspaceHandlers(), ...daemonHandlers(assistDaemonHooks), ...accountHandlers()]
+      : []),
     http.get("*/api/project-favicon", () => new HttpResponse(null, { status: 204 })),
     http.post("*/api/observability/v1/traces", () => new HttpResponse(null, { status: 204 })),
     http.get("*/api/self-update/status", () =>

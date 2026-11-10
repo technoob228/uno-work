@@ -10,6 +10,7 @@
  * Dev mode keeps the 0.0.105 header: the model picker, "Runs on Hermes",
  * "New conversation", Connect and the settings gear.
  */
+import { WORKSPACE_VISION } from "../../workspace/flag";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronDownIcon, PlugIcon, PlusIcon, SendIcon, Settings2Icon } from "lucide-react";
@@ -65,13 +66,15 @@ export function AssistantChatHeadline({
   const plan = useCloudPlan();
   // Gating (28.10): the D lines only with the assistants update.
   const teamShown = useTeamShown();
-  const where = !teamShown
-    ? null
-    : plan === "free"
-      ? "On your cloud computer · sleeps when you're away"
-      : plan === "paid"
-        ? "Lives on your cloud computer · always on"
-        : null;
+  const where = WORKSPACE_VISION
+    ? "Lives in your workspace · on while computers sleep"
+    : !teamShown
+      ? null
+      : plan === "free"
+        ? "On your cloud computer · sleeps when you're away"
+        : plan === "paid"
+          ? "Lives on your cloud computer · always on"
+          : null;
   const status = assistantStatusLine(channels);
   return (
     <div className="flex min-w-0 items-center gap-2.5" data-testid="uno-headline">

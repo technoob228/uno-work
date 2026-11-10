@@ -34,6 +34,7 @@ import { Route as SettingsAssistantRouteImport } from './routes/settings.assista
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAiRouteImport } from './routes/settings.ai'
 import { Route as SettingsAccountRouteImport } from './routes/settings.account'
+import { Route as ChatWorkspaceRouteImport } from './routes/_chat.workspace'
 import { Route as ChatSitesRouteImport } from './routes/_chat.sites'
 import { Route as ChatSetupRouteImport } from './routes/_chat.setup'
 import { Route as ChatPullRequestsRouteImport } from './routes/_chat.pull-requests'
@@ -192,6 +193,11 @@ const SettingsAccountRoute = SettingsAccountRouteImport.update({
   id: '/account',
   path: '/account',
   getParentRoute: () => SettingsRoute,
+} as any)
+const ChatWorkspaceRoute = ChatWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatSitesRoute = ChatSitesRouteImport.update({
   id: '/sites',
@@ -396,6 +402,7 @@ export interface FileRoutesByFullPath {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
+  '/workspace': typeof ChatWorkspaceRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -454,6 +461,7 @@ export interface FileRoutesByTo {
   '/pull-requests': typeof ChatPullRequestsRoute
   '/setup': typeof ChatSetupRoute
   '/sites': typeof ChatSitesRoute
+  '/workspace': typeof ChatWorkspaceRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -516,6 +524,7 @@ export interface FileRoutesById {
   '/_chat/pull-requests': typeof ChatPullRequestsRoute
   '/_chat/setup': typeof ChatSetupRoute
   '/_chat/sites': typeof ChatSitesRoute
+  '/_chat/workspace': typeof ChatWorkspaceRoute
   '/settings/account': typeof SettingsAccountRoute
   '/settings/ai': typeof SettingsAiRoute
   '/settings/archived': typeof SettingsArchivedRoute
@@ -579,6 +588,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/setup'
     | '/sites'
+    | '/workspace'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -637,6 +647,7 @@ export interface FileRouteTypes {
     | '/pull-requests'
     | '/setup'
     | '/sites'
+    | '/workspace'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -698,6 +709,7 @@ export interface FileRouteTypes {
     | '/_chat/pull-requests'
     | '/_chat/setup'
     | '/_chat/sites'
+    | '/_chat/workspace'
     | '/settings/account'
     | '/settings/ai'
     | '/settings/archived'
@@ -924,6 +936,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/settings/account'
       preLoaderRoute: typeof SettingsAccountRouteImport
       parentRoute: typeof SettingsRoute
+    }
+    '/_chat/workspace': {
+      id: '/_chat/workspace'
+      path: '/workspace'
+      fullPath: '/workspace'
+      preLoaderRoute: typeof ChatWorkspaceRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/_chat/sites': {
       id: '/_chat/sites'
@@ -1196,6 +1215,7 @@ interface ChatRouteChildren {
   ChatPullRequestsRoute: typeof ChatPullRequestsRoute
   ChatSetupRoute: typeof ChatSetupRoute
   ChatSitesRoute: typeof ChatSitesRoute
+  ChatWorkspaceRoute: typeof ChatWorkspaceRoute
   ChatIndexRoute: typeof ChatIndexRoute
   ChatEnvironmentIdThreadIdRoute: typeof ChatEnvironmentIdThreadIdRoute
   ChatDraftDraftIdRoute: typeof ChatDraftDraftIdRoute
@@ -1216,6 +1236,7 @@ const ChatRouteChildren: ChatRouteChildren = {
   ChatPullRequestsRoute: ChatPullRequestsRoute,
   ChatSetupRoute: ChatSetupRoute,
   ChatSitesRoute: ChatSitesRoute,
+  ChatWorkspaceRoute: ChatWorkspaceRoute,
   ChatIndexRoute: ChatIndexRoute,
   ChatEnvironmentIdThreadIdRoute: ChatEnvironmentIdThreadIdRoute,
   ChatDraftDraftIdRoute: ChatDraftDraftIdRoute,

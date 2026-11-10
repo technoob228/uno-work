@@ -21,6 +21,8 @@
  * On a laptop daemon the home screen is the laptop's own; the account's cloud
  * computers can be picked to look at, which shows that computer's cloud view.
  */
+import { WorkspacePill } from "../../workspace/WorkspacePill";
+import { WORKSPACE_VISION } from "../../workspace/flag";
 import type { UnoMachineAppAction } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, getRouteApi, useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
@@ -413,7 +415,7 @@ export function ComputerView() {
                   linkDown={linkDown}
                   onOpen={() => void launchers.openTerminal()}
                 />
-                {pill}
+                {WORKSPACE_VISION ? <WorkspacePill /> : pill}
               </div>
             </>
           </div>

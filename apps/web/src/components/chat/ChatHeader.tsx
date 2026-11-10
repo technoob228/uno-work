@@ -5,6 +5,8 @@ import {
   type ResolvedKeybindingsConfig,
   type ThreadId,
 } from "@t3tools/contracts";
+import { RunsOnChip } from "../../workspace/RunsOnChip";
+import { WORKSPACE_VISION } from "../../workspace/flag";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo, type ReactNode, useRef, useState } from "react";
 import GitActionsControl from "../GitActionsControl";
@@ -374,7 +376,13 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
         {/* The computer this chat runs on, and switching to another, from any chat (0.0.96). */}
-        {activeProjectComputerName ? (
+        {WORKSPACE_VISION ? (
+          <RunsOnChip
+            environmentId={activeThreadEnvironmentId}
+            threadId={String(activeThreadId)}
+            compact={isMobile}
+          />
+        ) : activeProjectComputerName ? (
           <span
             className="flex shrink-0 items-center gap-1 px-1.5 text-xs text-muted-foreground"
             title={`Runs in your cloud, commands and files on ${activeProjectComputerName}`}

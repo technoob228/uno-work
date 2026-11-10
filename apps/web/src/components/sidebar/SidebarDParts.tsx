@@ -18,6 +18,7 @@ import {
   ArrowUpRightIcon,
   CircleHelpIcon,
   CodeXmlIcon,
+  CpuIcon,
   CreditCardIcon,
   FolderIcon,
   HouseIcon,
@@ -60,6 +61,7 @@ import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useTeamShown } from "../assistants/useAssistantTeam";
+import { WORKSPACE_VISION } from "../../workspace/flag";
 import { useAutomationsShown } from "../automations/useAutomations";
 import { InboxCountBadge } from "./SidebarInboxRow";
 import {
@@ -519,11 +521,18 @@ function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const openFilesInPanel = useOpenFilesInPanel(isMobile);
-  return (to: "/files" | "/sites" | "/automations" | "/pull-requests") => {
+  return (
+    to: "/files" | "/sites" | "/automations" | "/pull-requests" | "/workspace",
+    search?: { tab?: "hardware" },
+  ) => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     // In a chat, Files opens on the right, beside it (Misha 18.10).
     if (to === "/files" && openFilesInPanel()) return;
+    if (to === "/workspace") {
+      void navigate({ to, search: search ?? {} });
+      return;
+    }
     void navigate({ to });
   };
 }
@@ -568,6 +577,9 @@ function NeedsYouPopover(props: {
  */
 const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const workspaceTab = useLocation({
+    select: (location) => (location.search as { tab?: string }).tab,
+  });
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
@@ -604,16 +616,41 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
         nameFits={nameFits("sidebar-nav-files")}
         tour="files"
       />
-      <PlaceIcon
-        icon={<LayoutGridIcon />}
-        label="Apps & sites"
-        name="Apps"
-        active={pathname.startsWith("/sites")}
-        onClick={() => open("/sites")}
-        testId="sidebar-nav-apps"
-        nameFits={nameFits("sidebar-nav-apps")}
-        tour="apps"
-      />
+      {WORKSPACE_VISION ? (
+        <>
+          {/* Workspace vision (10.11): apps belong to the workspace, not to a computer. */}
+          <PlaceIcon
+            icon={<LayoutGridIcon />}
+            label="Apps of your workspace"
+            name="Apps"
+            active={pathname.startsWith("/workspace") && workspaceTab !== "hardware"}
+            onClick={() => open("/workspace")}
+            testId="sidebar-nav-apps"
+            nameFits={nameFits("sidebar-nav-apps")}
+            tour="apps"
+          />
+          <PlaceIcon
+            icon={<CpuIcon />}
+            label="Hardware: computers, Spark, data, addresses"
+            name="Hardware"
+            active={pathname.startsWith("/workspace") && workspaceTab === "hardware"}
+            onClick={() => open("/workspace", { tab: "hardware" })}
+            testId="sidebar-nav-hardware"
+            nameFits={nameFits("sidebar-nav-hardware")}
+          />
+        </>
+      ) : (
+        <PlaceIcon
+          icon={<LayoutGridIcon />}
+          label="Apps & sites"
+          name="Apps"
+          active={pathname.startsWith("/sites")}
+          onClick={() => open("/sites")}
+          testId="sidebar-nav-apps"
+          nameFits={nameFits("sidebar-nav-apps")}
+          tour="apps"
+        />
+      )}
       {automations ? (
         <PlaceIcon
           icon={<WorkflowIcon />}
@@ -673,6 +710,9 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
  */
 const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
   const pathname = useLocation({ select: (location) => location.pathname });
+  const workspaceTab = useLocation({
+    select: (location) => (location.search as { tab?: string }).tab,
+  });
   const open = useOpenPlace();
   const goHome = useGoHome();
   const { shown } = useNeedsYouBadge();
