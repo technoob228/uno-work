@@ -3,8 +3,10 @@
  * or a report with "what next" buttons (`@t3tools/shared/personCard`). The
  * agent fills plain fields; Uno draws it where the person is: a page in this
  * chat (`personCardHtml.ts`, published like `html_render`), or their
- * Telegram (a Rich Message, quiz polls; `manager/telegramRichCard.ts`) when
- * this turn answers a message from there. Whatever the person picks comes
+ * Telegram when this turn answers a message from there: in a private chat a
+ * live widget (`manager/telegramWidgetCard.ts`), else or refused a Rich
+ * Message / quiz polls (`manager/telegramRichCard.ts`); `drawn` in the
+ * result says which. Whatever the person picks comes
  * back to the chat as their next, visible message (Misha, 05.11).
  *
  * Built for weak models: one tool, few fields, a forgiving validator whose

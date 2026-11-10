@@ -172,3 +172,54 @@ describe("show_card", () => {
     }
   });
 });
+
+describe("messenger_send widget / widget_update", () => {
+  const send = UNO_WORK_TOOLS.find((entry) => entry.name === "messenger_send")!;
+  const call = (deps: UnoWorkToolDeps, args: unknown) =>
+    Effect.runPromiseExit(runUnoWorkTool(send, deps, args));
+
+  it("passes a checked widget on, the text as its fallback", async () => {
+    const { deps, recorded } = makeDeps();
+    const exit = await call(deps, {
+      text: "Your move",
+      widget: { html: "<div><button>e4</button></div>", state: '{"turn":"w"}' },
+    });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(recorded.messages[0]).toEqual({
+      text: "Your move",
+      widget: { html: "<div><button>e4</button></div>", state: '{"turn":"w"}' },
+    });
+    // The fake answered "rich" (not a widget): the agent hears it went as text.
+    expect(Exit.isSuccess(exit) ? exit.value : null).toMatchObject({ drawn: "text" });
+  });
+
+  it("errors say how to fix it", async () => {
+    const { deps, recorded } = makeDeps();
+    const noise = Array.from({ length: 6000 }, (_, index) =>
+      ((index * 2_654_435_761) >>> 0).toString(36),
+    ).join("");
+    expect(
+      errorOf(
+        await call(deps, { text: "x", widget: { html: `<div>${noise.slice(0, 30_000)}</div>` } }),
+      ),
+    ).toContain("too big when compressed");
+    expect(errorOf(await call(deps, { text: "x", widget: { html: "<input>" } }))).toContain(
+      "buttons only",
+    );
+    expect(
+      errorOf(await call(deps, { text: "x", widget: { html: "<b/>" }, rich: { markdown: "# x" } })),
+    ).toContain("widget or rich, not both");
+    expect(
+      errorOf(await call(deps, { widget_update: { state: "x".repeat(1024) + "é" } })),
+    ).toContain("at most 1024");
+    expect(recorded.messages).toEqual([]);
+  });
+
+  it("widget_update needs no text and sends only the state", async () => {
+    const { deps, recorded } = makeDeps();
+    const exit = await call(deps, { widget_update: { state: '{"turn":"b"}' } });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(recorded.messages[0]).toEqual({ text: "", widgetUpdate: { state: '{"turn":"b"}' } });
+    expect(errorOf(await call(deps, {}))).toContain("text is required");
+  });
+});

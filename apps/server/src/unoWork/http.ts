@@ -803,7 +803,17 @@ const makeDeps = (input: {
         notify
           .notify({ text, threadId: ThreadId.make(input.threadId), kind })
           .pipe(Effect.map((result) => ({ delivered: result.delivered }))),
-      messengerSend: ({ text, file, buttons, card, cardImages, cardFiles, rich }) =>
+      messengerSend: ({
+        text,
+        file,
+        buttons,
+        card,
+        cardImages,
+        cardFiles,
+        rich,
+        widget,
+        widgetUpdate,
+      }) =>
         notify.sendToPerson({
           threadId: ThreadId.make(input.threadId),
           text,
@@ -813,6 +823,8 @@ const makeDeps = (input: {
           ...(cardImages !== undefined ? { cardImages } : {}),
           ...(cardFiles !== undefined ? { cardFiles } : {}),
           ...(rich !== undefined ? { rich } : {}),
+          ...(widget !== undefined ? { widget } : {}),
+          ...(widgetUpdate !== undefined ? { widgetUpdate } : {}),
         }),
       ...(sqlClient !== null
         ? {

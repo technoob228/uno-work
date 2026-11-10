@@ -19,6 +19,7 @@ import type { Effect } from "effect";
 
 import type { ConnectorButton } from "../connectorButtons.ts";
 import type { ResolvedNotifyChat } from "../connectorBindings.ts";
+import type { AgentWidgetInput } from "../telegramWidgetCard.ts";
 import type { ReplyLanguage } from "../connectorReplyText.ts";
 
 /** A chat's message to the person (`messenger_send`, approval requests). */
@@ -52,6 +53,16 @@ export interface PersonMessageInput {
    * or HTML); `text` goes where it is refused.
    */
   readonly rich?: { readonly markdown?: string; readonly html?: string } | null;
+  /**
+   * `messenger_send` `widget`: the agent's own Telegram widget (private chat
+   * only); `text` is its caption's fallback and what goes where it is refused.
+   */
+  readonly widget?: AgentWidgetInput | null;
+  /**
+   * `messenger_send` `widget_update`: the new state of the last widget this
+   * chat sent (Telegram only). Nothing else is sent; not rate-limited.
+   */
+  readonly widgetUpdate?: { readonly state: string } | null;
 }
 
 export interface PersonMessageResult {
@@ -60,8 +71,8 @@ export interface PersonMessageResult {
   readonly via: "telegram" | "slack" | "uno-bot" | "none";
   /** Why something was not sent (the file, the buttons, the rate limit). */
   readonly note: string | null;
-  /** A card in Telegram: a Rich Message, quiz polls, or the plain fallback. */
-  readonly drawn?: "rich" | "poll" | "text";
+  /** A card / widget in Telegram: a widget, a Rich Message, quiz polls, or the plain fallback. */
+  readonly drawn?: "widget" | "rich" | "poll" | "text";
 }
 
 export interface ConnectorNotifyServiceShape {

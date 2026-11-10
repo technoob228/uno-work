@@ -138,6 +138,11 @@ import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/as
 
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 import { normalizeButtonRows, type ButtonSpec } from "../manager/connectorButtons.ts";
+import {
+  validateAgentWidget,
+  widgetStateProblem,
+  type AgentWidgetInput,
+} from "../manager/telegramWidgetCard.ts";
 import { workAppLink } from "../workAddress.ts";
 import { resolveGroupPeople } from "../manager/telegramGroups.ts";
 
@@ -430,11 +435,15 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
     readonly cardFiles?: ReadonlyArray<string>;
     /** `messenger_send` `rich`: a Telegram Rich Message (Markdown or HTML). */
     readonly rich?: { readonly markdown?: string; readonly html?: string };
+    /** `messenger_send` `widget`: the agent's own Telegram widget (checked). */
+    readonly widget?: AgentWidgetInput;
+    /** `messenger_send` `widget_update`: the last widget's new state. */
+    readonly widgetUpdate?: { readonly state: string };
   }) => Effect.Effect<{
     readonly delivered: number;
     readonly via: "telegram" | "slack" | "uno-bot" | "none";
     readonly note: string | null;
-    readonly drawn?: "rich" | "poll" | "text";
+    readonly drawn?: "widget" | "rich" | "poll" | "text";
   }>;
   /**
    * This turn answers the person's Telegram / Slack message (an open
@@ -3010,7 +3019,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "messenger_send",
     group: "person",
     description:
-      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). A choice, a quiz or a report: use show_card with where \"messenger\" instead — it draws them there. The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. `rich`: your own Telegram Rich Message (Rich Markdown: headings, tables, lists; or Rich HTML), `text` then goes only where it can't show. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify).",
+      "Write to the person in their Telegram (or Slack) — the bot connected to Uno Work, theirs or Uno's — even when they never talked to you there. A short message, optionally a file (photo, document, voice; the same folders as send_file) and buttons (each press comes back to this chat as the person's message; their reply to the message comes here too). A choice, a quiz or a report: use show_card with where \"messenger\" instead — it draws them there. The message is headed with this chat's name. Once per outcome or question, a few lines; not for progress. `rich`: your own Telegram Rich Message (Rich Markdown: headings, tables, lists; or Rich HTML), `text` then goes only where it can't show. Without Telegram/Slack it goes as plain text through Uno's bot, or not at all (then use notify). `widget`: your own mini app in the message (a game, a calculator, a live board; private chat only; limits in uno_guide(\"cards\")), `text` is its fallback; `widget_update` {state} changes the last one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -3051,8 +3060,37 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           },
           additionalProperties: false,
         },
+        widget: {
+          type: "object",
+          description:
+            'Telegram widget (Bot API 10.4): {"html":"<style>…</style><div>…</div><script>…</script>","state":"{…}"}. One HTML+JS app in the message, ≤4096 bytes zlib-compressed, ≤600 px tall, no network, buttons only (no inputs), colours via --tg-theme-*. TelegramWidget.request("text ≤64 bytes") from a tap sends you that text as the person\'s message; TelegramWidget.chatData is `state`. See uno_guide("cards").',
+          properties: {
+            html: { type: "string", maxLength: 32_768 },
+            caption: {
+              type: "string",
+              maxLength: 1024,
+              description: "Shown under it and by old apps; default `text`.",
+            },
+            height: { type: "integer", minimum: 0, maximum: 600 },
+            width: { type: "integer", minimum: 0, maximum: 2000 },
+            state: {
+              type: "string",
+              maxLength: 1024,
+              description: "Its first TelegramWidget.chatData.",
+            },
+          },
+          required: ["html"],
+          additionalProperties: false,
+        },
+        widget_update: {
+          type: "object",
+          description:
+            'Change the state of the last widget this chat sent: {"state":"{…}"} (≤1024 bytes) → its TelegramWidget.chatData, event chatDataChanged. No text needed.',
+          properties: { state: { type: "string", maxLength: 1024 } },
+          required: ["state"],
+          additionalProperties: false,
+        },
       },
-      required: ["text"],
       additionalProperties: false,
     },
     level: "safe",
@@ -3060,6 +3098,21 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       Effect.gen(function* () {
         if (deps.messengerSend === undefined) {
           return yield* toolError("Messages to Telegram aren't available here; use notify.");
+        }
+        if (args.widget_update !== undefined) {
+          const update = args.widget_update as { readonly state?: unknown } | null;
+          const problem =
+            update === null || typeof update !== "object"
+              ? 'widget_update must be {"state": "…"}.'
+              : (widgetStateProblem(update.state, "widget_update.state") ??
+                (typeof update.state === "string" ? null : "widget_update.state is required."));
+          if (problem !== null) return yield* toolError(problem);
+          const updated = yield* deps.messengerSend({
+            text: "",
+            widgetUpdate: { state: (update as { readonly state: string }).state },
+          });
+          if (updated.delivered === 0) return yield* toolError(updated.note ?? "Not updated.");
+          return { ok: true, via: updated.via, updated: true };
         }
         const text = str(args, "text")?.trim() ?? "";
         if (text.length === 0) return yield* toolError("text is required.");
@@ -3091,11 +3144,19 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             : richMarkdown !== undefined
               ? { markdown: richMarkdown }
               : undefined;
+        let widget: AgentWidgetInput | undefined;
+        if (args.widget !== undefined) {
+          if (rich !== undefined) return yield* toolError("Give widget or rich, not both.");
+          const checked = validateAgentWidget(args.widget);
+          if (!checked.ok) return yield* toolError(checked.error);
+          widget = checked.widget;
+        }
         const result = yield* deps.messengerSend({
           text,
           ...(file ? { file } : {}),
           ...(buttons ? { buttons } : {}),
           ...(rich ? { rich } : {}),
+          ...(widget ? { widget } : {}),
         });
         if (result.delivered === 0) {
           return yield* toolError(result.note ?? "Not delivered.");
@@ -3103,7 +3164,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         return {
           ok: true,
           via: result.via,
+          ...(widget ? { drawn: result.drawn === "widget" ? "widget" : "text" } : {}),
           ...(result.note ? { note: result.note } : {}),
+          ...(widget && result.drawn === "widget"
+            ? {
+                next: "The widget is in their Telegram. Its requests come to this chat as the person's messages ([from the widget «…»]); change it with widget_update.",
+              }
+            : {}),
           ...(buttons && result.via === "telegram"
             ? {
                 next: "End your turn now. The person's press (or reply) comes to this chat as their next message.",

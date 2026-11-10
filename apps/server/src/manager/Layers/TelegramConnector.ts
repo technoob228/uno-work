@@ -115,6 +115,7 @@ import {
   bindingOnConnector,
   decideThreadRouting,
   isPrivateTelegramChat,
+  isPrivateTelegramChatId,
   mergeRoutedAccess,
   resolveChatTarget,
   routesToMainConversation,
@@ -207,6 +208,7 @@ import {
 import { longPollSignal } from "../../economy/wakeSignal.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import type { PersonCard } from "@t3tools/shared/personCard";
+import { renderPersonCardWidget } from "@t3tools/shared/personCardWidget";
 import {
   advanceQuiz,
   answerQuiz,
@@ -229,6 +231,28 @@ import {
   takeQuiz,
   type RichCardMedia,
 } from "../telegramRichCard.ts";
+import {
+  admitAgentWidgetRequest,
+  AGENT_WIDGET_OK,
+  AGENT_WIDGET_SLOW,
+  AGENT_WIDGET_TTL_MS,
+  agentWidgetMessage,
+  answerWidgetQuiz,
+  decideWidgetPick,
+  findAgentWidget,
+  lastAgentWidget,
+  parseWidgetRequest,
+  putAgentWidget,
+  spendWidgetGroup,
+  WIDGET_CAPTION_MAX_CHARS,
+  WIDGET_EXPIRED_STATE,
+  widgetFits,
+  widgetPickLabels,
+  widgetQuizDoneState,
+  widgetRequestPrefix,
+  widgetSizeProblem,
+  type AgentWidgetInput,
+} from "../telegramWidgetCard.ts";
 import {
   addButtonGroup,
   addSentMessageRoute,
@@ -287,18 +311,31 @@ export interface ManagerTelegramServiceShape {
   readonly sendRich: (input: TelegramRichMessage) => Effect.Effect<{
     readonly ok: boolean;
     readonly error: string | null;
+    /** With `widget`: whether it went as the widget or as the text. */
+    readonly drawn?: "widget" | "text";
   }>;
   /**
-   * A `show_card` card to the person (telegramRichCard.ts): a choice or a
-   * report as a Rich Message with our buttons, a quiz as quiz polls; where
-   * Telegram (or the relay) refuses that, the old message with buttons.
+   * A `show_card` card to the person: in a private chat first as a widget
+   * (telegramWidgetCard.ts); else, or refused, a choice or a report as a
+   * Rich Message with our buttons, a quiz as quiz polls (telegramRichCard.ts);
+   * where Telegram (or the relay) refuses that, the old message with buttons.
    * `drawn` says what went. Never fails.
    */
   readonly sendCard: (input: TelegramCardMessage) => Effect.Effect<{
     readonly ok: boolean;
     readonly error: string | null;
-    readonly drawn: "rich" | "poll" | "text" | "none";
+    readonly drawn: "widget" | "rich" | "poll" | "text" | "none";
   }>;
+  /**
+   * `messenger_send` `widget_update`: the new `chat_data` of the last widget
+   * the chat `threadId` sent to this Telegram chat. `error` is for the agent.
+   */
+  readonly updateWidget: (input: {
+    readonly projectId: ProjectId;
+    readonly chatId: string;
+    readonly threadId: ThreadId;
+    readonly state: string;
+  }) => Effect.Effect<{ readonly ok: boolean; readonly error: string | null }>;
   /**
    * An approval request was answered (in the app, with /approve, by a
    * timeout): its buttons in Telegram go, the message says so.
@@ -421,6 +458,12 @@ export interface TelegramRichMessage {
    * where a Rich Message is refused.
    */
   readonly rich?: { readonly markdown?: string; readonly html?: string } | null;
+  /**
+   * `messenger_send` `widget`: the agent's own widget (Bot API 10.4), only in
+   * a private chat; `text` goes where it is refused. `caption` is what old
+   * apps show (the header included), `title` names its messages.
+   */
+  readonly widget?: (AgentWidgetInput & { readonly title: string }) | null;
 }
 
 export interface TelegramCardMessage {
@@ -453,14 +496,36 @@ export interface TelegramPollAnswer {
   readonly option_ids?: ReadonlyArray<number>;
 }
 
-/** Updates the poller asks for: messages, presses of our buttons, answers to our quizzes. */
-export const TELEGRAM_ALLOWED_UPDATES = ["message", "callback_query", "poll_answer"] as const;
+/**
+ * A request of one of our widgets (`TelegramWidget.request`, Bot API 10.4).
+ * It must be answered (`answerWidgetQuery`) within 15 seconds.
+ */
+export interface TelegramWidgetQuery {
+  readonly id: string;
+  readonly from?: TelegramIncomingMessage["from"];
+  readonly chat?: TelegramIncomingMessage["chat"];
+  readonly message_id?: number;
+  readonly inline_message_id?: string;
+  /** `{type: "data"}` for a plain request; wallet requests are not ours. */
+  readonly type?: { readonly type?: string };
+  /** 1–64 bytes. */
+  readonly data?: string;
+}
+
+/** Updates the poller asks for: messages, presses of our buttons, answers to our quizzes and widgets. */
+export const TELEGRAM_ALLOWED_UPDATES = [
+  "message",
+  "callback_query",
+  "poll_answer",
+  "widget_query",
+] as const;
 
 export interface TelegramUpdate {
   readonly update_id: number;
   readonly message?: TelegramIncomingMessage;
   readonly callback_query?: TelegramCallbackQuery;
   readonly poll_answer?: TelegramPollAnswer;
+  readonly widget_query?: TelegramWidgetQuery;
   /**
    * Set by Uno's assistant bot relay (`tga_`) on a `/start <code>` the
    * console already answered ("Connected to …"): link locally, say nothing.
@@ -1866,9 +1931,38 @@ const makeTelegramConnector = Effect.gen(function* () {
         readonly messageId: number | null;
         readonly error: string | null;
       };
-      // The agent's own Rich Message first; refused (an old relay, a markup
-      // Telegram won't take) → the plain message below, as before.
+      // The agent's own widget (a private chat only) or Rich Message first;
+      // refused (an old relay, a markup Telegram won't take) → the plain
+      // message below, as before.
+      const widget = input.widget ?? null;
+      let widgetNote: string | null = null;
+      let widgetSent: {
+        readonly ok: boolean;
+        readonly messageId: number | null;
+        readonly description: string | null;
+      } | null = null;
+      if (widget !== null && !isPrivateTelegramChatId(input.chatId)) {
+        widgetNote =
+          "Telegram shows widgets only in the private chat with the bot, not in groups: the text went instead.";
+      } else if (widget !== null) {
+        widgetSent = yield* sendWidgetRaw(via.botToken, input.chatId, {
+          html: widget.html,
+          caption: widget.caption ?? text,
+          ...(widget.state !== undefined ? { chatData: widget.state } : {}),
+          ...(widget.width !== undefined ? { width: widget.width } : {}),
+          ...(widget.height !== undefined ? { height: widget.height } : {}),
+          allowQueries: true,
+          replyMarkup,
+        });
+        if (!widgetSent.ok) {
+          widgetNote = `Telegram didn't show the widget (${widgetSent.description ?? "refused"}): the text went instead.`;
+          yield* Effect.logInfo("telegram widget refused, sending plain text").pipe(
+            Effect.annotateLogs({ chatId: input.chatId, description: widgetSent.description }),
+          );
+        }
+      }
       const richSent =
+        widgetSent?.ok !== true &&
         input.rich !== undefined &&
         input.rich !== null &&
         (input.rich.markdown !== undefined || input.rich.html !== undefined)
@@ -1879,7 +1973,8 @@ const makeTelegramConnector = Effect.gen(function* () {
           Effect.annotateLogs({ chatId: input.chatId, description: richSent.description }),
         );
       }
-      if (richSent?.ok === true) {
+      const shown = widgetSent?.ok === true ? widgetSent : richSent?.ok === true ? richSent : null;
+      if (shown !== null) {
         yield* recordDelivery(via.projectId, true, null);
         if (group !== null) {
           yield* updateButtons((state) => ({
@@ -1889,7 +1984,21 @@ const makeTelegramConnector = Effect.gen(function* () {
             ),
           }));
         }
-        sent = { ok: true, messageId: richSent.messageId, error: null };
+        if (widget !== null && shown === widgetSent && shown.messageId !== null) {
+          const messageId = shown.messageId;
+          yield* updateButtons((state) =>
+            putAgentWidget(state, {
+              connectorProjectId: via.projectId,
+              chatId: input.chatId,
+              messageId,
+              threadId: input.threadId,
+              title: widget.title,
+              sentAtMs: nowMs,
+              expiresAtMs: nowMs + AGENT_WIDGET_TTL_MS,
+            }),
+          );
+        }
+        sent = { ok: true, messageId: shown.messageId, error: null };
         if (filePath !== null) {
           const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, filePath);
           if (!file.ok) sent = { ...sent, error: file.error };
@@ -1961,7 +2070,11 @@ const makeTelegramConnector = Effect.gen(function* () {
             : withId;
         });
       }
-      return { ok: true, error: sent.error };
+      return {
+        ok: true,
+        error: sent.error ?? widgetNote,
+        ...(widget !== null ? { drawn: widgetSent?.ok === true ? "widget" : "text" } : {}),
+      } as const;
     });
 
   /**
@@ -2021,6 +2134,89 @@ const makeTelegramConnector = Effect.gen(function* () {
       ),
       Effect.catch((description) => Effect.succeed({ ok: false, messageId: null, description })),
     );
+
+  /**
+   * `sendWidget` (Bot API 10.4): an HTML + JS app in the message, answering
+   * through `widget_query` when `allowQueries`. Not tried at all when the
+   * html is over Telegram's limits (32 KB, 4 KB deflated). One attempt: a
+   * refusal (an old relay: 403 "not available through the Uno relay", an
+   * old Bot API, a group) falls back at the caller.
+   */
+  const sendWidgetRaw = (
+    botToken: string,
+    chatId: string,
+    widget: {
+      readonly html: string;
+      readonly caption: string;
+      readonly chatData?: string;
+      readonly width?: number;
+      readonly height?: number;
+      readonly allowQueries: boolean;
+      readonly replyMarkup?: unknown;
+    },
+  ): Effect.Effect<{
+    readonly ok: boolean;
+    readonly messageId: number | null;
+    readonly description: string | null;
+  }> => {
+    const tooBig = widgetSizeProblem(widget.html);
+    if (tooBig !== null) {
+      return Effect.succeed({ ok: false, messageId: null, description: tooBig });
+    }
+    return fetchJson(telegramApi(botToken, "sendWidget"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        html: widget.html,
+        caption: widget.caption.slice(0, WIDGET_CAPTION_MAX_CHARS),
+        ...(widget.chatData !== undefined ? { chat_data: widget.chatData } : {}),
+        ...(widget.width !== undefined ? { width: widget.width } : {}),
+        ...(widget.height !== undefined ? { height: widget.height } : {}),
+        allow_queries: widget.allowQueries,
+        ...(widget.replyMarkup !== undefined ? { reply_markup: widget.replyMarkup } : {}),
+      }),
+    }).pipe(
+      Effect.map((answer) =>
+        answer.ok === true
+          ? { ok: true, messageId: sentMessageId(answer.result), description: null }
+          : { ok: false, messageId: null, description: answer.description ?? "refused" },
+      ),
+      Effect.catch((error) =>
+        Effect.succeed({ ok: false, messageId: null, description: error.message }),
+      ),
+    );
+  };
+
+  /** A widget's `chat_data` (its state as it shows it, also when opened again). */
+  const setWidgetData = (
+    botToken: string,
+    chatId: string,
+    messageId: number | null | undefined,
+    chatData: string,
+  ) =>
+    messageId === null || messageId === undefined
+      ? Effect.void
+      : callBotJson(botToken, "editMessageWidgetData", {
+          chat_id: chatId,
+          message_id: messageId,
+          chat_data: chatData,
+        }).pipe(
+          Effect.flatMap((answer) =>
+            answer.ok === true
+              ? Effect.void
+              : Effect.logInfo("telegram widget data not updated").pipe(
+                  Effect.annotateLogs({ chatId, messageId, description: answer.description }),
+                ),
+          ),
+        );
+
+  /** Every widget request is answered, within 15 s, or it fails with TIMEOUT in the widget. */
+  const answerWidgetQuery = (botToken: string, queryId: string, data?: string) =>
+    callBotJson(botToken, "answerWidgetQuery", {
+      widget_query_id: queryId,
+      ...(data !== undefined ? { data } : {}),
+    }).pipe(Effect.asVoid);
 
   /** A report's pictures and files: which go inside the Rich Message, which after it. */
   const planCardMedia = (images: ReadonlyArray<string>, files: ReadonlyArray<string>) =>
@@ -2104,6 +2300,111 @@ const makeTelegramConnector = Effect.gen(function* () {
       }),
     );
 
+  /**
+   * A card as a widget (telegramWidgetCard.ts): a choice / report keeps a
+   * ButtonGroup (`widget: true`), a quiz a CardQuiz (`widget: true`, no
+   * poll), so their requests, the TTL and the idle flush work as for the
+   * keyboard and the polls. Null: not drawable or refused — the caller
+   * goes on with the Rich Message / polls, nothing of this attempt left.
+   */
+  const sendCardWidget = (
+    via: { readonly projectId: ProjectId; readonly botToken: string },
+    input: TelegramCardMessage,
+    nowMs: number,
+  ) =>
+    Effect.gen(function* () {
+      const language = input.language ?? "en";
+      const card = input.card;
+      const routeReplies = input.routeReplies === true;
+      const quiz =
+        card.kind === "quiz"
+          ? {
+              ...newCardQuiz({
+                id: newButtonGroupId(),
+                card,
+                connectorProjectId: via.projectId,
+                chatId: input.chatId,
+                threadId: input.threadId,
+                language,
+                nowMs,
+              }),
+              widget: true,
+            }
+          : null;
+      const rows = card.kind === "quiz" ? [] : cardButtons(card, language);
+      const group: ButtonGroup | null =
+        rows.length === 0
+          ? null
+          : {
+              id: newButtonGroupId(),
+              connectorProjectId: via.projectId,
+              chatId: input.chatId,
+              messageId: null,
+              threadId: input.threadId,
+              rows,
+              widget: true,
+              language,
+              createdAtMs: nowMs,
+              expiresAtMs: nowMs + CHOICE_BUTTONS_TTL_MS,
+            };
+      const rendered = renderPersonCardWidget(card, {
+        header: input.header,
+        language,
+        // A report without actions sends nothing; its prefix is never used.
+        requestPrefix: widgetRequestPrefix(quiz?.id ?? group?.id ?? newButtonGroupId()),
+        fits: widgetFits,
+      });
+      if (rendered === null) return null;
+      if (group !== null) yield* updateButtons((state) => addButtonGroup(state, group, nowMs));
+      if (quiz !== null) yield* updateButtons((state) => putQuiz(state, quiz));
+      const sent = yield* sendWidgetRaw(via.botToken, input.chatId, {
+        html: rendered.html,
+        caption: rendered.caption,
+        ...(rendered.chatData !== undefined ? { chatData: rendered.chatData } : {}),
+        allowQueries: group !== null || quiz !== null,
+      });
+      if (!sent.ok) {
+        yield* Effect.logInfo("telegram widget card refused, sending the rich card").pipe(
+          Effect.annotateLogs({
+            chatId: input.chatId,
+            kind: card.kind,
+            description: sent.description,
+          }),
+        );
+        if (group !== null) yield* updateButtons((state) => removeButtonGroup(state, group.id));
+        if (quiz !== null) yield* updateButtons((state) => removeQuiz(state, quiz.id));
+        return null;
+      }
+      yield* recordDelivery(via.projectId, true, null);
+      if (quiz !== null && sent.messageId !== null) {
+        const messageId = sent.messageId;
+        yield* updateButtons((state) => ({
+          ...state,
+          quizzes: (state.quizzes ?? []).map((entry) =>
+            entry.id === quiz.id ? { ...entry, messageId } : entry,
+          ),
+        }));
+      }
+      yield* rememberCardMessage({
+        connectorProjectId: via.projectId,
+        chatId: input.chatId,
+        threadId: input.threadId,
+        groupId: group?.id ?? null,
+        messageId: sent.messageId,
+        routeReplies,
+        nowMs,
+      });
+      // A report's files follow as documents (pictures never make a widget).
+      let error: string | null = null;
+      for (const path of input.files ?? []) {
+        const file = yield* sendTelegramFile(via.projectId, via.botToken, input.chatId, path, {
+          language,
+        });
+        if (!file.ok) error = file.error;
+      }
+      return { ok: true, error, drawn: "widget" as const };
+    });
+
   const sendCard: ManagerTelegramServiceShape["sendCard"] = (input) =>
     Effect.gen(function* () {
       const config = yield* readRow(input.projectId);
@@ -2122,6 +2423,13 @@ const makeTelegramConnector = Effect.gen(function* () {
         0,
         TELEGRAM_MESSAGE_LIMIT,
       );
+
+      // A private chat: the card as a widget first (Bot API 10.4). Not
+      // drawable (pictures, too tall) or refused → the Rich Message / polls.
+      if (isPrivateTelegramChatId(input.chatId)) {
+        const widget = yield* sendCardWidget(via, input, nowMs);
+        if (widget !== null) return widget;
+      }
 
       if (card.kind === "quiz") {
         const intro = yield* sendTelegramText(
@@ -2323,7 +2631,17 @@ const makeTelegramConnector = Effect.gen(function* () {
   ) =>
     Effect.gen(function* () {
       const taken = yield* changeQuiz((state) => takeQuiz(state, options.seen ?? quiz));
-      if (!taken || quiz.answers.length === 0) return;
+      if (!taken) return;
+      // A widget quiz shows itself finished (no poll to stop: it has none).
+      if (quiz.widget === true) {
+        yield* setWidgetData(
+          config.botToken,
+          quiz.chatId,
+          quiz.messageId,
+          widgetQuizDoneState(quiz),
+        );
+      }
+      if (quiz.answers.length === 0) return;
       yield* answerAsPerson({
         projectId,
         config,
@@ -2375,6 +2693,170 @@ const makeTelegramConnector = Effect.gen(function* () {
     }).pipe(
       Effect.catchTag("TelegramRoutingError", (error) =>
         Effect.logWarning("telegram quiz answer not routed").pipe(
+          Effect.annotateLogs({ projectId, reason: error.message }),
+        ),
+      ),
+    );
+
+  /**
+   * A request of one of our widgets. Answered FIRST (Telegram gives 15 s),
+   * then the message's `chat_data` mirrors the answer, then the person's
+   * message goes to the chat — once: a group is spent and a quiz moves on
+   * inside one state update, so a double tap or an idle flush racing it
+   * changes nothing twice. Only the owner, in the private chat it went to.
+   */
+  const handleWidgetQuery = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    query: TelegramWidgetQuery,
+  ) =>
+    Effect.gen(function* () {
+      const botToken = config.botToken;
+      const answer = (data?: string) => answerWidgetQuery(botToken, query.id, data);
+      if (query.type?.type !== undefined && query.type.type !== "data") {
+        // A wallet request (sign_data, sent_transaction): not something we sent.
+        yield* answer();
+        return;
+      }
+      const fromId = query.from?.id;
+      const chatIdNumber = query.chat?.id ?? fromId;
+      const messageId = query.message_id;
+      if (fromId === undefined || chatIdNumber === undefined || query.from?.is_bot === true) {
+        yield* answer(WIDGET_EXPIRED_STATE);
+        return;
+      }
+      const chatId = String(chatIdNumber);
+      const routedRows = yield* routedRowsOf(projectId);
+      const access = mergeRoutedAccess(
+        config,
+        routedRows.map((row) => row.config),
+      );
+      const owner =
+        access.allowedChatIds.includes(chatId) &&
+        (String(fromId) === chatId || access.ownerUserIds.includes(String(fromId)));
+      const nowMs = Date.now();
+      const state = yield* Ref.get(buttonsRef);
+      const request = parseWidgetRequest(query.data);
+      const ours = (entry: { readonly connectorProjectId: string; readonly chatId: string }) =>
+        entry.connectorProjectId === projectId && entry.chatId === chatId;
+      const language = detectReplyLanguage("", query.from?.language_code);
+      const refuse = (reason: string) =>
+        Effect.gen(function* () {
+          yield* answer(WIDGET_EXPIRED_STATE);
+          yield* Effect.logInfo("telegram widget request refused").pipe(
+            Effect.annotateLogs({ projectId, chatId, reason }),
+          );
+        });
+      const asPerson = (threadId: string, text: string, replyLanguage: ReplyLanguage) =>
+        answerAsPerson({
+          projectId,
+          config,
+          chatId,
+          chatLabel: query.chat?.title ?? query.chat?.username ?? chatId,
+          threadId,
+          text,
+          replyKey: `${chatId}:wq:${query.id}`,
+          replyTo: messageId === undefined ? null : String(messageId),
+          language: replyLanguage,
+        });
+
+      // A card's quiz.
+      const quiz =
+        request === null
+          ? undefined
+          : (state.quizzes ?? []).find((entry) => entry.id === request.id && entry.widget === true);
+      if (request !== null && quiz !== undefined && request.question !== null) {
+        if (!ours(quiz) || !owner) return yield* refuse("not the owner's chat");
+        const verdict = answerWidgetQuiz(quiz, request.question, request.picks, nowMs);
+        if (verdict.kind === "stale") {
+          yield* answer(verdict.state);
+          return;
+        }
+        if (verdict.kind === "done") {
+          yield* answer(verdict.state);
+          yield* finishQuiz(projectId, config, verdict.quiz, { seen: quiz });
+          return;
+        }
+        if (!(yield* changeQuiz((current) => advanceQuiz(current, quiz, verdict.quiz)))) {
+          // Moved meanwhile (the idle flush finished it): it shows that.
+          yield* answer(widgetQuizDoneState(quiz));
+          return;
+        }
+        yield* answer(verdict.state);
+        yield* setWidgetData(botToken, chatId, messageId ?? quiz.messageId, verdict.state);
+        return;
+      }
+
+      // A card's choice or report.
+      const group =
+        request === null || request.question !== null
+          ? undefined
+          : state.groups.find((entry) => entry.id === request.id && entry.widget === true);
+      if (request !== null && group !== undefined && group.expiresAtMs > nowMs) {
+        if (!ours(group) || !owner) return yield* refuse("not the owner's chat");
+        const groupLanguage = group.language ?? language;
+        const verdict = decideWidgetPick(group, request.picks, groupLanguage);
+        if (verdict.kind === "bad") {
+          yield* answer('{"e":"bad"}');
+          return;
+        }
+        if (verdict.kind === "spent") {
+          yield* answer(verdict.state);
+          return;
+        }
+        if (!(yield* changeQuiz((current) => spendWidgetGroup(current, group.id, verdict.picks)))) {
+          // A double tap: the first one answered the chat already.
+          const spent = (yield* Ref.get(buttonsRef)).groups.find((entry) => entry.id === group.id);
+          const again =
+            spent === undefined ? null : decideWidgetPick(spent, verdict.picks, groupLanguage);
+          yield* answer(again?.kind === "spent" ? again.state : WIDGET_EXPIRED_STATE);
+          return;
+        }
+        yield* answer(verdict.state);
+        yield* setWidgetData(botToken, chatId, messageId ?? group.messageId, verdict.state);
+        yield* asPerson(group.threadId, verdict.text, groupLanguage);
+        yield* Effect.logInfo("telegram widget card answered").pipe(
+          Effect.annotateLogs({
+            projectId,
+            chatId,
+            picked: widgetPickLabels(group, verdict.picks),
+          }),
+        );
+        return;
+      }
+
+      // An agent's own widget: its text goes to the chat that sent it.
+      const agentWidget =
+        messageId === undefined
+          ? null
+          : findAgentWidget(state, { connectorProjectId: projectId, chatId, messageId, nowMs });
+      const data = (query.data ?? "").trim();
+      if (agentWidget !== null && request === null && data !== "") {
+        if (!owner) return yield* refuse("not the owner's chat");
+        let admitted = false;
+        yield* updateButtons((current) => {
+          const verdict = admitAgentWidgetRequest(current, agentWidget, nowMs);
+          admitted = verdict.admitted;
+          return verdict.state;
+        });
+        if (!admitted) {
+          yield* answer(AGENT_WIDGET_SLOW);
+          return;
+        }
+        yield* answer(AGENT_WIDGET_OK);
+        yield* asPerson(agentWidget.threadId, agentWidgetMessage(agentWidget, data), language);
+        return;
+      }
+
+      // Gone (expired, answered on another device long ago) or unknown.
+      yield* answer(WIDGET_EXPIRED_STATE);
+      // A choice's card shows it when opened again; a quiz's keeps its score.
+      if (request !== null && request.question === null && owner) {
+        yield* setWidgetData(botToken, chatId, messageId, WIDGET_EXPIRED_STATE);
+      }
+    }).pipe(
+      Effect.catchTag("TelegramRoutingError", (error) =>
+        Effect.logWarning("telegram widget request not routed").pipe(
           Effect.annotateLogs({ projectId, reason: error.message }),
         ),
       ),
@@ -2591,6 +3073,10 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       if (update.poll_answer !== undefined) {
         yield* handlePollAnswer(projectId, config, update.poll_answer);
+        return;
+      }
+      if (update.widget_query !== undefined) {
+        yield* handleWidgetQuery(projectId, config, update.widget_query);
         return;
       }
       const message = update.message;
@@ -3504,11 +3990,48 @@ const makeTelegramConnector = Effect.gen(function* () {
       return { ok: true as const, result: yield* groups(input.projectId) };
     });
 
+  const updateWidget: ManagerTelegramServiceShape["updateWidget"] = (input) =>
+    Effect.gen(function* () {
+      const config = yield* readRow(input.projectId);
+      if (config === null || !config.enabled) {
+        return { ok: false, error: "Telegram is not connected." };
+      }
+      const via = yield* resolveSendRow(input.projectId, config);
+      if (via === null) return { ok: false, error: "Telegram is not connected." };
+      const widget = lastAgentWidget(yield* Ref.get(buttonsRef), {
+        connectorProjectId: via.projectId,
+        chatId: input.chatId,
+        threadId: input.threadId,
+        nowMs: Date.now(),
+      });
+      if (widget === null) {
+        return {
+          ok: false,
+          error:
+            "This chat has no widget in the person's Telegram to update: send one with messenger_send widget first (they can be updated for 7 days).",
+        };
+      }
+      const answer = yield* callBotJson(via.botToken, "editMessageWidgetData", {
+        chat_id: input.chatId,
+        message_id: widget.messageId,
+        chat_data: input.state,
+      });
+      if (answer.ok === true) return { ok: true, error: null };
+      yield* Effect.logInfo("telegram widget update refused").pipe(
+        Effect.annotateLogs({ chatId: input.chatId, description: answer.description }),
+      );
+      return {
+        ok: false,
+        error: `Telegram refused the update: ${answer.description ?? "no answer"}.`,
+      };
+    });
+
   return {
     getRuntimeStatus,
     sendText,
     sendRich,
     sendCard,
+    updateWidget,
     retireRequestButtons,
     startPairing,
     sendTestMessage,

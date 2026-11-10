@@ -29,6 +29,7 @@ import {
 } from "../connectorNotify.ts";
 import { buttonsAsText, chatHeaderLine } from "../connectorButtons.ts";
 import { escapeRichText } from "../telegramRichCard.ts";
+import { agentWidgetTitle } from "../telegramWidgetCard.ts";
 import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
 import {
   driveLinkForFile,
@@ -257,8 +258,43 @@ const makeConnectorNotifyService = Effect.gen(function* () {
   });
   const personSentAtRef = yield* Ref.make<ReadonlyMap<string, ReadonlyArray<number>>>(new Map());
 
+  /** `widget_update`: the person's Telegram chats of this chat, their last widget's state. */
+  const updateWidget = (threadId: ThreadId, state: string) =>
+    Effect.gen(function* () {
+      const shell = yield* projectionSnapshotQuery
+        .getThreadShellById(threadId)
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const projectId = Option.isSome(shell) ? shell.value.projectId : null;
+      const chats = pickPersonChats(
+        yield* resolveChats({ threadId, projectId, includeAssistantFallback: true }),
+      ).filter((chat) => chat.kind === "telegram");
+      let delivered = 0;
+      let note: string | null = null;
+      for (const chat of chats) {
+        const result = yield* telegram.updateWidget({
+          projectId: chat.connectorProjectId,
+          chatId: chat.chatId,
+          threadId,
+          state,
+        });
+        if (result.ok) delivered += 1;
+        else note = result.error;
+      }
+      return {
+        delivered,
+        via: delivered > 0 ? ("telegram" as const) : ("none" as const),
+        note:
+          chats.length === 0
+            ? "widget_update works only in the person's Telegram, and none is connected."
+            : delivered > 0
+              ? null
+              : note,
+      };
+    });
+
   const sendToPerson: ConnectorNotifyServiceShape["sendToPerson"] = (input) =>
     Effect.gen(function* () {
+      if (input.widgetUpdate) return yield* updateWidget(input.threadId, input.widgetUpdate.state);
       const admitted =
         input.approval === true ||
         (yield* Ref.modify(personSentAtRef, (sentAt) => {
@@ -370,7 +406,7 @@ const makeConnectorNotifyService = Effect.gen(function* () {
             : `${chatHeaderLine(title)}\n${input.textWithoutButtons}`;
       let delivered = 0;
       let via: "telegram" | "slack" | "none" = "none";
-      let drawn: "rich" | "poll" | "text" | undefined;
+      let drawn: "widget" | "rich" | "poll" | "text" | undefined;
       const header = fromAssistant ? null : chatHeaderLine(title);
       for (const chat of chats) {
         if (chat.kind === "telegram" && input.card !== undefined) {
@@ -406,10 +442,22 @@ const makeConnectorNotifyService = Effect.gen(function* () {
             language,
             ...(input.buttonsTtlMs !== undefined ? { buttonsTtlMs: input.buttonsTtlMs } : {}),
             ...(input.rich ? { rich: withRichHeader(input.rich, header) } : {}),
+            ...(input.widget
+              ? {
+                  widget: {
+                    ...input.widget,
+                    title: agentWidgetTitle(input.widget.caption ?? body),
+                    caption: [header, input.widget.caption ?? body]
+                      .filter((part): part is string => part !== null && part !== "")
+                      .join("\n"),
+                  },
+                }
+              : {}),
           });
           if (sent.ok) {
             delivered += 1;
             via = "telegram";
+            if (sent.drawn !== undefined) drawn = sent.drawn;
           }
           if (sent.error !== null) note = sent.error;
           continue;

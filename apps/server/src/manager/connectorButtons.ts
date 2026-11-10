@@ -43,6 +43,7 @@ export const REPLY_ROUTE_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAX_GROUPS = 500;
 const MAX_ROUTES = 2_000;
 const MAX_QUIZZES = 100;
+const MAX_WIDGETS = 200;
 
 /** Prefix of our `callback_data` (versioned: a future format can coexist). */
 const CALLBACK_PREFIX = "ub1";
@@ -107,6 +108,17 @@ export interface ButtonGroup {
    * its content and its keyboard turns into one "✔ <label>" line.
    */
   readonly rich?: boolean;
+  /**
+   * The message is a Telegram widget (`sendWidget`, Bot API 10.4;
+   * telegramWidgetCard.ts): presses come as `widget_query`, its state is
+   * edited with `editMessageWidgetData`, never with the text / keyboard.
+   */
+  readonly widget?: boolean;
+  /**
+   * A widget's group once answered: what was picked. The group stays (until
+   * its TTL) so a second tap answers with the final state, not "expired".
+   */
+  readonly spent?: ReadonlyArray<number>;
   /** Toggle buttons picked so far (indexes in reading order). */
   readonly picked?: ReadonlyArray<number>;
   readonly createdAtMs: number;
@@ -135,8 +147,12 @@ export interface CardQuiz {
   readonly questions: ReadonlyArray<CardQuizQuestion>;
   /** The question on screen now. */
   readonly current: number;
-  /** Its poll (set once Telegram accepted it). */
+  /** Its poll (set once Telegram accepted it); a widget quiz has none. */
   readonly pollId: string | null;
+  /** Drawn as one Telegram widget (telegramWidgetCard.ts), answered by `widget_query`. */
+  readonly widget?: boolean;
+  /** The widget's message (its `chat_data` shows the answers). */
+  readonly messageId?: number | null;
   /** The person's picks per answered question, in order. */
   readonly answers: ReadonlyArray<ReadonlyArray<number>>;
   readonly language?: "ru" | "en";
@@ -154,11 +170,31 @@ export interface SentMessageRoute {
   readonly atMs: number;
 }
 
+/**
+ * A widget an agent sent itself (`messenger_send` `widget`): its requests
+ * come to `threadId` as the person's messages, and `widget_update` edits
+ * the last one of a chat.
+ */
+export interface AgentWidget {
+  readonly connectorProjectId: string;
+  readonly chatId: string;
+  readonly messageId: number;
+  readonly threadId: string;
+  /** Its caption's first line: the marker of its messages names it. */
+  readonly title: string;
+  readonly sentAtMs: number;
+  readonly expiresAtMs: number;
+  /** When its recent requests came (a rate limit). */
+  readonly requestsAtMs?: ReadonlyArray<number>;
+}
+
 export interface ConnectorButtonsState {
   readonly groups: ReadonlyArray<ButtonGroup>;
   readonly routes: ReadonlyArray<SentMessageRoute>;
   /** Card quizzes in progress (absent in states written before 05.11). */
   readonly quizzes?: ReadonlyArray<CardQuiz>;
+  /** Agents' own widgets (absent in states written before 10.11). */
+  readonly widgets?: ReadonlyArray<AgentWidget>;
 }
 
 export const EMPTY_BUTTONS_STATE: ConnectorButtonsState = { groups: [], routes: [] };
@@ -382,6 +418,11 @@ export const pruneButtonsState = (
         quizzes: state.quizzes.filter((quiz) => quiz.expiresAtMs > nowMs).slice(-MAX_QUIZZES),
       }
     : {}),
+  ...(state.widgets !== undefined
+    ? {
+        widgets: state.widgets.filter((widget) => widget.expiresAtMs > nowMs).slice(-MAX_WIDGETS),
+      }
+    : {}),
 });
 
 export const addButtonGroup = (
@@ -459,6 +500,7 @@ export const decodeButtonsState = (raw: unknown): ConnectorButtonsState => {
     readonly groups?: unknown;
     readonly routes?: unknown;
     readonly quizzes?: unknown;
+    readonly widgets?: unknown;
   };
   const groups = Array.isArray(record.groups)
     ? record.groups.filter(
@@ -500,7 +542,24 @@ export const decodeButtonsState = (raw: unknown): ConnectorButtonsState => {
           Array.isArray(quiz.answers),
       )
     : [];
-  return quizzes.length > 0 ? { groups, routes, quizzes } : { groups, routes };
+  const widgets = Array.isArray(record.widgets)
+    ? record.widgets.filter(
+        (widget): widget is AgentWidget =>
+          typeof widget === "object" &&
+          widget !== null &&
+          typeof widget.connectorProjectId === "string" &&
+          typeof widget.chatId === "string" &&
+          typeof widget.threadId === "string" &&
+          typeof widget.messageId === "number" &&
+          typeof widget.expiresAtMs === "number",
+      )
+    : [];
+  return {
+    groups,
+    routes,
+    ...(quizzes.length > 0 ? { quizzes } : {}),
+    ...(widgets.length > 0 ? { widgets } : {}),
+  };
 };
 
 // ── A press ──────────────────────────────────────────────────────────────

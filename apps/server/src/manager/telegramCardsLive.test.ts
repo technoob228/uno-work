@@ -52,6 +52,8 @@ let calls: Array<Recorded> = [];
 let nextMessageId = 500;
 let pending: Array<{ readonly requestId: string; readonly status: string }> = [];
 let richRefused = false;
+/** sendWidget: an old relay (403, the default: the older tests run the Rich path), Telegram's 400, or ok. */
+let widgetMode: "relay-403" | "telegram-400" | "ok" = "relay-403";
 let nextPoll = 0;
 
 const json = (body: unknown) => Response.json(body);
@@ -93,6 +95,24 @@ const installFetch = () => {
         nextMessageId += 1;
         return json({ ok: true, result: { message_id: nextMessageId } });
       }
+      if (path.endsWith("/sendWidget")) {
+        if (widgetMode === "relay-403") {
+          return json({
+            ok: false,
+            error_code: 403,
+            description: "Forbidden: method sendWidget is not available through the Uno relay",
+          });
+        }
+        if (widgetMode === "telegram-400") {
+          return json({
+            ok: false,
+            error_code: 400,
+            description: "Bad Request: WIDGET_HTML_INVALID",
+          });
+        }
+        nextMessageId += 1;
+        return json({ ok: true, result: { message_id: nextMessageId, widget: {} } });
+      }
       if (path.endsWith("/sendPoll")) {
         nextMessageId += 1;
         nextPoll += 1;
@@ -102,7 +122,9 @@ const installFetch = () => {
         });
       }
       if (
-        /\/(sendChatAction|answerCallbackQuery|editMessageText|editMessageReplyMarkup)$/.test(path)
+        /\/(sendChatAction|answerCallbackQuery|editMessageText|editMessageReplyMarkup|answerWidgetQuery|editMessageWidgetData)$/.test(
+          path,
+        )
       ) {
         return json({ ok: true, result: true });
       }
@@ -118,6 +140,7 @@ beforeEach(() => {
   queued = [];
   pending = [];
   richRefused = false;
+  widgetMode = "relay-403";
   dispatched.length = 0;
   installFetch();
 });
@@ -460,4 +483,347 @@ it.live("messenger_send rich: the agent's own Rich Message, the plain text when 
     expect(callsTo("sendRichMessage")[1]?.body.rich_message).toEqual({ html: "<h2>Report</h2>" });
     expect(String(callsTo("sendMessage")[0]?.body.text)).toContain("Report: plain");
   }).pipe(Effect.provide(connectorLayer)),
+);
+
+// ── Widgets (Bot API 10.4) ────────────────────────────────────────────────
+
+const widgetQuery = (data: string, messageId: number, fromId = CHAT) => ({
+  update_id: nextUpdate++,
+  widget_query: {
+    id: `wq-${nextUpdate}`,
+    from: { id: fromId, is_bot: false, language_code: "en" },
+    chat: { id: CHAT, type: "private" },
+    message_id: messageId,
+    type: { type: "data" },
+    data,
+  },
+});
+
+const prefixOf = (call: Recorded | undefined) =>
+  /data-p="(w1:[A-Za-z0-9_-]+:)"/.exec(String(call?.body.html))?.[1] ?? "";
+
+const answersOf = () => callsTo("answerWidgetQuery").map((call) => call.body.data);
+
+it.live("a choice as a widget: one tap answers the query, sets chat_data and the chat once", () =>
+  Effect.gen(function* () {
+    yield* saveRow;
+    widgetMode = "ok";
+    const telegram = yield* ManagerTelegramService;
+    const sent = yield* telegram.sendCard({
+      projectId,
+      chatId: String(CHAT),
+      threadId: WORK,
+      header: "💬 Fix the site",
+      card: cardOf({
+        kind: "choice",
+        question: "Which plan?",
+        options: ["Small", { label: "Plus", prompt: "Move me to Plus", recommended: true }],
+      }),
+      routeReplies: true,
+      language: "en",
+    });
+    expect(sent).toEqual({ ok: true, error: null, drawn: "widget" });
+    const widget = callsTo("sendWidget")[0]!;
+    expect(widget.body).toMatchObject({ chat_id: String(CHAT), allow_queries: true });
+    expect(String(widget.body.caption)).toContain("Reply with a number or text");
+    expect(callsTo("sendRichMessage")).toEqual([]);
+    const messageId = nextMessageId;
+    const prefix = prefixOf(widget);
+    expect(prefix).toMatch(/^w1:[A-Za-z0-9_-]{12}:$/);
+    expect(
+      yield* waitUntil(() =>
+        callsTo("getUpdates").some((call) => decodeURIComponent(call.url).includes("widget_query")),
+      ),
+    ).toBe(true);
+
+    queued.push(widgetQuery(`${prefix}2`, messageId));
+    expect(yield* waitUntil(() => turnTexts().length === 1)).toBe(true);
+    expect(turnTexts()[0]).toEqual({ threadId: WORK, text: "Move me to Plus" });
+    expect(answersOf()).toEqual(['{"p":[1],"d":1}']);
+    expect(callsTo("editMessageWidgetData")[0]?.body).toEqual({
+      chat_id: String(CHAT),
+      message_id: messageId,
+      chat_data: '{"p":[1],"d":1}',
+    });
+
+    // A double tap (another option even): the final state again, nothing more.
+    queued.push(widgetQuery(`${prefix}1`, messageId));
+    expect(yield* waitUntil(() => answersOf().length === 2)).toBe(true);
+    expect(answersOf()[1]).toBe('{"p":[1],"d":1}');
+    yield* Effect.sleep("300 millis");
+    expect(turnTexts()).toHaveLength(1);
+
+    // A card nobody knows: expired.
+    queued.push(widgetQuery("w1:ZZZZZZZZZZZZ:1", messageId));
+    expect(yield* waitUntil(() => answersOf().length === 3)).toBe(true);
+    expect(answersOf()[2]).toBe('{"e":"expired"}');
+    expect(turnTexts()).toHaveLength(1);
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live("a multiple choice widget: Done sends the mask, the picked values go once", () =>
+  Effect.gen(function* () {
+    yield* saveRow;
+    widgetMode = "ok";
+    const telegram = yield* ManagerTelegramService;
+    yield* telegram.sendCard({
+      projectId,
+      chatId: String(CHAT),
+      threadId: WORK,
+      header: null,
+      card: cardOf({
+        kind: "choice",
+        question: "Pages?",
+        options: ["Home", "Pricing", "Blog"],
+        multiple: true,
+      }),
+      language: "en",
+    });
+    const prefix = prefixOf(callsTo("sendWidget")[0]);
+    queued.push(widgetQuery(`${prefix}5`, nextMessageId));
+    expect(yield* waitUntil(() => turnTexts().length === 1)).toBe(true);
+    expect(turnTexts()[0]).toEqual({ threadId: WORK, text: "Picked: Home; Blog" });
+    expect(answersOf()).toEqual(['{"p":[0,2],"d":1}']);
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+for (const mode of ["relay-403", "telegram-400"] as const) {
+  it.live(`a refused widget (${mode}): the Rich Message with the same buttons, a press works`, () =>
+    Effect.gen(function* () {
+      yield* saveRow;
+      widgetMode = mode;
+      const telegram = yield* ManagerTelegramService;
+      const sent = yield* telegram.sendCard({
+        projectId,
+        chatId: String(CHAT),
+        threadId: WORK,
+        header: null,
+        card: cardOf({
+          kind: "report",
+          title: "Done",
+          actions: [{ label: "Ship it", prompt: "Ship it now" }, "Wait"],
+        }),
+        language: "en",
+      });
+      expect(sent).toEqual({ ok: true, error: null, drawn: "rich" });
+      expect(callsTo("sendWidget")).toHaveLength(1);
+      const keyboard = keyboardOf(callsTo("sendRichMessage")[0])!;
+      expect(keyboard.inline_keyboard.flat().map((button) => button.text)).toEqual([
+        "Ship it",
+        "Wait",
+      ]);
+      queued.push(press(keyboard.inline_keyboard[0]![0]!.callback_data!, nextMessageId));
+      expect(yield* waitUntil(() => turnTexts().length > 0)).toBe(true);
+      expect(turnTexts()[0]).toEqual({ threadId: WORK, text: "Ship it now" });
+    }).pipe(Effect.provide(connectorLayer)),
+  );
+}
+
+it.live("a group chat: no widget is tried", () =>
+  Effect.gen(function* () {
+    const repository = yield* ManagerConnectorRepository;
+    yield* repository.upsert({
+      projectId,
+      kind: "telegram",
+      config: {
+        botToken: `unorelay:${TGA}`,
+        allowedChatIds: [String(CHAT), "-100777"],
+        ownerUserIds: [String(CHAT)],
+        enabled: true,
+        defaultModelSelection: null,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    widgetMode = "ok";
+    const telegram = yield* ManagerTelegramService;
+    const sent = yield* telegram.sendCard({
+      projectId,
+      chatId: "-100777",
+      threadId: WORK,
+      header: null,
+      card: cardOf({ kind: "choice", question: "Which?", options: ["A", "B"] }),
+      language: "en",
+    });
+    expect(sent.drawn).toBe("rich");
+    const own = yield* telegram.sendRich({
+      projectId,
+      chatId: "-100777",
+      text: "A game",
+      widget: { html: "<div>x</div>", title: "Game", caption: "A game" },
+      threadId: WORK,
+    });
+    expect(own.ok).toBe(true);
+    expect(own.drawn).toBe("text");
+    expect(own.error).toContain("only in the private chat");
+    expect(callsTo("sendWidget")).toEqual([]);
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live(
+  "a quiz widget: answers per question, ONE score at the end, a stale answer changes nothing",
+  () =>
+    Effect.gen(function* () {
+      yield* saveRow;
+      widgetMode = "ok";
+      const telegram = yield* ManagerTelegramService;
+      const sent = yield* telegram.sendCard({
+        projectId,
+        chatId: String(CHAT),
+        threadId: WORK,
+        header: null,
+        card: cardOf({
+          kind: "quiz",
+          title: "Capitals",
+          questions: [
+            { question: "Capital of France?", options: ["Lyon", "Paris"], correct: [1] },
+            { question: "Capital of Italy?", options: ["Rome", "Milan"], correct: [0] },
+          ],
+        }),
+        language: "en",
+      });
+      expect(sent).toEqual({ ok: true, error: null, drawn: "widget" });
+      expect(callsTo("sendPoll")).toEqual([]);
+      expect(String(callsTo("sendWidget")[0]?.body.caption)).toContain(
+        "Update Telegram to take the quiz",
+      );
+      const messageId = nextMessageId;
+      const prefix = prefixOf(callsTo("sendWidget")[0]);
+
+      queued.push(widgetQuery(`${prefix}0.1`, messageId));
+      expect(yield* waitUntil(() => answersOf().length === 1)).toBe(true);
+      expect(answersOf()[0]).toBe('{"a":[[0]]}');
+      // The same question again (a double tap): the state, nothing recorded.
+      queued.push(widgetQuery(`${prefix}0.2`, messageId));
+      expect(yield* waitUntil(() => answersOf().length === 2)).toBe(true);
+      expect(answersOf()[1]).toBe('{"a":[[0]]}');
+      expect(turnTexts()).toEqual([]);
+
+      queued.push(widgetQuery(`${prefix}1.1`, messageId));
+      expect(yield* waitUntil(() => turnTexts().length === 1)).toBe(true);
+      expect(answersOf()[2]).toBe('{"a":[[0],[0]],"d":1}');
+      expect(turnTexts()[0]).toEqual({
+        threadId: WORK,
+        text: 'Quiz «Capitals»: 1/2 right.\nQ1 ✗ picked "Lyon", right "Paris"\nQ2 ✓ "Rome"',
+      });
+      expect(
+        callsTo("editMessageWidgetData").some(
+          (call) => call.body.chat_data === '{"a":[[0],[0]],"d":1}',
+        ),
+      ).toBe(true);
+      // After the end: a late answer is not a second score.
+      queued.push(widgetQuery(`${prefix}1.2`, messageId));
+      expect(yield* waitUntil(() => answersOf().length === 4)).toBe(true);
+      yield* Effect.sleep("300 millis");
+      expect(turnTexts()).toHaveLength(1);
+    }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live("a widget quiz left half answered: the idle flush sends what was answered, once", () =>
+  Effect.gen(function* () {
+    yield* saveRow;
+    widgetMode = "ok";
+    const telegram = yield* ManagerTelegramService;
+    yield* telegram.sendCard({
+      projectId,
+      chatId: String(CHAT),
+      threadId: WORK,
+      header: null,
+      card: cardOf({
+        kind: "quiz",
+        title: "Capitals",
+        questions: [
+          { question: "Capital of France?", options: ["Lyon", "Paris"], correct: [1] },
+          { question: "Capital of Italy?", options: ["Rome", "Milan"], correct: [0] },
+        ],
+      }),
+      language: "en",
+    });
+    const messageId = nextMessageId;
+    queued.push(widgetQuery(`${prefixOf(callsTo("sendWidget")[0])}0.2`, messageId));
+    expect(yield* waitUntil(() => answersOf().length === 1)).toBe(true);
+    const real = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(real + 31 * 60_000);
+    try {
+      expect(yield* waitUntil(() => turnTexts().length === 1)).toBe(true);
+      expect(turnTexts()[0]?.text).toBe(
+        'Quiz «Capitals»: 1/1 right, answered 1 of 2 and stopped.\nQ1 ✓ "Paris"',
+      );
+      // No poll to stop; the widget shows itself finished.
+      expect(callsTo("stopPoll")).toEqual([]);
+      expect(callsTo("editMessageWidgetData").at(-1)?.body).toMatchObject({
+        message_id: messageId,
+        chat_data: '{"a":[[1]],"d":1}',
+      });
+      yield* Effect.sleep("400 millis");
+      expect(turnTexts()).toHaveLength(1);
+    } finally {
+      clock.mockRestore();
+    }
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live(
+  "messenger_send widget: the agent's own widget, its requests reach the chat, widget_update",
+  () =>
+    Effect.gen(function* () {
+      yield* saveRow;
+      widgetMode = "ok";
+      const telegram = yield* ManagerTelegramService;
+      const html =
+        '<style>.b{padding:12px}</style><div><button class="b" onclick="TelegramWidget.request(\'e4\')">e4</button></div>';
+      const sent = yield* telegram.sendRich({
+        projectId,
+        chatId: String(CHAT),
+        text: "💬 Chess\nYour move",
+        widget: { html, title: "Chess", caption: "💬 Chess\nYour move", state: '{"turn":"w"}' },
+        threadId: WORK,
+      });
+      expect(sent).toEqual({ ok: true, error: null, drawn: "widget" });
+      const widget = callsTo("sendWidget")[0]!;
+      expect(widget.body).toMatchObject({
+        html,
+        caption: "💬 Chess\nYour move",
+        chat_data: '{"turn":"w"}',
+        allow_queries: true,
+      });
+      const messageId = nextMessageId;
+
+      queued.push(widgetQuery("e4", messageId));
+      expect(yield* waitUntil(() => turnTexts().length === 1)).toBe(true);
+      expect(turnTexts()[0]).toEqual({ threadId: WORK, text: "[from the widget «Chess»]\ne4" });
+      expect(answersOf()).toEqual(['{"ok":1}']);
+
+      const updated = yield* telegram.updateWidget({
+        projectId,
+        chatId: String(CHAT),
+        threadId: WORK,
+        state: '{"turn":"b"}',
+      });
+      expect(updated).toEqual({ ok: true, error: null });
+      expect(callsTo("editMessageWidgetData").at(-1)?.body).toEqual({
+        chat_id: String(CHAT),
+        message_id: messageId,
+        chat_data: '{"turn":"b"}',
+      });
+      const none = yield* telegram.updateWidget({
+        projectId,
+        chatId: String(CHAT),
+        threadId: ThreadId.make("another-thread"),
+        state: "{}",
+      });
+      expect(none.ok).toBe(false);
+
+      // Refused by an old relay: the text goes, the agent is told.
+      widgetMode = "relay-403";
+      const refused = yield* telegram.sendRich({
+        projectId,
+        chatId: String(CHAT),
+        text: "Your move",
+        widget: { html, title: "Chess" },
+        threadId: WORK,
+      });
+      expect(refused.drawn).toBe("text");
+      expect(refused.error).toContain("not available through the Uno relay");
+      expect(String(callsTo("sendMessage").at(-1)?.body.text)).toContain("Your move");
+    }).pipe(Effect.provide(connectorLayer)),
 );
