@@ -125,6 +125,7 @@ vi.mock("~/store", () => ({
       syncServerThreadDetail: vi.fn(),
       removeServerThreadDetail: vi.fn(),
       applyServerShellEvent: vi.fn(),
+      removeEnvironmentState: vi.fn(),
     }),
   },
   selectProjectsAcrossEnvironments: vi.fn(() => []),
