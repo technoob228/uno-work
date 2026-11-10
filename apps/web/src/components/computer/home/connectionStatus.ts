@@ -178,8 +178,34 @@ export const CONNECTION_DOT: Partial<Record<ConnectionKind, string>> = {
   reconnecting: "animate-pulse bg-muted-foreground/60",
   offline: "bg-muted-foreground/50",
   "no-network": "bg-muted-foreground/50",
-  lost: "bg-warning",
+  // Red only when the computer can't be reached (Misha 10.11).
+  lost: "bg-destructive",
   "sign-in": "bg-warning",
   asleep: "bg-info",
   waking: "animate-pulse bg-info",
 };
+
+/**
+ * The dot for a computer among several (Misha 10.11): red only when it can't
+ * be reached; amber when it works but something is off (`strained`: memory,
+ * disk or the processor near the limit; the link coming back; a sign-in).
+ */
+export function connectionDot(kind: ConnectionKind, strained: boolean): string {
+  switch (kind) {
+    case "connected":
+      return strained ? "bg-warning" : "bg-success";
+    case "connecting":
+    case "reconnecting":
+    case "waking":
+      return "animate-pulse bg-warning";
+    case "offline":
+    case "sign-in":
+      return "bg-warning";
+    case "no-network":
+      return "bg-muted-foreground/50";
+    case "asleep":
+      return "bg-info";
+    case "lost":
+      return "bg-destructive";
+  }
+}

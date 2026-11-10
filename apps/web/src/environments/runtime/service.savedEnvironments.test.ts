@@ -10,6 +10,7 @@ const mockListSavedEnvironmentRecords = vi.fn();
 const mockSavedEnvironmentRegistrySubscribe = vi.fn();
 const mockReadSavedEnvironmentBearerToken = vi.fn();
 const mockGetSavedEnvironmentRecord = vi.fn();
+const mockRegistryRemove = vi.fn();
 
 function MockWsTransport() {
   return undefined;
@@ -46,7 +47,7 @@ vi.mock("./catalog", () => ({
     subscribe: mockSavedEnvironmentRegistrySubscribe,
     getState: () => ({
       upsert: vi.fn(),
-      remove: vi.fn(),
+      remove: mockRegistryRemove,
       markConnected: vi.fn(),
       rename: vi.fn(),
     }),
@@ -326,5 +327,35 @@ describe("saved environment startup", () => {
 
     stop();
     await resetEnvironmentServiceForTests();
+  });
+
+  it("removes an ssh computer even when stopping it over ssh fails (host key changed)", async () => {
+    const sshRecord = {
+      ...savedRecord,
+      desktopSsh: { alias: "old-vps", hostname: "203.0.113.7", username: "agent", port: 22 },
+    };
+    mockGetSavedEnvironmentRecord.mockImplementation((environmentId: EnvironmentId) =>
+      environmentId === sshRecord.environmentId ? sshRecord : null,
+    );
+    const disconnectSshEnvironment = vi
+      .fn()
+      .mockRejectedValue(new Error("WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!"));
+    const hadWindow = typeof window !== "undefined";
+    const target = (hadWindow ? window : ((globalThis as { window?: unknown }).window = {})) as {
+      desktopBridge?: unknown;
+    };
+    const previousBridge = target.desktopBridge;
+    target.desktopBridge = { disconnectSshEnvironment };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const { removeSavedEnvironment } = await import("./service");
+      await expect(removeSavedEnvironment(sshRecord.environmentId)).resolves.toBeUndefined();
+      expect(disconnectSshEnvironment).toHaveBeenCalledTimes(1);
+      expect(mockRegistryRemove).toHaveBeenCalledWith(sshRecord.environmentId);
+    } finally {
+      warn.mockRestore();
+      target.desktopBridge = previousBridge;
+      if (!hadWindow) delete (globalThis as { window?: unknown }).window;
+    }
   });
 });

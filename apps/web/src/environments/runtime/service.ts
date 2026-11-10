@@ -2207,8 +2207,23 @@ configureSelfHeal({
   isDeviceOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
 });
 
+/**
+ * Remove always removes (Misha 10.11: "хочу просто их убрать — почему ошибки?").
+ * Disconnecting an ssh computer also stops Uno Work on it over ssh; a computer
+ * that is gone, renamed its address or changed its host key refuses that, and
+ * the refusal used to abort the removal — the dead computer could never leave
+ * the list. Stopping it is a courtesy: on failure the record goes anyway.
+ */
 export async function removeSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
-  await disconnectSavedEnvironment(environmentId);
+  try {
+    await disconnectSavedEnvironment(environmentId);
+  } catch (error) {
+    console.warn("Removing a computer that could not be disconnected", {
+      environmentId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  resetSelfHeal(environmentId);
   disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   useSavedEnvironmentRegistryStore.getState().remove(environmentId);
   useSavedEnvironmentRuntimeStore.getState().clear(environmentId);

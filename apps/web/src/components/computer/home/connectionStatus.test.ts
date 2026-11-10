@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CONNECTED,
+  connectionDot,
   CONNECTION_ATTENTION_MS,
   CONNECTION_GRACE_MS,
   CONNECTION_OFFLINE_MS,
@@ -142,5 +143,29 @@ describe("agoLabel", () => {
     expect(agoLabel(NOW - 61_000, NOW)).toBe("1 min ago");
     expect(agoLabel(NOW - 2 * 3_600_000, NOW)).toBe("2 h ago");
     expect(agoLabel(NOW - 3 * 86_400_000, NOW)).toBe("3 d ago");
+  });
+});
+
+describe("connectionDot (Misha 10.11: red only when the computer can't be reached)", () => {
+  it("is red only for a computer that can't be reached", () => {
+    expect(connectionDot("lost", false)).toContain("bg-destructive");
+    const kinds = [
+      "connected",
+      "connecting",
+      "reconnecting",
+      "offline",
+      "no-network",
+      "asleep",
+      "waking",
+      "sign-in",
+    ] as const;
+    for (const kind of kinds) {
+      expect(connectionDot(kind, true)).not.toContain("destructive");
+    }
+  });
+
+  it("is amber, not red, when memory or disk is near full", () => {
+    expect(connectionDot("connected", true)).toBe("bg-warning");
+    expect(connectionDot("connected", false)).toBe("bg-success");
   });
 });

@@ -60,7 +60,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../../ui/popover";
 import { localMetricsQueryOptions } from "../computerQueries";
 import { formatGb, formatMemory, percent } from "../computerFormat";
 import { Meter } from "../computerUi";
-import { CONNECTION_ACTION_LABEL } from "./connectionStatus";
+import { CONNECTION_ACTION_LABEL, connectionDot } from "./connectionStatus";
 import { type ComputerConnection, useComputerConnection } from "./useComputerConnection";
 
 /** The computers the overview shows: connected ones and the ones asleep on the account. */
@@ -182,20 +182,27 @@ export function useLive(environmentId: EnvironmentId, fast = false): Live {
   };
 }
 
-/** The dot: green when fine, amber pulse while the link is coming back, red when it's gone. */
+/**
+ * The dot (Misha 10.11: "красное — это прям пиздец, компьютер недоступен"):
+ * green — fine; amber — it works but something is off (memory, disk or the
+ * processor near the limit, the link coming back, a sign-in it waits for);
+ * red — only when the computer can't be reached; blue — asleep. Before, a
+ * full memory and a dead computer were the same red.
+ */
 export function dotClass(live: Live | null, asleep: boolean): string {
   if (asleep || live?.connection.status.kind === "asleep") return "bg-info";
   if (!live) return "bg-muted-foreground/40";
-  switch (live.connection.status.kind) {
-    case "connected":
-      return live.strained ? "bg-destructive" : "bg-success";
-    case "connecting":
-    case "reconnecting":
-    case "waking":
-      return "animate-pulse bg-amber-500";
-    default:
-      return "bg-destructive/80";
+  return connectionDot(live.connection.status.kind, live.strained !== null);
+}
+
+/** The status line's colour, matching the dot: amber words for "off", red only for "unreachable". */
+function statusTone(live: Live): string {
+  const kind = live.connection.status.kind;
+  if (kind === "lost") return "font-medium text-destructive";
+  if (live.strained || kind === "offline" || kind === "sign-in") {
+    return "font-medium text-warning-foreground";
   }
+  return "text-muted-foreground";
 }
 
 /** One short line: what it is doing, or what is wrong with the link. */
@@ -233,17 +240,21 @@ interface MarkReport {
   readonly title: string;
 }
 
+/** 0 — can't be reached (red), 1 — works but something is off (amber), 2 — fine, 3 — asleep. */
 function markRank(live: Live | null, asleep: boolean): MarkRank {
   if (asleep || !live || live.connection.status.kind === "asleep") return 3;
   switch (live.connection.status.kind) {
     case "connected":
-      return live.strained ? 0 : 2;
+      return live.strained ? 1 : 2;
     case "connecting":
     case "waking":
+    case "no-network":
       return 2;
     case "reconnecting":
+    case "offline":
+    case "sign-in":
       return 1;
-    default:
+    case "lost":
       return 0;
   }
 }
@@ -315,7 +326,9 @@ function Mark({
         className={cn(
           "truncate text-[11px]",
           current ? "max-w-40 font-medium" : "max-w-20",
-          fit === "chat" && "hidden max-w-28 @3xl/header-actions:inline",
+          // A chat names its computer always (Misha 10.11: "надо показывать название,
+          // а то мне надо нажать и посмотреть"): shorter when the header is tight.
+          fit === "chat" && "max-w-24 @3xl/header-actions:max-w-36",
           live?.up ? "text-foreground/90" : "text-muted-foreground",
         )}
       >
@@ -414,12 +427,7 @@ function LiveRow(props: {
             ) : null}
           </span>
           <span
-            className={cn(
-              "block truncate text-xs",
-              live.strained || status.attention
-                ? "font-medium text-destructive"
-                : "text-muted-foreground",
-            )}
+            className={cn("block truncate text-xs", statusTone(live))}
             data-testid="computers-row-status"
           >
             {statusWords(live)}
@@ -485,7 +493,7 @@ function LiveRow(props: {
             <Bars live={live} />
           ) : null}
           {live.strained && !props.isThis ? (
-            <p className="flex items-start gap-1.5 text-[11px] text-destructive">
+            <p className="flex items-start gap-1.5 text-[11px] text-warning-foreground">
               <TriangleAlertIcon className="mt-px size-3 shrink-0" />
               {live.strained === "disk"
                 ? "The disk is almost full — new files and apps may not fit."
