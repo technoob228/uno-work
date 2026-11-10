@@ -535,10 +535,11 @@ const MARKER_TITLE_LENGTH = 60;
 
 /**
  * The first line of a message from a page, for the agent: which page sent it.
- * `[from the card «Which plan?»]` (show_card) or `[from the page «Q3»]`.
+ * `[from the card «Which plan?»]` (show_card), `[from the page «Q3»]`, or
+ * `[from the widget «Tic-tac-toe»]` (an agent's own Telegram widget).
  */
 export function htmlRenderMessageMarker(input: {
-  readonly source: HtmlRenderSource | undefined;
+  readonly source: HtmlRenderSource | "widget" | undefined;
   readonly title: string;
 }): string {
   const clean = normalizeHtmlRenderMessageText(input.title)
@@ -547,14 +548,14 @@ export function htmlRenderMessageMarker(input: {
     .trim();
   const title =
     clean.length > MARKER_TITLE_LENGTH ? `${clean.slice(0, MARKER_TITLE_LENGTH - 1)}…` : clean;
-  const what = input.source === "card" ? "card" : "page";
+  const what = input.source === "card" || input.source === "widget" ? input.source : "page";
   return title ? `[from the ${what} «${title}»]` : `[from the ${what}]`;
 }
 
 /** The message as the agent gets it: the marker line, then the page's text. */
 export function withHtmlRenderMessageMarker(
   text: string,
-  input: { readonly source: HtmlRenderSource | undefined; readonly title: string },
+  input: { readonly source: HtmlRenderSource | "widget" | undefined; readonly title: string },
 ): string {
   return `${htmlRenderMessageMarker(input)}\n${text}`;
 }
