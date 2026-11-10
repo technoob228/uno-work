@@ -38,6 +38,7 @@ import {
   ManagerCreateAssistantInput,
   type ManagerAssistantsList,
   ManagerCreateTokenInput,
+  ManagerTelegramGroupMembers,
   ManagerOwnerResolveProposalInput,
   ManagerProposalStatus,
   ManagerConnectorAddressingConfig,
@@ -83,6 +84,7 @@ import { ManagerAssistantError, ManagerAssistantService } from "./Services/Assis
 import { ManagerTelegramService } from "./Layers/TelegramConnector.ts";
 import { ManagerSlackService } from "./Layers/SlackConnector.ts";
 import { telegramPairingLink } from "./telegramPairing.ts";
+import { pruneTelegramGroupAccess } from "./telegramGroups.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { isRelayCredential, isRouteCredential } from "./channelRelay.ts";
 import {
@@ -846,6 +848,62 @@ const assistantProjectIdFromQuery = Effect.gen(function* () {
   return ProjectId.make(trimmed);
 });
 
+/**
+ * `GET /api/manager/assistant/telegram/groups?projectId=` — the groups this
+ * assistant's bot answers in, who is heard in each, the people seen writing
+ * there, and the groups waiting to be added (`telegramGroups.ts`).
+ */
+export const managerAssistantTelegramGroupsGetRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/assistant/telegram/groups",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const telegram = yield* ManagerTelegramService;
+    const projectId = yield* assistantProjectIdFromQuery;
+    if (!isAssistantProjectId(projectId)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "projectId must be an assistant project." },
+        { status: 400 },
+      );
+    }
+    return HttpServerResponse.jsonUnsafe(yield* telegram.groups(projectId), { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+const TelegramGroupAccessPayload = Schema.Struct({
+  projectId: ProjectId,
+  chatId: Schema.String,
+  members: ManagerTelegramGroupMembers,
+  userIds: Schema.optional(Schema.Array(Schema.String)),
+});
+
+/**
+ * `POST /api/manager/assistant/telegram/groups` — who is heard in one group:
+ * only the owner, the people picked, or everyone. A group that is not added
+ * yet is added by the same call.
+ */
+export const managerAssistantTelegramGroupsSetRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/telegram/groups",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const telegram = yield* ManagerTelegramService;
+    const input = yield* HttpServerRequest.schemaBodyJson(TelegramGroupAccessPayload).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid group payload.", status: 400 })),
+    );
+    if (!isAssistantProjectId(input.projectId)) {
+      return HttpServerResponse.jsonUnsafe(
+        { error: "projectId must be an assistant project." },
+        { status: 400 },
+      );
+    }
+    const outcome = yield* telegram.setGroupAccess(input);
+    return outcome.ok
+      ? HttpServerResponse.jsonUnsafe(outcome.result, { status: 200 })
+      : HttpServerResponse.jsonUnsafe({ error: outcome.error }, { status: 400 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const managerAssistantOverviewRouteLayer = HttpRouter.add(
   "GET",
   "/api/manager/assistant",
@@ -1127,11 +1185,19 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
       // form never sends them, so they survive every save.
       const ownerUserIds = previousSuccess?.ownerUserIds;
       const groupMembers = input.groupMembers ?? previousSuccess?.groupMembers;
+      const allowedChatIds = input.allowedChatIds
+        .map((chatId) => chatId.trim())
+        .filter((chatId) => chatId.length > 0);
+      // Each group's "who is heard" is set on its own route (/telegram/groups);
+      // it survives every save here and goes with a group that is removed.
+      // A new bot starts with none: its groups are other chats.
+      const groups =
+        botToken === previousToken
+          ? pruneTelegramGroupAccess(previousSuccess?.groups, allowedChatIds)
+          : undefined;
       const config = {
         botToken,
-        allowedChatIds: input.allowedChatIds
-          .map((chatId) => chatId.trim())
-          .filter((chatId) => chatId.length > 0),
+        allowedChatIds,
         enabled: input.enabled,
         defaultModelSelection:
           input.defaultModelSelection !== undefined
@@ -1140,6 +1206,7 @@ export const managerAssistantTelegramRouteLayer = HttpRouter.add(
         ...(mergedAddressing !== undefined ? { addressing: mergedAddressing } : {}),
         ...(ownerUserIds !== undefined ? { ownerUserIds } : {}),
         ...(groupMembers !== undefined ? { groupMembers } : {}),
+        ...(groups !== undefined ? { groups } : {}),
       } satisfies ManagerTelegramConnectorConfig;
       yield* connectorRepository.upsert({
         projectId: input.projectId,

@@ -42,6 +42,8 @@ import {
   ASSISTANT_PROJECT_ID,
   CommandId,
   ManagerTelegramConnectorConfig,
+  type ManagerTelegramGroupMembers,
+  type ManagerTelegramGroupsResult,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
@@ -119,6 +121,18 @@ import {
   type RoutingThreadShell,
 } from "../connectorBindings.ts";
 import { migratePersonalTelegramChats } from "../telegramPersonalChats.ts";
+import {
+  decodeGroupDirectory,
+  EMPTY_GROUP_DIRECTORY,
+  recordGroupSender,
+  TELEGRAM_GROUPS_FILE,
+  telegramGroupAccess,
+  telegramGroupsView,
+  telegramPersonName,
+  withTelegramGroupAccess,
+  type TelegramGroupDirectory,
+} from "../telegramGroups.ts";
+import { OutsideThreads } from "../../automations/outsideThreads.ts";
 import { executeConnectorCommand } from "../connectorCommandHandler.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
 import { parseConnectorCommand } from "../connectorCommands.ts";
@@ -175,12 +189,14 @@ import {
 import {
   classifyTelegramSender,
   type ConnectorSenderRole,
+  telegramOwnerUserIds,
   withOwnerUserId,
 } from "../connectorSenders.ts";
 import {
   callTelegramBotMethod,
   isAssistantBotRelay,
   isRelayCredential,
+  isRouteCredential,
   parseRouteCredential,
   redactConnectorSecrets,
   RELAY_CREDENTIAL_PREFIX,
@@ -282,12 +298,39 @@ export interface ManagerTelegramServiceShape {
    * queued.
    */
   readonly enqueueSystemTurn: (input: SystemTurnInput) => Effect.Effect<EnqueueOutcome | "failed">;
+  /**
+   * The groups this assistant's bot answers in, who is heard in each, the
+   * people seen writing there, and groups the owner wrote in that are not
+   * added yet (`telegramGroups.ts`). Never fails: no bot → nothing.
+   */
+  readonly groups: (projectId: ProjectId) => Effect.Effect<ManagerTelegramGroupsResult>;
+  /**
+   * Set who is heard in one group (adds the group when it is not added yet).
+   * `error` is a sentence for the person.
+   */
+  readonly setGroupAccess: (input: {
+    readonly projectId: ProjectId;
+    readonly chatId: string;
+    readonly members: ManagerTelegramGroupMembers;
+    readonly userIds?: ReadonlyArray<string> | undefined;
+  }) => Effect.Effect<
+    | { readonly ok: true; readonly result: ManagerTelegramGroupsResult }
+    | { readonly ok: false; readonly error: string }
+  >;
 }
 
 export class ManagerTelegramService extends Context.Service<
   ManagerTelegramService,
   ManagerTelegramServiceShape
 >()("t3/manager/Services/ManagerTelegramService") {}
+
+/** A name a stranger chose, safe inside a bracketed line of the turn's text. */
+const plainForLine = (value: string): string =>
+  value
+    .replace(/[[\]"\n\r]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80);
 
 const POLL_TIMEOUT_SECONDS = 10;
 const IDLE_RECHECK = Duration.seconds(5);
@@ -499,6 +542,44 @@ const makeTelegramConnector = Effect.gen(function* () {
       rest: ReadonlyArray<TelegramIncomingMessage>,
     ) => Effect.Effect<void>;
   } = {};
+
+  // Chats of group members the owner let in hold strangers' text: their
+  // `uno-work` tools ask first (`automations/outsideThreads.ts`).
+  const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
+
+  // Groups and the people seen writing in them (telegramGroups.ts): what the
+  // settings page offers to pick from. In memory, mirrored to disk.
+  const groupsFile = nodePath.join(serverConfig.stateDir, TELEGRAM_GROUPS_FILE);
+  const groupsRef = yield* Ref.make<TelegramGroupDirectory>(
+    yield* Effect.promise(() =>
+      fsPromises
+        .readFile(groupsFile, "utf8")
+        .then((raw) => decodeGroupDirectory(JSON.parse(raw)))
+        .catch(() => EMPTY_GROUP_DIRECTORY),
+    ),
+  );
+  const groupsWriteLock = yield* Semaphore.make(1);
+  const updateGroups = (change: (state: TelegramGroupDirectory) => TelegramGroupDirectory) =>
+    groupsWriteLock.withPermits(1)(
+      Effect.gen(function* () {
+        const before = yield* Ref.get(groupsRef);
+        const next = change(before);
+        if (next === before) return;
+        yield* Ref.set(groupsRef, next);
+        yield* Effect.promise(async () => {
+          const temp = `${groupsFile}.${process.pid}.tmp`;
+          await fsPromises.mkdir(nodePath.dirname(groupsFile), { recursive: true });
+          await fsPromises.writeFile(temp, JSON.stringify(next), { mode: 0o600 });
+          await fsPromises.rename(temp, groupsFile);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("telegram groups directory not saved").pipe(
+              Effect.annotateLogs({ cause }),
+            ),
+          ),
+        );
+      }),
+    );
 
   // Inline buttons and reply routes of messages chats sent to the person
   // (connectorButtons.ts): in memory, mirrored to disk so a restart (an
@@ -1468,7 +1549,7 @@ const makeTelegramConnector = Effect.gen(function* () {
             from: query.from,
             allowedChatIds: access.allowedChatIds,
             ownerUserIds: access.ownerUserIds,
-            groupMembers: config.groupMembers,
+            groupAccess: telegramGroupAccess(config, chatId),
           })
         : "ignore";
       const press = decideButtonPress({
@@ -2012,10 +2093,61 @@ const makeTelegramConnector = Effect.gen(function* () {
         config,
         routedRows.map((row) => row.config),
       );
+      // --- Who writes in groups (telegramGroups.ts). In a group the bot
+      // answers in: everyone, so the owner can pick people by name. In any
+      // other group: only the owner, so the group can be added with a button.
+      // Uno's shared bot never takes groups.
+      const inGroup = !isPrivateTelegramChat(message.chat);
+      const fromOwner =
+        message.from?.id !== undefined &&
+        message.from.is_bot !== true &&
+        telegramOwnerUserIds(access).has(String(message.from.id));
+      if (
+        inGroup &&
+        message.from !== undefined &&
+        !isRelayCredential(config.botToken) &&
+        (access.allowedChatIds.includes(chatId) || fromOwner)
+      ) {
+        const from = message.from;
+        yield* updateGroups((directory) =>
+          recordGroupSender(directory, {
+            connectorProjectId: projectId,
+            chatId,
+            title: message.chat?.title,
+            from,
+            nowIso: new Date().toISOString(),
+          }),
+        );
+      }
       if (!access.allowedChatIds.includes(chatId)) {
         yield* Effect.logDebug("telegram message from non-allowlisted chat ignored").pipe(
           Effect.annotateLogs({ projectId, chatId }),
         );
+        // The owner called the bot in a group that is not added yet: say
+        // where to add it (at most every few minutes), instead of silence.
+        if (inGroup && fromOwner && !isRelayCredential(config.botToken)) {
+          const called = toNormalizedMessage({
+            message,
+            botUsername: (yield* getRuntime(projectId)).botUsername,
+            text,
+          });
+          const nowMs = Date.now();
+          const last = (yield* Ref.get(strangerRepliesRef)).get(`${projectId}:${chatId}`);
+          if (
+            (called.explicitMention || called.isReplyToBot) &&
+            shouldReplyToStranger(last, nowMs)
+          ) {
+            yield* Ref.update(strangerRepliesRef, (map) =>
+              new Map(map).set(`${projectId}:${chatId}`, nowMs),
+            );
+            yield* sendTelegramText(
+              projectId,
+              config.botToken,
+              chatId,
+              "I don't answer in this group yet. Add it in Uno Work: Settings, Assistant, Telegram. There you also choose who I listen to here.",
+            );
+          }
+        }
         // A private chat hears how to link (at most every few minutes), so
         // the owner is never left talking to a silent bot.
         if (message.chat?.type === "private" && message.from?.is_bot !== true) {
@@ -2044,7 +2176,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         from: message.from,
         allowedChatIds: access.allowedChatIds,
         ownerUserIds: access.ownerUserIds,
-        groupMembers: config.groupMembers,
+        groupAccess: telegramGroupAccess(config, chatId),
       });
       if (senderRole === "ignore") {
         yield* Effect.logDebug("telegram message from a non-owner sender ignored").pipe(
@@ -2280,7 +2412,22 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (bodyParts.length === 0) {
         bodyParts.push("[The user sent the attached image(s) without a caption.]");
       }
-      const body = [...bodyParts, TELEGRAM_SEND_FILE_HINT].join("\n\n");
+      // A member's chat is shared by everyone the owner let in: say who
+      // writes, and that it is not the owner.
+      const memberLine =
+        senderRole === "member" && message.from !== undefined
+          ? `[From ${plainForLine(telegramPersonName(message.from))}${
+              message.from.username ? ` (@${plainForLine(message.from.username)})` : ""
+            }, a member of the Telegram group "${plainForLine(chatLabel)}" — not your owner. Don't share the owner's private data with them; anything you do here waits for the owner's OK.]`
+          : null;
+      if (senderRole === "member" && outsideThreads !== null) {
+        yield* outsideThreads.mark(threadId);
+      }
+      const body = [
+        ...(memberLine !== null ? [memberLine] : []),
+        ...bodyParts,
+        TELEGRAM_SEND_FILE_HINT,
+      ].join("\n\n");
       const messageText =
         handoffContext === null ? body : [wrapHandoffPreamble(handoffContext), "", body].join("\n");
       yield* replies.enqueue({
@@ -2691,6 +2838,61 @@ const makeTelegramConnector = Effect.gen(function* () {
         ),
       );
 
+  const groups: ManagerTelegramServiceShape["groups"] = (projectId) =>
+    Effect.gen(function* () {
+      const row = yield* readRow(projectId);
+      if (row === null) {
+        return { supported: true, botUsername: null, groups: [], pending: [] };
+      }
+      // Uno's shared bot (held here or routed through another assistant)
+      // only takes private chats.
+      const supported = !isRelayCredential(row.botToken) && !isRouteCredential(row.botToken);
+      const directory = yield* Ref.get(groupsRef);
+      return telegramGroupsView({
+        config: row,
+        seen: supported ? (directory.connectors[projectId] ?? []) : [],
+        botUsername: (yield* getRuntime(projectId)).botUsername,
+        supported,
+      });
+    });
+
+  const setGroupAccess: ManagerTelegramServiceShape["setGroupAccess"] = (input) =>
+    Effect.gen(function* () {
+      const row = yield* readRow(input.projectId);
+      if (row === null) {
+        return { ok: false as const, error: "This assistant has no Telegram bot yet." };
+      }
+      if (isRelayCredential(row.botToken) || isRouteCredential(row.botToken)) {
+        return {
+          ok: false as const,
+          error:
+            "Groups need the assistant's own bot: Uno's shared bot only answers in private chats.",
+        };
+      }
+      const change = withTelegramGroupAccess(row, input);
+      if (!change.ok) return { ok: false as const, error: change.error };
+      const saved = yield* connectorRepository
+        .upsert({
+          projectId: input.projectId,
+          kind: "telegram",
+          config: change.config,
+          updatedAt: new Date().toISOString(),
+        })
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!saved) return { ok: false as const, error: "Could not save the group's settings." };
+      yield* Effect.logInfo("telegram group access changed").pipe(
+        Effect.annotateLogs({
+          projectId: input.projectId,
+          chatId: input.chatId,
+          members: input.members,
+        }),
+      );
+      return { ok: true as const, result: yield* groups(input.projectId) };
+    });
+
   return {
     getRuntimeStatus,
     sendText,
@@ -2699,6 +2901,8 @@ const makeTelegramConnector = Effect.gen(function* () {
     startPairing,
     sendTestMessage,
     enqueueSystemTurn,
+    groups,
+    setGroupAccess,
   } satisfies ManagerTelegramServiceShape;
 });
 

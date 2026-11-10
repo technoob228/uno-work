@@ -377,6 +377,59 @@ export const ManagerConnectorGroupMembersPolicy = Schema.Literals([
 ]);
 export type ManagerConnectorGroupMembersPolicy = typeof ManagerConnectorGroupMembersPolicy.Type;
 
+/**
+ * Who, besides the owner, is heard in ONE Telegram group (10.11). `owners`:
+ * nobody else. `selected`: only the people in `userIds`. `anyone`: every
+ * member. Whoever is let in runs approval-required and can't use chat
+ * commands, exactly like `anyone-with-approval`. A group without an entry
+ * follows the connector-wide `groupMembers`.
+ */
+export const ManagerTelegramGroupMembers = Schema.Literals(["owners", "selected", "anyone"]);
+export type ManagerTelegramGroupMembers = typeof ManagerTelegramGroupMembers.Type;
+
+export const ManagerTelegramGroupAccess = Schema.Struct({
+  members: ManagerTelegramGroupMembers,
+  /** Telegram user ids let in when `members` is `selected` (kept otherwise). */
+  userIds: Schema.Array(TrimmedNonEmptyString),
+});
+export type ManagerTelegramGroupAccess = typeof ManagerTelegramGroupAccess.Type;
+
+/** A person the bot has seen writing in a group. */
+export const ManagerTelegramGroupPerson = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  name: Schema.String,
+  username: Schema.NullOr(Schema.String),
+  /** The owner's own account: always heard, not part of the choice. */
+  owner: Schema.Boolean,
+  /** Picked by the owner (counts while the group is on `selected`). */
+  selected: Schema.Boolean,
+  /** Heard under the group's current setting. */
+  allowed: Schema.Boolean,
+});
+export type ManagerTelegramGroupPerson = typeof ManagerTelegramGroupPerson.Type;
+
+/** One group the bot answers in, as the settings page and `assistant_groups` see it. */
+export const ManagerTelegramGroupView = Schema.Struct({
+  chatId: TrimmedNonEmptyString,
+  /** The group's name in Telegram; null until the bot has seen a message there. */
+  title: Schema.NullOr(Schema.String),
+  members: ManagerTelegramGroupMembers,
+  people: Schema.Array(ManagerTelegramGroupPerson),
+});
+export type ManagerTelegramGroupView = typeof ManagerTelegramGroupView.Type;
+
+export const ManagerTelegramGroupsResult = Schema.Struct({
+  /** False: Uno's shared bot, which only takes private chats. */
+  supported: Schema.Boolean,
+  botUsername: Schema.NullOr(Schema.String),
+  groups: Schema.Array(ManagerTelegramGroupView),
+  /** Groups the owner wrote to the bot in that are not added yet. */
+  pending: Schema.Array(
+    Schema.Struct({ chatId: TrimmedNonEmptyString, title: Schema.NullOr(Schema.String) }),
+  ),
+});
+export type ManagerTelegramGroupsResult = typeof ManagerTelegramGroupsResult.Type;
+
 export const ManagerTelegramConnectorConfig = Schema.Struct({
   /**
    * The owner's bot token, or `unorelay:<tgr_…>` — Uno's shared bot, reached
@@ -402,6 +455,8 @@ export const ManagerTelegramConnectorConfig = Schema.Struct({
   ownerUserIds: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   /** Absent = `owners`. */
   groupMembers: Schema.optionalKey(ManagerConnectorGroupMembersPolicy),
+  /** Per-group choice of who is heard, by group chat id; wins over `groupMembers`. */
+  groups: Schema.optionalKey(Schema.Record(Schema.String, ManagerTelegramGroupAccess)),
 });
 export type ManagerTelegramConnectorConfig = typeof ManagerTelegramConnectorConfig.Type;
 

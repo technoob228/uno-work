@@ -15,12 +15,20 @@ import {
   type ManagerAssistantSummary,
   type ManagerAssistantTeam,
   type ManagerScope,
+  type ManagerTelegramGroupMembers,
+  type ManagerTelegramGroupsResult,
   type ProjectId,
 } from "@t3tools/contracts";
 import { presetTokenAccess } from "@t3tools/shared/assistantPreset";
 import { HttpResponse, http, type HttpHandler } from "msw";
 
-import { MACHINES, PROJECTS, type DemoMachine, type MachineKey } from "../heavyFixtures";
+import {
+  MACHINES,
+  PROJECTS,
+  readModelFor,
+  type DemoMachine,
+  type MachineKey,
+} from "../heavyFixtures";
 import { automationHandlers, resetAutomations } from "./automations";
 import { type DemoPersona, assistantsOn } from "./fixtures";
 import { ownComputerHandlers, ownComputerRunning, withOwnComputer } from "./ownComputer";
@@ -131,11 +139,23 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
     telegram: {
       configured: linked,
       enabled: linked,
-      allowedChatIds: linked ? ["100200300"] : [],
+      allowedChatIds: linked
+        ? [
+            DEMO_OWNER_CHAT_ID,
+            ...(record.persona.projectId === ASSISTANT_PROJECT_ID
+              ? demoGroups.filter((group) => group.added).map((group) => group.chatId)
+              : []),
+          ]
+        : [],
       botUsername: linked ? "uno_team_bot" : null,
       lastError: null,
       health: linked
-        ? { status: "ok", lastOkAt: new Date().toISOString(), lastError: null, lastErrorAt: null }
+        ? {
+            status: "connected",
+            lastOkAt: new Date().toISOString(),
+            lastError: null,
+            lastErrorAt: null,
+          }
         : null,
       defaultModelSelection: null,
       addressing: DEFAULT_CONNECTOR_ADDRESSING,
@@ -235,6 +255,7 @@ function connectorsList() {
 export function startDaemons(input: { readonly world: AssistWorld }) {
   world = input.world;
   records.clear();
+  demoGroups = freshDemoGroups();
   for (const provider of CONNECTOR_PROVIDERS)
     connectorStates.set(provider, world.connectors[provider]);
   for (const key of Object.keys(MACHINES) as MachineKey[]) {
@@ -258,6 +279,101 @@ export function setupDone(machine: MachineKey, projectId: string): boolean {
 
 export function presetOf(machine: MachineKey, projectId: string): AssistantPreset | null {
   return recordOf(machine, projectId)?.preset ?? null;
+}
+
+// ── Telegram groups (10.11): who Uno listens to in each group ────────────
+
+interface DemoGroup {
+  readonly chatId: string;
+  readonly title: string;
+  members: ManagerTelegramGroupMembers;
+  userIds: ReadonlyArray<string>;
+  /** Added to the bot's chats (false: the owner called the bot there, waiting). */
+  added: boolean;
+  readonly people: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly username: string | null;
+  }>;
+}
+
+const DEMO_OWNER_CHAT_ID = "100200300";
+const DEMO_OWNER = { id: DEMO_OWNER_CHAT_ID, name: "Misha", username: "misha" };
+
+const freshDemoGroups = (): DemoGroup[] => [
+  {
+    chatId: "-1002200300401",
+    title: "Family",
+    members: "selected",
+    userIds: ["100200301", "100200302"],
+    added: true,
+    people: [
+      DEMO_OWNER,
+      { id: "100200301", name: "Anna", username: "anna_k" },
+      { id: "100200302", name: "Dima", username: null },
+      { id: "100200303", name: "Grandma Vera", username: null },
+      { id: "100200304", name: "Kirill", username: "kirill" },
+    ],
+  },
+  {
+    chatId: "-1002200300402",
+    title: "Acme · launch team",
+    members: "anyone",
+    userIds: [],
+    added: true,
+    people: [
+      DEMO_OWNER,
+      { id: "100200311", name: "Olga Petrova", username: "olga_p" },
+      { id: "100200312", name: "Pavel", username: "pavel_dev" },
+    ],
+  },
+  {
+    chatId: "-1002200300403",
+    title: "Flat renovation",
+    members: "owners",
+    userIds: [],
+    added: true,
+    people: [DEMO_OWNER, { id: "100200321", name: "Foreman Sergey", username: null }],
+  },
+  {
+    chatId: "-1002200300404",
+    title: "Book club",
+    members: "owners",
+    userIds: [],
+    added: false,
+    people: [DEMO_OWNER],
+  },
+];
+
+let demoGroups: DemoGroup[] = freshDemoGroups();
+
+function demoGroupsResult(linked: boolean): ManagerTelegramGroupsResult {
+  if (!linked) return { supported: true, botUsername: null, groups: [], pending: [] };
+  return {
+    supported: true,
+    botUsername: "uno_team_bot",
+    groups: demoGroups
+      .filter((group) => group.added)
+      .map((group) => ({
+        chatId: group.chatId,
+        title: group.title,
+        members: group.members,
+        people: group.people.map((person) => {
+          const owner = person.id === DEMO_OWNER.id;
+          const selected = !owner && group.userIds.includes(person.id);
+          return {
+            ...person,
+            owner,
+            selected,
+            allowed:
+              owner || group.members === "anyone" || (group.members === "selected" && selected),
+          };
+        }),
+      })),
+    pending: demoGroups
+      .filter((group) => !group.added)
+      .map((group) => ({ chatId: group.chatId, title: group.title })),
+  };
 }
 
 export function asksFirst(machine: MachineKey, projectId: string): boolean {
@@ -604,6 +720,27 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       const record = recordOf(machine.key, projectId);
       return json({ telegram: record ? summaryOf(machine, record).telegram : null });
     }),
+    http.get("*/api/manager/assistant/telegram/groups", ({ request }) => {
+      const machine = machineOf(request);
+      const projectId = projectParam(request);
+      return json(
+        demoGroupsResult(
+          projectId === ASSISTANT_PROJECT_ID && telegramLinked(machine.key, projectId),
+        ),
+      );
+    }),
+    http.post("*/api/manager/assistant/telegram/groups", async ({ request }) => {
+      const body = await bodyOf(request);
+      const group = demoGroups.find((entry) => entry.chatId === String(body.chatId ?? ""));
+      if (!group) return json({ error: "No such group." }, { status: 400 });
+      const members = body.members;
+      if (members === "owners" || members === "selected" || members === "anyone") {
+        group.members = members;
+      }
+      if (Array.isArray(body.userIds)) group.userIds = body.userIds.map(String);
+      group.added = true;
+      return json(demoGroupsResult(true));
+    }),
     http.post("*/api/manager/assistant/telegram/test", () =>
       json({ results: [{ chatId: "100200300", ok: true, error: null }] }),
     ),
@@ -657,6 +794,12 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.get("*/api/manager/assistant/instructions", () => json({ state: "current", content: "" })),
     http.get("*/api/manager/assistant/chats", () => json({ chats: [] })),
     http.get("*/api/manager/connector-bindings", () => json({ bindings: [] })),
+    // Settings → Assistant (the Telegram page): its pickers read the computer's
+    // projects and chats; nothing is waiting for approval.
+    http.get("*/api/orchestration/snapshot", ({ request }) =>
+      json(readModelFor(machineOf(request))),
+    ),
+    http.get("*/api/manager/proposals", () => json({ proposals: [] })),
     http.get("*/api/manager/connectors", () => json(connectorsList())),
     http.post("*/api/manager/connectors/:provider/start", ({ params }) => {
       const provider = String(params.provider) as ConnectorProvider;

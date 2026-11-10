@@ -338,6 +338,18 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Обновить плагин** — сменить SHA осознанно: проверить `requires_hermes` в `plugin.yaml` и поставить на нашем Hermes. Уже стоящий плагин Work не трогает (проверка — `plugin.yaml` в `<shared>/plugins/claude-subscription-directsdk-experimental`).
 - **Ошибка человеку — наша фраза** (нет сети / нет git / долго / общая), строки Hermes только в лог.
 
+### 16. Ассистент в группах Telegram: кому отвечает (10.11)
+
+До этого в группе ассистент слушал только владельца; режим «все участники» был одним флагом на весь бот (`groupMembers`) и включался только запросом к API.
+
+- **Правило по каждой группе.** `ManagerTelegramConnectorConfig.groups[chatId] = { members: owners | selected | anyone, userIds }`. Главнее старого `groupMembers` (он остаётся значением по умолчанию для групп без своей записи). Логика — `manager/telegramGroups.ts`, роль отправителя — `connectorSenders.ts#classifyTelegramSender` (`groupAccess`).
+- **Кого впустили** — как раньше `member`: отдельный тред `<chatId>:members`, всегда approval-required, команды бота не работают. Дополнительно тред помечается как «чужой текст» (`OutsideThreads`): инструменты `uno-work` в нём спрашивают, а в текст сообщения дописывается, кто пишет и что это не владелец. `OutsideThreadsLive` переехал в `runtimeLayer.ts` ниже Telegram-коннектора.
+- **Кого бот видел.** Бот не может получить список участников группы, поэтому коннектор запоминает, кто писал ему в группах (`telegram-groups.json` в state dir, до 60 групп × 80 человек). В группе, которой ещё нет в списке, запоминается только владелец — так группа появляется в настройках как «ждёт» и добавляется кнопкой, без chat id. Владельцу, позвавшему бота в такой группе, бот отвечает, где её добавить.
+- **Кнопки.** Settings → Assistant → раздел Groups (`components/helper/TelegramGroupsSection.tsx`): переключатель Only me / People I pick / Everyone, чипы людей, кнопка Add у ждущих групп. Маршруты `GET|POST /api/manager/assistant/telegram/groups`. Старый демон отвечает 404 — раздел не показывается.
+- **MCP.** Инструмент `assistant_groups` (`unoWork/tools.ts`): без аргументов — список; с `group` + `access` / `people` / `add` / `remove` — изменение. Чтение `safe`, любое изменение `sensitive` (всегда спрашивает человека).
+- **Общий бот Uno** группы не берёт (реле консоли отдаёт только личные чаты): раздел и инструмент говорят, что нужен свой бот.
+- Не сделано: режим «только отвечать, без инструментов» для участников; выбор людей кнопками прямо в Telegram.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

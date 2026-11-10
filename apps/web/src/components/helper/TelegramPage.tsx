@@ -63,6 +63,7 @@ import { helperCopy } from "./helperCopy";
 import { ModelSelectionFields } from "./ModelSelectionFields";
 import { ProposalsList, useManagerProposals } from "./ProposalsList";
 import { SlackConnectorSection } from "./SlackConnectorSection";
+import { TelegramGroupsSection } from "./TelegramGroupsSection";
 import {
   addChatId,
   addressingConfigFromForm,
@@ -138,6 +139,8 @@ export function TelegramPage({
   const [newChatId, setNewChatId] = useState("");
   const [newChatLabel, setNewChatLabel] = useState("");
   const [chatLabels, setChatLabels] = useState<ChatLabels>({});
+  // Telegram's own names of the groups (from the Groups section).
+  const [groupTitles, setGroupTitles] = useState<Readonly<Record<string, string>>>({});
   // Routing drafts: a select that has been changed but whose picker is not
   // filled in yet. Cleared as soon as the daemon confirms the binding.
   const [draftRoutes, setDraftRoutes] = useState<Readonly<Record<string, ChatRoute>>>({});
@@ -305,6 +308,22 @@ export function TelegramPage({
     },
     [allowedChatIds, persistTelegram],
   );
+
+  // The owner's label first, else the group's name in Telegram, else the id.
+  const chatTitle = useCallback(
+    (chatId: string) =>
+      formatChatTitle(
+        chatId,
+        chatLabels[chatId] === undefined && groupTitles[chatId] !== undefined
+          ? { ...chatLabels, [chatId]: groupTitles[chatId] }
+          : chatLabels,
+      ),
+    [chatLabels, groupTitles],
+  );
+
+  const handleGroupAdded = useCallback(() => {
+    void refresh();
+  }, [refresh]);
 
   const handleSaveBrain = useCallback(() => {
     if (helperProjectId === null || !canMutate) return;
@@ -512,7 +531,7 @@ export function TelegramPage({
               allowedChatIds.map((chatId) => (
                 <SettingsRow
                   key={chatId}
-                  title={formatChatTitle(chatId, chatLabels)}
+                  title={chatTitle(chatId)}
                   description=""
                   control={
                     <Button
@@ -565,6 +584,21 @@ export function TelegramPage({
             </SettingsRow>
           </SettingsSection>
 
+          {/* b2. Who Uno listens to in each group */}
+          {helperProjectId !== null ? (
+            <TelegramGroupsSection
+              environmentId={environmentId}
+              projectId={helperProjectId}
+              canMutate={canMutate}
+              chatLabels={chatLabels}
+              reloadKey={allowedChatIds.join(",")}
+              onGroupAdded={handleGroupAdded}
+              onTitles={setGroupTitles}
+              onError={setError}
+              onNotice={setNotice}
+            />
+          ) : null}
+
           {/* c. What each chat talks to */}
           <SettingsSection
             title={helperCopy.routing.title}
@@ -581,7 +615,7 @@ export function TelegramPage({
                 <ChatRouteRow
                   key={row.chatId}
                   row={row}
-                  title={formatChatTitle(row.chatId, chatLabels)}
+                  title={chatTitle(row.chatId)}
                   route={effectiveRoute(row)}
                   projects={projects}
                   threads={threads}

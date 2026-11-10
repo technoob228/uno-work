@@ -423,6 +423,7 @@ export const saveAssistantOwnBot = (input: {
       ...(sameBot && previous.groupMembers !== undefined
         ? { groupMembers: previous.groupMembers }
         : {}),
+      ...(sameBot && previous.groups !== undefined ? { groups: previous.groups } : {}),
     } satisfies ManagerTelegramConnectorConfig;
     yield* repository.upsert({
       projectId: input.projectId,

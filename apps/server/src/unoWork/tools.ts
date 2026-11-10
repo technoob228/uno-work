@@ -21,6 +21,8 @@ import { boundaryDenial } from "./pathBoundary.ts";
 import { promises as fsp } from "node:fs";
 
 import type {
+  ManagerTelegramGroupMembers,
+  ManagerTelegramGroupsResult,
   FilesCloudListResult,
   FilesCloudTransferResult,
   FilesDriveFileList,
@@ -135,6 +137,7 @@ import { ASKS_FIRST_CATEGORY_LABEL, asksFirstCategory } from "@t3tools/shared/as
 import { UNO_WORK_MCP_SERVER_NAME } from "./constants.ts";
 import { normalizeButtonRows, type ButtonSpec } from "../manager/connectorButtons.ts";
 import { workAppLink } from "../workAddress.ts";
+import { resolveGroupPeople } from "../manager/telegramGroups.ts";
 
 export {
   UNO_WORK_APPROVAL_FROM_INBOX_PATH,
@@ -538,6 +541,22 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
      * Telegram, never a file. Returns at once; the answer comes as a message.
      */
     readonly requestBotToken?: Effect.Effect<{ readonly opened: boolean }>;
+    /**
+     * Telegram groups of the assistant's own bot (assistant_groups): who is
+     * heard in each, the people seen there, groups waiting to be added.
+     * Absent (tests, older wiring): the tool says it isn't here.
+     */
+    readonly groups?: {
+      readonly list: Effect.Effect<ManagerTelegramGroupsResult>;
+      readonly set: (input: {
+        readonly chatId: string;
+        readonly members: ManagerTelegramGroupMembers;
+        readonly userIds?: ReadonlyArray<string>;
+      }) => Effect.Effect<
+        | { readonly ok: true; readonly result: ManagerTelegramGroupsResult }
+        | { readonly ok: false; readonly error: string }
+      >;
+    };
   };
   /**
    * Automations of the calling chat (`automation_*`, `automations_list`),
@@ -598,6 +617,58 @@ export type AssistantTelegramStep =
   | "start-window"
   /** Its own bot is set, but no Uno Work window is open to show the Start step. */
   | "no-window";
+
+/** Whether an `assistant_groups` call changes something (then it asks first). */
+export function assistantGroupsChanges(args: Record<string, unknown>): boolean {
+  return ["access", "people", "add", "remove"].some((key) => args[key] !== undefined);
+}
+
+const GROUP_ACCESS_WORD: Readonly<Record<ManagerTelegramGroupMembers, string>> = {
+  owners: "me",
+  selected: "selected",
+  anyone: "everyone",
+};
+
+/** What `assistant_groups` answers: the groups in the tool's own words. */
+export function assistantGroupsAnswer(view: ManagerTelegramGroupsResult) {
+  const bot = view.botUsername ? `@${view.botUsername}` : "the bot";
+  return {
+    supported: true,
+    bot: view.botUsername,
+    groups: view.groups.map((group) => ({
+      group: group.title ?? group.chatId,
+      chatId: group.chatId,
+      access: GROUP_ACCESS_WORD[group.members],
+      people: group.people.map((person) => ({
+        name: person.name,
+        ...(person.username !== null ? { username: `@${person.username}` } : {}),
+        id: person.id,
+        heard: person.allowed,
+        ...(person.owner ? { owner: true } : {}),
+      })),
+    })),
+    waiting: view.pending.map((group) => ({
+      group: group.title ?? group.chatId,
+      chatId: group.chatId,
+    })),
+    tellThePerson:
+      view.groups.length === 0 && view.pending.length === 0
+        ? [
+            `No groups yet. Add ${bot} to a Telegram group and call it there once ("${bot} hi"): the group shows up here and you choose who it listens to.`,
+          ]
+        : view.pending.length > 0
+          ? [
+              `Waiting to be added: ${view.pending.map((group) => group.title ?? group.chatId).join(", ")}. Say who the assistant should listen to there: only you, people you pick, or everyone.`,
+            ]
+          : [],
+  };
+}
+
+function strings(args: Record<string, unknown>, key: string): ReadonlyArray<string> {
+  const value = args[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
 
 /**
  * What the agent tells the person after `assistant_connect` — the built-in
@@ -3565,6 +3636,129 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           })(),
           tellThePerson: assistantConnectAdvice({ status, asked, step }),
         };
+      }),
+  },
+
+  {
+    name: "assistant_groups",
+    group: "person",
+    description:
+      'Who the assistant answers in Telegram groups (its own bot, see assistant_connect). Without arguments: the groups its bot answers in — name, who is heard ("me": only the owner; "selected": the owner and the people picked; "everyone": every member) and the people seen writing there — plus groups waiting to be added. To change one: `group` (its name or chat id) and `access`; with "selected" pass `people` (the full list: names, @usernames or Telegram user ids as listed), or `add` / `remove` to change the list by a few people. A waiting group is added by the same call. Changing always asks the person first. People other than the owner talk in a chat of their own: the bot\'s commands don\'t work for them and anything the assistant does there waits for the owner\'s OK. To get a group listed, the person adds the bot to the group and calls it there once ("@bot hi"). A person shows up in a group\'s list after they write to the bot there. For the bot to hear its name without @, the person turns off Group Privacy in @BotFather (Bot Settings).',
+    inputSchema: {
+      type: "object",
+      properties: {
+        group: {
+          type: "string",
+          minLength: 1,
+          description: "The group's name as listed, or its chat id (starts with a minus).",
+        },
+        access: {
+          type: "string",
+          enum: ["me", "selected", "everyone"],
+          description:
+            "me: only the owner. selected: the owner and `people`. everyone: any member.",
+        },
+        people: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          maxItems: 200,
+          description: "With selected: the whole list of people heard besides the owner.",
+        },
+        add: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          maxItems: 50,
+          description: "People to add to the selected list.",
+        },
+        remove: {
+          type: "array",
+          items: { type: "string", minLength: 1 },
+          maxItems: 50,
+          description: "People to take off the selected list.",
+        },
+      },
+      additionalProperties: false,
+    },
+    // Reading is free; letting other people talk to the assistant always asks.
+    level: (args) => (assistantGroupsChanges(args) ? "sensitive" : "safe"),
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const groups = deps.assistant?.groups;
+        if (!groups) {
+          return yield* toolError(
+            "Telegram groups aren't reachable from this chat. Tell the person to open Settings, Assistant, Telegram.",
+          );
+        }
+        const view = yield* groups.list;
+        if (!view.supported) {
+          return {
+            supported: false,
+            groups: [],
+            waiting: [],
+            tellThePerson: [
+              "Groups need the assistant's own bot: Uno's shared bot only answers in private chats. Create its own bot first (assistant_connect with open: \"telegram\").",
+            ],
+          };
+        }
+        if (!assistantGroupsChanges(args)) return assistantGroupsAnswer(view);
+
+        const wanted = str(args, "group")?.trim() ?? "";
+        if (wanted.length === 0) {
+          return yield* toolError("Say which group: pass `group` (its name or chat id).");
+        }
+        const known = [
+          ...view.groups.map((entry) => ({ chatId: entry.chatId, title: entry.title })),
+          ...view.pending,
+        ];
+        const fold = (value: string) => value.trim().toLowerCase();
+        const matches = known.filter(
+          (entry) =>
+            entry.chatId === wanted || (entry.title !== null && fold(entry.title) === fold(wanted)),
+        );
+        if (matches.length !== 1) {
+          const names = known.map((entry) => entry.title ?? entry.chatId).join(", ");
+          return yield* toolError(
+            matches.length > 1
+              ? `Several groups are called "${wanted}": pass its chat id instead.`
+              : known.length === 0
+                ? 'No groups yet. The person adds the bot to the group and calls it there once ("@bot hi"); then the group is listed here.'
+                : `No group "${wanted}" here. Known: ${names}. A new one shows up after the person calls the bot in it once.`,
+          );
+        }
+        const target = matches[0]!;
+        const current = view.groups.find((entry) => entry.chatId === target.chatId);
+        const people = current?.people ?? [];
+        const asked = (key: string) => strings(args, key);
+        const explicit = str(args, "access");
+        const members: ManagerTelegramGroupMembers =
+          explicit === "me"
+            ? "owners"
+            : explicit === "everyone"
+              ? "anyone"
+              : // "selected", or only people named: that is the selected list.
+                "selected";
+        const full = resolveGroupPeople(people, asked("people"));
+        const added = resolveGroupPeople(people, asked("add"));
+        const removed = resolveGroupPeople(people, asked("remove"));
+        const unknown = [...full.unknown, ...added.unknown, ...removed.unknown];
+        if (unknown.length > 0) {
+          return yield* toolError(
+            `Not seen in this group yet: ${unknown.join(", ")}. They write to the bot there once ("@bot hi") and appear in the list; or pass their Telegram user id (a number).`,
+          );
+        }
+        const before = people.filter((person) => person.selected).map((person) => person.id);
+        const base = args["people"] !== undefined ? full.userIds : before;
+        const userIds = [...new Set([...base, ...added.userIds])].filter(
+          (id) => !removed.userIds.includes(id),
+        );
+        if (members === "selected" && userIds.length === 0) {
+          return yield* toolError(
+            'With selected, name at least one person in `people`. For nobody but the owner use access: "me".',
+          );
+        }
+        const outcome = yield* groups.set({ chatId: target.chatId, members, userIds });
+        if (!outcome.ok) return yield* toolError(outcome.error);
+        return { changed: target.title ?? target.chatId, ...assistantGroupsAnswer(outcome.result) };
       }),
   },
 

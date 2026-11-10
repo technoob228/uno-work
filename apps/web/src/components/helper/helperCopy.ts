@@ -50,6 +50,27 @@ export const helperCopy = {
     empty: "No chats yet. Add the chat id of your own Telegram account first.",
   },
 
+  groups: {
+    title: "Groups",
+    intro: "Who Uno listens to in each group.",
+    optionOwners: "Only me",
+    optionSelected: "People I pick",
+    optionAnyone: "Everyone",
+    you: "you",
+    nobodyYet: (bot: string) =>
+      `Nobody else has called ${bot} here yet. Once they do, pick them here.`,
+    othersNote: "What Uno does for others waits for your OK.",
+    waiting: "Not answering here yet",
+    add: "Add",
+    empty: (bot: string) =>
+      `Add ${bot} to a group and call it there once: “${bot} hi”. The group shows up here.`,
+    unsupported: "Groups need a bot of your own. Uno's shared bot answers only in private chats.",
+    privacyHint:
+      "To be called by name without @, turn off Group Privacy for the bot in @BotFather.",
+    saved: (group: string) => `Saved for ${group}.`,
+    added: (group: string) => `Uno now answers in ${group}.`,
+  },
+
   routing: {
     title: "What each chat talks to",
     description: "Pick where messages from each chat go.",

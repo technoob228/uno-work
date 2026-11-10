@@ -27,6 +27,8 @@ import type {
   ManagerActionProposal,
   ManagerAssistantSummary,
   ManagerStartedByList,
+  ManagerTelegramGroupMembers,
+  ManagerTelegramGroupsResult,
   ManagerAssistantsList,
   ManagerCapabilityTokenDescriptor,
   ManagerConnectorBindingKind,
@@ -568,6 +570,39 @@ export function draftAssistant(
 }
 
 /** Chat → target bindings of the chats carried by this assistant's connectors. */
+/**
+ * The groups an assistant's bot answers in, who is heard in each, the people
+ * seen writing there and the groups waiting to be added. A daemon older than
+ * 0.0.182 answers 404: the caller hides the section.
+ */
+export function listTelegramGroups(
+  input: EnvironmentScoped & { readonly projectId: string },
+): Promise<ManagerTelegramGroupsResult> {
+  return environmentFetchJson({
+    environmentId: input.environmentId,
+    pathname: "/api/manager/assistant/telegram/groups",
+    searchParams: { projectId: input.projectId },
+  });
+}
+
+/** Who is heard in one group; a waiting group is added by the same call. */
+export function setTelegramGroupAccess(
+  input: EnvironmentScoped & {
+    readonly projectId: string;
+    readonly chatId: string;
+    readonly members: ManagerTelegramGroupMembers;
+    readonly userIds?: ReadonlyArray<string>;
+  },
+): Promise<ManagerTelegramGroupsResult> {
+  const { environmentId, ...body } = input;
+  return environmentFetchJson({
+    environmentId,
+    pathname: "/api/manager/assistant/telegram/groups",
+    method: "POST",
+    body,
+  });
+}
+
 export function listConnectorBindings(
   input: EnvironmentScoped & { readonly projectId: string },
 ): Promise<{ bindings: ReadonlyArray<ManagerConnectorBindingView> }> {

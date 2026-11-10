@@ -601,6 +601,14 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
       named("Browser:", hostOf(text(c.args, "url")) ?? text(c.args, "command"), "Used the browser"),
     "The browser step didn't work",
   ],
+  assistant_groups: [
+    "Checking Telegram groups…",
+    (c) =>
+      typeof c.result.changed === "string"
+        ? named("Telegram group:", c.result.changed, "Changed who your assistant answers")
+        : "Checked Telegram groups",
+    "Couldn't change the Telegram group",
+  ],
   assistant_connect: [
     "Checking your assistant…",
     (c) =>

@@ -9,7 +9,9 @@
  * - `owner`   — the owner's own account: full behaviour (commands, the
  *               routed runtime mode).
  * - `member`  — someone else in a group, heard only when the owner opted in
- *               (`groupMembers: "anyone-with-approval"`): no chat commands,
+ *               (for that group: everyone, or the people picked —
+ *               `telegramGroups.ts`; or connector-wide
+ *               `groupMembers: "anyone-with-approval"`): no chat commands,
  *               turns always run approval-required.
  * - `ignore`  — bots, unknown senders, everyone else.
  *
@@ -22,7 +24,11 @@
  *
  * @module manager/connectorSenders
  */
-import type { ManagerConnectorGroupMembersPolicy, RuntimeMode } from "@t3tools/contracts";
+import type {
+  ManagerConnectorGroupMembersPolicy,
+  ManagerTelegramGroupAccess,
+  RuntimeMode,
+} from "@t3tools/contracts";
 
 import { isPrivateTelegramChatId } from "./connectorBindings.ts";
 
@@ -51,6 +57,11 @@ export const classifyTelegramSender = (input: {
   readonly allowedChatIds: ReadonlyArray<string>;
   readonly ownerUserIds?: ReadonlyArray<string> | undefined;
   readonly groupMembers?: ManagerConnectorGroupMembersPolicy | undefined;
+  /**
+   * This group's own choice (`telegramGroups.ts#telegramGroupAccess`); when
+   * given it decides instead of the connector-wide `groupMembers`.
+   */
+  readonly groupAccess?: ManagerTelegramGroupAccess | undefined;
 }): ConnectorSenderRole => {
   const from = input.from;
   if (from === undefined || from.id === undefined || from.is_bot === true) return "ignore";
@@ -66,7 +77,13 @@ export const classifyTelegramSender = (input: {
     return senderId === chatId ? "owner" : "ignore";
   }
   if (telegramOwnerUserIds(input).has(senderId)) return "owner";
-  return policyOrDefault(input.groupMembers) === "anyone-with-approval" ? "member" : "ignore";
+  const access = input.groupAccess;
+  const letIn =
+    access !== undefined
+      ? access.members === "anyone" ||
+        (access.members === "selected" && access.userIds.includes(senderId))
+      : policyOrDefault(input.groupMembers) === "anyone-with-approval";
+  return letIn ? "member" : "ignore";
 };
 
 export const classifySlackSender = (input: {

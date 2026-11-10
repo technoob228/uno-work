@@ -57,8 +57,6 @@ export const ManagerLayerLive = Layer.mergeAll(
   AssistantScheduledTurnsLive,
   // Automations (the console keeps them): the web routes, automation_* tools.
   AutomationsServiceLive,
-  // Chats holding a stranger's text (site forms, webhooks): their tools ask.
-  OutsideThreadsLive,
 ).pipe(
   // Order matters: each layer's requirements are satisfied by the layers
   // provided AFTER it in this pipe.
@@ -70,6 +68,9 @@ export const ManagerLayerLive = Layer.mergeAll(
   // Outbound channel (HTTP notify + forwarder) on top of the Telegram sender.
   Layer.provideMerge(ConnectorNotifyServiceLive),
   Layer.provideMerge(ManagerTelegramServiceLive),
+  // Chats holding a stranger's text (site forms, webhooks, group members the
+  // owner let in): their tools ask. Below the Telegram connector, which marks them.
+  Layer.provideMerge(OutsideThreadsLive),
   Layer.provideMerge(ManagerSlackServiceLive),
   Layer.provideMerge(ManagerApprovalServiceLive),
   // The account's default AI: what chats the assistant starts run on.

@@ -2670,6 +2670,167 @@ describe("assistant_connect: the built-in assistant, in a bot of its own", () =>
   });
 });
 
+describe("assistant_groups: who the assistant answers in Telegram groups", () => {
+  const FAMILY = "-100111";
+  const person = (
+    id: string,
+    name: string,
+    flags: { owner?: boolean; selected?: boolean; username?: string } = {},
+  ) => ({
+    id,
+    name,
+    username: flags.username ?? null,
+    owner: flags.owner ?? false,
+    selected: flags.selected ?? false,
+    allowed: (flags.owner ?? false) || (flags.selected ?? false),
+  });
+  const view = (supported = true) => ({
+    supported,
+    botUsername: "my_bot",
+    groups: [
+      {
+        chatId: FAMILY,
+        title: "Family",
+        members: "selected" as const,
+        people: [
+          person("42", "Misha", { owner: true }),
+          person("7", "Anna", { selected: true, username: "anna_k" }),
+          person("8", "Dima"),
+        ],
+      },
+    ],
+    pending: [{ chatId: "-100999", title: "Book club" }],
+  });
+  const withGroups = (deps: UnoWorkToolDeps, supported = true) => {
+    const calls: Array<Record<string, unknown>> = [];
+    const next: UnoWorkToolDeps = {
+      ...deps,
+      assistant: {
+        status: Effect.die("not used"),
+        openTelegram: Effect.succeed({ ok: true }),
+        groups: {
+          list: Effect.succeed(view(supported)),
+          set: (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              return { ok: true as const, result: view() };
+            }),
+        },
+      },
+    };
+    return { deps: next, calls };
+  };
+  const valueOf = (result: unknown) => (result as { success: Record<string, unknown> }).success;
+
+  it("reading runs freely; any change always asks the person", () => {
+    expect(toolLevel(tool("assistant_groups"), {})).toBe("safe");
+    expect(toolLevel(tool("assistant_groups"), { group: "Family" })).toBe("safe");
+    for (const args of [
+      { group: "Family", access: "everyone" },
+      { group: "Family", people: ["Anna"] },
+      { group: "Family", add: ["Dima"] },
+      { group: "Family", remove: ["Anna"] },
+    ]) {
+      expect(toolLevel(tool("assistant_groups"), args)).toBe("sensitive");
+    }
+  });
+
+  it("lists the groups, who is heard and what is waiting", async () => {
+    const { deps } = withGroups(makeDeps().deps);
+    const value = valueOf(await run("assistant_groups", deps, {}));
+    expect(value.groups).toEqual([
+      {
+        group: "Family",
+        chatId: FAMILY,
+        access: "selected",
+        people: [
+          { name: "Misha", id: "42", heard: true, owner: true },
+          { name: "Anna", username: "@anna_k", id: "7", heard: true },
+          { name: "Dima", id: "8", heard: false },
+        ],
+      },
+    ]);
+    expect(value.waiting).toEqual([{ group: "Book club", chatId: "-100999" }]);
+    expect((value.tellThePerson as string[]).join(" ")).toMatch(/Book club/);
+  });
+
+  it("everyone in a group, by its name", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    const result = await run("assistant_groups", deps, { group: "family", access: "everyone" });
+    expect(result._tag).toBe("Success");
+    expect(calls).toEqual([{ chatId: FAMILY, members: "anyone", userIds: ["7"] }]);
+    expect(valueOf(result).changed).toBe("Family");
+  });
+
+  it("adds a person to the picked list by name, keeps the others", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    await run("assistant_groups", deps, { group: "Family", add: ["Dima"] });
+    expect(calls).toEqual([{ chatId: FAMILY, members: "selected", userIds: ["7", "8"] }]);
+  });
+
+  it("the whole list replaces the old one; remove takes a person off", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    await run("assistant_groups", deps, { group: FAMILY, access: "selected", people: ["Dima"] });
+    await run("assistant_groups", deps, { group: FAMILY, add: ["Dima"], remove: ["@anna_k"] });
+    expect(calls.map((call) => call.userIds)).toEqual([["8"], ["8"]]);
+  });
+
+  it("only me", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    await run("assistant_groups", deps, { group: "Family", access: "me" });
+    expect(calls[0]).toMatchObject({ chatId: FAMILY, members: "owners" });
+  });
+
+  it("a waiting group is added by the same call", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    await run("assistant_groups", deps, { group: "Book club", access: "me" });
+    expect(calls).toEqual([{ chatId: "-100999", members: "owners", userIds: [] }]);
+  });
+
+  it("someone the bot never saw: says how they get on the list, changes nothing", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    const result = await run("assistant_groups", deps, { group: "Family", add: ["Zed"] });
+    expect(result._tag).toBe("Failure");
+    expect(JSON.stringify(result)).toMatch(/Not seen in this group yet: Zed/);
+    expect(calls).toEqual([]);
+  });
+
+  it("an unknown group: names the ones it knows", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    const result = await run("assistant_groups", deps, { group: "Nope", access: "everyone" });
+    expect(result._tag).toBe("Failure");
+    expect(JSON.stringify(result)).toMatch(/Known: Family, Book club/);
+    expect(calls).toEqual([]);
+  });
+
+  it("selected with nobody named is refused", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps);
+    const result = await run("assistant_groups", deps, {
+      group: "Family",
+      access: "selected",
+      people: [],
+    });
+    expect(result._tag).toBe("Failure");
+    expect(calls).toEqual([]);
+  });
+
+  it("Uno's shared bot: says groups need the assistant's own bot", async () => {
+    const { deps, calls } = withGroups(makeDeps().deps, false);
+    const value = valueOf(await run("assistant_groups", deps, { group: "Family", access: "me" }));
+    expect(value.supported).toBe(false);
+    expect(calls).toEqual([]);
+  });
+
+  it("without the wiring: an error that points at Settings", async () => {
+    const result = await run("assistant_groups", makeDeps().deps, {});
+    expect(result._tag).toBe("Failure");
+  });
+
+  it("a chat holding a stranger's text asks before even reading the groups", () => {
+    expect(outsideTextAsks("assistant_groups", {})).toBe(true);
+  });
+});
+
 describe("computer_cleanup", () => {
   const usage = (home: string) => ({
     home,

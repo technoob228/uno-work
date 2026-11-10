@@ -19,6 +19,7 @@ import { promises as fsp } from "node:fs";
 
 import {
   ASSISTANT_PROJECT_ID,
+  isAssistantProjectId,
   CommandId,
   EventId,
   ManagerTelegramConnectorConfig,
@@ -53,6 +54,7 @@ import { MachineAppsService } from "../machineApps/MachineAppsService.ts";
 import { resolveManifestDir } from "../machineApps/manifestDir.ts";
 import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { replyButtons } from "../manager/connectorButtons.ts";
+import { ManagerTelegramService } from "../manager/Layers/TelegramConnector.ts";
 import { SUPPORT_DRAFT_ACTIVITY_KIND } from "@t3tools/shared/supportDraft";
 import { redactForSupport } from "../fixWork/fixWorkReport.ts";
 import { storePage } from "../htmlRender/htmlRender.ts";
@@ -456,6 +458,19 @@ const makeDeps = (input: {
           }).planOfThread(input.threadId),
         )
       : Effect.succeed(null);
+    const telegramService = Option.getOrNull(yield* Effect.serviceOption(ManagerTelegramService));
+    // Whose Telegram groups `assistant_groups` reads and changes.
+    const groupsProjectId = Effect.gen(function* () {
+      const own = Option.isSome(shell) ? shell.value.projectId : null;
+      if (own === null || own === ASSISTANT_PROJECT_ID || !isAssistantProjectId(own)) {
+        return ASSISTANT_PROJECT_ID;
+      }
+      if (connectorRows === null) return ASSISTANT_PROJECT_ID;
+      const row = yield* connectorRows
+        .get({ projectId: own, kind: "telegram" })
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      return Option.isSome(row) ? own : ASSISTANT_PROJECT_ID;
+    });
     let lateChat: AssistantPushChat | null = null;
     const deps: UnoWorkToolDeps = {
       mailOwner,
@@ -879,6 +894,21 @@ const makeDeps = (input: {
           Effect.provideContext(secretServices),
           Effect.map((outcome) => ({ opened: outcome.queued === true || outcome.ok })),
         ),
+        // Telegram groups (assistant_groups): of the assistant this chat
+        // belongs to when it has a bot of its own, else of Uno.
+        ...(telegramService === null
+          ? {}
+          : {
+              groups: {
+                list: Effect.flatMap(groupsProjectId, (projectId) =>
+                  telegramService.groups(projectId),
+                ),
+                set: (change) =>
+                  Effect.flatMap(groupsProjectId, (projectId) =>
+                    telegramService.setGroupAccess({ projectId, ...change }),
+                  ),
+              },
+            }),
       },
       console: {
         request: (request) =>
