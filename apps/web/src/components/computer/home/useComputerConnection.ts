@@ -9,7 +9,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
-import { describeRestartError, restartComputer } from "../../../account/accountOverview";
+import { describeWorkRestartError, restartWorkOnComputer } from "../../../account/accountOverview";
 import { accountTransport } from "../../../account/unoAccount";
 import { isElectron } from "../../../env";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
@@ -35,8 +35,11 @@ import {
 const TICK_MS = 1_000;
 /** "Restart now" goes back to "Restart" if not pressed within this. */
 const RESTART_CONFIRM_MS = 8_000;
-/** A restarted computer is offline about 15 s; reconnect (quietly) once it should be back. */
-const RECONNECT_AFTER_RESTART_MS = 20_000;
+/**
+ * Reconnect (quietly) after Uno Work restarted: at once when the console says
+ * it answers again, a little later while it is still coming up.
+ */
+const RECONNECT_AFTER_RESTART_MS = { done: 500, restarting: 10_000 } as const;
 
 function parseTime(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -102,24 +105,40 @@ function useSavedFacts(environmentId: EnvironmentId | null): Facts {
   };
 }
 
-/** Restarts an Uno computer through the account (the console's safe restart). */
-async function restartUnoComputer(environmentId: EnvironmentId): Promise<boolean> {
+/**
+ * Restarts only Uno Work on an Uno computer through the account
+ * (`POST /boxes/{id}/work/restart`); the computer and its programs keep
+ * running. No fallback to restarting the whole computer: the person agreed to
+ * restart Uno Work, not to stop their programs. Resolves to when to reconnect,
+ * or null when it didn't work (the person got a message).
+ */
+async function restartUnoWork(environmentId: EnvironmentId): Promise<number | null> {
   const boxId = useSavedEnvironmentRegistryStore.getState().byId[environmentId]?.unoBoxId;
-  if (boxId === undefined) return false;
+  if (boxId === undefined) return null;
   try {
-    await restartComputer(boxId);
-    // It's restarting now: the words go back to "Reconnecting…" until it's up.
+    const answer = await restartWorkOnComputer(boxId);
+    if (answer?.state === "failed") {
+      toastManager.add({
+        type: "error",
+        title: "Uno Work didn't restart",
+        description: answer.error ?? "Try again in a minute, or restart the computer.",
+      });
+      return null;
+    }
+    // It's restarting or back: the words go back to "Reconnecting…" until it's up.
     useSavedEnvironmentRuntimeStore
       .getState()
       .patch(environmentId, { serverNotRespondingSince: null });
-    return true;
+    return answer?.state === "done"
+      ? RECONNECT_AFTER_RESTART_MS.done
+      : RECONNECT_AFTER_RESTART_MS.restarting;
   } catch (error) {
     toastManager.add({
       type: "error",
-      title: "Couldn't restart the computer",
-      description: describeRestartError(error),
+      title: "Couldn't restart Uno Work",
+      description: describeWorkRestartError(error),
     });
-    return false;
+    return null;
   }
 }
 
@@ -202,13 +221,12 @@ export function useComputerConnection(
         if (environmentId === null) return;
         setConfirmingRestart(false);
         setRestarting(true);
-        void restartUnoComputer(environmentId).then((restarted) => {
+        void restartUnoWork(environmentId).then((reconnectInMs) => {
           setRestarting(false);
-          if (!restarted) return;
+          if (reconnectInMs === null) return;
           window.setTimeout(
-            () =>
-              void healSavedEnvironment(environmentId, "computer-restarted", { immediate: true }),
-            RECONNECT_AFTER_RESTART_MS,
+            () => void healSavedEnvironment(environmentId, "work-restarted", { immediate: true }),
+            reconnectInMs,
           );
         });
         return;

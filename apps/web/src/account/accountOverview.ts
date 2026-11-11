@@ -15,7 +15,7 @@
 import { ControlPlaneHttpError, controlPlaneErrorStatus } from "@t3tools/shared/unoCloud";
 
 import { parsePeakExceeded } from "./alwaysOn";
-import { accountRequest } from "./unoAccount";
+import { AccountHttpError, accountRequest } from "./unoAccount";
 import { type ComputerRole, computerRole, parseRoleComment, withRole } from "./computerRoles";
 
 export const CONSOLE_URL = "https://console.uno.place";
@@ -150,6 +150,43 @@ export function parseComputerRestart(raw: unknown): ComputerRestart | null {
 export async function restartComputer(id: number): Promise<ComputerRestart | null> {
   const raw = await accountRequest("POST", `/api/v1/boxes/${id}/restart`, {});
   return parseComputerRestart(rec(raw)?.["restart"]);
+}
+
+// ---- restart only Uno Work ----
+
+/**
+ * Restarts only Uno Work on a computer (`POST /api/v1/boxes/{id}/work/restart`):
+ * the computer, its files and other programs keep running. The console waits
+ * up to ~25 s for Uno Work to answer again: `done` / `failed` (with `error` in
+ * plain words), or `restarting` when it takes longer.
+ */
+export interface WorkRestart {
+  readonly state: "restarting" | "done" | "failed";
+  readonly error: string | null;
+}
+
+export function parseWorkRestart(raw: unknown): WorkRestart | null {
+  const r = rec(raw);
+  if (!r) return null;
+  const state = str(r["state"]);
+  if (state !== "restarting" && state !== "done" && state !== "failed") return null;
+  return { state, error: strOrNull(r["error"]) };
+}
+
+export async function restartWorkOnComputer(id: number): Promise<WorkRestart | null> {
+  const raw = await accountRequest("POST", `/api/v1/boxes/${id}/work/restart`, {});
+  return parseWorkRestart(rec(raw)?.["work_restart"]);
+}
+
+/** The console's refusal of a Uno Work restart, in the person's words. */
+export function describeWorkRestartError(error: unknown): string {
+  const body = error instanceof AccountHttpError ? rec(error.body) : null;
+  const detail = body ? strOrNull(body["detail"]) : null;
+  if (detail) return detail;
+  const raw = error instanceof Error ? error.message : String(error);
+  if (/^403\b/.test(raw)) return "Only the account owner can restart it.";
+  if (/^404\b/.test(raw)) return "Uno can't restart Uno Work on this computer yet.";
+  return `Uno couldn't restart Uno Work: ${raw.replace(/^\d{3}:\s*/, "").slice(0, 200)}`;
 }
 
 /** The console's refusal in the person's words. */

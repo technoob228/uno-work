@@ -17,8 +17,8 @@
  *     (any click wakes it; the menu also has "Wake up"), then "Waking…";
  *   - the computer answers but Uno Work on it doesn't (its database is stuck,
  *     11.11 box 395): "Not responding" at once — waiting won't fix it —
- *     with "Restart" on an Uno computer, "Retry" elsewhere. Restart asks
- *     once more first ("Restart now"): it stops what runs on the computer.
+ *     with "Restart" on an Uno computer, "Retry" elsewhere. Restart (only
+ *     Uno Work, the computer keeps running) asks once more ("Restart now").
  *
  * Pure and clock-free (`now` comes in) so the rule is tested without timers.
  */
@@ -43,7 +43,7 @@ export interface ConnectionFacts {
   readonly signInNeeded: boolean;
   /** The computer answers, Uno Work on it doesn't (its health check says so). */
   readonly serverNotResponding?: boolean;
-  /** Uno can restart this computer for the person (an Uno computer of the account). */
+  /** Uno can restart Uno Work on this computer for the person (an Uno computer of the account). */
   readonly canRestart?: boolean;
   /** The person pressed Restart once; the next press restarts. */
   readonly confirmingRestart?: boolean;
@@ -138,7 +138,7 @@ export function describeConnection(facts: ConnectionFacts): ConnectionStatus {
       return {
         kind: "not-responding",
         chip: "Not responding",
-        line: "Programs running on it will stop. Restart?",
+        line: "Restart Uno Work on it? Chats reconnect in a few seconds.",
         attention: true,
         action: "restart-confirm",
       };

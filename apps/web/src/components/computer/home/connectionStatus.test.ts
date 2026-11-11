@@ -155,7 +155,7 @@ describe("describeConnection — Uno Work on the computer is stuck", () => {
       facts({ serverNotResponding: true, canRestart: true, confirmingRestart: true }),
     );
     expect(confirming.action).toBe("restart-confirm");
-    expect(confirming.line).toBe("Programs running on it will stop. Restart?");
+    expect(confirming.line).toBe("Restart Uno Work on it? Chats reconnect in a few seconds.");
   });
 
   it("a live link, a sign-in or no network on the device win over it", () => {
