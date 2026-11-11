@@ -12,6 +12,8 @@
 
 - An assistant you created now starts with its own notes, its profile and your projects in front of it, the same as Uno. Before, only Uno had them: an assistant with a name of its own had to open its notes itself, and could send a client's letter to the wrong computer.
 - After this update such an assistant's conversation starts again once, with the recent messages carried over. The same happens when its instructions change, as it already does for Uno.
+- Uno Work on a cloud computer restarts itself when it stops responding. Before, it could stay half-working for hours: the computer was online, but the app showed "No connection".
+- When a computer is online but Uno Work on it isn't responding, the app says "Not responding" and offers Restart. Only Uno Work restarts, the computer keeps running, and chats reconnect in a few seconds.
 
 ## v0.0.186 — 2026-11-10
 
