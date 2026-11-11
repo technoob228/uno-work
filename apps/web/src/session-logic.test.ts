@@ -1597,6 +1597,74 @@ describe("deriveTimelineEntries", () => {
       }),
     ).toBe("assistant-final");
   });
+
+  // qa 11.11: a bubble sent from a device whose clock runs behind (or written
+  // offline) sat among replies the agent gave before it had the message.
+  it("keeps a message that isn't on the computer yet after everything shown", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("first"),
+          role: "user",
+          text: "first",
+          createdAt: "2026-11-11T10:00:00.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [
+        { id: "step-1", createdAt: "2026-11-11T10:00:05.000Z", label: "a", tone: "tool" },
+        { id: "step-2", createdAt: "2026-11-11T10:00:09.000Z", label: "b", tone: "tool" },
+      ],
+      [],
+      [
+        // The outbox one, written offline at :06; the one on its way at :03
+        // by a clock 7 s behind the computer's.
+        {
+          id: MessageId.make("outbox"),
+          role: "user",
+          text: "written offline",
+          createdAt: "2026-11-11T10:00:01.000Z",
+          streaming: false,
+        },
+        {
+          id: MessageId.make("sending"),
+          role: "user",
+          text: "on its way",
+          createdAt: "2026-11-11T10:00:03.000Z",
+          streaming: false,
+        },
+      ],
+    );
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "first",
+      "step-1",
+      "step-2",
+      "outbox",
+      "sending",
+    ]);
+  });
+
+  it("places a message by the computer's stamp once its server copy is in", () => {
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("sent"),
+          role: "user",
+          text: "sent",
+          // The server stamped it when it arrived: after step-1, before step-2.
+          createdAt: "2026-11-11T10:00:06.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [
+        { id: "step-1", createdAt: "2026-11-11T10:00:05.000Z", label: "a", tone: "tool" },
+        { id: "step-2", createdAt: "2026-11-11T10:00:07.000Z", label: "b", tone: "tool" },
+      ],
+    );
+    expect(entries.map((entry) => entry.id)).toEqual(["step-1", "sent", "step-2"]);
+  });
 });
 
 describe("deriveWorkLogEntries: tools of an MCP server read as one human line", () => {

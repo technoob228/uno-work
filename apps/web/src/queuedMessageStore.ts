@@ -9,7 +9,8 @@
  * old behaviour: into the running turn.
  *
  * Text only: a message with pictures, files or a recording still goes at
- * once. Kept in localStorage: a reload must not lose what the person wrote
+ * once — with what waits here going first in it, so nothing typed later
+ * overtakes the queue (planQueuedSend). Kept in localStorage: a reload must not lose what the person wrote
  * (qa 30.10: it vanished without a word). What waited long stops going by
  * itself: the person left, the chat moved on, "Send now" is theirs to press.
  * Several tabs share the queue, and a message leaves from one of them only.
@@ -209,6 +210,60 @@ export function shouldQueueSend(input: {
   readonly linkDown?: boolean;
 }): boolean {
   return input.agentWorking && !input.hasAttachments && !input.sendNow && !input.linkDown;
+}
+
+/**
+ * What "Up next" sends by itself before anything typed now: the messages up
+ * to the first held one. Empty when the first is held — then the queue waits
+ * for the person (Send now), and a new message isn't overtaking it.
+ */
+export function queuedAheadOfSend(
+  queue: ReadonlyArray<QueuedChatMessage>,
+): ReadonlyArray<QueuedChatMessage> {
+  const firstHeld = queue.findIndex((message) => message.hold);
+  return firstHeld === -1 ? queue : queue.slice(0, firstHeld);
+}
+
+/**
+ * How a message typed now goes, so it never overtakes what waits in "Up next"
+ * (qa 11.11: after a failed turn the queue paused, the next Enter went at
+ * once and the older waiting message only after it and its reply):
+ * - "send": nothing waits ahead — it goes as before (or "Up next" while the
+ *   agent works, shouldQueueSend);
+ * - "queue": it joins the back of "Up next"; `releaseFirst` — the chat is free
+ *   (or paused after an error: this Enter is the person going on), so the
+ *   oldest waiting message goes now, the rest one per finished turn;
+ * - "send-with-ahead": it can't wait in "Up next" (pictures, files, a
+ *   recording, terminal context, a send on the way out of the chat), so the
+ *   waiting messages go in it, first, in order (joinQueuedAhead).
+ */
+export type QueuedSendPlan =
+  | { readonly kind: "send" }
+  | { readonly kind: "queue"; readonly releaseFirst: boolean }
+  | { readonly kind: "send-with-ahead"; readonly ahead: ReadonlyArray<QueuedChatMessage> };
+
+export function planQueuedSend(input: {
+  readonly queue: ReadonlyArray<QueuedChatMessage>;
+  readonly agentWorking: boolean;
+  readonly hasAttachments: boolean;
+  readonly sendNow: boolean;
+  readonly linkDown?: boolean;
+}): QueuedSendPlan {
+  if (shouldQueueSend(input)) return { kind: "queue", releaseFirst: false };
+  const ahead = queuedAheadOfSend(input.queue);
+  if (ahead.length === 0) return { kind: "send" };
+  if (!input.hasAttachments && !input.sendNow) {
+    return {
+      kind: "queue",
+      releaseFirst: !input.agentWorking && !(input.linkDown ?? false),
+    };
+  }
+  return { kind: "send-with-ahead", ahead };
+}
+
+/** The waiting messages' text first, then what was typed: one message, in order. */
+export function joinQueuedAhead(ahead: ReadonlyArray<string>, text: string): string {
+  return [...ahead, text].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
 /**

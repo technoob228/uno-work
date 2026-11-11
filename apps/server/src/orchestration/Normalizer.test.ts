@@ -163,3 +163,34 @@ describe("normalizeDispatchCommand: attached files", () => {
     ).rejects.toThrow(/didn't finish uploading/);
   });
 });
+
+describe("normalizeDispatchCommand: when a message was sent", () => {
+  // qa 11.11: the chat sorts by time; a sender's clock seconds off, or a
+  // message written offline and delivered later, landed among replies the
+  // agent gave before it had the message.
+  it("stamps a message with this computer's time, not the sender's", async () => {
+    const before = Date.now();
+    const normalized = await normalize({
+      ...turnStart([]),
+      // The sender's clock: a laptop running behind, or an outbox message
+      // written while the computer was out of reach.
+      createdAt: "2020-01-01T00:00:00.000Z",
+    } as ClientOrchestrationCommand);
+    const after = Date.now();
+    if (normalized.type !== "thread.turn.start") throw new Error("unexpected command");
+    const stamped = Date.parse(normalized.createdAt);
+    expect(stamped).toBeGreaterThanOrEqual(before);
+    expect(stamped).toBeLessThanOrEqual(after);
+    expect(normalized.createdAt).toBe(new Date(stamped).toISOString());
+  });
+
+  it("leaves other commands' time alone", async () => {
+    const command = {
+      type: "thread.session.stop",
+      commandId: CommandId.make("cmd-stop"),
+      threadId: ThreadId.make("thread-files"),
+      createdAt: "2020-01-01T00:00:00.000Z",
+    } as ClientOrchestrationCommand;
+    expect(await normalize(command)).toEqual(command);
+  });
+});

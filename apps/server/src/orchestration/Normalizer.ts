@@ -400,5 +400,11 @@ export const normalizeDispatchCommand = (
         text: expandedText,
         attachments: normalizedAttachments,
       },
+      // The chat is ordered by one clock: this computer's, the one the agent's
+      // replies and steps carry. The sender's own time is left out — a phone
+      // or laptop running seconds off, or a message written offline and
+      // delivered later, would put it among replies it never saw. Stamped
+      // after the attachments are filed, right before the command is queued.
+      createdAt: new Date().toISOString(),
     } satisfies OrchestrationCommand;
   });

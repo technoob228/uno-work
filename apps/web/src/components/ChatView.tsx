@@ -301,9 +301,11 @@ import { useNotificationSoftAsk } from "../inbox/systemNotifications";
 import { useDemoSwitch } from "~/demo/demoFlag";
 import { useFeatureFlag } from "~/hooks/useFeatureFlags";
 import {
+  joinQueuedAhead,
   nextQueuedMessageToSend,
-  shouldQueueSend,
+  planQueuedSend,
   type QueuedChatMessage,
+  type QueuedSendPlan,
   QUEUE_AFTER_RESTART_DELAY_MS,
   useQueuedMessages,
   useQueuedMessageStore,
@@ -317,6 +319,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROPOSED_PLANS: Thread["proposedPlans"] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_PENDING_MESSAGES: ReadonlyArray<ChatMessage> = [];
 type EnvironmentUnavailableState = {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -1828,7 +1831,9 @@ export default function ChatView(props: ChatViewProps) {
       }
     };
   }, [attachmentPreviewHandoffByMessageId, clearAttachmentPreviewHandoff, serverMessages]);
-  const timelineMessages = useMemo(() => {
+  // Server copies, and what was sent from here but isn't on the computer yet
+  // (deriveTimelineEntries keeps those last).
+  const { timelineMessages, serverTimelineMessages, pendingTimelineMessages } = useMemo(() => {
     const messages = serverMessages ?? [];
     const serverMessagesWithPreviewHandoff =
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
@@ -1871,8 +1876,13 @@ export default function ChatView(props: ChatViewProps) {
             return changed ? { ...message, attachments } : message;
           });
 
+    const serverOnly = {
+      timelineMessages: serverMessagesWithPreviewHandoff,
+      serverTimelineMessages: serverMessagesWithPreviewHandoff,
+      pendingTimelineMessages: EMPTY_PENDING_MESSAGES,
+    };
     if (optimisticUserMessages.length === 0 && outboxChatMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return serverOnly;
     }
     const shownIds = new Set(serverMessagesWithPreviewHandoff.map((message) => message.id));
     const pendingMessages: ChatMessage[] = [];
@@ -1882,9 +1892,13 @@ export default function ChatView(props: ChatViewProps) {
       pendingMessages.push(message);
     }
     if (pendingMessages.length === 0) {
-      return serverMessagesWithPreviewHandoff;
+      return serverOnly;
     }
-    return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
+    return {
+      timelineMessages: [...serverMessagesWithPreviewHandoff, ...pendingMessages],
+      serverTimelineMessages: serverMessagesWithPreviewHandoff,
+      pendingTimelineMessages: pendingMessages,
+    };
   }, [
     serverMessages,
     attachmentPreviewHandoffByMessageId,
@@ -1897,13 +1911,25 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries, [
-        ...deriveHtmlRenderEntries(threadActivities),
-        ...deriveSupportDraftEntries(threadActivities),
-        ...deriveAgentSwitchEntries(threadActivities),
-        ...deriveApprovalExpiredEntries(threadActivities),
-      ]),
-    [activeThread?.proposedPlans, threadActivities, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        serverTimelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        [
+          ...deriveHtmlRenderEntries(threadActivities),
+          ...deriveSupportDraftEntries(threadActivities),
+          ...deriveAgentSwitchEntries(threadActivities),
+          ...deriveApprovalExpiredEntries(threadActivities),
+        ],
+        pendingTimelineMessages,
+      ),
+    [
+      activeThread?.proposedPlans,
+      threadActivities,
+      serverTimelineMessages,
+      pendingTimelineMessages,
+      workLogEntries,
+    ],
   );
   // Фильтр видимости встроенного чата: применяем на выборке строк, а не в
   // рендере — плагин не может ни добавить строку, ни расширить права.
@@ -3311,7 +3337,8 @@ export default function ChatView(props: ChatViewProps) {
     const composerVideos = queued ? [] : ctxComposerVideos;
     const composerFiles = queued ? [] : ctxComposerFiles;
     const composerTerminalContexts = queued ? [] : ctxComposerTerminalContexts;
-    const promptForSend = queued ? queued.text : promptRef.current;
+    // `let`: what waits in "Up next" may go first in it (takeQueuedAhead).
+    let promptForSend = queued ? queued.text : promptRef.current;
     // Loom Work: the chat's screen recording goes with the message as a block.
     const composerRecording = queued
       ? null
@@ -3462,16 +3489,19 @@ export default function ChatView(props: ChatViewProps) {
     // turn (that is "Send now"). Pictures, files, a recording or terminal
     // context still go at once: the queue keeps text only. Offline the
     // message goes to the outbox instead (below), never to both.
-    if (
-      !queued &&
-      shouldQueueSend({
-        agentWorking: phase === "running",
-        linkDown,
-        hasAttachments: hasComposerAttachments || sendableComposerTerminalContexts.length > 0,
-        // Leaving the chat: "Up next" only moves while the chat is on screen.
-        sendNow: inBackground,
-      })
-    ) {
+    // Nothing typed now overtakes what already waits in "Up next" (11.11,
+    // planQueuedSend): it joins the back, or takes the waiting ones with it.
+    const sendPlan: QueuedSendPlan = queued
+      ? { kind: "send" }
+      : planQueuedSend({
+          queue: useQueuedMessageStore.getState().queuesByThreadKey[routeThreadKey] ?? [],
+          agentWorking: phase === "running",
+          linkDown,
+          hasAttachments: hasComposerAttachments || sendableComposerTerminalContexts.length > 0,
+          // Leaving the chat: "Up next" only moves while the chat is on screen.
+          sendNow: inBackground,
+        });
+    if (sendPlan.kind === "queue") {
       useQueuedMessageStore
         .getState()
         .enqueue(routeThreadKey, appendQuotesToPrompt(promptForSend.trim(), composerQuotes));
@@ -3479,8 +3509,25 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
+      // The chat is free (or paused after a failed turn — this Enter is the
+      // person going on): the oldest waiting message goes now, as Send now.
+      const oldest = sendPlan.releaseFirst
+        ? useQueuedMessageStore.getState().queuesByThreadKey[routeThreadKey]?.[0]
+        : undefined;
+      const released = oldest
+        ? useQueuedMessageStore.getState().take(routeThreadKey, oldest.id)
+        : null;
+      if (released) await onSend(undefined, released);
       return;
     }
+    // Taken from "Up next" only once the message really goes (below).
+    const takeQueuedAhead = () =>
+      sendPlan.kind === "send-with-ahead"
+        ? sendPlan.ahead.flatMap((message) => {
+            const taken = useQueuedMessageStore.getState().take(routeThreadKey, message.id);
+            return taken ? [taken.text] : [];
+          })
+        : [];
     // Going around the queue (files, Send now) can't take the chat from an
     // agent that is still working: the message would start nowhere.
     if (
@@ -3553,6 +3600,7 @@ export default function ChatView(props: ChatViewProps) {
         );
         return;
       }
+      promptForSend = joinQueuedAhead(takeQueuedAhead(), promptForSend);
       const queuedTitleSeed =
         trimmed ||
         (composerQuotes[0] ? quoteSummary(composerQuotes[0]) : "") ||
@@ -3597,6 +3645,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
     if (!api) return;
+    promptForSend = joinQueuedAhead(takeQueuedAhead(), promptForSend);
 
     // A new chat sent in the background leaves the screen right away: this
     // view is the next chat's by the time the send finishes. An open chat

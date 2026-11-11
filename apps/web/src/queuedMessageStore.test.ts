@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  joinQueuedAhead,
   nextQueuedMessageToSend,
+  planQueuedSend,
+  queuedAheadOfSend,
   QUEUED_MESSAGE_HOLD_AFTER_MS,
   QUEUED_MESSAGES_STORAGE_KEY,
   restoreQueues,
@@ -141,6 +144,79 @@ describe("shouldQueueSend", () => {
         linkDown: true,
       }),
     ).toBe(false);
+  });
+});
+
+// qa 11.11: after a failed turn "Up next" paused; the next Enter went at once
+// and the older waiting message only after it and its reply.
+describe("planQueuedSend: nothing typed now overtakes Up next", () => {
+  const typed = { agentWorking: false, hasAttachments: false, sendNow: false };
+
+  it("goes as before when nothing waits", () => {
+    expect(planQueuedSend({ ...typed, queue: [] })).toEqual({ kind: "send" });
+    expect(planQueuedSend({ ...typed, queue: [], agentWorking: true })).toEqual({
+      kind: "queue",
+      releaseFirst: false,
+    });
+    expect(planQueuedSend({ ...typed, queue: [], hasAttachments: true })).toEqual({
+      kind: "send",
+    });
+  });
+
+  it("after a failed turn: the new message joins the back, the oldest waiting one goes now", () => {
+    store().enqueue(KEY, "older");
+    // The chat is free (the error paused the queue): the old code sent the new one at once.
+    expect(planQueuedSend({ ...typed, queue: queue() })).toEqual({
+      kind: "queue",
+      releaseFirst: true,
+    });
+  });
+
+  it("offline: the new message waits behind them, nothing goes", () => {
+    store().enqueue(KEY, "older");
+    expect(planQueuedSend({ ...typed, queue: queue(), linkDown: true })).toEqual({
+      kind: "queue",
+      releaseFirst: false,
+    });
+    expect(
+      planQueuedSend({ ...typed, queue: queue(), agentWorking: true, linkDown: true }),
+    ).toEqual({ kind: "queue", releaseFirst: false });
+  });
+
+  it("a message with a picture takes the waiting ones with it, first, in order", () => {
+    const first = store().enqueue(KEY, "one");
+    const second = store().enqueue(KEY, "two");
+    for (const agentWorking of [true, false]) {
+      const plan = planQueuedSend({ ...typed, queue: queue(), agentWorking, hasAttachments: true });
+      expect(plan.kind).toBe("send-with-ahead");
+      if (plan.kind !== "send-with-ahead") return;
+      expect(plan.ahead.map((message) => message.id)).toEqual([first.id, second.id]);
+    }
+    // Leaving the chat (Up next stays still there) does the same.
+    expect(
+      planQueuedSend({ ...typed, queue: queue(), agentWorking: true, sendNow: true }).kind,
+    ).toBe("send-with-ahead");
+    expect(joinQueuedAhead(["one", "two"], "look at this")).toBe("one\n\ntwo\n\nlook at this");
+    expect(joinQueuedAhead(["one"], "")).toBe("one");
+  });
+
+  it("a held queue waits for the person: the new message isn't overtaking it", () => {
+    store().enqueue(KEY, "one");
+    store().holdAll(KEY);
+    expect(planQueuedSend({ ...typed, queue: queue() })).toEqual({ kind: "send" });
+    expect(planQueuedSend({ ...typed, queue: queue(), hasAttachments: true })).toEqual({
+      kind: "send",
+    });
+  });
+
+  it("only what goes by itself is ahead: up to the first held one", () => {
+    const at = new Date().toISOString();
+    const ahead = queuedAheadOfSend([
+      { id: "1", text: "one", createdAt: at },
+      { id: "2", text: "two", createdAt: at, hold: true },
+      { id: "3", text: "three", createdAt: at },
+    ]);
+    expect(ahead.map((message) => message.text)).toEqual(["one"]);
   });
 });
 
