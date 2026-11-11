@@ -10,10 +10,15 @@
  *   CLI's `auth pairing create --base-url … --qr`;
  * - manual entry is `host` + `code`; the app rebuilds the same link itself.
  *
+ * One code pairs one computer, so the workspace is paired computer by
+ * computer — see `resolvePhoneComputer` at the bottom.
+ *
  * Kept free of React so the rules can be tested with plain values.
  *
  * @module components/settings/phonePairing
  */
+import type { AdvertisedEndpoint, EnvironmentId } from "@t3tools/contracts";
+
 import type { ServerClientSessionRecord } from "../../environments/primary/auth";
 
 /** Real store listings, from upstream README / docs/user/install.md. */
@@ -119,4 +124,142 @@ export function describePhoneSession(session: ServerClientSessionRecord): string
     (part): part is string => typeof part === "string" && part.length > 0,
   );
   return parts.length > 0 ? parts.join(" · ") : "Phone";
+}
+
+// ── The workspace's computers, as the phone sees them ────────────────────
+//
+// The store app pairs one computer per code (one QR = one environment), so
+// "connect your phone to the workspace" means one code per computer, minted
+// on that computer's own daemon, carrying an address a phone can dial.
+// Desktop Work used to mint only on its own daemon at 127.0.0.1 — a QR no
+// phone can use (Misha 11.11).
+
+/** One computer of the workspace, before deciding how a phone reaches it. */
+export interface PhoneComputerSource {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  /** The daemon serving this Work window (the Mac in desktop, the box in its browser). */
+  readonly isPrimary: boolean;
+  readonly unoBoxId: number | null;
+  /** The address Work itself uses for this daemon. */
+  readonly httpBaseUrl: string | null;
+  /** The box's own published origin (`https://<box>.app.uno4.dev`), when known. */
+  readonly boxDirectOrigin: string | null;
+  /** Desktop only: where the local daemon listens for other devices. */
+  readonly advertisedEndpoints?: ReadonlyArray<
+    Pick<AdvertisedEndpoint, "httpBaseUrl" | "reachability" | "status">
+  >;
+}
+
+export type PhoneComputerReach = "public" | "private" | "unreachable";
+
+export interface PhoneComputer {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly isPrimary: boolean;
+  readonly unoBoxId: number | null;
+  /** What goes into the QR; null when no phone can reach this computer. */
+  readonly phoneBaseUrl: string | null;
+  readonly reach: PhoneComputerReach;
+}
+
+function usableAddress(
+  url: string | null | undefined,
+  isProxyHost: (url: string) => boolean,
+): { readonly url: string; readonly reach: "public" | "private" } | null {
+  if (!url) return null;
+  let origin: string;
+  try {
+    origin = normalizePhoneHost(url);
+  } catch {
+    return null;
+  }
+  if (isProxyHost(origin)) return null;
+  const reach = classifyPhoneHostReach(origin);
+  return reach === "loopback" ? null : { url: origin, reach };
+}
+
+const ENDPOINT_RANK: Record<AdvertisedEndpoint["reachability"], number> = {
+  public: 0,
+  "private-network": 1,
+  lan: 2,
+  loopback: 3,
+};
+
+/**
+ * The address a phone should dial for this computer, best first: the box's
+ * own published origin → the address Work uses (unless it is loopback or the
+ * sign-in proxy) → for the desktop daemon, an endpoint it really listens on
+ * beyond loopback (Settings → Connections → Network access). A public address
+ * beats a same-Wi-Fi one. Loopback is never offered: a phone that scans
+ * `127.0.0.1` dials itself.
+ */
+export function resolvePhoneComputer(
+  source: PhoneComputerSource,
+  isProxyHost: (url: string) => boolean,
+): PhoneComputer {
+  const endpoints = (source.advertisedEndpoints ?? [])
+    .filter((endpoint) => endpoint.status !== "unavailable" && endpoint.reachability !== "loopback")
+    .toSorted((a, b) => ENDPOINT_RANK[a.reachability] - ENDPOINT_RANK[b.reachability]);
+  const candidates = [
+    source.boxDirectOrigin,
+    source.httpBaseUrl,
+    ...endpoints.map((endpoint) => endpoint.httpBaseUrl),
+  ];
+  let picked: { readonly url: string; readonly reach: "public" | "private" } | null = null;
+  for (const candidate of candidates) {
+    const address = usableAddress(candidate, isProxyHost);
+    if (!address) continue;
+    if (address.reach === "public") {
+      picked = address;
+      break;
+    }
+    picked ??= address;
+  }
+  return {
+    environmentId: source.environmentId,
+    label: source.label,
+    isPrimary: source.isPrimary,
+    unoBoxId: source.unoBoxId,
+    phoneBaseUrl: picked?.url ?? null,
+    reach: picked?.reach ?? "unreachable",
+  };
+}
+
+const REACH_RANK: Record<PhoneComputerReach, number> = { public: 0, private: 1, unreachable: 2 };
+
+/**
+ * Scan order: computers a phone reaches from anywhere first (cloud computers
+ * ahead of other servers), then same-Wi-Fi ones, unreachable last; by name
+ * within a group.
+ */
+export function orderPhoneComputers(
+  computers: ReadonlyArray<PhoneComputer>,
+): ReadonlyArray<PhoneComputer> {
+  return computers.toSorted(
+    (a, b) =>
+      REACH_RANK[a.reach] - REACH_RANK[b.reach] ||
+      Number(b.unoBoxId !== null) - Number(a.unoBoxId !== null) ||
+      a.label.localeCompare(b.label),
+  );
+}
+
+/**
+ * One entry per computer: the same box can be both the primary and a saved
+ * connection. The first occurrence wins, so list the primary first.
+ */
+export function dedupePhoneComputerSources(
+  sources: ReadonlyArray<PhoneComputerSource>,
+): ReadonlyArray<PhoneComputerSource> {
+  const seenEnvironments = new Set<string>();
+  const seenBoxes = new Set<number>();
+  const result: PhoneComputerSource[] = [];
+  for (const source of sources) {
+    if (seenEnvironments.has(source.environmentId)) continue;
+    if (source.unoBoxId !== null && seenBoxes.has(source.unoBoxId)) continue;
+    seenEnvironments.add(source.environmentId);
+    if (source.unoBoxId !== null) seenBoxes.add(source.unoBoxId);
+    result.push(source);
+  }
+  return result;
 }
