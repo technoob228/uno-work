@@ -6,6 +6,7 @@ import {
   fetchRemoteEnvironmentDescriptor,
   fetchRemoteSessionState,
   issueRemoteWebSocketToken,
+  probeRemoteServerHealth,
   resolveRemoteWebSocketConnectionUrl,
 } from "./api";
 import { resolveRemotePairingTarget } from "./target";
@@ -310,5 +311,49 @@ describe("timeouts and retries (e2e 21.09: a fresh box left the request hanging 
     }).catch((error: unknown) => error);
     expect(isRemoteEnvironmentUnreachableError(caught)).toBe(true);
     expect((caught as { timedOut: boolean }).timedOut).toBe(true);
+  });
+});
+
+describe("probeRemoteServerHealth", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const answer = (status: number, body: string) => {
+    globalThis.fetch = vi.fn(async () => new Response(body, { status })) as typeof fetch;
+  };
+
+  it("tells a stuck Uno Work from a computer that is down", async () => {
+    answer(
+      503,
+      JSON.stringify({
+        ok: false,
+        db: "error",
+        message: "Health probe failed: database did not answer within 3000ms",
+      }),
+    );
+    expect(await probeRemoteServerHealth({ httpBaseUrl: "https://box.example/" })).toEqual({
+      kind: "not-responding",
+      detail: "Health probe failed: database did not answer within 3000ms",
+    });
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toBe("https://box.example/api/health");
+
+    answer(200, JSON.stringify({ ok: true, db: "ok", version: "0.0.186" }));
+    expect(await probeRemoteServerHealth({ httpBaseUrl: "https://box.example/" })).toEqual({
+      kind: "ok",
+    });
+
+    // An edge answering for a computer that is starting or asleep is not Uno Work.
+    answer(502, "<html>Bad gateway</html>");
+    expect(await probeRemoteServerHealth({ httpBaseUrl: "https://box.example/" })).toEqual({
+      kind: "unknown",
+    });
+
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }) as typeof fetch;
+    expect(await probeRemoteServerHealth({ httpBaseUrl: "https://box.example/" })).toEqual({
+      kind: "unknown",
+    });
   });
 });

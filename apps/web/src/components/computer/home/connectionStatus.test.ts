@@ -135,6 +135,42 @@ describe("describeConnection — said quietly in the computer chip", () => {
   });
 });
 
+describe("describeConnection — Uno Work on the computer is stuck", () => {
+  // 11.11, box 395: the computer answered, Uno Work's database there had
+  // stopped; the app showed "No connection" for 3 hours.
+  it("says so at once, not after the outage grace", () => {
+    const status = describeConnection(facts({ serverNotResponding: true }));
+    expect(status.kind).toBe("not-responding");
+    expect(status.chip).toBe("Not responding");
+    expect(status.line).toBe("Online, but Uno Work on it isn't responding");
+    expect(status.attention).toBe(true);
+    expect(status.action).toBe("retry");
+  });
+
+  it("offers Restart on an Uno computer, and asks once more before restarting", () => {
+    expect(describeConnection(facts({ serverNotResponding: true, canRestart: true })).action).toBe(
+      "restart",
+    );
+    const confirming = describeConnection(
+      facts({ serverNotResponding: true, canRestart: true, confirmingRestart: true }),
+    );
+    expect(confirming.action).toBe("restart-confirm");
+    expect(confirming.line).toBe("Restart Uno Work on it? Chats reconnect in a few seconds.");
+  });
+
+  it("a live link, a sign-in or no network on the device win over it", () => {
+    expect(
+      describeConnection(facts({ link: "connected", downSince: null, serverNotResponding: true })),
+    ).toEqual(CONNECTED);
+    expect(describeConnection(facts({ serverNotResponding: true, signInNeeded: true })).kind).toBe(
+      "sign-in",
+    );
+    expect(
+      describeConnection(facts({ serverNotResponding: true, networkOnline: false })).kind,
+    ).toBe("no-network");
+  });
+});
+
 describe("agoLabel", () => {
   it("reads like a person", () => {
     expect(agoLabel(NOW - 3_000, NOW)).toBe("just now");

@@ -19,6 +19,13 @@ Environment=T3CODE_STARTUP_PAIRING_OUTPUT=0
 # harnesses it spawns — writes to the state disk instead. install.sh creates
 # the directory owned by the service user.
 Environment=TMPDIR=/var/lib/uno-work/tmp
+# Lets the daemon's own watchdog (apps/server/src/selfWatchdog.ts) exit when its
+# database stops answering for minutes, so Restart=always below brings back a
+# working one. Without it a box stayed half-dead for hours (11.11, box 395: HTTP
+# up, every database call hanging, the Mac app "No connection" for 3 h). The
+# daemon drops the variable at start, so nothing it launches inherits it.
+# Updates re-copy this file (install.sh), so installed boxes get it too.
+Environment=T3_WATCHDOG_EXIT=1
 ExecStart=/opt/uno-work/bin/uno-work serve \
   --mode web \
   --host ${UNO_WORK_HOST} \
@@ -32,8 +39,9 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 Restart=always
 RestartSec=2
-# The daemon has its own watchdog; systemd restarts it when the health probe
-# wedges hard enough to kill the process.
+# The daemon has its own watchdog (T3_WATCHDOG_EXIT above); systemd restarts
+# it after the watchdog exits. A wedged daemon may not finish a graceful stop:
+# after this long systemd kills it.
 TimeoutStopSec=20
 KillSignal=SIGTERM
 

@@ -230,3 +230,55 @@ export async function resolveRemoteWebSocketConnectionUrl(input: {
   url.searchParams.set("wsToken", issued.token);
   return url.toString();
 }
+
+/** How long the health check after a failed reconnect may take. */
+export const REMOTE_HEALTH_PROBE_TIMEOUT_MS = 8_000;
+
+/**
+ * What a computer's own Uno Work says about itself (`GET /api/health`, no
+ * sign-in needed):
+ *   - `ok` — it answers and its database works;
+ *   - `not-responding` — the computer is up and Uno Work answers, but its
+ *     database doesn't (it says `db: "error"`): nothing a reconnect can fix,
+ *     Uno Work there has to restart;
+ *   - `unknown` — no answer, or an answer that isn't Uno Work's (an edge
+ *     502 while the computer starts or sleeps).
+ */
+export type RemoteServerHealth =
+  | { readonly kind: "ok" }
+  | { readonly kind: "not-responding"; readonly detail: string }
+  | { readonly kind: "unknown" };
+
+export async function probeRemoteServerHealth(input: {
+  readonly httpBaseUrl: string;
+  readonly timeoutMs?: number;
+}): Promise<RemoteServerHealth> {
+  let response: Response;
+  try {
+    response = await fetch(remoteEndpointUrl(input.httpBaseUrl, "/api/health"), {
+      signal: AbortSignal.timeout(input.timeoutMs ?? REMOTE_HEALTH_PROBE_TIMEOUT_MS),
+    });
+  } catch {
+    return { kind: "unknown" };
+  }
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch {
+    return { kind: "unknown" };
+  }
+  if (typeof body !== "object" || body === null) return { kind: "unknown" };
+  const fields = body as {
+    readonly ok?: unknown;
+    readonly db?: unknown;
+    readonly message?: unknown;
+  };
+  if (fields.ok === true) return { kind: "ok" };
+  if (fields.ok === false && fields.db === "error") {
+    return {
+      kind: "not-responding",
+      detail: typeof fields.message === "string" ? fields.message : "database error",
+    };
+  }
+  return { kind: "unknown" };
+}

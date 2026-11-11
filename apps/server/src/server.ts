@@ -25,7 +25,7 @@ import { UnoAgentAccessLive } from "./unoAgentAccess.ts";
 import { UnoGatewayKeyLive } from "./unoGatewayKey.ts";
 import { UnoBoxIdentityLive } from "./unoBoxIdentity.ts";
 import { HealthCheck } from "./health.ts";
-import { SelfWatchdogLive } from "./selfWatchdog.ts";
+import { SelfWatchdogLive, takeWatchdogExitFlagAtStart } from "./selfWatchdog.ts";
 import { EconomyPresenceLive } from "./economy/EconomyPresence.ts";
 import { ServerBrowserLive } from "./serverBrowser.ts";
 import { homeSuggestionsRouteLayer } from "./homeSuggestionsHttp.ts";
@@ -838,6 +838,8 @@ export const makeServerLayer = Layer.unwrap(
     const config = yield* ServerConfig;
 
     fixPath();
+    // Before any layer can start a child: the flag must not reach them.
+    takeWatchdogExitFlagAtStart();
 
     const httpListeningLayer = Layer.effectDiscard(
       Effect.gen(function* () {

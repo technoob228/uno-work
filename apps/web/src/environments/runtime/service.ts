@@ -40,6 +40,7 @@ import {
   fetchRemoteSessionState,
   isRemoteEnvironmentAuthHttpError,
   resolveRemoteWebSocketConnectionUrl,
+  probeRemoteServerHealth,
 } from "../remote/api";
 import { resolveRemotePairingTarget } from "../remote/target";
 import {
@@ -959,6 +960,7 @@ function setRuntimeConnected(environmentId: EnvironmentId) {
     lastSynchronizedAt: connectedAt,
     lastError: null,
     lastErrorAt: null,
+    serverNotRespondingSince: null,
   });
   noteSavedEnvironmentHealthy(environmentId);
   useSavedEnvironmentRegistryStore.getState().markConnected(environmentId, connectedAt);
@@ -1995,16 +1997,54 @@ async function performSavedEnvironmentReconnect(
   }
 }
 
+/**
+ * A reconnect failed: ask Uno Work on that computer how it is. 11.11, box 395:
+ * the computer answered, Uno Work's database there had stopped, and the app
+ * retried ~2,500 times over 3 hours showing only "No connection". Its own
+ * health check says which it is, so the person sees that Uno Work there is
+ * stuck (and can restart it) instead of a network problem.
+ */
+async function noteSavedEnvironmentServerHealth(
+  environmentId: EnvironmentId,
+  error: unknown,
+): Promise<void> {
+  if (isSshAuthRequiredError(error) || isSavedEnvironmentConnectionCancelledError(error)) return;
+  const record = getSavedEnvironmentRecord(environmentId);
+  if (!record) return;
+  const health = await probeRemoteServerHealth({ httpBaseUrl: record.httpBaseUrl });
+  const store = useSavedEnvironmentRuntimeStore.getState();
+  const since = store.byId[environmentId]?.serverNotRespondingSince ?? null;
+  if (health.kind === "not-responding") {
+    console.warn(
+      `Uno Work on saved environment ${environmentId} answers, but its database does not: ${health.detail}`,
+    );
+    if (since === null) store.patch(environmentId, { serverNotRespondingSince: isoNow() });
+    return;
+  }
+  if (since !== null) store.patch(environmentId, { serverNotRespondingSince: null });
+}
+
+async function reconnectAndDiagnose(
+  environmentId: EnvironmentId,
+  options: { readonly interactive: boolean },
+): Promise<void> {
+  try {
+    await performSavedEnvironmentReconnect(environmentId, options);
+  } catch (error) {
+    await noteSavedEnvironmentServerHealth(environmentId, error).catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function reconnectSavedEnvironment(environmentId: EnvironmentId): Promise<void> {
   // A manual reconnect re-arms self-healing: auth prompts are allowed again
   // and the backoff ladder starts over.
   resetSelfHeal(environmentId);
-  await performSavedEnvironmentReconnect(environmentId, { interactive: true });
+  await reconnectAndDiagnose(environmentId, { interactive: true });
 }
 
 configureSelfHeal({
-  performReconnect: (environmentId) =>
-    performSavedEnvironmentReconnect(environmentId, { interactive: false }),
+  performReconnect: (environmentId) => reconnectAndDiagnose(environmentId, { interactive: false }),
   isAuthRequiredError: isSshAuthRequiredError,
   onAuthRequired: (environmentId) => {
     useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
@@ -2014,10 +2054,9 @@ configureSelfHeal({
     });
   },
   onNeedsAttention: (environmentId, failure) => {
-    console.warn("Saved environment needs attention; automatic reconnects stopped", {
-      environmentId,
-      kind: failure.kind,
-    });
+    console.warn(
+      `Saved environment ${environmentId} needs attention (${failure.kind}); automatic reconnects stopped`,
+    );
     // Dispose the live transport too: its own socket retries would otherwise
     // keep failing in the background. Reconnect builds a fresh connection.
     void removeConnection(environmentId)

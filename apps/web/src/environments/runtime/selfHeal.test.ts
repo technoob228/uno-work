@@ -157,3 +157,24 @@ describe("getSelfHealBackoffDelayMs", () => {
     expect(delays.size).toBeGreaterThan(10);
   });
 });
+
+describe("self-heal warning", () => {
+  it("logs the error's own words as one string, never [object Object]", async () => {
+    const { performReconnect } = configure();
+    performReconnect.mockRejectedValueOnce(
+      new RemoteEnvironmentUnreachableError(
+        "No answer from https://box/api/auth/ws-token within 20 s.",
+        {
+          requestUrl: "https://box/api/auth/ws-token",
+          timedOut: true,
+        },
+      ),
+    );
+    await healSavedEnvironment(environmentId, "transport-error");
+    const warn = vi.mocked(console.warn);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]).toEqual([
+      "Saved environment self-heal failed (environment env-broken, transport-error, attempt 1): RemoteEnvironmentUnreachableError: No answer from https://box/api/auth/ws-token within 20 s.",
+    ]);
+  });
+});

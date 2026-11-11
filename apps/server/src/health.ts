@@ -21,10 +21,9 @@ export class HealthProbeError extends Schema.TaggedErrorClass<HealthProbeError>(
  * Proves the database can still be written and read back, through the same
  * SQLite client the event store uses. HTTP 200 from a static route says
  * nothing about persistence — this is what turns a half-dead daemon (locked
- * WAL, read-only file, full disk) into a red health check. Bounded so a
- * wedged database yields a failure, not a hang.
+ * WAL, read-only file, full disk) into a red health check.
  */
-export const runHealthHeartbeatProbe: Effect.Effect<
+const heartbeatProbe: Effect.Effect<
   number,
   HealthProbeError | PersistenceSqlError,
   SqlClient.SqlClient
@@ -62,20 +61,33 @@ export const runHealthHeartbeatProbe: Effect.Effect<
     });
   }
   return now;
-}).pipe(
-  Effect.timeoutOrElse({
-    duration: HEALTH_PROBE_TIMEOUT,
-    orElse: () =>
-      Effect.fail(
-        new HealthProbeError({
-          detail: `database did not answer within ${Duration.toMillis(HEALTH_PROBE_TIMEOUT)}ms`,
-        }),
-      ),
-  }),
-);
+});
+
+/** The heartbeat, bounded so a wedged database yields a failure, not a hang. */
+export const runHealthHeartbeatProbeWithin = (
+  timeout: Duration.Duration,
+): Effect.Effect<number, HealthProbeError | PersistenceSqlError, SqlClient.SqlClient> =>
+  heartbeatProbe.pipe(
+    Effect.timeoutOrElse({
+      duration: timeout,
+      orElse: () =>
+        Effect.fail(
+          new HealthProbeError({
+            detail: `database did not answer within ${Duration.toMillis(timeout)}ms`,
+          }),
+        ),
+    }),
+  );
+
+/** `/api/health`'s probe: a client waiting on it wants an answer in seconds. */
+export const runHealthHeartbeatProbe = runHealthHeartbeatProbeWithin(HEALTH_PROBE_TIMEOUT);
 
 export interface HealthCheckShape {
   readonly probe: Effect.Effect<number, HealthProbeError | PersistenceSqlError>;
+  /** The same probe with its own bound (the watchdog waits longer than a client). */
+  readonly probeWithin: (
+    timeout: Duration.Duration,
+  ) => Effect.Effect<number, HealthProbeError | PersistenceSqlError>;
 }
 
 /**
@@ -91,6 +103,10 @@ export class HealthCheck extends Context.Service<HealthCheck, HealthCheckShape>(
       const sql = yield* SqlClient.SqlClient;
       return HealthCheck.of({
         probe: runHealthHeartbeatProbe.pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+        probeWithin: (timeout) =>
+          runHealthHeartbeatProbeWithin(timeout).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          ),
       });
     }),
   );

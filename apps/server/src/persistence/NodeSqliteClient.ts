@@ -7,7 +7,6 @@
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 import * as NodeUtil from "node:util";
 
-import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -16,7 +15,6 @@ import { identity } from "effect/Function";
 import * as Layer from "effect/Layer";
 import * as Predicate from "effect/Predicate";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 import * as Reactivity from "effect/unstable/reactivity/Reactivity";
@@ -139,6 +137,147 @@ export const hasLargeBinding = (params: ReadonlyArray<unknown>): boolean => {
   }
 };
 
+/**
+ * Prepared statements by SQL text: least recently used first, each kept for
+ * `ttlMs` after it was prepared, failures never kept.
+ *
+ * Synchronous on purpose. It replaces `effect/Cache`, whose `get` publishes a
+ * pending slot for the key before it starts the lookup: a fiber interrupted
+ * in between (suspended at the scheduler's periodic yield, then interrupted by
+ * a timeout or a closed request) leaves the slot pending forever, and every
+ * later use of that SQL waits on it — inside a transaction, while holding the
+ * connection's only permit, so the whole database stops answering. Box 395
+ * on 11.11 looked exactly like that: HTTP up, every database call hanging for
+ * 3 hours, the daemon idle. Preparing a statement is synchronous anyway, so
+ * the cache needs no pending state at all.
+ */
+export class StatementCache<S> {
+  private readonly entries = new Map<
+    string,
+    { readonly statement: S; readonly expiresAt: number }
+  >();
+
+  private readonly capacity: number;
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+
+  constructor(capacity: number, ttlMs: number, now: () => number = Date.now) {
+    this.capacity = capacity;
+    this.ttlMs = ttlMs;
+    this.now = now;
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /** The cached statement for `sql`, or a fresh one from `prepare` (which may throw). */
+  get(sql: string, prepare: (sql: string) => S): S {
+    const now = this.now();
+    const cached = this.entries.get(sql);
+    if (cached !== undefined) {
+      this.entries.delete(sql);
+      if (cached.expiresAt > now) {
+        this.entries.set(sql, cached);
+        return cached.statement;
+      }
+    }
+    const statement = prepare(sql);
+    this.entries.set(sql, { statement, expiresAt: now + this.ttlMs });
+    while (this.entries.size > this.capacity) {
+      const oldest = this.entries.keys().next();
+      if (oldest.done === true) break;
+      this.entries.delete(oldest.value);
+    }
+    return statement;
+  }
+}
+
+/**
+ * The connection's one lock: a transaction holds it from BEGIN to COMMIT, a
+ * plain statement waits until no transaction holds it (it would otherwise
+ * run inside someone else's transaction).
+ *
+ * It replaces `effect/Semaphore` (4.0.0-beta.59), whose `take` counts the
+ * permit as taken one step before the caller can register its release: a
+ * fiber suspended right there (the scheduler yields every 2048 steps) and
+ * then interrupted — a timeout, a closed request — leaves the permit taken
+ * forever, and every database call after it waits. The regression test in
+ * NodeSqliteClient.test.ts wedges the old client that way in a few hundred
+ * interrupted queries. Here a waiter's ticket is registered for release
+ * before it starts waiting, so an interruption at any point gives the lock
+ * back (or passes it on).
+ */
+export class ConnectionLock {
+  private holder: object | null = null;
+  private readonly queue: Array<{ readonly ticket: object; readonly wake: () => void }> = [];
+
+  get held(): boolean {
+    return this.holder !== null;
+  }
+
+  get waiting(): number {
+    return this.queue.length;
+  }
+
+  /** A ticket: holds the lock at once when it is free, else waits in line. */
+  private enqueue(): { readonly ticket: object; readonly wait: Effect.Effect<void> } {
+    const ticket = {};
+    if (this.holder === null) {
+      this.holder = ticket;
+      return { ticket, wait: Effect.void };
+    }
+    const wait = Effect.callback<void>((resume) => {
+      if (this.holder === ticket) return resume(Effect.void);
+      this.queue.push({ ticket, wake: () => resume(Effect.void) });
+    });
+    return { ticket, wait };
+  }
+
+  /** Gives the lock back (or to the next in line), or leaves the line. */
+  private done(ticket: object): void {
+    const queued = this.queue.findIndex((entry) => entry.ticket === ticket);
+    if (queued !== -1) this.queue.splice(queued, 1);
+    if (this.holder !== ticket) return;
+    const next = this.queue.shift();
+    this.holder = next?.ticket ?? null;
+    next?.wake();
+  }
+
+  /** Runs `self` holding the lock; the wait for it can be interrupted. */
+  withLock<A, E, R>(self: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> {
+    return Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        const { ticket, wait } = this.enqueue();
+        return Effect.ensuring(
+          Effect.flatMap(restore(wait), () => restore(self)),
+          Effect.sync(() => this.done(ticket)),
+        );
+      }),
+    );
+  }
+
+  /**
+   * Takes the lock until `scope` closes. The release is added to the scope
+   * before the wait starts.
+   */
+  acquireFor(
+    scope: Scope.Scope,
+    restore: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>,
+  ): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const { ticket, wait } = this.enqueue();
+      return Effect.flatMap(
+        Scope.addFinalizer(
+          scope,
+          Effect.sync(() => this.done(ticket)),
+        ),
+        () => restore(wait),
+      );
+    });
+  }
+}
+
 const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
   options: SqliteClientConfig,
   openDatabase: () => DatabaseSync,
@@ -169,18 +308,10 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
       return value;
     };
 
-    const prepareCache = yield* Cache.make({
-      capacity: options.prepareCacheSize ?? 200,
-      timeToLive: options.prepareCacheTTL ?? Duration.minutes(10),
-      lookup: (sql: string) =>
-        Effect.try({
-          try: () => db.prepare(sql),
-          catch: (cause) =>
-            new SqlError({
-              reason: classifyError(cause, "Failed to prepare statement", "prepare"),
-            }),
-        }),
-    });
+    const prepareCache = new StatementCache<StatementSync>(
+      options.prepareCacheSize ?? 200,
+      Duration.toMillis(Duration.fromInputUnsafe(options.prepareCacheTTL ?? Duration.minutes(10))),
+    );
 
     const runStatement = (statement: StatementSync, params: ReadonlyArray<unknown>, raw: boolean) =>
       Effect.withFiber<ReadonlyArray<any>, SqlError>((fiber) => {
@@ -213,8 +344,17 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
           }),
       });
 
+    const prepareCached = (sql: string) =>
+      Effect.try({
+        try: () => prepareCache.get(sql, (text) => db.prepare(text)),
+        catch: (cause) =>
+          new SqlError({
+            reason: classifyError(cause, "Failed to prepare statement", "prepare"),
+          }),
+      });
+
     const statementFor = (sql: string, params: ReadonlyArray<unknown>) =>
-      hasLargeBinding(params) ? prepareUncached(sql) : Cache.get(prepareCache, sql);
+      hasLargeBinding(params) ? prepareUncached(sql) : prepareCached(sql);
 
     const run = (sql: string, params: ReadonlyArray<unknown>, raw = false) =>
       Effect.flatMap(statementFor(sql, params), (s) => runStatement(s, params, raw));
@@ -269,17 +409,14 @@ const makeWithDatabase = Effect.fn("makeWithDatabase")(function* (
     });
   });
 
-  const semaphore = yield* Semaphore.make(1);
+  const lock = new ConnectionLock();
   const connection = yield* makeConnection;
 
-  const acquirer = semaphore.withPermits(1)(Effect.succeed(connection));
+  const acquirer = lock.withLock(Effect.succeed(connection));
   const transactionAcquirer = Effect.uninterruptibleMask((restore) => {
     const fiber = Fiber.getCurrent()!;
     const scope = Context.getUnsafe(fiber.context, Scope.Scope);
-    return Effect.as(
-      Effect.tap(restore(semaphore.take(1)), () => Scope.addFinalizer(scope, semaphore.release(1))),
-      connection,
-    );
+    return Effect.as(lock.acquireFor(scope, restore), connection);
   });
 
   return yield* Client.make({
