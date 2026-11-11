@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.187 — 2026-11-11
+
+- An assistant you created now starts with its own notes, its profile and your projects in front of it, the same as Uno. Before, only Uno had them: an assistant with a name of its own had to open its notes itself, and could send a client's letter to the wrong computer.
+- After this update such an assistant's conversation starts again once, with the recent messages carried over. The same happens when its instructions change, as it already does for Uno.
+
 ## v0.0.186 — 2026-11-10
 
 - Your assistant knows your projects. It sees every project on its computer with its folder, so a task, a client's ticket or a forwarded letter about a project goes to a chat in that project, with the project's own instructions. Before, a new assistant could answer "this isn't for me".
