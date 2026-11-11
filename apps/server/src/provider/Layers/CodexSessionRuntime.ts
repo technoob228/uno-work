@@ -53,6 +53,10 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
 ];
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
+  // Codex CLI 0.15x: a chat whose rollout file was never written (or is gone)
+  // answers thread/resume with "no rollout found for thread id …". Without
+  // this every turn in that chat failed as "The agent didn't start".
+  "no rollout found",
   "missing thread",
   "no such thread",
   "unknown thread",
