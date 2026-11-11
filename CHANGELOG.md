@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.188 — 2026-11-11
+
+- An assistant on its own Telegram bot now wakes its computer when you write to it, the same as Uno's bot. Before, a computer in economy mode that had fallen asleep didn't hear the message, and the assistant only answered once something else woke the computer.
+- While the computer wakes up, the bot says "Waking up — the answer will come here in a moment." in a chat the assistant already talks to. The answer comes in the same chat.
+
 ## v0.0.187 — 2026-11-11
 
 - An assistant you created now starts with its own notes, its profile and your projects in front of it, the same as Uno. Before, only Uno had them: an assistant with a name of its own had to open its notes itself, and could send a client's letter to the wrong computer.
