@@ -36,9 +36,17 @@ async function makeMockHermes() {
   const dir = await mkdtemp(path.join(os.tmpdir(), "hermes-acp-mock-"));
   const wrapperPath = path.join(dir, "hermes");
   // PATH: the driver never re-merges the daemon env into the harness's.
+  // environment-hint.txt: what Hermes' embedder slot got for this session
+  // (the env wins over config.yaml, so this is what the model would see).
   await writeFile(
     wrapperPath,
-    `#!/bin/sh\nexport PATH=${JSON.stringify(process.env.PATH ?? "")}\nexec bun ${JSON.stringify(mockAgentPath)} "$@"\n`,
+    [
+      "#!/bin/sh",
+      `export PATH=${JSON.stringify(process.env.PATH ?? "")}`,
+      'if [ -d "$HERMES_HOME" ]; then printf \'%s\' "$HERMES_ENVIRONMENT_HINT" > "$HERMES_HOME/environment-hint.txt"; fi',
+      `exec bun ${JSON.stringify(mockAgentPath)} "$@"`,
+      "",
+    ].join("\n"),
     "utf8",
   );
   await chmod(wrapperPath, 0o755);
@@ -523,6 +531,15 @@ const PROJECTS_BLOCK = [
   "- uno-project · ~/projects/uno-project — UNO: hosting, client servers and their tickets. [its instructions: CLAUDE.md]",
 ].join("\n");
 
+const UNO_WORK_BRIEF = "# You are working inside Uno Work";
+
+/** What Hermes' embedder slot got when this thread's session started. */
+const environmentHintOf = (threadId: string) =>
+  readFile(
+    path.join(assistantProjectsState.hermesHome, "threads", threadId, "environment-hint.txt"),
+    "utf8",
+  );
+
 /** What `session/prompt` carried, in order (the mock agent's request log). */
 async function promptTexts(logPath: string): Promise<ReadonlyArray<string>> {
   const raw = await readFile(logPath, "utf8").catch(() => "");
@@ -559,6 +576,8 @@ const assistantProjectsLayer = it.layer(
           environment: {
             HERMES_HOME: mock.hermesHome,
             T3_ACP_REQUEST_LOG_PATH: assistantProjectsState.log,
+            // What the driver always puts there (HermesDriver.ts).
+            HERMES_ENVIRONMENT_HINT: UNO_WORK_BRIEF,
           },
           assistantProjects: () => Effect.sync(() => assistantProjectsState.block),
         },
@@ -610,8 +629,15 @@ assistantProjectsLayer("an assistant's projects reach its session", (it) => {
         assert.include(config, "environment_hint");
         assert.include(config, "Your projects");
         assert.include(config, "~/projects/uno-project");
-        const cursor = session.resumeCursor as { projectsStamp?: string };
+        // The env wins over the config in Hermes: a named assistant keeps
+        // the Uno Work brief and gets its own files and projects after it.
+        const hint = yield* Effect.promise(() => environmentHintOf(threadId));
+        assert.isTrue(hint.startsWith(UNO_WORK_BRIEF));
+        assert.include(hint, "Ты Купер, помощник Миши.");
+        assert.include(hint, "- uno-project · ~/projects/uno-project — UNO");
+        const cursor = session.resumeCursor as { projectsStamp?: string; promptStamp?: string };
         assert.isString(cursor.projectsStamp);
+        assert.isString(cursor.promptStamp);
 
         // The list is in the prompt already: the message goes as it is.
         yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
@@ -633,7 +659,7 @@ assistantProjectsLayer("an assistant's projects reach its session", (it) => {
   );
 
   it.effect(
-    "a session from before the list (Cooper's, 10.11) comes back and gets it with the first message",
+    "a session from before its files reached the prompt (Cooper's, 10.11) starts fresh, with them",
     () =>
       Effect.gen(function* () {
         const adapter = yield* HermesAdapter;
@@ -641,32 +667,84 @@ assistantProjectsLayer("an assistant's projects reach its session", (it) => {
         const threadId = ThreadId.make("chief-old");
         assistantProjectsState.block = PROJECTS_BLOCK;
 
-        // Hermes froze that session's system prompt when it was created: the
-        // new config.yaml does not reach it. Its cursor has no stamp.
+        // Hermes froze that session's system prompt when it was created, and
+        // a named assistant's own files were never in it. Its cursor has no
+        // stamp: resuming it would keep the assistant blind.
         const session = yield* adapter.startSession({
           threadId,
           provider: ProviderDriverKind.make("hermes"),
           cwd,
           runtimeMode: "full-access",
-          resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
+          resumeCursor: { schemaVersion: 1, sessionId: "session-of-10-11" },
         });
-        const cursor = session.resumeCursor as { sessionId: string; projectsStamp?: string };
-        assert.strictEqual(cursor.sessionId, "mock-session-1");
-        // Still "built without the list": the next restart says it again.
-        assert.isUndefined(cursor.projectsStamp);
+        const cursor = session.resumeCursor as {
+          sessionId: string;
+          promptStamp?: string;
+          projectsStamp?: string;
+        };
+        assert.notStrictEqual(cursor.sessionId, "session-of-10-11");
+        assert.isString(cursor.promptStamp);
+        assert.isString(cursor.projectsStamp);
+        const hint = yield* Effect.promise(() => environmentHintOf(threadId));
+        assert.include(hint, "- uno-project · ~/projects/uno-project — UNO");
 
+        // The list is in the new prompt: no second copy with the message.
         yield* adapter.sendTurn({
           threadId,
           input: "Сервер bright-falcon #1086: не могу войти по SSH",
           attachments: [],
         });
+        const prompts = (yield* Effect.promise(() =>
+          promptTexts(assistantProjectsState.log),
+        )).slice(-1);
+        assert.notInclude(prompts[0]!, "<Your projects>");
+        assert.isTrue(prompts[0]!.endsWith("Сервер bright-falcon #1086: не могу войти по SSH"));
+
+        yield* adapter.stopSession(threadId);
+      }),
+  );
+
+  it.effect(
+    "a session that comes back with another list gets the list of now with the first message",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* HermesAdapter;
+        const cwd = yield* Effect.promise(() => makeAssistantWorkspace());
+        const threadId = ThreadId.make("chief-back");
+        assistantProjectsState.block = PROJECTS_BLOCK;
+
+        const first = yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd,
+          runtimeMode: "full-access",
+        });
+        yield* adapter.stopSession(threadId);
+
+        // The daemon restarted; a project was added meanwhile. Same
+        // instructions → the same session, whose frozen prompt has the old list.
+        assistantProjectsState.block = `${PROJECTS_BLOCK}\n- site · ~/projects/site`;
+        const back = yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("hermes"),
+          cwd,
+          runtimeMode: "full-access",
+          resumeCursor: first.resumeCursor,
+        });
+        const before = first.resumeCursor as { sessionId: string; projectsStamp?: string };
+        const cursor = back.resumeCursor as { sessionId: string; projectsStamp?: string };
+        assert.strictEqual(cursor.sessionId, before.sessionId);
+        // Still "built with the old list": the next restart says it again.
+        assert.strictEqual(cursor.projectsStamp, before.projectsStamp);
+
+        yield* adapter.sendTurn({ threadId, input: "что по сайту?", attachments: [] });
         yield* adapter.sendTurn({ threadId, input: "ну что?", attachments: [] });
         const prompts = (yield* Effect.promise(() =>
           promptTexts(assistantProjectsState.log),
         )).slice(-2);
-        assert.include(prompts[0]!, "<Your projects>");
-        assert.include(prompts[0]!, "- uno-project · ~/projects/uno-project — UNO");
-        assert.isTrue(prompts[0]!.endsWith("Сервер bright-falcon #1086: не могу войти по SSH"));
+        assert.include(prompts[0]!, "[Your projects changed since this session started");
+        assert.include(prompts[0]!, "- site · ~/projects/site");
+        assert.isTrue(prompts[0]!.endsWith("что по сайту?"));
         assert.notInclude(prompts[1]!, "Your projects");
 
         yield* adapter.stopSession(threadId);

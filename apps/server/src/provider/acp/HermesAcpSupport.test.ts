@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
+  assistantPromptStamp,
   dispatcherPromptStamp,
+  hermesEnvironmentHint,
   resumableSessionId,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
@@ -505,5 +507,33 @@ describe("dispatcher session stamp", () => {
     expect(resumableSessionId({ sessionId: "s1", promptStamp: stamp }, stamp)).toBe("s1");
     expect(resumableSessionId({ sessionId: "s1" }, undefined)).toBe("s1");
     expect(resumableSessionId(undefined, stamp)).toBeUndefined();
+  });
+
+  it("a named assistant has a stamp of its own: its old sessions start fresh once", () => {
+    expect(assistantPromptStamp(v1)).not.toBe(assistantPromptStamp(v2));
+    expect(assistantPromptStamp(v2)).toBe(assistantPromptStamp(`${v2}\n\nmore`));
+    expect(assistantPromptStamp(v2)).not.toBe(dispatcherPromptStamp(v2));
+    // Cooper's cursor of 10.11 has no stamp.
+    expect(resumableSessionId({ sessionId: "s1" }, assistantPromptStamp(v2))).toBeUndefined();
+  });
+});
+
+describe("hermesEnvironmentHint", () => {
+  const brief = "# You are working inside Uno Work";
+  const own = "<Your projects>\n- uno-project · ~/projects/uno-project\n</Your projects>";
+
+  it("the Uno chat gets its own files instead of the brief", () => {
+    expect(hermesEnvironmentHint({ brief, own, dispatcherOnly: true })).toBe(own);
+    expect(hermesEnvironmentHint({ brief, own: undefined, dispatcherOnly: true })).toBe("");
+  });
+
+  it("a named assistant keeps the brief and gets its own files after it", () => {
+    expect(hermesEnvironmentHint({ brief, own, dispatcherOnly: false })).toBe(`${brief}\n\n${own}`);
+    expect(hermesEnvironmentHint({ brief: undefined, own, dispatcherOnly: false })).toBe(own);
+    expect(hermesEnvironmentHint({ brief: "  ", own, dispatcherOnly: false })).toBe(own);
+  });
+
+  it("a chat with nothing of its own leaves the env as the driver set it", () => {
+    expect(hermesEnvironmentHint({ brief, own: undefined, dispatcherOnly: false })).toBeUndefined();
   });
 });

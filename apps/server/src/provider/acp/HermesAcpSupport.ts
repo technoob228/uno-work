@@ -561,8 +561,54 @@ export function dispatcherPromptStamp(agentsMd: string): string {
 }
 
 /**
- * Resume a dispatcher session only when it was built as now (see
- * {@link dispatcherPromptStamp}); other sessions resume as before.
+ * What a named assistant's Hermes session was built with (Cooper, not the
+ * Uno chat). Its system prompt is frozen like the dispatcher's, and until
+ * 0.0.186 its own files never reached that prompt at all (see
+ * {@link hermesEnvironmentHint}): a session from before this stamp — or from
+ * other instructions — starts fresh, with the thread's recent conversation
+ * handed over. It keeps Hermes' own tools, so they are not part of the stamp.
+ */
+const HERMES_ASSISTANT_PROMPT_SHAPE = 1;
+
+export function assistantPromptStamp(agentsMd: string): string {
+  const version =
+    /<!-- uno-instructions: ([^>]+?) -->/.exec(agentsMd)?.[1] ??
+    `edited:${createHash("sha256").update(agentsMd).digest("hex").slice(0, 12)}`;
+  return createHash("sha256")
+    .update(JSON.stringify({ assistant: HERMES_ASSISTANT_PROMPT_SHAPE, version }))
+    .digest("hex")
+    .slice(0, 16);
+}
+
+/**
+ * What Hermes' one embedder slot carries for a session: the process env
+ * HERMES_ENVIRONMENT_HINT. The env wins over config.yaml's
+ * `agent.environment_hint`, and the driver always fills it with the Uno Work
+ * brief — so a block written only to the config never reaches the model.
+ * That is how a named assistant ran without its profile, notes and projects
+ * (Cooper, 11.11) while the Uno chat had them.
+ *
+ * - the Uno chat (a dispatcher) hands work off: its own files instead of the
+ *   brief, which is for the chats that do the work;
+ * - any other session with a block of its own (a named assistant's files, a
+ *   project on the person's computer): the brief, then the block;
+ * - no block: undefined — the env stays as the driver set it.
+ */
+export function hermesEnvironmentHint(input: {
+  readonly brief: string | undefined;
+  readonly own: string | undefined;
+  readonly dispatcherOnly: boolean;
+}): string | undefined {
+  if (input.dispatcherOnly) return input.own ?? "";
+  if (input.own === undefined) return undefined;
+  const brief = input.brief?.trim() ?? "";
+  return brief.length > 0 ? `${brief}\n\n${input.own}` : input.own;
+}
+
+/**
+ * Resume an assistant's session only when it was built as now (see
+ * {@link dispatcherPromptStamp}, {@link assistantPromptStamp}); other
+ * sessions resume as before.
  */
 export function resumableSessionId(
   cursor: { readonly sessionId: string; readonly promptStamp?: string } | undefined,

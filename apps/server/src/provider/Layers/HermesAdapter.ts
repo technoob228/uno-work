@@ -82,7 +82,9 @@ import {
   buildHermesConfigYaml,
   HERMES_APPROVAL_TIMEOUT_SECONDS,
   HERMES_DISPATCHER_COMPRESSION,
+  assistantPromptStamp,
   dispatcherPromptStamp,
+  hermesEnvironmentHint,
   resumableSessionId,
   HERMES_DISPATCHER_DISABLED_TOOLSETS,
   HERMES_DISPATCHER_MCP_TOOLS,
@@ -770,24 +772,33 @@ export function makeHermesAdapter(
           // assistants keep Hermes' tools.
           const dispatcherOnly =
             inAssistantWorkspace && (yield* readMarkerProjectId(cwd)) === ASSISTANT_PROJECT_ID;
+          // Any assistant's session is resumed only when built as now: its
+          // system prompt is frozen, so other instructions (or a prompt from
+          // before its own files reached it) mean a fresh session.
+          const assistantAgentsMd = inAssistantWorkspace
+            ? yield* fileSystem
+                .readFileString(nodePath.join(cwd, "AGENTS.md"))
+                .pipe(Effect.orElseSucceed(() => ""))
+            : "";
           const promptStamp = dispatcherOnly
-            ? dispatcherPromptStamp(
-                yield* fileSystem
-                  .readFileString(nodePath.join(cwd, "AGENTS.md"))
-                  .pipe(Effect.orElseSucceed(() => "")),
-              )
-            : undefined;
+            ? dispatcherPromptStamp(assistantAgentsMd)
+            : inAssistantWorkspace
+              ? assistantPromptStamp(assistantAgentsMd)
+              : undefined;
           const resumeSessionId = resumableSessionId(resumeCursor, promptStamp);
           if (resumeCursor !== undefined && resumeSessionId === undefined) {
             yield* Effect.logInfo(
-              "hermes: the Uno chat's instructions or tools changed — a fresh session",
-              { threadId: input.threadId },
+              "hermes: the assistant's instructions or tools changed — a fresh session",
+              { threadId: input.threadId, dispatcherOnly },
             );
           }
           const hermesProvider = hermesProviderIdOf(llmRoute);
           const workspace = input.computerWorkspace
             ? hermesWorkspaceOptions(input.computerWorkspace)
             : null;
+          // This session's own block for the system prompt: an assistant's
+          // files and projects, a project on the person's computer.
+          const ownHint = joinNotes(assistantContext?.hint, workspace?.note);
           yield* fileSystem.makeDirectory(threadHermesHome, { recursive: true }).pipe(
             Effect.andThen(
               fileSystem.writeFileString(
@@ -809,9 +820,7 @@ export function makeHermesAdapter(
                     }),
                   },
                   skillsExternalDirs: [sharedSkillsRoot()],
-                  ...(joinNotes(assistantContext?.hint, workspace?.note) !== undefined
-                    ? { environmentHint: joinNotes(assistantContext?.hint, workspace?.note)! }
-                    : {}),
+                  ...(ownHint !== undefined ? { environmentHint: ownHint } : {}),
                   // The project is on the person's computer: Hermes' own
                   // terminal and files off, uno-work's workspace_* tools there.
                   ...(workspace && !dispatcherOnly
@@ -897,17 +906,26 @@ export function makeHermesAdapter(
             ...options?.environment,
             ...options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }),
           };
+          const environmentHintEnv = hermesEnvironmentHint({
+            brief: baseEnvironment.HERMES_ENVIRONMENT_HINT,
+            own: dispatcherOnly ? assistantContext?.hint : ownHint,
+            dispatcherOnly,
+          });
           const sessionEnvironment = {
             // The route wins over the static gateway env and the app label of
             // the bridge overlay: it already carries the right base URL (or,
             // on a subscription, takes the gateway key out).
             ...(llmRoute ? applyHermesLlmRoute(baseEnvironment, llmRoute) : baseEnvironment),
             HERMES_HOME: threadHermesHome,
+            // Hermes has one embedder slot and the env wins over config.yaml's
+            // `agent.environment_hint`: the session's own block rides in the
+            // env too, or it never reaches the model (hermesEnvironmentHint).
             // The dispatcher hands work off: the 14k-character Uno Work brief
-            // (apps, widgets, sites…) is for the chats that do it. Its own
-            // files go in instead — the env hint wins over config.yaml's
-            // `agent.environment_hint`, so that one never reached it.
-            ...(dispatcherOnly ? { HERMES_ENVIRONMENT_HINT: assistantContext?.hint ?? "" } : {}),
+            // (apps, widgets, sites…) is for the chats that do it, so its own
+            // files go in instead of the brief; others get both.
+            ...(environmentHintEnv !== undefined
+              ? { HERMES_ENVIRONMENT_HINT: environmentHintEnv }
+              : {}),
           };
           // A restricted assistant's chat: `hermes acp` in the sandbox with this
           // chat's home and the shared one it links into; on the person's
