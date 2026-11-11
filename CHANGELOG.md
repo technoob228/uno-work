@@ -12,6 +12,8 @@
 
 - An assistant on its own Telegram bot now wakes its computer when you write to it, the same as Uno's bot. Before, a computer in economy mode that had fallen asleep didn't hear the message, and the assistant only answered once something else woke the computer.
 - While the computer wakes up, the bot says "Waking up — the answer will come here in a moment." in a chat the assistant already talks to. The answer comes in the same chat.
+- Chat messages now always appear in the order you sent them, even after a failed reply, offline, or when your device clock is off.
+- Codex: a chat that could not continue its earlier session now starts a fresh one instead of failing with "The agent didn't start".
 
 ## v0.0.187 — 2026-11-11
 
