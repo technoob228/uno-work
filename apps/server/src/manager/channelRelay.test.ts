@@ -3,9 +3,11 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   isAssistantBotRelay,
   isRelayCredential,
+  ownBotRelay,
   parseRelayCredential,
   redactConnectorSecrets,
   relayCredential,
+  setOwnBotRelay,
   slackFileRequest,
   slackRelayApiBase,
   slackRelayEventsUrl,
@@ -58,6 +60,30 @@ describe("Telegram URLs", () => {
       `${CONSOLE}/api/v1/work-relay/telegram/file/bot${TGR}/photos/file_2.jpg`,
     );
   });
+
+  it("an own bot registered with the console talks to the mirror with its tgo_ token", () => {
+    const own = "123:own";
+    const tgo = "tgo_" + "ab".repeat(32);
+    setOwnBotRelay(own, tgo);
+    try {
+      expect(ownBotRelay(own)).toBe(tgo);
+      expect(telegramApiUrl(own, "getUpdates", CONSOLE)).toBe(
+        `${CONSOLE}/api/v1/work-relay/telegram/bot${tgo}/getUpdates`,
+      );
+      expect(telegramFileUrl(own, "voice/file_1.oga", CONSOLE)).toBe(
+        `${CONSOLE}/api/v1/work-relay/telegram/file/bot${tgo}/voice/file_1.oga`,
+      );
+      // Another own bot is not affected.
+      expect(telegramApiUrl("456:other", "getMe", CONSOLE)).toBe(
+        "https://api.telegram.org/bot456:other/getMe",
+      );
+    } finally {
+      setOwnBotRelay(own, null);
+    }
+    expect(telegramApiUrl(own, "getUpdates", CONSOLE)).toBe(
+      "https://api.telegram.org/bot123:own/getUpdates",
+    );
+  });
 });
 
 describe("Slack URLs", () => {
@@ -97,11 +123,13 @@ describe("redactConnectorSecrets", () => {
       `stored unorelay:${SLR}`,
       `bare ${SLR}`,
       `bare ${TGA}`,
+      `bare tgo_${"ef".repeat(32)}`,
     ].join("\n");
     const redacted = redactConnectorSecrets(text);
     expect(redacted).not.toContain(TGR);
     expect(redacted).not.toContain(SLR);
     expect(redacted).not.toContain(TGA);
+    expect(redacted).not.toContain("ef".repeat(32));
     expect(redacted).not.toContain("own-secret");
   });
 });

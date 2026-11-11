@@ -88,13 +88,48 @@ function telegramRelayBase(baseUrl: string): string {
   return `${baseUrl}/api/v1/work-relay/telegram`;
 }
 
+/**
+ * The person's own bot (a BotFather token) on a cloud computer talks through
+ * the console too (11.11): a computer in economy mode sleeps, and nothing
+ * inside a sleeping computer can long-poll Telegram. The console holds the
+ * bot's webhook, queues its updates, wakes the computer and serves them on
+ * the same Bot-API mirror with a `tgo_` relay token (`ownBotRelay.ts`
+ * registers it). The connector row keeps the real token — only the
+ * transport changes — so the mapping real token → relay token lives here,
+ * in this process, and every Bot-API URL below follows it.
+ */
+export const OWN_BOT_RELAY_PREFIX = "tgo_";
+
+const ownBotRelays = new Map<string, string>();
+
+/** Point an own bot at its console relay (`null`: back to api.telegram.org). */
+export function setOwnBotRelay(botToken: string, relayToken: string | null): void {
+  if (relayToken === null) ownBotRelays.delete(botToken);
+  else ownBotRelays.set(botToken, relayToken);
+}
+
+/** The relay token an own bot currently talks through, or null (direct). */
+export function ownBotRelay(botToken: string): string | null {
+  return ownBotRelays.get(botToken) ?? null;
+}
+
+/** Own bot tokens that talk through the console right now. */
+export function ownBotRelayTokens(): ReadonlyArray<string> {
+  return [...ownBotRelays.keys()];
+}
+
+/** The relay a Bot-API call goes through: Uno's bot, an own bot's relay, or none. */
+function telegramRelayOf(botToken: string): string | null {
+  return parseRelayCredential(botToken) ?? ownBotRelay(botToken);
+}
+
 /** Bot-API method URL for a connector credential (own bot or relay). */
 export function telegramApiUrl(
   botToken: string,
   method: string,
   baseUrl: string = controlPlaneBaseUrl(),
 ): string {
-  const relay = parseRelayCredential(botToken);
+  const relay = telegramRelayOf(botToken);
   return relay === null
     ? `${TELEGRAM_API_BASE}/bot${botToken}/${method}`
     : `${telegramRelayBase(baseUrl)}/bot${relay}/${method}`;
@@ -106,7 +141,7 @@ export function telegramFileUrl(
   filePath: string,
   baseUrl: string = controlPlaneBaseUrl(),
 ): string {
-  const relay = parseRelayCredential(botToken);
+  const relay = telegramRelayOf(botToken);
   return relay === null
     ? `${TELEGRAM_API_BASE}/file/bot${botToken}/${filePath}`
     : `${telegramRelayBase(baseUrl)}/file/bot${relay}/${filePath}`;
@@ -121,7 +156,7 @@ export function redactConnectorSecrets(text: string): string {
     .replace(/\/bot[^/\s?]+/g, "/bot<redacted>")
     .replace(/\/work-relay\/slack\/[^/\s?]+/g, "/work-relay/slack/<redacted>")
     .replace(/unorelay:[^\s"']+/g, "unorelay:<redacted>")
-    .replace(/\b(tgr|tga|slr)_[0-9a-fA-F]{8,}\b/g, "$1_<redacted>");
+    .replace(/\b(tgr|tga|tgo|slr)_[0-9a-fA-F]{8,}\b/g, "$1_<redacted>");
 }
 
 function slackRelayBase(relayToken: string, baseUrl: string): string {

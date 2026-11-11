@@ -199,12 +199,16 @@ import {
   isAssistantBotRelay,
   isRelayCredential,
   isRouteCredential,
+  ownBotRelay,
+  ownBotRelayTokens,
   parseRouteCredential,
   redactConnectorSecrets,
   RELAY_CREDENTIAL_PREFIX,
   telegramApiUrl,
   telegramFileUrl,
 } from "../channelRelay.ts";
+import * as OwnBotRelay from "../ownBotRelay.ts";
+import { readWorkMachineIdentity } from "../workConsole.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
 import type { PersonCard } from "@t3tools/shared/personCard";
@@ -551,6 +555,12 @@ interface BotRuntime {
    * rebuilt for it. Null until the connector is first seen in this process.
    */
   botToken: string | null;
+  /**
+   * `credentialFingerprint` the runtime (and the persisted offset) belong to.
+   * An own bot that switches between api.telegram.org and the console relay
+   * keeps its token but changes stream — and this — so the runtime is rebuilt.
+   */
+  fingerprint: string | null;
   /** In-memory mirror of the persisted `getUpdates` offset. */
   offset: number;
   botUsername: string | null;
@@ -561,6 +571,7 @@ interface BotRuntime {
 
 const INITIAL_BOT_RUNTIME: BotRuntime = {
   botToken: null,
+  fingerprint: null,
   offset: 0,
   botUsername: null,
   lastError: null,
@@ -568,8 +579,9 @@ const INITIAL_BOT_RUNTIME: BotRuntime = {
   lastOkPersistedAtMs: 0,
 };
 
-// Own bot → api.telegram.org; `unorelay:<tgr>` → the console's Bot-API
-// mirror (channelRelay.ts). Every Bot-API URL of this connector goes here.
+// Own bot → api.telegram.org, or the console's Bot-API mirror once the own
+// bot is registered there (ownBotRelay.ts); `unorelay:<tgr>` → the mirror
+// (channelRelay.ts). Every Bot-API URL of this connector goes here.
 const telegramApi = telegramApiUrl;
 
 /** Ошибка Telegram Bot API / файловой системы — только сообщение, поллер её логирует. */
@@ -629,13 +641,30 @@ const isTelegramParseError = (description: string | undefined): boolean =>
  * token rotates (every "Connect with Uno's bot" mints a new one) while the
  * relay queue — and its update ids — stays the same, so all relay tokens
  * share one fingerprint: rotation must not replay or drop the queue.
+ *
+ * An own bot has two streams: Telegram's own (update ids of the bot) and the
+ * console relay's queue (row ids) once it goes through Uno. A Telegram offset
+ * must never ack the queue and back, so the relay stream has its own
+ * fingerprint — stable across relay-token rotations and restarts.
  */
 export const credentialFingerprint = (botToken: string): string =>
   crypto
     .createHash("sha256")
-    .update(isRelayCredential(botToken) ? RELAY_CREDENTIAL_PREFIX : botToken)
+    .update(
+      isRelayCredential(botToken)
+        ? RELAY_CREDENTIAL_PREFIX
+        : ownBotRelay(botToken) !== null
+          ? ownRelayStreamKey(botToken)
+          : botToken,
+    )
     .digest("hex")
     .slice(0, 16);
+
+const ownRelayStreamKey = (botToken: string): string => `unoown:${botToken}`;
+
+/** The fingerprint an own bot's state carries while it goes through the console. */
+export const ownRelayFingerprint = (botToken: string): string =>
+  crypto.createHash("sha256").update(ownRelayStreamKey(botToken)).digest("hex").slice(0, 16);
 
 /** Registering a relay link code with the console failed; the link would not work. */
 export class TelegramPairingError extends Data.TaggedError("TelegramPairingError")<{
@@ -3617,6 +3646,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       yield* updateRuntime(projectId, {
         ...INITIAL_BOT_RUNTIME,
         botToken: config.botToken,
+        fingerprint,
         offset: sameCredential ? existing.value.offset : 0,
         health: {
           ...INITIAL_CONNECTOR_HEALTH,
@@ -3634,10 +3664,134 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
     });
 
+  const machineIdentity = serverSettingsService.getSettings.pipe(
+    Effect.map((settings) => readWorkMachineIdentity(settings.uno)),
+    Effect.orElseSucceed(() => null),
+  );
+
+  /**
+   * An own bot on a cloud computer goes through the console (11.11), so a
+   * sleeping computer wakes when someone writes to it. Before the switch,
+   * one direct `getUpdates` with the current offset confirms to Telegram
+   * what was already handled — otherwise Telegram would hand the last batch
+   * to the console's webhook again and the assistant would answer it twice.
+   * If that call brings anything new, the normal poll takes it and the
+   * switch waits for a quiet cycle.
+   */
+  const switchOwnBotIfDue = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    runtime: BotRuntime,
+  ) =>
+    Effect.gen(function* () {
+      const token = config.botToken;
+      const nowMs = Date.now();
+      if (
+        !OwnBotRelay.isOwnBotToken(token) ||
+        ownBotRelay(token) !== null ||
+        !OwnBotRelay.attemptDue(token, nowMs)
+      ) {
+        return;
+      }
+      const identity = yield* machineIdentity;
+      if (identity === null) {
+        // A laptop or a BYO machine: Telegram directly, as always.
+        OwnBotRelay.defer(token, nowMs, OwnBotRelay.OWN_BOT_RETRY_WHEN_OFF_MS);
+        return;
+      }
+      const state = yield* connectorRepository
+        .getState(connectorKey(projectId))
+        .pipe(Effect.orElseSucceed(() => Option.none()));
+      const persisted = Option.isSome(state) ? state.value : null;
+      // On the relay before a restart: the console holds the webhook, there
+      // is nothing to confirm to Telegram (and a direct call would get 409).
+      const wasOnRelay = persisted?.credentialFingerprint === ownRelayFingerprint(token);
+      if (!wasOnRelay) {
+        // First sighting in this process: the runtime starts on Telegram's
+        // stream first and replays what a previous run received but never
+        // settled — the switch resets that state. Next cycle.
+        if (runtime.botToken !== token) return;
+        const confirm = yield* fetchJson(
+          telegramApi(token, "getUpdates") +
+            `?timeout=0&limit=1&offset=${runtime.offset}&allowed_updates=${encodeURIComponent(JSON.stringify(TELEGRAM_ALLOWED_UPDATES))}`,
+        ).pipe(Effect.orElseSucceed(() => null));
+        if (confirm === null) return; // network: the normal poll reports it
+        if (confirm.ok === true) {
+          // Something new: the normal poll takes it, the switch waits.
+          if (Array.isArray(confirm.result) && confirm.result.length > 0) return;
+        } else if (!OwnBotRelay.isWebhookConflict(confirm.error_code, confirm.description)) {
+          // A bad token or another poller: the normal poll reports it.
+          OwnBotRelay.defer(token, nowMs, OwnBotRelay.OWN_BOT_RETRY_AFTER_ERROR_MS);
+          return;
+        }
+      }
+      const outcome = yield* OwnBotRelay.register({
+        identity,
+        botToken: token,
+        allowedUpdates: TELEGRAM_ALLOWED_UPDATES,
+        nowMs,
+      });
+      if (outcome.kind === "registered") {
+        yield* Effect.logInfo("telegram own bot goes through Uno now").pipe(
+          Effect.annotateLogs({ projectId, botUsername: outcome.botUsername }),
+        );
+      } else {
+        yield* Effect.logInfo("telegram own bot stays on api.telegram.org").pipe(
+          Effect.annotateLogs({ projectId, outcome }),
+        );
+      }
+    });
+
+  /**
+   * After a failed Bot-API answer: the relay this bot talked through is gone
+   * (401 from the console's mirror — moved to another computer or dropped),
+   * or Telegram refuses a direct poll because a webhook holds the bot (409 —
+   * ours, left from before a restart or a turned-off rollout). Returns true
+   * when the transport changed or a fix was asked for.
+   */
+  const healOwnBotTransport = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    answer: { readonly error_code?: number | undefined; readonly description?: string | undefined },
+  ) =>
+    Effect.gen(function* () {
+      const token = config.botToken;
+      if (!OwnBotRelay.isOwnBotToken(token)) return false;
+      const nowMs = Date.now();
+      if (ownBotRelay(token) !== null) {
+        if (answer.error_code !== 401) return false;
+        OwnBotRelay.dropRelay(token, nowMs);
+        yield* Effect.logWarning("telegram own bot relay is gone; back to api.telegram.org").pipe(
+          Effect.annotateLogs({ projectId }),
+        );
+        return true;
+      }
+      if (!OwnBotRelay.isWebhookConflict(answer.error_code, answer.description)) return false;
+      const identity = yield* machineIdentity;
+      if (identity === null) return false;
+      // A webhook we may own blocks the direct poll: re-register (it is this
+      // computer's bot) — or, if Uno doesn't take own bots now, let it go.
+      if (OwnBotRelay.attemptDue(token, nowMs)) {
+        const outcome = yield* OwnBotRelay.register({
+          identity,
+          botToken: token,
+          allowedUpdates: TELEGRAM_ALLOWED_UPDATES,
+          nowMs,
+        });
+        if (outcome.kind === "registered") return true;
+      }
+      if (!OwnBotRelay.lastAnsweredOff(token)) return false;
+      return yield* OwnBotRelay.releaseBlockingWebhook({ identity, botToken: token, nowMs });
+    });
+
   const pollConnector = (projectId: ProjectId, config: ManagerTelegramConnectorConfig) =>
     Effect.gen(function* () {
       let runtime = yield* getRuntime(projectId);
-      if (runtime.botToken !== config.botToken) {
+      yield* switchOwnBotIfDue(projectId, config, runtime);
+      if (
+        runtime.botToken !== config.botToken ||
+        runtime.fingerprint !== credentialFingerprint(config.botToken)
+      ) {
         yield* initializeRuntime(projectId, config);
         runtime = yield* getRuntime(projectId);
       }
@@ -3648,6 +3802,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (runtime.botUsername === null) {
         const me = yield* fetchJson(telegramApi(config.botToken, "getMe"));
         if (me.ok !== true) {
+          if (yield* healOwnBotTransport(projectId, config, me)) return;
           yield* recordPollFailure(
             projectId,
             classifyTelegramApiError({
@@ -3670,6 +3825,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         { signal: longPollSignal((POLL_TIMEOUT_SECONDS + 15) * 1000) },
       );
       if (response.ok !== true) {
+        if (yield* healOwnBotTransport(projectId, config, response)) return;
         yield* recordPollFailure(
           projectId,
           classifyTelegramApiError({
@@ -3784,6 +3940,46 @@ const makeTelegramConnector = Effect.gen(function* () {
     ),
   );
 
+  // An own bot that went through the console and is no longer polled here
+  // (assistant disconnected, bot swapped, moved to another computer): let the
+  // console drop its webhook, or it keeps queueing — and waking this
+  // computer — for nobody. Once per start also the bots the console still
+  // routes here from before a restart (this process's map starts empty).
+  const ownBotsCheckedAfterStartRef = yield* Ref.make(false);
+  const releaseOwnBotsNotInUse = (polledTokens: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const polled = new Set(polledTokens);
+      const gone = ownBotRelayTokens().filter((token) => !polled.has(token));
+      const checkedAfterStart = yield* Ref.get(ownBotsCheckedAfterStartRef);
+      if (gone.length === 0 && checkedAfterStart) return;
+      const identity = yield* machineIdentity;
+      if (identity === null) {
+        yield* Ref.set(ownBotsCheckedAfterStartRef, true);
+        return;
+      }
+      for (const token of gone) {
+        const released = yield* OwnBotRelay.release({ identity, botToken: token });
+        yield* Effect.logInfo("telegram own bot released from Uno's relay").pipe(
+          Effect.annotateLogs({ botId: OwnBotRelay.ownBotIdOf(token), released }),
+        );
+      }
+      if (!checkedAfterStart) {
+        yield* Ref.set(ownBotsCheckedAfterStartRef, true);
+        const keep = new Set(
+          polledTokens.flatMap((token) => {
+            const id = OwnBotRelay.isOwnBotToken(token) ? OwnBotRelay.ownBotIdOf(token) : null;
+            return id === null ? [] : [id];
+          }),
+        );
+        const released = yield* OwnBotRelay.releaseUnused({ identity, keepBotIds: keep });
+        if (released.length > 0) {
+          yield* Effect.logInfo("telegram own bots no assistant here uses were released").pipe(
+            Effect.annotateLogs({ botIds: released }),
+          );
+        }
+      }
+    });
+
   const pollCycle = Effect.gen(function* () {
     yield* migratePersonalChatsOnce;
     const records = yield* connectorRepository
@@ -3798,6 +3994,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         ? [{ projectId: record.projectId, config: decoded.value }]
         : [];
     });
+    yield* releaseOwnBotsNotInUse(enabled.map(({ config }) => config.botToken));
     if (enabled.length === 0) {
       yield* Effect.sleep(IDLE_RECHECK);
       return;
