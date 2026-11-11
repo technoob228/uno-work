@@ -1506,13 +1506,25 @@ export function hasToolActivityForTurn(
 /** The assistant's "nothing to tell" is a word for Uno, not for the person. */
 export const NO_REPLY_TEXT = "Nothing to tell you this time.";
 
+const byTimelineTime = (a: TimelineEntry, b: TimelineEntry) =>
+  a.createdAt.localeCompare(b.createdAt);
+
+/**
+ * The feed in the order the chat's computer saw things: its rows carry its
+ * clock (the server stamps a person's message when it arrives, 11.11).
+ * `pendingMessages` — sent from here, not on the computer yet (a send on its
+ * way, the outbox) — go last, in the order written: the computer stamps them
+ * when they arrive, after everything already shown, so a bubble neither sits
+ * among replies it never saw nor jumps when its server copy comes.
+ */
 export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
   pageEntries: ReadonlyArray<TimelineEntry> = [],
+  pendingMessages: ReadonlyArray<ChatMessage> = [],
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages.map((message) => ({
+  const toMessageRow = (message: ChatMessage): TimelineEntry => ({
     id: message.id,
     kind: "message",
     createdAt: message.createdAt,
@@ -1520,7 +1532,8 @@ export function deriveTimelineEntries(
       message.role === "assistant" && !message.streaming && isAssistantNoReply(message.text)
         ? { ...message, text: NO_REPLY_TEXT }
         : message,
-  }));
+  });
+  const messageRows = messages.map(toMessageRow);
   const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
     id: proposedPlan.id,
     kind: "proposed-plan",
@@ -1533,9 +1546,11 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows, ...pageEntries].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
+  const rows = [...messageRows, ...proposedPlanRows, ...workRows, ...pageEntries].toSorted(
+    byTimelineTime,
   );
+  if (pendingMessages.length === 0) return rows;
+  return [...rows, ...pendingMessages.map(toMessageRow).toSorted(byTimelineTime)];
 }
 
 export function deriveCompletionDividerBeforeEntryId(
