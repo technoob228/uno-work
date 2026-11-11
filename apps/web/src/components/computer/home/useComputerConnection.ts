@@ -9,13 +9,20 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
+import { describeRestartError, restartComputer } from "../../../account/accountOverview";
+import { accountTransport } from "../../../account/unoAccount";
 import { isElectron } from "../../../env";
 import { usePrimaryEnvironmentId } from "../../../environments/primary/context";
-import { useSavedEnvironmentRuntimeStore } from "../../../environments/runtime";
+import {
+  useSavedEnvironmentRegistryStore,
+  useSavedEnvironmentRuntimeStore,
+} from "../../../environments/runtime";
+import { healSavedEnvironment } from "../../../environments/runtime/selfHeal";
 import { useReconnectEnvironment } from "../../../hooks/useReconnectEnvironment";
 import { isEconomyGateHeld, subscribeEconomyGate } from "../../../rpc/economyGate";
 import { useWsConnectionStatus } from "../../../rpc/wsConnectionState";
 import { useEconomyPill, wakeEconomyComputer } from "../../economy/EconomyPresence";
+import { toastManager } from "../../ui/toast";
 import { reconnectPrimaryNow } from "../../WebSocketConnectionSurface";
 import {
   CONNECTED,
@@ -26,6 +33,10 @@ import {
 } from "./connectionStatus";
 
 const TICK_MS = 1_000;
+/** "Restart now" goes back to "Restart" if not pressed within this. */
+const RESTART_CONFIRM_MS = 8_000;
+/** A restarted computer is offline about 15 s; reconnect (quietly) once it should be back. */
+const RECONNECT_AFTER_RESTART_MS = 20_000;
 
 function parseTime(iso: string | null | undefined): number | null {
   if (!iso) return null;
@@ -41,7 +52,7 @@ function useGateHeld(key: string | null): boolean {
   );
 }
 
-type Facts = Omit<ConnectionFacts, "now">;
+type Facts = Omit<ConnectionFacts, "now" | "confirmingRestart">;
 
 function usePrimaryFacts(): Facts {
   const ws = useWsConnectionStatus();
@@ -65,6 +76,9 @@ function useSavedFacts(environmentId: EnvironmentId | null): Facts {
   const runtime = useSavedEnvironmentRuntimeStore((state) =>
     environmentId === null ? undefined : state.byId[environmentId],
   );
+  const unoBoxId = useSavedEnvironmentRegistryStore((state) =>
+    environmentId === null ? undefined : state.byId[environmentId]?.unoBoxId,
+  );
   const held = useGateHeld(environmentId);
   const online = useSyncExternalStore(
     subscribeNetwork,
@@ -83,7 +97,30 @@ function useSavedFacts(environmentId: EnvironmentId | null): Facts {
     networkOnline: online,
     economy: held ? "sleeping" : null,
     signInNeeded: runtime?.authState === "requires-auth",
+    serverNotResponding: (runtime?.serverNotRespondingSince ?? null) !== null,
+    canRestart: unoBoxId !== undefined && accountTransport() !== "none",
   };
+}
+
+/** Restarts an Uno computer through the account (the console's safe restart). */
+async function restartUnoComputer(environmentId: EnvironmentId): Promise<boolean> {
+  const boxId = useSavedEnvironmentRegistryStore.getState().byId[environmentId]?.unoBoxId;
+  if (boxId === undefined) return false;
+  try {
+    await restartComputer(boxId);
+    // It's restarting now: the words go back to "Reconnecting…" until it's up.
+    useSavedEnvironmentRuntimeStore
+      .getState()
+      .patch(environmentId, { serverNotRespondingSince: null });
+    return true;
+  } catch (error) {
+    toastManager.add({
+      type: "error",
+      title: "Couldn't restart the computer",
+      description: describeRestartError(error),
+    });
+    return false;
+  }
 }
 
 function subscribeNetwork(listener: () => void): () => void {
@@ -114,6 +151,13 @@ export function useComputerConnection(
   const facts = isPrimary ? primaryFacts : savedFacts;
   const { reconnect, reconnectingId } = useReconnectEnvironment();
   const [primaryRetrying, setPrimaryRetrying] = useState(false);
+  const [confirmingRestart, setConfirmingRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  useEffect(() => {
+    if (!confirmingRestart) return;
+    const id = window.setTimeout(() => setConfirmingRestart(false), RESTART_CONFIRM_MS);
+    return () => window.clearTimeout(id);
+  }, [confirmingRestart]);
 
   // The device says it has no network: the socket would take ~40 s to notice.
   const down = facts.link !== "connected" || !facts.networkOnline;
@@ -143,12 +187,32 @@ export function useComputerConnection(
       ? CONNECTED
       : describeConnection({
           ...facts,
+          confirmingRestart,
           downSince: facts.downSince ?? clock.seenDownAt,
           now: clock.now,
         });
 
   const run = useCallback(
     (action: ConnectionAction) => {
+      if (action === "restart") {
+        setConfirmingRestart(true);
+        return;
+      }
+      if (action === "restart-confirm") {
+        if (environmentId === null) return;
+        setConfirmingRestart(false);
+        setRestarting(true);
+        void restartUnoComputer(environmentId).then((restarted) => {
+          setRestarting(false);
+          if (!restarted) return;
+          window.setTimeout(
+            () =>
+              void healSavedEnvironment(environmentId, "computer-restarted", { immediate: true }),
+            RECONNECT_AFTER_RESTART_MS,
+          );
+        });
+        return;
+      }
       if (action === "wake") {
         wakeEconomyComputer(isPrimary || environmentId === null ? undefined : environmentId);
         return;
@@ -168,7 +232,7 @@ export function useComputerConnection(
   return {
     status,
     act: action ? () => run(action) : null,
-    acting: isPrimary ? primaryRetrying : reconnectingId === environmentId,
+    acting: isPrimary ? primaryRetrying : restarting || reconnectingId === environmentId,
   };
 }
 

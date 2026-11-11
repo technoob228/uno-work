@@ -293,6 +293,12 @@ export interface SavedEnvironmentRuntimeState {
    * advances.
    */
   readonly lastSynchronizedAt: string | null;
+  /**
+   * Set while the computer answers but Uno Work on it doesn't: its own health
+   * check says the database is stuck (`GET /api/health` → `db: "error"`). A
+   * reconnect can't fix that; the daemon's watchdog or a restart does.
+   */
+  readonly serverNotRespondingSince: string | null;
 }
 
 interface SavedEnvironmentRuntimeStoreState {
@@ -317,6 +323,7 @@ const DEFAULT_SAVED_ENVIRONMENT_RUNTIME_STATE: SavedEnvironmentRuntimeState = Ob
   connectedAt: null,
   disconnectedAt: null,
   lastSynchronizedAt: null,
+  serverNotRespondingSince: null,
 });
 
 function createDefaultSavedEnvironmentRuntimeState(): SavedEnvironmentRuntimeState {

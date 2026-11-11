@@ -85,6 +85,17 @@ export function classifyPermanentFailure(error: unknown): PermanentFailure | nul
   return null;
 }
 
+/** The self-heal warning as one line, with the error's own words. */
+export function describeSelfHealFailure(
+  environmentId: EnvironmentId,
+  reason: string,
+  attempt: number,
+  error: unknown,
+): string {
+  const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return `Saved environment self-heal failed (environment ${environmentId}, ${reason}, attempt ${attempt}): ${detail}`;
+}
+
 interface SelfHealDeps {
   readonly performReconnect: (environmentId: EnvironmentId) => Promise<void>;
   readonly isAuthRequiredError: (error: unknown) => boolean;
@@ -268,12 +279,10 @@ export function healSavedEnvironment(
       if (noteSavedEnvironmentFailure(environmentId, error)) {
         return;
       }
-      console.warn("Saved environment self-heal failed", {
-        environmentId,
-        reason,
-        attempt: entry.consecutiveFailures,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      // One string: the desktop log writes an object argument as "[object Object]".
+      console.warn(
+        describeSelfHealFailure(environmentId, reason, entry.consecutiveFailures, error),
+      );
     }
   })().finally(() => {
     if (entry.inflight === run) {

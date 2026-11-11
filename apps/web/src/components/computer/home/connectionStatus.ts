@@ -14,7 +14,11 @@
  *     action: no connection for {@link CONNECTION_ATTENTION_MS} → "Retry",
  *     a session that needs signing in again → "Sign in";
  *   - an economy computer resting while the person is away is "Asleep"
- *     (any click wakes it; the menu also has "Wake up"), then "Waking…".
+ *     (any click wakes it; the menu also has "Wake up"), then "Waking…";
+ *   - the computer answers but Uno Work on it doesn't (its database is stuck,
+ *     11.11 box 395): "Not responding" at once — waiting won't fix it —
+ *     with "Restart" on an Uno computer, "Retry" elsewhere. Restart asks
+ *     once more first ("Restart now"): it stops what runs on the computer.
  *
  * Pure and clock-free (`now` comes in) so the rule is tested without timers.
  */
@@ -37,6 +41,12 @@ export interface ConnectionFacts {
   readonly economy: "sleeping" | "waking" | null;
   /** The saved session on this computer needs the person to sign in again. */
   readonly signInNeeded: boolean;
+  /** The computer answers, Uno Work on it doesn't (its health check says so). */
+  readonly serverNotResponding?: boolean;
+  /** Uno can restart this computer for the person (an Uno computer of the account). */
+  readonly canRestart?: boolean;
+  /** The person pressed Restart once; the next press restarts. */
+  readonly confirmingRestart?: boolean;
   readonly now: number;
 }
 
@@ -49,9 +59,10 @@ export type ConnectionKind =
   | "lost"
   | "asleep"
   | "waking"
-  | "sign-in";
+  | "sign-in"
+  | "not-responding";
 
-export type ConnectionAction = "retry" | "wake" | "sign-in";
+export type ConnectionAction = "retry" | "wake" | "sign-in" | "restart" | "restart-confirm";
 
 export interface ConnectionStatus {
   readonly kind: ConnectionKind;
@@ -76,6 +87,8 @@ export const CONNECTION_ACTION_LABEL: Record<ConnectionAction, string> = {
   retry: "Retry",
   wake: "Wake up",
   "sign-in": "Sign in",
+  restart: "Restart",
+  "restart-confirm": "Restart now",
 };
 
 /** "just now", "40s ago", "1 min ago", "2 h ago", "3 d ago". */
@@ -119,6 +132,25 @@ export function describeConnection(facts: ConnectionFacts): ConnectionStatus {
     };
   }
   if (facts.link === "connected" && facts.networkOnline) return CONNECTED;
+
+  if (facts.serverNotResponding && facts.networkOnline) {
+    if (facts.canRestart && facts.confirmingRestart) {
+      return {
+        kind: "not-responding",
+        chip: "Not responding",
+        line: "Programs running on it will stop. Restart?",
+        attention: true,
+        action: "restart-confirm",
+      };
+    }
+    return {
+      kind: "not-responding",
+      chip: "Not responding",
+      line: "Online, but Uno Work on it isn't responding",
+      attention: true,
+      action: facts.canRestart ? "restart" : "retry",
+    };
+  }
 
   // Unknown start of the outage: count it from now, i.e. a fresh short drop.
   const since = facts.downSince ?? facts.now;
@@ -180,6 +212,7 @@ export const CONNECTION_DOT: Partial<Record<ConnectionKind, string>> = {
   "no-network": "bg-muted-foreground/50",
   lost: "bg-warning",
   "sign-in": "bg-warning",
+  "not-responding": "bg-warning",
   asleep: "bg-info",
   waking: "animate-pulse bg-info",
 };
