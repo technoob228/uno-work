@@ -157,11 +157,15 @@ export class StatementCache<S> {
     { readonly statement: S; readonly expiresAt: number }
   >();
 
-  constructor(
-    private readonly capacity: number,
-    private readonly ttlMs: number,
-    private readonly now: () => number = Date.now,
-  ) {}
+  private readonly capacity: number;
+  private readonly ttlMs: number;
+  private readonly now: () => number;
+
+  constructor(capacity: number, ttlMs: number, now: () => number = Date.now) {
+    this.capacity = capacity;
+    this.ttlMs = ttlMs;
+    this.now = now;
+  }
 
   get size(): number {
     return this.entries.size;
