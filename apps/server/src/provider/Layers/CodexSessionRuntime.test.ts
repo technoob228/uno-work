@@ -160,6 +160,18 @@ describe("isRecoverableThreadResumeError", () => {
     );
   });
 
+  it("matches a chat whose Codex rollout is missing", () => {
+    assert.equal(
+      isRecoverableThreadResumeError(
+        new CodexErrors.CodexAppServerRequestError({
+          code: -32600,
+          errorMessage: "no rollout found for thread id 01a1cbc4-d9ab-7e80-99ad-1b4f1acece50",
+        }),
+      ),
+      true,
+    );
+  });
+
   it("ignores non-recoverable resume errors", () => {
     assert.equal(
       isRecoverableThreadResumeError(

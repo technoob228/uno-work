@@ -29,7 +29,7 @@ export function aiBusyNoticeText(notice: NonNullable<ReturnType<typeof aiBusyNot
       link: null,
     };
   }
-  return { text: "AI is busy, tasks run a bit slower.", link: "More AI power on bigger plans →" };
+  return { text: "Tasks run slower: your plan's AI power is maxed out. A computer boost won't help.", link: "More AI power on bigger plans →" };
 }
 
 export const AiBusyNotice = memo(function AiBusyNotice(props: {

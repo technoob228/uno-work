@@ -46,7 +46,7 @@ describe("AI busy notice", () => {
   it("one calm line while slowed down, with the way to more power", () => {
     const notice = aiBusyNotice(status({ throttled: true, speedPct: 40 }))!;
     expect(aiBusyNoticeText(notice)).toEqual({
-      text: "AI is busy, tasks run a bit slower.",
+      text: "Tasks run slower: your plan's AI power is maxed out. A computer boost won't help.",
       link: "More AI power on bigger plans →",
     });
   });
