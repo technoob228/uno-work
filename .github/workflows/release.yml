@@ -29,7 +29,9 @@ jobs:
     name: Preflight
     runs-on: ubuntu-24.04
     # Lint + typecheck + the full test suite: ~8 min at 0.0.93, >10 at 0.0.94.
-    timeout-minutes: 20
+    # Typecheck (~5 min) and the tests (~14 min) no longer fit into 20:
+    # v0.0.185 and v0.0.186 were cancelled here and no desktop build came out.
+    timeout-minutes: 40
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
       version: ${{ steps.release_meta.outputs.version }}
