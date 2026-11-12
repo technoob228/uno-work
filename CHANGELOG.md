@@ -8,6 +8,10 @@
 
 ---
 
+## Unreleased
+
+- Long Google Docs no longer fail halfway. The agent now writes a long document on the computer part by part and sends it to Google Drive (or another connected app) in one small step. Before, a big document had to go out in one piece, and the request could stall and break again and again.
+
 ## v0.0.188 — 2026-11-11
 
 - An assistant on its own Telegram bot now wakes its computer when you write to it, the same as Uno's bot. Before, a computer in economy mode that had fallen asleep didn't hear the message, and the assistant only answered once something else woke the computer.

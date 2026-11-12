@@ -1,16 +1,22 @@
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import type { RuntimeMode } from "@t3tools/contracts";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { handleMcpMessage } from "../mcp/mcpJsonRpc.ts";
 import {
   buildUnoWorkMcpServer,
+  connectorMcpTool,
   connectorToolLevel,
   UNO_WORK_MCP_SERVER,
   type UnoWorkToolDeps,
 } from "../unoWork/tools.ts";
 import {
   ConnectorsError,
+  type ConnectorTool,
   connectorCredentialsFrom,
   makeConnectorsClient,
   type ConnectorCredentials,
@@ -457,6 +463,8 @@ describe("connector tools in the uno-work MCP server", () => {
   it("classifies write tools as changes", () => {
     for (const name of [
       "gdrive_create",
+      "gdrive_append",
+      "gdrive_update",
       "gmail_create_draft",
       "notion_append",
       "notion_create_page",
@@ -468,6 +476,180 @@ describe("connector tools in the uno-work MCP server", () => {
     for (const name of ["gdrive_search", "gdrive_read", "gmail_search", "calendar_list_events"]) {
       expect(connectorToolLevel(name), name).toBe("safe");
     }
+  });
+});
+
+describe("content_file: a long document sent from a file", () => {
+  const SCHEMA = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      content: { type: "string", description: "The document." },
+    },
+    required: ["name", "content"],
+  };
+  const TOOL: ConnectorTool = {
+    name: "gdrive_create",
+    description: "Create a Google Doc.",
+    inputSchema: SCHEMA,
+    provider: "google-drive",
+    providerName: "Google Drive",
+  };
+  let home = "";
+
+  beforeEach(() => {
+    home = mkdtempSync(path.join(tmpdir(), "content-file-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  function run(
+    args: Record<string, unknown>,
+    options: {
+      runtimeMode?: RuntimeMode;
+      cwd?: string;
+      boundary?: { roots: string[]; name: string };
+    } = {},
+  ) {
+    const sent: Array<Record<string, unknown>> = [];
+    const approvals: Array<{ title: string; detail?: string }> = [];
+    const deps = {
+      home,
+      caller: {
+        threadId: "t-1",
+        threadTitle: "Chat",
+        runtimeMode: options.runtimeMode ?? "full-access",
+        cwd: options.cwd,
+        boundary: options.boundary ?? null,
+      },
+      requestApproval: (input: { title: string; detail?: string }) =>
+        Effect.sync(() => {
+          approvals.push({ title: input.title, ...(input.detail ? { detail: input.detail } : {}) });
+          return "approved" as const;
+        }),
+      connectors: {
+        call: (input: { arguments: Record<string, unknown> }) =>
+          Effect.sync(() => {
+            sent.push(input.arguments);
+            return { content: [{ type: "text", text: "Created" }], isError: false };
+          }),
+      },
+    } as unknown as UnoWorkToolDeps;
+    return Effect.runPromise(
+      connectorMcpTool(TOOL)
+        .run(deps, args)
+        .pipe(
+          Effect.match({
+            onFailure: (error) => ({ ok: false, error: error.message, sent, approvals }),
+            onSuccess: () => ({ ok: true, error: null, sent, approvals }),
+          }),
+        ),
+    );
+  }
+
+  it("offers content_file and no longer requires content, without touching the console's schema", () => {
+    const schema = connectorMcpTool(TOOL).inputSchema as typeof SCHEMA & {
+      properties: Record<string, { type: string; description?: string }>;
+    };
+    expect(schema.properties.content).toEqual(SCHEMA.properties.content);
+    expect(schema.properties.content_file).toMatchObject({ type: "string" });
+    expect(schema.properties.content_file?.description).toMatch(/write the file in parts first/);
+    expect(schema.required).toEqual(["name"]);
+    expect(SCHEMA.required).toEqual(["name", "content"]);
+    expect(SCHEMA.properties).not.toHaveProperty("content_file");
+    // A tool without a string `content` keeps its schema as it is.
+    const search = { type: "object", properties: { query: { type: "string" } } };
+    expect(
+      connectorMcpTool({ ...TOOL, name: "gdrive_search", inputSchema: search }).inputSchema,
+    ).toBe(search);
+  });
+
+  it("reads the file (relative to home) and sends it as content", async () => {
+    mkdirSync(path.join(home, "Documents"));
+    writeFileSync(path.join(home, "Documents", "report.md"), "# Report\n\nПривет, мир.\n");
+    const result = await run({ name: "Report", content_file: "Documents/report.md" });
+    expect(result.ok).toBe(true);
+    expect(result.sent).toEqual([{ name: "Report", content: "# Report\n\nПривет, мир.\n" }]);
+    const viaTilde = await run({ name: "Report", content_file: "~/Documents/report.md" });
+    expect(viaTilde.sent[0]?.content).toBe("# Report\n\nПривет, мир.\n");
+  });
+
+  it("passes content as before when no file is given", async () => {
+    const result = await run({ name: "Note", content: "short" });
+    expect(result.sent).toEqual([{ name: "Note", content: "short" }]);
+  });
+
+  it("refuses content and content_file together, and neither", async () => {
+    writeFileSync(path.join(home, "a.md"), "text");
+    const both = await run({ name: "x", content: "inline", content_file: "a.md" });
+    expect(both.ok).toBe(false);
+    expect(both.error).toMatch(/either content or content_file, not both/);
+    expect(both.sent).toEqual([]);
+    const neither = await run({ name: "x" });
+    expect(neither.error).toMatch(/Pass the document as content, or as content_file/);
+    expect(neither.sent).toEqual([]);
+  });
+
+  it("refuses a missing, empty, too big or non-text file", async () => {
+    const missing = await run({ name: "x", content_file: "nope.md" });
+    expect(missing.error).toMatch(/There is no file ~\/nope\.md/);
+    writeFileSync(path.join(home, "empty.md"), "");
+    expect((await run({ name: "x", content_file: "empty.md" })).error).toMatch(/is empty/);
+    writeFileSync(path.join(home, "big.md"), Buffer.alloc(5 * 1024 * 1024 + 1, 97));
+    const big = await run({ name: "x", content_file: "big.md" });
+    expect(big.error).toMatch(/big\.md is 5\.0 MB; a connected app takes up to 5\.0 MB/);
+    writeFileSync(path.join(home, "photo.md"), Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]));
+    expect((await run({ name: "x", content_file: "photo.md" })).error).toMatch(/not UTF-8 text/);
+    mkdirSync(path.join(home, "folder"));
+    expect((await run({ name: "x", content_file: "folder" })).error).toMatch(/is not a file/);
+    expect([missing, big].every((result) => result.sent.length === 0)).toBe(true);
+  });
+
+  it("refuses files outside a sandboxed assistant's projects, even through a link", async () => {
+    mkdirSync(path.join(home, "projects", "site"), { recursive: true });
+    writeFileSync(path.join(home, "private.md"), "diary");
+    writeFileSync(path.join(home, "projects", "site", "doc.md"), "ok");
+    symlinkSync(path.join(home, "private.md"), path.join(home, "projects", "site", "link.md"));
+    const boundary = { roots: [path.join(home, "projects", "site")], name: "Helper" };
+    const outside = await run({ name: "x", content_file: "~/private.md" }, { boundary });
+    expect(outside.error).toMatch(/Helper works only in its projects/);
+    const linked = await run({ name: "x", content_file: "~/projects/site/link.md" }, { boundary });
+    expect(linked.error).toMatch(/Helper works only in its projects/);
+    const inside = await run({ name: "x", content_file: "~/projects/site/doc.md" }, { boundary });
+    expect(inside.sent).toEqual([{ name: "x", content: "ok" }]);
+  });
+
+  it("refuses hidden and key files, but not a chat copy that lives in a hidden folder", async () => {
+    writeFileSync(path.join(home, ".env"), "API_KEY=secret");
+    mkdirSync(path.join(home, ".ssh"));
+    writeFileSync(path.join(home, ".ssh", "config"), "Host x");
+    writeFileSync(path.join(home, "credentials.json"), "{}");
+    for (const file of [".env", ".ssh/config", "credentials.json"]) {
+      const result = await run({ name: "x", content_file: file });
+      expect(result.error, file).toMatch(/can't be sent to a connected app/);
+      expect(result.sent, file).toEqual([]);
+    }
+    const chatCopy = path.join(home, ".t3", "worktrees", "chat-1");
+    mkdirSync(chatCopy, { recursive: true });
+    writeFileSync(path.join(chatCopy, "draft.md"), "draft");
+    const fromCopy = await run({ name: "x", content_file: "draft.md" }, { cwd: chatCopy });
+    expect(fromCopy.sent).toEqual([{ name: "x", content: "draft" }]);
+  });
+
+  it("the approval card shows the file's name and size, not the document", async () => {
+    writeFileSync(path.join(home, "report.md"), "x".repeat(2048));
+    const result = await run(
+      { name: "Report", content_file: "report.md" },
+      { runtimeMode: "approval-required" },
+    );
+    expect(result.approvals).toEqual([
+      {
+        title: "Google Drive: gdrive_create",
+        detail: '{"name":"Report"} · content from report.md (2 KB)',
+      },
+    ]);
+    expect(result.sent).toEqual([{ name: "Report", content: "x".repeat(2048) }]);
   });
 });
 

@@ -112,6 +112,14 @@ import { saysTelegramBot, scanFolderForTelegramBot } from "../machineApps/telegr
 import { forgetSiteChat, recordSiteChat } from "../sites/siteChats.ts";
 import { validateArgs, type ObjectSchema } from "./argsSchema.ts";
 import { appServerTools } from "./appServerTools.ts";
+import {
+  CONTENT_FILE_ARG,
+  describeContentFile,
+  readContentFile,
+  takesContent,
+  withContentFile,
+  type ContentFile,
+} from "./connectorContentFile.ts";
 import { mailTools, type MailOwner } from "./mailTools.ts";
 import { automationChatTools } from "../automations/chatTools.ts";
 import type { AutomationChatTools } from "../automations/AutomationsService.ts";
@@ -5155,6 +5163,8 @@ function askPerson(
 /** Connector tools that change something in the person's account. */
 const CONNECTOR_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "gdrive_create",
+  "gdrive_append",
+  "gdrive_update",
   "gmail_create_draft",
   "notion_append",
   "notion_create_page",
@@ -5175,10 +5185,70 @@ export function connectorToolLevel(name: string): UnoWorkToolLevel {
     : "safe";
 }
 
-function describeConnectorArgs(args: Record<string, unknown>): string | undefined {
-  const text = JSON.stringify(args);
-  if (text === undefined || text === "{}") return undefined;
-  return text.length > 400 ? `${text.slice(0, 400)}…` : text;
+/** The approval card's line: the arguments, or the file in place of a `content_file` document. */
+function describeConnectorArgs(
+  args: Record<string, unknown>,
+  file?: Pick<ContentFile, "name" | "size">,
+): string | undefined {
+  const { content: _content, ...rest } = args;
+  const shown = file ? rest : args;
+  const json = JSON.stringify(shown);
+  const text =
+    json === undefined || json === "{}"
+      ? undefined
+      : json.length > 400
+        ? `${json.slice(0, 400)}…`
+        : json;
+  if (!file) return text;
+  return [text, describeContentFile(file)].filter(Boolean).join(" · ");
+}
+
+/**
+ * `content_file` → `content` (see connectorContentFile.ts): the arguments the
+ * console gets and the file they came from. Read before asking the person, so
+ * what they allow is what is sent.
+ */
+function connectorArgsWithFile(
+  deps: UnoWorkToolDeps,
+  schema: Record<string, unknown>,
+  args: Record<string, unknown>,
+): Effect.Effect<
+  { readonly args: Record<string, unknown>; readonly file: ContentFile | null },
+  UnoWorkToolError
+> {
+  const { [CONTENT_FILE_ARG]: raw, ...rest } = args;
+  if (raw === undefined || raw === null) {
+    const required = Array.isArray(schema["required"]) && schema["required"].includes("content");
+    return required && typeof args["content"] !== "string"
+      ? Effect.fail(
+          toolError(
+            "Pass the document as content, or as content_file (a text file on this computer) for a long one.",
+          ),
+        )
+      : Effect.succeed({ args, file: null });
+  }
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    return Effect.fail(toolError("content_file must be the path of a text file on this computer."));
+  }
+  if (args["content"] !== undefined && args["content"] !== null) {
+    return Effect.fail(
+      toolError("Pass either content or content_file, not both: content_file is sent as content."),
+    );
+  }
+  return Effect.tryPromise({
+    try: () =>
+      readContentFile(raw, {
+        home: deps.home,
+        cwd: deps.caller.cwd,
+        boundary: deps.caller.boundary,
+        resolve: (value) => resolveUserPath(value, deps),
+        display: (absolute) => displayPath(absolute, deps.home),
+      }),
+    catch: (cause) =>
+      cause instanceof UnoWorkToolError
+        ? cause
+        : new UnoWorkToolError({ message: cause instanceof Error ? cause.message : String(cause) }),
+  }).pipe(Effect.map((file) => ({ args: { ...rest, content: file.text }, file })));
 }
 
 function connectorErrorText(result: ConnectorCallResult): string {
@@ -5199,7 +5269,7 @@ export function connectorMcpTool(
     description: tool.description
       ? `${tool.description} (${tool.providerName}, connected by the person)`
       : `${tool.providerName} tool, connected by the person.`,
-    inputSchema: tool.inputSchema,
+    inputSchema: withContentFile(tool.inputSchema),
     annotations: {
       readOnlyHint: level === "safe",
       destructiveHint: false,
@@ -5207,7 +5277,7 @@ export function connectorMcpTool(
     },
     run: (deps, rawArgs) =>
       Effect.gen(function* () {
-        const args =
+        const given =
           rawArgs !== null && typeof rawArgs === "object" && !Array.isArray(rawArgs)
             ? (rawArgs as Record<string, unknown>)
             : {};
@@ -5235,6 +5305,10 @@ export function connectorMcpTool(
         const asking = level !== "safe" && deps.asksFirst ? yield* deps.asksFirst : null;
         // A chat with a stranger's text: reading the person's apps asks too.
         const outside = deps.outsideText ? yield* deps.outsideText : false;
+        // A long document comes as a file on this computer (`content_file`).
+        const { args, file } = takesContent(tool.inputSchema)
+          ? yield* connectorArgsWithFile(deps, tool.inputSchema, given)
+          : { args: given, file: null };
         // The console validates the arguments against its own schema.
         const call = Effect.gen(function* () {
           const result = yield* connectors.call({
@@ -5248,7 +5322,7 @@ export function connectorMcpTool(
         if (
           decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null || outside) === "ask"
         ) {
-          const described = describeConnectorArgs(args);
+          const described = describeConnectorArgs(args, file ?? undefined);
           const title = `${tool.providerName}: ${tool.name}`;
           const outcome = yield* askPerson(deps, {
             tool: tool.name,

@@ -59,13 +59,24 @@ describe("Uno Work environment brief", () => {
     // the limits and an example are uno_guide("cards")).
     // ~5 for "a result → `report`, not bullets" (Misha 10.11: metrics and a
     // reconciliation came as bullets in Telegram instead of a card).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2425);
+    // ~70 for long documents in parts (12.11: a 30k-token gdrive_create call
+    // stalled the stream again and again; content_file / gdrive_append).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2500);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
     const brief = buildUnoWorkBrief();
     expect(brief).toMatch(/Your own mailbox \(`mail_address`\)/);
     expect(brief).toMatch(/the person's mail only via the Gmail connector/);
+  });
+
+  it("a long document goes in parts, never in one giant tool call", () => {
+    const brief = buildUnoWorkBrief();
+    expect(brief).toMatch(
+      /A long document \(over ~2,000 words\) never goes in one giant tool call/,
+    );
+    expect(brief).toMatch(/content_file/);
+    expect(brief).toMatch(/Stalled twice on it: split it, don't retry the same/);
   });
 
   it("deploying to uno.place: tools or llms.txt first, never a browser sign-in", () => {
