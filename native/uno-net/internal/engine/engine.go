@@ -71,13 +71,16 @@ type Engine struct {
 	changed   chan struct{}
 	cancel    context.CancelFunc
 	done      chan struct{}
+	// kick asks the monitor for a probe now: a dial through the tunnel
+	// just failed, maybe the exit is gone.
+	kick chan struct{}
 }
 
 func New(log *slog.Logger) *Engine {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
-	return &Engine{log: log, status: Off, transport: -1, changed: make(chan struct{})}
+	return &Engine{log: log, status: Off, transport: -1, changed: make(chan struct{}), kick: make(chan struct{}, 1)}
 }
 
 // Apply replaces the config and brings the tunnel up with it. Connections
@@ -314,23 +317,33 @@ func probeTarget(cfg *config.Config, tun *tunnel.Tunnel) netip.Addr {
 // probe: an ICMP echo through the tunnel; where the exit drops ICMP, a DNS
 // lookup through it counts too.
 func (e *Engine) probe(ctx context.Context, tun *tunnel.Tunnel, target netip.Addr, interval time.Duration) (time.Duration, bool) {
-	timeout := interval
-	if timeout > 5*time.Second {
-		timeout = 5 * time.Second
+	// Short: an exit that does not answer a ping in 2 s is not one to keep
+	// waiting on, and a failed probe is retried within a second anyway.
+	timeout := interval / 2
+	if timeout > 2*time.Second {
+		timeout = 2 * time.Second
 	}
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if rtt, err := tun.Ping(pctx, target); err == nil {
-		return rtt, true
+	// Ping and a DNS lookup at once; the first that answers wins.
+	type result struct {
+		rtt time.Duration
+		ok  bool
 	}
-	if ctx.Err() != nil {
-		return 0, false
-	}
-	lctx, lcancel := context.WithTimeout(ctx, timeout)
-	defer lcancel()
+	res := make(chan result, 2)
 	start := time.Now()
-	if _, err := tun.LookupHost(lctx, "uno.place"); err == nil {
-		return time.Since(start), true
+	go func() {
+		rtt, err := tun.Ping(pctx, target)
+		res <- result{rtt, err == nil}
+	}()
+	go func() {
+		_, err := tun.LookupHost(pctx, "uno.place")
+		res <- result{time.Since(start), err == nil}
+	}()
+	for k := 0; k < 2; k++ {
+		if r := <-res; r.ok {
+			return r.rtt, true
+		}
 	}
 	return 0, false
 }
@@ -341,11 +354,18 @@ func (e *Engine) monitor(ctx context.Context, cfg *config.Config, tun *tunnel.Tu
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	failures := 0
+	var lastKick time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-e.kick:
+			// At most one extra probe a second, however many dials fail.
+			if time.Since(lastKick) < time.Second {
+				continue
+			}
+			lastKick = time.Now()
 		}
 		if hs := tun.Stats().LastHandshake; !hs.IsZero() && time.Since(hs) > staleHandshake {
 			e.mu.Lock()
@@ -372,7 +392,22 @@ func (e *Engine) monitor(ctx context.Context, cfg *config.Config, tun *tunnel.Tu
 			e.mu.Unlock()
 			return
 		}
+		// After a miss, ask again soon instead of a whole interval later.
+		e.Kick()
+		lastKick = time.Time{}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retryAfterMiss(interval)):
+		}
 	}
+}
+
+func retryAfterMiss(interval time.Duration) time.Duration {
+	if d := interval / 5; d < time.Second {
+		return d
+	}
+	return time.Second
 }
 
 // current returns the tunnel if it is up; while connecting it waits up to
@@ -412,10 +447,21 @@ func (e *Engine) DialContext(ctx context.Context, network, address string) (net.
 		return nil, err
 	}
 	c, err := tun.DialContext(ctx, network, address)
-	if err != nil && e.Snapshot().Status != On {
-		return nil, errors.Join(socks.ErrDown, err)
+	if err != nil {
+		if e.Snapshot().Status != On {
+			return nil, errors.Join(socks.ErrDown, err)
+		}
+		e.Kick()
 	}
 	return c, err
+}
+
+// Kick asks for a health probe now (rate-limited).
+func (e *Engine) Kick() {
+	select {
+	case e.kick <- struct{}{}:
+	default:
+	}
 }
 
 // ListenUDP implements socks.Dialer.

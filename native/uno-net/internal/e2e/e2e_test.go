@@ -455,4 +455,3 @@ func TestStopMeansOff(t *testing.T) {
 		t.Fatalf("reply %d while off, want 3", rep)
 	}
 }
-

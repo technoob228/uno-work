@@ -84,14 +84,17 @@ Config (keys base64, as WireGuard writes them):
   ],
   "handshakeTimeoutMs": 12000,
   "probe": "10.66.0.1",
-  "probeIntervalMs": 10000,
+  "probeIntervalMs": 5000,
   "probeFailures": 3
 }
 ```
 
 `conf` is an imported wg-quick / AmneziaWG config. Health: a handshake older
-than 190 s, or `probeFailures` probes in a row (ICMP echo to `probe`, else a
-DNS lookup through the tunnel) mean down.
+than 190 s, or `probeFailures` probes in a row (an ICMP echo to `probe` and a
+DNS lookup through the tunnel, at once; either answering counts) mean down.
+A missed probe is retried within a second, and a dial that fails through the
+tunnel asks for a probe at once. Measured on a real gateway: down about 12 s
+after the exit dies, back on about 5 s after it returns.
 
 Other commands: `uno-net keygen` (a device key pair), `uno-net parse-conf`
 (wg-quick text on stdin → transport JSON), `uno-net version`.
@@ -107,3 +110,69 @@ go test ./...           # Linux is enough: the exit runs inside the test process
 process and checks TCP and UDP (by address and by name), DNS through UDP,
 Auto falling back to AmneziaWG, fail-closed when the exit dies and recovery
 when it returns, blocked destinations and the token.
+
+## uno-gw: the exit side
+
+`cmd/uno-gw` (Linux, root) is the gateway: one TUN interface per protocol
+(amneziawg-go), a peer per device, NAT out, and an nft table `inet uno_gw`
+that lets peers reach the internet and nothing else:
+
+- no peer-to-peer traffic (devices of different accounts never see each other);
+- nothing to the gateway's own services (only ping);
+- no private, CGNAT, link-local / metadata, multicast or reserved ranges;
+- TCP MSS clamped to the path MTU.
+
+Where Docker set the iptables FORWARD policy to DROP, uno-gw lets only its
+own interfaces through (DOCKER-USER), and removes that on exit.
+
+```sh
+uno-gw run --config /etc/uno-gw/config.json   # SIGHUP reloads peers
+uno-gw ruleset --config …                      # print the nft script
+```
+
+```json
+{
+  "egress": "eth0",
+  "interfaces": [
+    {
+      "name": "unowg0",
+      "protocol": "wireguard",
+      "listenPort": 51820,
+      "privateKey": "…",
+      "address": "10.66.0.1/24"
+    },
+    {
+      "name": "unoawg0",
+      "protocol": "amneziawg",
+      "listenPort": 51821,
+      "privateKey": "…",
+      "address": "10.67.0.1/24",
+      "obfuscation": {
+        "jc": "4",
+        "jmin": "40",
+        "jmax": "70",
+        "s1": "15",
+        "s2": "18",
+        "h1": "1234567",
+        "h2": "2345678",
+        "h3": "3456789",
+        "h4": "4567890"
+      }
+    }
+  ],
+  "peers": [
+    {
+      "interface": "unowg0",
+      "publicKey": "…",
+      "address": "10.66.0.2",
+      "label": "account 85 · Mac"
+    },
+    { "interface": "unoawg0", "publicKey": "…", "address": "10.67.0.2" }
+  ]
+}
+```
+
+Checked 13.11 on a Uno cloud computer (box 6777, test only): WireGuard
+up, 4 ms, HTTPS fine, 10 MB at ~50 MB/s; the node's network, the gateway's
+own SSH and metadata unreachable; with WireGuard's port blocked Auto moved
+to AmneziaWG; exit stopped → down ~12 s, back ~5 s after restart.
