@@ -23,6 +23,7 @@ import {
   NOT_AN_APPROVER,
   conflictMessage,
   parseDeployApprovals,
+  visibleRequests,
   waitingCount,
 } from "./deployApprovals.logic";
 
@@ -49,6 +50,14 @@ export const useDeployApprovalsStore = create<DeployApprovalsState>(() => ({
 /** Requests waiting for a decision — added to the bell's and the Inbox row's count. */
 export function useDeployWaitingCount(): number {
   return useDeployApprovalsStore((state) => waitingCount(state.gate));
+}
+
+/**
+ * Cards a "Needs you" list shows now — waiting requests and open windows
+ * (Home's section appears for them even with no chat waiting).
+ */
+export function useDeployLiveCount(): number {
+  return useDeployApprovalsStore((state) => visibleRequests(state.gate, Date.now(), 0).length);
 }
 
 let inFlight: Promise<DeployApprovals | null> | null = null;

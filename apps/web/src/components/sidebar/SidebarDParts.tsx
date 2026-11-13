@@ -43,6 +43,7 @@ import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
 import { useInboxNeedsYouCount } from "../../inbox/inboxStore";
+import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -528,9 +529,12 @@ function useOpenPlace() {
   };
 }
 
-/** Whether Needs you shows, and its count: approvals and questions waiting, nothing else. */
+/**
+ * Whether Needs you shows, and its count: approvals and questions waiting,
+ * and deploy-window requests waiting for a decision (13.11), nothing else.
+ */
 export function useNeedsYouBadge() {
-  const { shown, count } = needsYouPlace(useInboxNeedsYouCount());
+  const { shown, count } = needsYouPlace(useInboxNeedsYouCount() + useDeployWaitingCount());
   return { needsYou: count, shown };
 }
 

@@ -24,6 +24,7 @@ import { setupWorker } from "msw/browser";
 
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
+import { deployApprovalHandlers } from "./deployApprovalsDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
@@ -1922,6 +1923,8 @@ export async function startDemo(): Promise<void> {
       const found = accountBoxes().find((item) => String(item.id) === String(params.id));
       return found ? HttpResponse.json(found) : HttpResponse.json({}, { status: 404 });
     }),
+    // Deploy-window requests in the Inbox (deployApprovals/, 13.11).
+    ...deployApprovalHandlers(),
     http.all("*/_account/*", () => HttpResponse.json({}, { status: 404 })),
     // p2: the test site's backend (/api/order → 500, a missing image).
     ...demoSiteHandlers,

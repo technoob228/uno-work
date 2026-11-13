@@ -21,6 +21,7 @@ import { memo, type ComponentType, type ReactNode } from "react";
 import { APP_VERSION } from "../../branding";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useMachineRows } from "../../hooks/useMachineRows";
+import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
 import { cn } from "../../lib/utils";
 import { type SidebarMode, useNavStore } from "../../navigation/navStore";
@@ -131,8 +132,10 @@ export const NavRail = memo(function NavRail({ isElectron }: { isElectron: boole
   const goHome = useGoHome();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  const unread = useInboxUnreadCount();
-  const needsYou = useInboxNeedsYouCount();
+  // Deploy-window requests that wait count as needing the person.
+  const deployWaiting = useDeployWaitingCount();
+  const unread = useInboxUnreadCount() + deployWaiting;
+  const needsYou = useInboxNeedsYouCount() + deployWaiting;
   const { pins } = usePins();
   const requestNewChat = useNavStore((state) => state.requestNewChat);
   const machineLabel = useActiveMachineLabel();
