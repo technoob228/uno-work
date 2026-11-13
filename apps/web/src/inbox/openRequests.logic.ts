@@ -11,6 +11,7 @@
  */
 import {
   INBOX_NEEDS_YOU_KINDS,
+  INBOX_PERSON_ANSWER_BODY_PREFIX,
   INBOX_PERSON_CALL_BODY_PREFIX,
   type InboxItem,
   type InboxItemKind,
@@ -52,6 +53,13 @@ export function canOfferChatDone(status: SidebarThreadStatus): boolean {
 /** An agent called the person into the chat (`chat_call_person`): looking at it answers. */
 export function isPersonCallItem(item: Pick<InboxItem, "kind" | "body">): boolean {
   return item.kind === "agent.input" && (item.body ?? "").startsWith(INBOX_PERSON_CALL_BODY_PREFIX);
+}
+
+/** The answer to the person's own message ("Answer to your question: …"). */
+export function isPersonAnswerItem(item: Pick<InboxItem, "kind" | "body">): boolean {
+  return (
+    item.kind === "agent.done" && (item.body ?? "").startsWith(INBOX_PERSON_ANSWER_BODY_PREFIX)
+  );
 }
 
 /** Does this Inbox item stand for a request the chat still waits on? */

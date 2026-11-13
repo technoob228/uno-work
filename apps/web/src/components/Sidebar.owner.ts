@@ -5,7 +5,9 @@
 // agent's, nobody called the person in and nothing asks them anything —
 // "waiting on agents": no Ready, no badge, the agent's in Only mine. The
 // safety net: their request waited for the chats this one started and the
-// last of them is done, which makes it theirs again (Ready).
+// last of them is done, which makes it theirs again (Ready). And the answer
+// to their message holds: until they open the chat, write there or press
+// Done, the agents' turns after it don't take the chat from them.
 // A chat an agent, Uno or an app started is the person's while it needs them:
 // - it asks them something (an approval or a question);
 // - an agent called them into it (`chat_call_person`) and they have not
@@ -39,6 +41,7 @@ export type ThreadOwnerInput = Pick<
       | "latestPersonMessageAt"
       | "personCalledAt"
       | "childWork"
+      | "unreadAnswerAt"
     >
   >;
 
@@ -67,6 +70,16 @@ function personLookedSince(thread: ThreadOwnerInput, atMs: number): boolean {
 export function isPersonCallPending(thread: ThreadOwnerInput): boolean {
   const calledMs = ms(thread.personCalledAt);
   return !Number.isNaN(calledMs) && !personLookedSince(thread, calledMs);
+}
+
+/**
+ * The answer to the person's message is in and they have not seen it: the
+ * Inbox item is unread (opening the chat reads it) and they pressed neither
+ * Read nor Done, nor wrote, since it came.
+ */
+export function hasUnreadAnswer(thread: ThreadOwnerInput): boolean {
+  const answeredMs = ms(thread.unreadAnswerAt);
+  return !Number.isNaN(answeredMs) && !personLookedSince(thread, answeredMs);
 }
 
 /** The latest message that started a turn here is the person's, not an agent's. */
@@ -98,7 +111,7 @@ export function areChildChatsDoneSinceRequest(thread: ThreadOwnerInput): boolean
 export function isWaitingOnAgents(thread: ThreadOwnerInput): boolean {
   if (isAgentStartedChat(thread)) return false;
   if (thread.startedBy === undefined || thread.latestPersonMessageAt == null) return false;
-  if (isAnsweringPerson(thread)) return false;
+  if (isAnsweringPerson(thread) || hasUnreadAnswer(thread)) return false;
   if (threadNeedsUser(thread) || isPersonCallPending(thread)) return false;
   return !areChildChatsDoneSinceRequest(thread);
 }
@@ -148,7 +161,7 @@ export function threadOwner(thread: ThreadOwnerInput): ThreadOwner {
   // A server from before 28.10 knows neither the person's messages nor calls:
   // a chat stays the agent's until the person writes in it.
   if (thread.startedBy === undefined) return thread.controller === "human" ? "you" : "agent";
-  if (isPersonCallPending(thread)) return "you";
+  if (isPersonCallPending(thread) || hasUnreadAnswer(thread)) return "you";
   if (
     (isAnsweringPerson(thread) || areChildChatsDoneSinceRequest(thread)) &&
     !personDoneWithAnswer(thread)

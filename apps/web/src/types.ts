@@ -263,6 +263,13 @@ export interface SidebarThreadSummary {
    * summaries, see childChatWork.ts); absent when it started none.
    */
   childWork?: ChildChatWork | undefined;
+  /**
+   * The answer to the person's own message is in and they have not opened
+   * the chat since: the Inbox's unread "Answer to your question" item, put
+   * on the summary by the store (unreadAnswers.ts). Agents' turns after it
+   * don't clear it (Misha 13.11).
+   */
+  unreadAnswerAt?: string | undefined;
 }
 
 /** How the chats a chat's agent started are doing. */

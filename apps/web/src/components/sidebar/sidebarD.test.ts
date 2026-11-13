@@ -92,6 +92,9 @@ describe("sidebar D: marks", () => {
     expect(dRowMark("ready", "ready")).toBe("your-turn");
     expect(dRowMark("ready", null)).toBeNull();
     expect(dRowMark("working", true)).toBe("working");
+    // Agents work after an answer the person has not seen: the answer shows.
+    expect(dRowMark("working", "ready")).toBe("your-turn");
+    expect(dRowMark("working", null)).toBe("working");
     expect(dRowMark("approval", false)).toBe("approval");
     expect(dRowMark("stopped", false)).toBe("stopped");
   });

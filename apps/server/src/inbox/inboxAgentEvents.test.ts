@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   INITIAL_INBOX_AGENT_STATE,
   agentItemBody,
+  answerItemBody,
   callItemBody,
   trackInboxAgentEvent,
   type InboxAgentAction,
@@ -30,7 +31,9 @@ const turn = (threadId: string, origin?: unknown): OrchestrationEvent[] => [
 ];
 
 const posts = (actions: ReadonlyArray<InboxAgentAction>) =>
-  actions.filter((action) => action.type === "post" || action.type === "call");
+  actions.filter(
+    (action) => action.type === "post" || action.type === "call" || action.type === "answer",
+  );
 
 function run(events: ReadonlyArray<OrchestrationEvent>): InboxAgentAction[] {
   let state = INITIAL_INBOX_AGENT_STATE;
@@ -44,18 +47,13 @@ function run(events: ReadonlyArray<OrchestrationEvent>): InboxAgentAction[] {
 }
 
 describe("agent events → inbox", () => {
-  it("a finished turn posts done (and clears an old error)", () => {
+  it("a finished turn of the person's posts their answer (and clears an old error)", () => {
     const actions = run([
       event("thread.turn-start-requested", { threadId: "t1" }),
       session("running", { activeTurnId: "turn1" }),
       session("ready"),
     ]);
-    expect(actions).toContainEqual({
-      type: "post",
-      threadId: "t1",
-      kind: "agent.done",
-      detail: null,
-    });
+    expect(actions).toContainEqual({ type: "answer", threadId: "t1" });
     expect(actions).toContainEqual({ type: "resolve", threadId: "t1", kinds: ["agent.error"] });
   });
 
@@ -115,6 +113,10 @@ describe("agent events → inbox", () => {
     expect(agentItemBody("agent.input", "Which token?")).toBe("Asks: Which token?");
     expect(callItemBody("Pick a plan")).toBe("Needs you: Pick a plan");
     expect(callItemBody(null)).toBe("Needs you: take a look at this chat.");
+    expect(answerItemBody("Three plans, $9 to $49.")).toBe(
+      "Answer to your question: Three plans, $9 to $49.",
+    );
+    expect(answerItemBody(null)).toBe("Answer to your question is in.");
   });
 
   it("a turn another chat's agent started is not news: no Finished", () => {
@@ -203,5 +205,30 @@ describe("agent events → inbox", () => {
       ...turn("parent", AGENT),
     ]);
     expect(posts(actions)).toEqual([]);
+  });
+
+  it("asked, answered, then three agent turns: the answer stays news until the person is back (Misha 13.11)", () => {
+    const actions = run([
+      ...turn("t1"),
+      ...turn("t1", AGENT),
+      ...turn("t1", AGENT),
+      ...turn("t1", AGENT),
+    ]);
+    // One answer, nothing posted, read or replaced by the agents' turns.
+    expect(posts(actions)).toEqual([{ type: "answer", threadId: "t1" }]);
+    const afterAnswer = actions.slice(actions.findIndex((action) => action.type === "answer"));
+    expect(
+      afterAnswer.filter(
+        (action) =>
+          (action.type === "resolve" && action.kinds.includes("agent.done")) ||
+          action.type === "resolve-call",
+      ),
+    ).toEqual([]);
+    // The person writes again: their answer is read.
+    expect(run([event("thread.turn-start-requested", { threadId: "t1" })])).toContainEqual({
+      type: "resolve",
+      threadId: "t1",
+      kinds: ["agent.done", "agent.error"],
+    });
   });
 });

@@ -51,8 +51,12 @@ export function dRowMark(
     case "input":
     case "failed":
     case "stopped":
-    case "working":
       return status;
+    case "working":
+      // Agents work in a chat whose answer the person has not seen: the
+      // answer is the news (Misha 13.11); a call into it is too.
+      // (Only a kind says so: a plain `true` predates it.)
+      return yourTurn === "called" ? "called" : yourTurn === "ready" ? "your-turn" : status;
     case "ready":
       return yourTurn === "called" ? "called" : yourTurn ? "your-turn" : null;
   }

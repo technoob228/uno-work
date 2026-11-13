@@ -32,6 +32,15 @@ export type InboxItemKind = typeof InboxItemKind.Type;
  */
 export const INBOX_PERSON_CALL_BODY_PREFIX = "Needs you: ";
 
+/**
+ * The body of the item a turn that answered the person's own message posts
+ * ("Answer to your question: <its start>", kind `agent.done`, Misha 13.11):
+ * it stays unread until they open the chat, write there or press Done, however
+ * many turns agents take in the chat after it. The sidebar keeps the chat's
+ * Ready while it is unread.
+ */
+export const INBOX_PERSON_ANSWER_BODY_PREFIX = "Answer to your question";
+
 /** Kinds that wait for the person — shown as "Needs you". */
 export const INBOX_NEEDS_YOU_KINDS: ReadonlySet<InboxItemKind> = new Set([
   "agent.approval",

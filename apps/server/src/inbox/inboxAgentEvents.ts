@@ -9,6 +9,11 @@
  * (`user-input.requested`) plus the moments an item stops being news: the
  * person answered, approved, or wrote to the chat again.
  *
+ * A turn that answered the person's own message posts "Answer to your
+ * question" (Misha 13.11): it waits for them until they open the chat, write
+ * there or press Done — the turns agents take in the chat after it don't
+ * touch it, so a person who asked and left finds their answer.
+ *
  * Agents talking among themselves are not news (Misha 13.11): a turn another
  * chat's agent (or Uno, an app) started posts no "Finished" — unless the
  * chat is the person's request that waited for the chats it started and the
@@ -18,6 +23,7 @@
  * Done or the agent says they are no longer needed.
  */
 import {
+  INBOX_PERSON_ANSWER_BODY_PREFIX,
   INBOX_PERSON_CALL_BODY_PREFIX,
   type InboxItemKind,
   type OrchestrationEvent,
@@ -40,6 +46,11 @@ export type InboxAgentAction =
       readonly kind: Exclude<InboxItemKind, "app">;
       /** Extra line under the chat's title; the service adds the title. */
       readonly detail: string | null;
+    }
+  | {
+      /** A turn answered the person's own message: "Answer to your question". */
+      readonly type: "answer";
+      readonly threadId: ThreadId;
     }
   | {
       /** An agent called the person into the chat ("Needs you"), with its reason. */
@@ -80,6 +91,11 @@ export const INITIAL_INBOX_AGENT_STATE: InboxAgentTrackerState = {
 
 export function inboxGroupKey(threadId: string, kind: InboxItemKind): string {
   return `agent:${threadId}:${kind}`;
+}
+
+/** The answer to the person's message: its own item, apart from the chat's "Finished". */
+export function inboxAnswerGroupKey(threadId: string): string {
+  return `agent:${threadId}:answer`;
 }
 
 /** The person called into a chat: its own item, apart from the chat's questions. */
@@ -142,10 +158,9 @@ export function trackInboxAgentEvent(
       case "turn.completed":
         actions.push({ type: "resolve", threadId: notification.threadId, kinds: ["agent.error"] });
         // Agents talking among themselves are not news for the person.
-        if (
-          isOnPersonsBehalf(notification.origin) ||
-          waitedOnChildrenAndTheyAreDone(next, notification.threadId)
-        ) {
+        if (isOnPersonsBehalf(notification.origin)) {
+          actions.push({ type: "answer", threadId: notification.threadId });
+        } else if (waitedOnChildrenAndTheyAreDone(next, notification.threadId)) {
           actions.push({
             type: "post",
             threadId: notification.threadId,
@@ -262,6 +277,13 @@ export function trackInboxAgentEvent(
       break;
   }
   return { state: next, actions };
+}
+
+/** The line under the chat's title for the answer to the person's message. */
+export function answerItemBody(detail: string | null): string {
+  return detail
+    ? `${INBOX_PERSON_ANSWER_BODY_PREFIX}: ${detail}`
+    : `${INBOX_PERSON_ANSWER_BODY_PREFIX} is in.`;
 }
 
 /** The line under the chat's title for a call into it. */

@@ -12,6 +12,8 @@ import {
   listEnvironmentConnections,
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
+import { useStore } from "../store";
+import { unreadAnswersFromInbox } from "../unreadAnswers";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
 import { isPersonCallItem } from "./openRequests.logic";
 import { showSystemNotification, windowIsInFront } from "./systemNotifications";
@@ -57,7 +59,10 @@ export function InboxListener() {
     const connections = listEnvironmentConnections();
     const live = new Set<string>(connections.map((connection) => connection.environmentId));
     for (const environmentId of Object.keys(useInboxStore.getState().byEnvironment)) {
-      if (!live.has(environmentId)) useInboxStore.getState().forget(environmentId as EnvironmentId);
+      if (!live.has(environmentId)) {
+        useInboxStore.getState().forget(environmentId as EnvironmentId);
+        useStore.getState().setUnreadAnswers(environmentId as EnvironmentId, new Map());
+      }
     }
     const unsubscribers = connections.map((connection) => {
       const environmentId = connection.environmentId;
@@ -86,8 +91,19 @@ export function InboxListener() {
     };
   }, [connectionsVersion]);
 
-  // Looking at a chat reads its news.
+  // The sidebar keeps a chat's Ready while its answer is unread (any change
+  // of the Inbox: a push from the computer or this window's own Read).
   const byEnvironment = useInboxStore((state) => state.byEnvironment);
+  useEffect(() => {
+    for (const [environmentId, snapshot] of Object.entries(byEnvironment)) {
+      if (!snapshot) continue;
+      useStore
+        .getState()
+        .setUnreadAnswers(environmentId as EnvironmentId, unreadAnswersFromInbox(snapshot.items));
+    }
+  }, [byEnvironment]);
+
+  // Looking at a chat reads its news.
   useEffect(() => {
     const { environmentId, threadId } = params;
     if (!environmentId || !threadId) return;

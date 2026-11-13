@@ -3,6 +3,7 @@ import {
   changedFilesSummaryLabel,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
+  deriveAgentTalkFold,
   deriveMessagesTimelineRows,
   displayChangedFilePath,
   normalizeCompactToolLabel,
@@ -666,5 +667,98 @@ describe("holdsOutsideText", () => {
         message("user", "[Automation]\n<outside_input_ab12>\nhello\n</outside_input_ab12>"),
       ]),
     ).toBe(true);
+  });
+});
+
+const agentTalkMessage = (
+  id: string,
+  second: number,
+  role: "user" | "assistant",
+  extra: { turnId?: string; sentByThreadId?: string } = {},
+) => {
+  const at = `2026-01-01T00:00:${String(second).padStart(2, "0")}Z`;
+  return {
+    id: `${id}-entry`,
+    kind: "message" as const,
+    createdAt: at,
+    message: {
+      id: id as never,
+      role,
+      text: id,
+      turnId: (extra.turnId ?? null) as never,
+      createdAt: at,
+      completedAt: at,
+      streaming: false,
+      sentByThreadId: (extra.sentByThreadId ?? null) as never,
+    },
+  };
+};
+
+describe("the agents' talk after the answer to the person (Misha 13.11)", () => {
+  // Asked, answered, then three agent turns.
+  const entries = [
+    agentTalkMessage("ask", 0, "user"),
+    agentTalkMessage("answer", 5, "assistant", { turnId: "t1" }),
+    agentTalkMessage("helper-1", 10, "user", { sentByThreadId: "helper" }),
+    agentTalkMessage("reply-1", 12, "assistant", { turnId: "t2" }),
+    agentTalkMessage("helper-2", 20, "user", { sentByThreadId: "helper" }),
+    agentTalkMessage("reply-2", 22, "assistant", { turnId: "t3" }),
+    agentTalkMessage("helper-3", 30, "user", { sentByThreadId: "helper" }),
+    agentTalkMessage("reply-3", 32, "assistant", { turnId: "t4" }),
+  ];
+  const rowsOf = (timelineEntries: typeof entries, agentTalkExpanded = false) =>
+    deriveMessagesTimelineRows({
+      timelineEntries,
+      completionDividerBeforeEntryId: null,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+      agentTalkExpanded,
+    }).map((row) =>
+      row.kind === "message"
+        ? row.message.id
+        : row.kind === "agent-talk-fold"
+          ? `fold(${row.agentMessageCount})`
+          : row.kind,
+    );
+
+  it("ends at the answer: 'Your answer', then the agents' talk folded", () => {
+    expect(deriveAgentTalkFold(entries)).toMatchObject({
+      answerEntryId: "answer-entry",
+      firstHiddenEntryId: "helper-1-entry",
+      agentMessageCount: 3,
+    });
+    expect(rowsOf(entries)).toEqual(["ask", "answer-anchor", "answer", "fold(3)"]);
+  });
+
+  it("opens to everything", () => {
+    expect(rowsOf(entries, true)).toEqual([
+      "ask",
+      "answer-anchor",
+      "answer",
+      "fold(3)",
+      "helper-1",
+      "reply-1",
+      "helper-2",
+      "reply-2",
+      "helper-3",
+      "reply-3",
+    ]);
+  });
+
+  it("keeps the answer in sight when its turn went on after an agent wrote", () => {
+    const oneTurn = entries.map((entry) =>
+      entry.message.role === "assistant"
+        ? { ...entry, message: { ...entry.message, turnId: "t1" as never } }
+        : entry,
+    );
+    expect(rowsOf(oneTurn)).toEqual(["ask", "turn-fold", "answer-anchor", "answer", "fold(3)"]);
+  });
+
+  it("nothing to fold: no agent after the answer, no answer before the agent, or the person wrote again", () => {
+    expect(deriveAgentTalkFold(entries.slice(0, 2))).toBeNull();
+    expect(deriveAgentTalkFold([entries[0]!, entries[2]!, entries[3]!])).toBeNull();
+    expect(deriveAgentTalkFold([...entries, agentTalkMessage("again", 40, "user")])).toBeNull();
   });
 });

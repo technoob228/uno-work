@@ -10,7 +10,9 @@ import {
 import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary, ThreadSession } from "../types";
+import { threadOwner } from "./Sidebar.owner";
 import { isThreadSettled, resolveSidebarThreadSection } from "./Sidebar.sections";
+import { dRowMark } from "./sidebar/sidebarD.logic";
 import {
   countChatsWaitingOnYou,
   isYourTurn,
@@ -307,5 +309,49 @@ describe("the person's own chat where agents talk (Misha 13.11)", () => {
     expect(isYourTurn({ ...waited(0, ago(20 * HOUR_MS)), readAt: ago(30 * MINUTE_MS) }, NOW)).toBe(
       false,
     );
+  });
+
+  it("asked, answered, three agent turns: Ready holds until the person opens the chat", () => {
+    // Asked 3 h ago, answered at 2 h 50 m; then agents wrote three times, the
+    // last at 1 h 1 m, and the last turn (theirs) ended an hour ago.
+    const answered = {
+      latestPersonMessageAt: ago(3 * HOUR_MS),
+      unreadAnswerAt: ago(2 * HOUR_MS + 50 * MINUTE_MS),
+      latestUserMessageAt: ago(HOUR_MS + MINUTE_MS),
+    };
+    const held = mine(answered);
+    expect(yourTurnKind(held, NOW)).toBe("ready");
+    expect(countChatsWaitingOnYou([held], NOW)).toBe(1);
+    expect(threadOwner(held)).toBe("you");
+    // An agent's turn running right now does not hide it either.
+    const agentsWorking = mine({ ...answered, session: session("running") });
+    expect(dRowMark("working", yourTurnKind(agentsWorking, NOW))).toBe("your-turn");
+    // Opened with the window in front: the Inbox reads the answer, and the
+    // chat goes back to waiting on agents.
+    const opened = mine({ ...answered, unreadAnswerAt: undefined });
+    expect(isYourTurn(opened, NOW)).toBe(false);
+    expect(threadOwner(opened)).toBe("agent");
+    expect(dRowMark("working", yourTurnKind({ ...opened, session: session("running") }, NOW))).toBe(
+      "working",
+    );
+    // Read or Done after the answer, or a new message of theirs, ends it too.
+    expect(isYourTurn(mine({ ...answered, readAt: ago(2 * HOUR_MS) }), NOW)).toBe(false);
+    expect(
+      isYourTurn(
+        mine({ ...answered, settledOverride: "settled", settledAt: ago(2 * HOUR_MS) }),
+        NOW,
+      ),
+    ).toBe(false);
+    expect(
+      isYourTurn(
+        mine({
+          ...answered,
+          latestPersonMessageAt: ago(30 * MINUTE_MS),
+          latestUserMessageAt: ago(30 * MINUTE_MS),
+          session: session("running"),
+        }),
+        NOW,
+      ),
+    ).toBe(false);
   });
 });

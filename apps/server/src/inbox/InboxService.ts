@@ -29,7 +29,9 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import {
   INITIAL_INBOX_AGENT_STATE,
   agentItemBody,
+  answerItemBody,
   callItemBody,
+  inboxAnswerGroupKey,
   inboxCallGroupKey,
   inboxGroupKey,
   trackInboxAgentEvent,
@@ -230,19 +232,34 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
         // and reports it (its conversation's own item is the news), so this
         // chat's raw "Finished" / "Stopped with an error" would only double it.
         if (
-          (action.kind === "agent.done" || action.kind === "agent.error") &&
+          (action.type === "answer" ||
+            action.kind === "agent.done" ||
+            action.kind === "agent.error") &&
           push !== null &&
           (yield* push.reportsOutcomeOf(action.threadId))
         ) {
           return;
         }
-        let detail = action.detail;
-        if (action.kind === "agent.done") {
+        const answerStart = Effect.gen(function* () {
           const thread = yield* projections
             .getThreadDetailById(action.threadId)
             .pipe(Effect.orElseSucceed(() => Option.none()));
-          detail = Option.isSome(thread) ? doneDetail(lastAssistantAnswer(thread.value)) : null;
+          return Option.isSome(thread) ? doneDetail(lastAssistantAnswer(thread.value)) : null;
+        });
+        if (action.type === "answer") {
+          // Quiet like "Finished" (agent.done), but its own item: the turns
+          // agents take after it neither replace nor read it.
+          yield* post({
+            kind: "agent.done",
+            source: agentSource(action.threadId, shell.title),
+            title: shell.title,
+            body: answerItemBody(yield* answerStart),
+            open: { kind: "thread", threadId: action.threadId },
+            groupKey: inboxAnswerGroupKey(action.threadId),
+          });
+          return;
         }
+        const detail = action.kind === "agent.done" ? yield* answerStart : action.detail;
         yield* post({
           kind: action.kind,
           source: agentSource(action.threadId, shell.title),

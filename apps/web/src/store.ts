@@ -39,6 +39,7 @@ import {
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
 import { withChildChatWork } from "./childChatWork";
+import { sameUnreadAnswers, withUnreadAnswers } from "./unreadAnswers";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 import { readThreadReadAt, writeThreadReadAt, writeThreadReadAts } from "./threadReadMarks";
 
@@ -1188,18 +1189,30 @@ function getStoredEnvironmentState(
   return state.environmentStateById[environmentId] ?? initialEnvironmentState;
 }
 
+/**
+ * Per computer: the chats whose answer to the person is still unread in its
+ * Inbox (unreadAnswers.ts). Kept beside the store's state because the Inbox
+ * comes on its own stream; every summary write folds it back in.
+ */
+const unreadAnswersByEnvironment = new Map<EnvironmentId, ReadonlyMap<ThreadId, string>>();
+const NO_UNREAD_ANSWERS: ReadonlyMap<ThreadId, string> = new Map();
+
 function commitEnvironmentState(
   state: AppState,
   environmentId: EnvironmentId,
   incomingEnvironmentState: EnvironmentState,
 ): AppState {
   const currentEnvironmentState = state.environmentStateById[environmentId];
-  // A chat's summary changed: its parent's view of the chats it started may too.
+  // A chat's summary changed: its parent's view of the chats it started may
+  // too, and the rewritten summary needs its unread answer back.
   const summaries =
     incomingEnvironmentState.sidebarThreadSummaryById ===
     currentEnvironmentState?.sidebarThreadSummaryById
       ? incomingEnvironmentState.sidebarThreadSummaryById
-      : withChildChatWork(incomingEnvironmentState.sidebarThreadSummaryById);
+      : withUnreadAnswers(
+          withChildChatWork(incomingEnvironmentState.sidebarThreadSummaryById),
+          unreadAnswersByEnvironment.get(environmentId) ?? NO_UNREAD_ANSWERS,
+        );
   const nextEnvironmentState =
     summaries === incomingEnvironmentState.sidebarThreadSummaryById
       ? incomingEnvironmentState
@@ -2254,6 +2267,29 @@ export function setThreadReadAt(
   });
 }
 
+/** The computer's Inbox changed: which chats have an unread answer for the person. */
+export function setUnreadAnswers(
+  state: AppState,
+  environmentId: EnvironmentId,
+  answers: ReadonlyMap<ThreadId, string>,
+): AppState {
+  const known = unreadAnswersByEnvironment.get(environmentId) ?? NO_UNREAD_ANSWERS;
+  if (sameUnreadAnswers(known, answers)) return state;
+  if (answers.size === 0) unreadAnswersByEnvironment.delete(environmentId);
+  else unreadAnswersByEnvironment.set(environmentId, answers);
+  const environmentState = state.environmentStateById[environmentId];
+  if (!environmentState) return state;
+  const summaries = withUnreadAnswers(environmentState.sidebarThreadSummaryById, answers);
+  if (summaries === environmentState.sidebarThreadSummaryById) return state;
+  return {
+    ...state,
+    environmentStateById: {
+      ...state.environmentStateById,
+      [environmentId]: { ...environmentState, sidebarThreadSummaryById: summaries },
+    },
+  };
+}
+
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
@@ -2276,6 +2312,7 @@ interface AppStore extends AppState {
   ) => void;
   setThreadArchivedAt: (threadRef: ScopedThreadRef, archivedAt: string | null) => void;
   setThreadReadAt: (threadRef: ScopedThreadRef, readAt: string | null) => void;
+  setUnreadAnswers: (environmentId: EnvironmentId, answers: ReadonlyMap<ThreadId, string>) => void;
   /** Server read marks (another device pressed Read / marked unread): one
    *  write for the batch, no echo back to the server. */
   applyServerThreadReadAts: (
@@ -2318,6 +2355,8 @@ export const useStore = create<AppStore>((set) => ({
     set((state) => setThreadReadAt(state, threadRef, readAt));
     threadReadAtSink?.(threadRef, readAt);
   },
+  setUnreadAnswers: (environmentId, answers) =>
+    set((state) => setUnreadAnswers(state, environmentId, answers)),
   applyServerThreadReadAts: (entries) => {
     if (entries.length === 0) return;
     writeThreadReadAts(

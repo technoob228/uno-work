@@ -1048,7 +1048,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const status = resolveSidebarThreadStatus(thread);
   // Finished and waiting on the person until they reply or press Done;
   // opening the chat doesn't clear it (unlike isUnread).
-  const turnKind = status === "ready" ? yourTurnKind(thread, props.now) : null;
+  // A working chat can be theirs too: agents talk after an answer they have
+  // not seen yet (Sidebar.yourTurn).
+  const turnKind =
+    status === "ready" || status === "working" ? yourTurnKind(thread, props.now) : null;
   const yourTurn = turnKind !== null;
   // Pinned chats sit with the other pins and never recede like history.
   const isPinnedRow = section === "pinned";

@@ -11,6 +11,7 @@ import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
 import {
   areChildChatsDoneSinceRequest,
+  hasUnreadAnswer,
   isAgentStartedChat,
   isAnsweringPerson,
   isPersonCallPending,
@@ -41,6 +42,7 @@ export type YourTurnInput = ThreadOwnerInput &
       | "spawnedByThreadId"
       | "source"
       | "childWork"
+      | "unreadAnswerAt"
     >
   >;
 
@@ -52,8 +54,16 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   // turn that answered another chat's agent is not theirs either (Misha
   // 13.11: "Ready" only when they are really needed).
   const calledIn = isPersonCallPending(thread);
+  // The answer to their message holds whatever agents do after it, even while
+  // they work (Misha 13.11), until the person opens the chat, writes or Done.
+  const answerWaiting = hasUnreadAnswer(thread);
   if (isAgentStartedChat(thread)) {
-    if (!calledIn && !isAnsweringPerson(thread) && !areChildChatsDoneSinceRequest(thread)) {
+    if (
+      !calledIn &&
+      !answerWaiting &&
+      !isAnsweringPerson(thread) &&
+      !areChildChatsDoneSinceRequest(thread)
+    ) {
       return false;
     }
   } else if (thread.projectId != null && isAssistantProjectId(thread.projectId)) {
@@ -63,6 +73,7 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   }
   // An approval or a question has its own, louder status.
   if (threadNeedsUser(thread)) return false;
+  if (answerWaiting) return !isThreadSnoozed(thread, now);
   const session = thread.session;
   if (
     session?.status === "running" ||
