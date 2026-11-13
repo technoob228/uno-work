@@ -12,6 +12,7 @@ import {
   applyPersonRoute,
   applyTableRoute,
   defaultModelChoice,
+  isReadyForChat,
   selectionNotReadyMessage,
   strongestReadyModelSelection,
 } from "./personRouting.ts";
@@ -200,6 +201,29 @@ describe("strongestReadyModelSelection (replaces the account's onboarding AI)", 
     expect(
       strongestReadyModelSelection([codex, provider("claudeAgent", {}, ["claude-opus-5-5"])]),
     ).toEqual({ instanceId: "claudeAgent", model: "claude-opus-5-5" });
+  });
+
+  it("12.11: Codex installed but nobody signed in is not ready, Auto never picks it", () => {
+    const terra = ["gpt-5.6-luna", "gpt-5.6-terra"];
+    // No ChatGPT account: the CLI says "ready" with auth "unknown"…
+    const noAccount = provider("codex", { auth: { status: "unknown" } }, terra);
+    // …or "error" + "unauthenticated" when it asks for `codex login`.
+    const loggedOut = provider(
+      "codex",
+      { status: "error", auth: { status: "unauthenticated" }, message: "Run `codex login`" },
+      terra,
+    );
+    for (const codex of [noAccount, loggedOut]) {
+      expect(isReadyForChat(codex)).toBe(false);
+      expect(strongestReadyModelSelection([codex])).toBeNull();
+      expect(strongestReadyModelSelection([codex, provider("uno", {}, ["uno/smart"])])).toBeNull();
+      expect(
+        selectionNotReadyMessage({ instanceId: codex.instanceId, model: "gpt-5.6-terra" }, [codex]),
+      ).toContain("Codex is not signed in");
+    }
+    // Signed in with an API key: ready.
+    const apiKey = provider("codex", { auth: { status: "authenticated", type: "apiKey" } }, terra);
+    expect(strongestReadyModelSelection([apiKey])?.model).toBe("gpt-5.6-terra");
   });
 
   it("Claude on Uno credits counts only when allowed here", () => {

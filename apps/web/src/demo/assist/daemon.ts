@@ -470,6 +470,21 @@ export function machineAwake(key: MachineKey): boolean {
 const files = new Map<string, string>();
 function defaultFile(projectId: string, name: string | null): string {
   if (projectId !== ASSISTANT_PROJECT_ID || world.account !== "live") return "";
+  if (name === "ROUTING.md") {
+    return [
+      "# Routing table — which harness/model for which task",
+      "",
+      "| Task type | Harness | Model | Effort | Source | Why |",
+      "|---|---|---|---|---|---|",
+      "| UI and hard bugs | claudeAgent | claude-opus-5 | high | you | the hard part |",
+      "| Quick lookups | claudeAgent | claude-sonnet-5 |  | default | cheap and fast |",
+      "| Docs reading, summaries | opencode |  |  | learned | did the job 9 times of 9 |",
+      "",
+      "## Outcomes log",
+      "",
+      "- 12.11 | Docs reading | opencode | ok | summary of the API docs",
+    ].join("\n");
+  }
   if (name === "AGENTS.md") {
     return "You are Misha's personal assistant. Take tasks only from Misha.\nRun work in chats on his computers; write to him only when he is needed.";
   }

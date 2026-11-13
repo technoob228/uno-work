@@ -1282,6 +1282,73 @@ describe("agent threads bridge: which model an assistant's chat runs on (13.11)"
   );
 });
 
+describe("agent threads bridge: a chat nobody chose a model for (12.11)", () => {
+  const harness = (
+    driver: string,
+    slugs: ReadonlyArray<string>,
+    auth: ServerProvider["auth"],
+  ): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(driver),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: "1",
+    status: "ready",
+    auth,
+    checkedAt: T0,
+    models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    slashCommands: [],
+    skills: [],
+  });
+  // Codex installed, no ChatGPT account: the CLI answers "ready", auth "unknown".
+  const codexNoAccount = harness("codex", ["gpt-5.6-luna", "gpt-5.6-terra"], {
+    status: "unknown",
+  });
+  const claude = harness("claudeAgent", ["claude-opus-5-5"], { status: "authenticated" });
+  const onCodex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+  const fixture = (list: ReadonlyArray<ServerProvider>) =>
+    makeFixture({
+      providers: list,
+      personalDefault: Effect.succeed(strongestReadyModelSelection(list)),
+      threads: [threadShell(CALLER, { modelSelection: onCodex })],
+    });
+
+  it.effect("no provider, its default on Codex nobody signed in to: Auto, not Codex", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount, claude]);
+      const created = yield* handlers.createThread(scoped(), { text: "Fix the crash" });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "claudeAgent",
+        model: "claude-opus-5-5",
+      });
+    }),
+  );
+
+  it.effect("nothing ready here: not started (409), instead of a chat that hangs", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount]);
+      const created = yield* handlers.createThread(scoped(), { text: "Fix the crash" });
+      assert.strictEqual(created.status, 409);
+      assert.strictEqual(body(created).error, "harness_not_ready");
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("Codex asked for by name stays the caller's choice", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount, claude]);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        provider: "codex",
+        model: "gpt-5.6-terra",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), onCodex);
+    }),
+  );
+});
+
 describe("agent threads bridge: no permission escalation", () => {
   it.effect("a spawned thread never gets a wider runtime mode than the caller", () =>
     Effect.gen(function* () {

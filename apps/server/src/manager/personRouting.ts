@@ -72,6 +72,11 @@ export function providerNotReadyReason(provider: ServerProvider): string | null 
   if (!provider.enabled || provider.status === "disabled") return "turned off";
   if (provider.auth.status === "unauthenticated") return "not signed in";
   if (provider.status === "error") return provider.message ?? "not working";
+  // Codex installed with no ChatGPT account (nor an API key) answers "ready"
+  // with auth "unknown"; a chat put on it never starts (12.11).
+  if (provider.driver === "codex" && provider.auth.status !== "authenticated") {
+    return "not signed in";
+  }
   return null;
 }
 

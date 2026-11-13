@@ -146,15 +146,20 @@ export function strongestReadySelection(
     const slug = strongestListedModel("claudeAgent", provider.models);
     return slug !== null && opusVersion(slug) !== null ? slug : null;
   };
+  // "On their plan" means a sign-in the harness confirmed: Codex installed
+  // with no account reports itself ready with auth "unknown", and a chat put
+  // on it never starts (12.11: a chat with no provider went to Codex and hung).
+  const signedIn = (provider: ServerProvider) => provider.auth.status === "authenticated";
   return (
     pick(
       "claude",
-      (provider) => provider.driver === "claudeAgent" && !claudeOnUnoCredits(provider),
+      (provider) =>
+        provider.driver === "claudeAgent" && signedIn(provider) && !claudeOnUnoCredits(provider),
       claudeOpus,
     ) ??
     pick(
       "codex",
-      (provider) => provider.driver === "codex",
+      (provider) => provider.driver === "codex" && signedIn(provider),
       (provider) => strongestListedModel("codex", provider.models),
     ) ??
     pick(

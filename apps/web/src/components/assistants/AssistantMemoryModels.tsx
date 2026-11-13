@@ -50,7 +50,7 @@ import {
 } from "@t3tools/shared/assistantMemory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, XIcon } from "lucide-react";
+import { FileTextIcon, LoaderCircleIcon, TableIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
@@ -887,12 +887,43 @@ export function KindOfTaskTable({
   projectId?: string;
 }) {
   const routing = useRouting(environmentId, projectId, name);
+  // The table, or ROUTING.md itself as text (Misha 13.11: "editable with
+  // buttons and in the file itself"): the same file, saved on blur.
+  const [asFile, setAsFile] = useState(false);
+  const file = routing.routing.file;
   return (
     <div className="flex flex-col gap-1" data-testid="settings-kind-of-task">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
         <SavedHint at={routing.routing.savedAt} />
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => setAsFile((value) => !value)}
+          disabled={file.isLoading || file.isError}
+          data-testid="assistant-models-file-toggle"
+        >
+          {asFile ? <TableIcon /> : <FileTextIcon />}
+          {asFile ? "Table" : "Edit file"}
+        </Button>
       </div>
-      <RoutingTable name={name} routing={routing} />
+      {asFile ? (
+        <div className="flex flex-col gap-2" data-testid="assistant-models-file">
+          <p className="text-xs text-muted-foreground">
+            This is ROUTING.md, the file {name} reads before it starts a chat. A row with{" "}
+            <code>you</code> in the Source column is your rule: chats for that kind of task start on
+            it, and {name} never changes it. Saved when you click outside the text.
+          </p>
+          <TextFile
+            file={routing.routing}
+            placeholder=""
+            testId="assistant-models-file-text"
+            rows={16}
+            mono
+          />
+        </div>
+      ) : (
+        <RoutingTable name={name} routing={routing} />
+      )}
     </div>
   );
 }

@@ -95,6 +95,15 @@ describe("strongestReadySelection", () => {
     ).toBe("gpt-5.5");
   });
 
+  it("a harness that didn't confirm a sign-in is not 'their plan' (12.11)", () => {
+    const noAccount = provider("codex", ["gpt-5.6-terra"], { auth: { status: "unknown" } });
+    expect(strongestReadySelection([noAccount], ready)).toBeNull();
+    const claudeUnknown = provider("claudeAgent", ["claude-opus-5-5"], {
+      auth: { status: "unknown" },
+    });
+    expect(strongestReadySelection([claudeUnknown, codex], ready)?.tier).toBe("codex");
+  });
+
   it("Codex with only small models is skipped", () => {
     expect(strongestReadySelection([provider("codex", ["gpt-5.6-luna"])], ready)).toBeNull();
   });

@@ -753,6 +753,20 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           }
         }
         if (requested !== null) modelSelection = requested;
+        // Nothing chose the model (no provider, no row): the caller's or the
+        // project's default may sit on a harness that can't start here (12.11:
+        // Codex installed, nobody signed in — the chat went there and hung).
+        // Then Auto, the strongest ready model, takes it.
+        if (requested === null && modelSelection !== null && deps.personalDefault !== undefined) {
+          const notReadyHere = selectionNotReadyMessage(
+            modelSelection,
+            yield* deps.getProviders,
+            deps.getHarnessUnoCredits === undefined ? {} : yield* deps.getHarnessUnoCredits,
+          );
+          if (notReadyHere !== null) {
+            modelSelection = (yield* deps.personalDefault) ?? modelSelection;
+          }
+        }
         if (modelSelection === null) {
           return yield* fail(
             400,
@@ -760,9 +774,10 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             'У проекта нет модели по умолчанию — передай "provider" (например "codex" или "claudeAgent") и при желании "model".',
           );
         }
-        // An assistant's chat on a harness that can't start here is not
-        // started at all: the model hears why and asks the person.
-        if (assistantProjectId !== null) {
+        // An assistant's chat — or any chat nobody chose a model for — on a
+        // harness that can't start here is not started at all: the model
+        // hears why and asks the person.
+        if (assistantProjectId !== null || requested === null) {
           const notReady = selectionNotReadyMessage(
             modelSelection,
             yield* deps.getProviders,
