@@ -18,6 +18,7 @@ import {
   type MachineKey,
   type ProjectSpec,
 } from "../heavyFixtures";
+import { installDemoExternalAsks } from "./needsYou";
 import { PLAN_LIMIT_CHAT } from "./plans";
 import { type AssistWorld, macOnline } from "./world";
 
@@ -225,6 +226,29 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
     errorClass: "provider_error",
     messages: [["user", "From the pricing page chat: make the OG image for /pricing, 1200×630."]],
   },
+  // Needs you (the Pult redo, 13.11): a task of the pricing page asks with ready answers.
+  {
+    id: "h-plans",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Pricing page: yearly plans",
+    minutesAgo: 11,
+    state: "needs-you",
+    role: "helper",
+    parent: "w-launch",
+    ask: {
+      kind: "question",
+      text: "Show a yearly price on the pricing page?",
+      options: ["Yes: $100/yr, 2 months free", "Monthly only"],
+    },
+    messages: [
+      ["user", "From the pricing page chat: add yearly plans if they make sense."],
+      [
+        "assistant",
+        "Yearly plans are ready behind a switch. One thing to decide: show a yearly price at all?",
+      ],
+    ],
+  },
   {
     id: "h-copy",
     machine: "work",
@@ -255,6 +279,28 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
       [
         "assistant",
         "The /pay command is written and its tests are green. To go live Stripe needs your sign-in once — calling you in.",
+      ],
+    ],
+  },
+  // Needs you: a deploy that waits for the person's OK.
+  {
+    id: "w-release",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Release orders-bot 1.4 (refunds)",
+    minutesAgo: 7,
+    state: "needs-you",
+    role: "solo",
+    ask: {
+      kind: "permission",
+      text: "Tests are green on staging. Deploy orders-bot 1.4 to production?",
+      command: "./deploy.sh production 1.4",
+    },
+    messages: [
+      ["user", "Release the refunds once the tests pass on staging. Ask me before production."],
+      [
+        "assistant",
+        "Staging is green (62/62 tests, a test refund went through). Rollback: ./deploy.sh rollback 1.3. I need your OK for production.",
       ],
     ],
   },
@@ -449,6 +495,24 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       body: `${INBOX_PERSON_CALL_BODY_PREFIX}Stripe asks you to sign in once to finish connecting the account.`,
     },
     {
+      id: "i-release",
+      machine: "work",
+      kind: "agent.approval",
+      minutesAgo: 7,
+      chat: "w-release",
+      title: "Release orders-bot 1.4 (refunds)",
+      body: "Deploy orders-bot 1.4 to production?",
+    },
+    {
+      id: "i-plans",
+      machine: "work",
+      kind: "agent.input",
+      minutesAgo: 11,
+      chat: "h-plans",
+      title: "Pricing page: yearly plans",
+      body: "Show a yearly price on the pricing page?",
+    },
+    {
       id: "i-backup",
       machine: "work",
       kind: "agent.done",
@@ -562,6 +626,7 @@ export function installAssistFixtures(world: AssistWorld) {
   for (const key of Object.keys(PROJECTS) as MachineKey[]) replace(PROJECTS[key], projects[key]);
   replace(CHATS, chats);
   replace(INBOX, live ? liveInbox(world) : []);
+  if (live) installDemoExternalAsks();
 }
 
 /** Uno, plus the personas on that computer, as the daemon lists them. */
