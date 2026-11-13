@@ -36,13 +36,22 @@ import {
   WorkflowIcon,
   WrenchIcon,
 } from "lucide-react";
-import { memo, type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  forwardRef,
+  memo,
+  type ReactNode,
+  type RefObject,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { CONSOLE_URL, consoleLinks } from "../../account/accountOverview";
 import { UNO_WORK_URL, accountTransport } from "../../account/unoAccount";
 import { useCommandPaletteStore } from "../../commandPaletteStore";
 import { isLoopbackHostname } from "../../environments/primary";
-import { useInboxNeedsYouCount } from "../../inbox/inboxStore";
+import { useNeedsYouCount } from "../../needsYou/useNeedsYouBoard";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useStore } from "../../store";
 import { cn, isMacPlatform } from "../../lib/utils";
@@ -53,9 +62,7 @@ import { GetHelpDialog } from "./GetHelpDialog";
 import { FIX_WORK_COPY } from "../../fixWork/fixWork";
 import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
-import { BellPanel } from "../inbox/InboxBell";
 import { Menu, MenuItem, MenuPopup, MenuSeparator } from "../ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarHeader, useSidebar } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -519,7 +526,7 @@ function useOpenPlace() {
   const navigate = useNavigate();
   const { isMobile, setOpenMobile } = useSidebar();
   const openFilesInPanel = useOpenFilesInPanel(isMobile);
-  return (to: "/files" | "/sites" | "/automations" | "/pull-requests") => {
+  return (to: "/files" | "/sites" | "/automations" | "/pull-requests" | "/needs-you") => {
     if (isMobile) setOpenMobile(false);
     sidebarDPanel.closeNow();
     // In a chat, Files opens on the right, beside it (Misha 18.10).
@@ -530,36 +537,47 @@ function useOpenPlace() {
 
 /** Whether Needs you shows, and its count: approvals and questions waiting, nothing else. */
 export function useNeedsYouBadge() {
-  const { shown, count } = needsYouPlace(useInboxNeedsYouCount());
+  // One count (the Pult redo, 13.11): what the Needs-you screen lists, not only the Inbox's.
+  const { shown, count } = needsYouPlace(useNeedsYouCount());
   return { needsYou: count, shown };
 }
 
-/** "Needs you" — the Inbox (approvals, questions, finished chats, app news) in place of the bell. */
+/**
+ * "Needs you" opens its screen (the Pult redo, 13.11): every chat, result and
+ * tracker question that waits on the person, with how long it takes. It
+ * replaced the Inbox popover here; the Inbox keeps its own row and bell.
+ */
 function NeedsYouPopover(props: {
   side: "right" | "bottom";
   trigger: (badge: { needsYou: number }) => ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
   const badge = useNeedsYouBadge();
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      {props.trigger(badge)}
-      <PopoverPopup
-        side={props.side}
-        align="start"
-        className="w-[min(26rem,calc(100vw-1.5rem))] [--viewport-inline-padding:0px]"
-        data-testid="inbox-popover"
-      >
-        <BellPanel
-          onClose={() => {
-            setOpen(false);
-            sidebarDPanel.closeNow();
-          }}
-        />
-      </PopoverPopup>
-    </Popover>
-  );
+  return <>{props.trigger(badge)}</>;
 }
+
+/** The button of Needs you: opens /needs-you (closing the mobile sidebar like the other places). */
+const NeedsYouTrigger = forwardRef<HTMLButtonElement, ComponentProps<"button">>(
+  function NeedsYouTrigger(props, ref) {
+    const open = useOpenPlace();
+    const pathname = useLocation({ select: (location) => location.pathname });
+    return (
+      <button
+        ref={ref}
+        type="button"
+        {...props}
+        data-active={pathname.startsWith("/needs-you") || undefined}
+        className={cn(
+          props.className,
+          "data-[active]:bg-sidebar-row-active data-[active]:text-foreground",
+        )}
+        onClick={(event) => {
+          props.onClick?.(event);
+          open("/needs-you");
+        }}
+      />
+    );
+  },
+);
 
 /**
  * Home, Files, Apps & sites, Automations (with the assistants, 28.10) — and
@@ -642,7 +660,7 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <PopoverTrigger
+                  <NeedsYouTrigger
                     aria-label="Needs you"
                     className={cn(PLACE_ICON_CLASS, PLACE_ICON_IDLE)}
                     data-testid="sidebar-needs-you"
@@ -709,14 +727,14 @@ const SidebarDPlaceRows = memo(function SidebarDPlaceRows() {
         <NeedsYouPopover
           side="right"
           trigger={(badge) => (
-            <PopoverTrigger
+            <NeedsYouTrigger
               className="flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 text-left text-sm text-sidebar-foreground/85 outline-hidden ring-ring transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-4 [&_svg]:shrink-0"
               data-testid="sidebar-needs-you"
             >
               <InboxIcon />
               <span className="min-w-0 flex-1 truncate">Needs you</span>
               <InboxCountBadge unread={badge.needsYou} needsYou={badge.needsYou} />
-            </PopoverTrigger>
+            </NeedsYouTrigger>
           )}
         />
       ) : null}
@@ -873,7 +891,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
           <NeedsYouPopover
             side="right"
             trigger={(badge) => (
-              <PopoverTrigger
+              <NeedsYouTrigger
                 aria-label="Needs you"
                 data-testid="sidebar-rail-needs-you"
                 className="relative grid size-9 cursor-pointer place-items-center rounded-lg text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-[18px]"
@@ -884,7 +902,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
                   needsYou={badge.needsYou}
                   className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
                 />
-              </PopoverTrigger>
+              </NeedsYouTrigger>
             )}
           />
         ) : null}
