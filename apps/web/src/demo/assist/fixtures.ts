@@ -8,7 +8,11 @@
  * Made-up work of a small founder (a landing, an orders bot, a pitch deck);
  * no client data.
  */
-import { ASSISTANT_PROJECT_ID, INBOX_PERSON_CALL_BODY_PREFIX } from "@t3tools/contracts";
+import {
+  ASSISTANT_PROJECT_ID,
+  INBOX_PERSON_ANSWER_BODY_PREFIX,
+  INBOX_PERSON_CALL_BODY_PREFIX,
+} from "@t3tools/contracts";
 
 import {
   CHATS,
@@ -244,6 +248,56 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
   },
 ];
 
+/**
+ * The answer holds (Misha 13.11): a chat that answered the person, then
+ * talked with its helper three times — Ready until they open it ("Answer to
+ * your question" in the Inbox; the chat opens at "Your answer", the
+ * helper's talk folded).
+ */
+const PLANS_ANSWER =
+  "Hetzner CX22 fits best: €4.50 a month, 2 vCPU, 4 GB, in the EU. DigitalOcean costs twice as much, Fly is cheaper but sleeps when idle. A helper is load-testing CX22 to be sure.";
+
+const ANSWER_HELD_CHATS: ChatSpec[] = [
+  {
+    id: "w-plans",
+    machine: "work",
+    project: "p-work-bot",
+    title: "A host for the orders bot",
+    minutesAgo: 2,
+    state: "read",
+    role: "coordinator",
+    messages: [
+      ["user", "Pick a host for the orders bot: compare three plans. I'll decide tonight."],
+      ["assistant", PLANS_ANSWER],
+      ["user", "From the load test: 200 orders a minute, p95 140 ms. Trying 500 next.", "h-load"],
+      ["assistant", "Good. Tell me the p95 at 500."],
+      ["user", "From the load test: 500 orders a minute, p95 310 ms, no errors.", "h-load"],
+      ["assistant", "Noted. One more run with the bot's real export job on top, please."],
+      ["user", "From the load test: with the export job, p95 350 ms. Still fine.", "h-load"],
+      ["assistant", "CX22 holds 500 orders a minute with the export running."],
+    ],
+  },
+  {
+    id: "h-load",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Load test: CX22 for the orders bot",
+    minutesAgo: 1,
+    runningFor: 14,
+    state: "running",
+    role: "helper",
+    parent: "w-plans",
+    now: "Cleaning up the test server",
+    messages: [
+      ["user", "From the hosting chat: load-test a Hetzner CX22 with the orders bot."],
+      [
+        "assistant",
+        "CX22 holds 500 orders a minute, p95 350 ms with the export. Removing the test server.",
+      ],
+    ],
+  },
+];
+
 function liveChats(world: AssistWorld): ChatSpec[] {
   const chats: ChatSpec[] = [
     UNO_MAIN,
@@ -307,6 +361,7 @@ function liveChats(world: AssistWorld): ChatSpec[] {
     },
   ];
   chats.push(...PERSON_NEEDED_CHATS);
+  chats.push(...ANSWER_HELD_CHATS);
   // Multi-computer variants (28.10): one chat at work on each computer that's on.
   chats.push({
     id: "w-refunds",
@@ -408,6 +463,15 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       read: true,
       title: "Finished: Daily orders export to Drive",
       body: "212 orders → Drive / Orders / 2026-10-27.",
+    },
+    {
+      id: "i-plans-answer",
+      machine: "work",
+      kind: "agent.done",
+      minutesAgo: 23,
+      chat: "w-plans",
+      title: "A host for the orders bot",
+      body: `${INBOX_PERSON_ANSWER_BODY_PREFIX}: ${PLANS_ANSWER.slice(0, 120)}…`,
     },
   ];
   if (macOnline(world)) {
