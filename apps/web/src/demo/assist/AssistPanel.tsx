@@ -21,6 +21,7 @@ import { MC_VARIANT } from "./mcVariant";
 import { dropLink, wakeComputer } from "./links";
 import { LC_ON } from "./lifecycle";
 import { LifecyclePanel } from "./LifecyclePanel";
+import { DEV_TOUR, DevOnboardingPanel } from "./DevOnboardingPanel";
 import {
   type AssistWorld,
   CONNECTOR_PROVIDERS,
@@ -228,6 +229,24 @@ export default function AssistPanel({ router }: { router: DemoRouter }) {
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [open]);
 
+  // "Move my projects here" (13.11): its own card.
+  if (DEV_TOUR) {
+    return (
+      <DevOnboardingPanel
+        router={router}
+        open={open}
+        setOpen={setOpen}
+        panelRef={panelRef}
+        openUno={() => {
+          const threadId = assistDemo.mainChat("work", ASSISTANT_PROJECT_ID);
+          void router.navigate({
+            to: "/$environmentId/$threadId",
+            params: { environmentId: assistDemo.environmentOf("work"), threadId },
+          } as never);
+        }}
+      />
+    );
+  }
   // Computers lifecycle (02.11): its own card.
   if (LC_ON) {
     return <LifecyclePanel router={router} open={open} setOpen={setOpen} panelRef={panelRef} />;

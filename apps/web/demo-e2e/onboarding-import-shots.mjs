@@ -19,10 +19,15 @@ const SIZES = [
 ];
 // A new account, Claude Code and Codex installed but not signed in, the MacBook
 // not connected yet, each project ~5 s to come over.
-const DEV_WORLD = { world: "new", plans: "signin", lc: "fresh", bring: "slow" };
+const DEV_WORLD = { world: "new", plans: "signin", lc: "fresh", bring: "slow", tour: "dev" };
 
-async function open(page, world) {
-  const params = new URLSearchParams({ world: "live", ...world, speed: "3", panel: "closed" });
+async function open(page, world, { panel = false } = {}) {
+  const params = new URLSearchParams({
+    world: "live",
+    ...world,
+    speed: "3",
+    ...(panel ? {} : { panel: "closed" }),
+  });
   await page.goto(`${server.url}?${params}`);
   await page.waitForFunction(() => Boolean(window.__assistDemo), null, { timeout: 30_000 });
   await page.waitForTimeout(2500);
@@ -34,8 +39,8 @@ async function go(page, path, search = {}) {
   await page.waitForTimeout(800);
 }
 
-async function run(name, world, body) {
-  for (const size of SIZES) {
+async function run(name, world, body, { sizes = SIZES, panel = false } = {}) {
+  for (const size of sizes) {
     const { name: width, ...device } = size;
     const context = await browser.newContext({
       deviceScaleFactor: 2,
@@ -76,7 +81,7 @@ async function run(name, world, body) {
       if (tall > 0) await page.setViewportSize(base);
     };
     try {
-      await open(page, world);
+      await open(page, world, { panel });
       await body({ page, shot });
       log.push(`ok   ${name} ${width}`);
     } catch (error) {
@@ -92,6 +97,59 @@ async function run(name, world, body) {
 
 const id = (page, testId) => page.getByTestId(testId).first();
 const primary = (page) => id(page, "setup-primary");
+const seeText = (page, text, timeout = 20_000) =>
+  page.getByText(text, { exact: false }).first().waitFor({ timeout });
+/** An option of Uno's question card: one tap answers. */
+async function pick(page, label) {
+  const button = page.getByRole("button", { name: label }).last();
+  if (await button.isVisible().catch(() => false)) return button.click();
+  return page.getByText(label, { exact: true }).last().click();
+}
+
+// The way in for a newcomer: Uno's first question → "I build software" → two buttons.
+await run("00-uno", DEV_WORLD, async ({ page, shot }) => {
+  await seeText(page, "what do you mostly do");
+  await shot("1-question");
+  await pick(page, "I build software");
+  await seeText(page, "Sign in to Claude Code / Codex");
+  await shot("2-developer-way");
+  await pick(page, "Sign in to Claude Code / Codex");
+  await id(page, "setup-dev-agent-claudeAgent").waitFor();
+  await shot("3-sign-in");
+});
+
+// The same in their own words.
+await run(
+  "00-uno-own-words",
+  DEV_WORLD,
+  async ({ page, shot }) => {
+    await seeText(page, "what do you mostly do");
+    await page.getByPlaceholder("Or in your own words").fill("I'm a developer");
+    await page.getByRole("button", { name: "Save" }).last().click();
+    await seeText(page, "Import projects from my computer");
+    await shot("developer-way");
+  },
+  { sizes: [SIZES[0]] },
+);
+
+// The demo's own card for this path, as a fresh browser opens it.
+await run(
+  "00-demo-panel",
+  DEV_WORLD,
+  async ({ page }) => {
+    // Open at the start; the shot's own clicks (banners) may have folded it.
+    if (
+      await id(page, "demo-panel-pill")
+        .isVisible()
+        .catch(() => false)
+    )
+      await id(page, "demo-panel-pill").click();
+    await id(page, "demo-panel").waitFor();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: join(out, "00-demo-panel-1440.png") });
+  },
+  { sizes: [SIZES[0]], panel: true },
+);
 
 // Home's first screen: the third way is a line under the composer.
 await run("01-home", { ...DEV_WORLD }, async ({ page, shot }) => {

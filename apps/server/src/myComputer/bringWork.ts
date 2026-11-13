@@ -5,7 +5,7 @@
  *
  * Scan: ONE command on the computer lists the git folders directly in the
  * usual places for repositories (`SCAN_ROOTS`: `~/projects`, `~/code`,
- * `~/Developer`, `~/Documents/GitHub`…), plus the folders found chats ran in
+ * `~/Developer`, `~/Documents/GitHub`, `~/source/repos`…), plus the folders found chats ran in
  * (the chat import's index), and for each the key names of its `.env` and
  * `.env.local` — the names are cut out there by `sed`, so a value never
  * leaves the computer during a scan. Nothing outside those folders is read:
@@ -55,6 +55,8 @@ export const SCAN_ROOTS: ReadonlyArray<string> = [
   "github",
   "workspace",
   "Documents/GitHub",
+  // Visual Studio's own place for repositories on Windows.
+  "source/repos",
 ];
 
 /** Where a folder's key names come from; a later file's value wins for the same name. */

@@ -56,6 +56,11 @@ export const DEMO_SIGN_IN = WORLD.plans === "signin";
 /** Which of them the person signed in to (the demo's sign-in finishes by itself). */
 const signedInHere = new Set<string>();
 
+/** Claude Code or Codex runs on the person's own plan on uno-work (Uno's "I build software" card). */
+export function demoOwnAgentSignedIn(): boolean {
+  return DEMO_SIGN_IN ? signedInHere.size > 0 : DEMO_PLANS;
+}
+
 const NOW = Date.now();
 const later = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString();

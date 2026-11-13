@@ -37,6 +37,7 @@ import {
   telegramCard,
 } from "./engine";
 import { DEMO_PERSONAS, type DemoPersona } from "./fixtures";
+import { demoOwnAgentSignedIn } from "./plans";
 import { WORLD, macOnline } from "./world";
 
 export const VARIANT: { readonly id: string; readonly title: string } = {
@@ -338,6 +339,69 @@ function aboutYou(answer: string): string {
   return `Got it: “${answer.slice(0, 80)}”. I'll keep that in mind.`;
 }
 
+/**
+ * "I build software" — the card's option, or plainly the same in their own
+ * words ("I'm a developer", "I code"). Not "software" alone: "I sell software"
+ * isn't a developer.
+ */
+const BUILDS_SOFTWARE =
+  /^I build software$|\b(?:developer|programmer|software engineer|coder)\b|\bI (?:write )?code\b/i;
+
+const DEV_SIGN_IN = "Sign in to Claude Code / Codex";
+const DEV_IMPORT = "Import projects from my computer";
+
+/** The developer way's step in setup. */
+const openSetupStep = (step: "sign-in" | "import"): Script => [
+  {
+    run: () => {
+      location.hash = `#/setup?step=${step}`;
+    },
+    delay: 500,
+  },
+];
+
+/**
+ * A developer (Misha 13.11): Uno offers the developer way at once — sign in to
+ * their coding agent, bring their projects (setup's "Move my projects here").
+ * Already signed in: straight to the import. Later: Uno's usual first run.
+ */
+function devWay(after: Script): Script {
+  const signedIn = demoOwnAgentSignedIn();
+  return [
+    {
+      say: "Got it — you build software. Then your projects first: they come here with their git history and keys, and your agent works on them with the laptop closed.",
+    },
+    {
+      ask: signedIn
+        ? "Your coding agent is signed in already. Bring your projects?"
+        : "Two steps: sign in with the plan you already pay for, then pick projects on your laptop.",
+      question: {
+        id: "dev-way",
+        header: "Your projects",
+        question: "Move your projects here",
+        options: [
+          ...(signedIn
+            ? []
+            : [
+                {
+                  label: DEV_SIGN_IN,
+                  description: "Your Claude or ChatGPT plan, here in the cloud",
+                },
+              ]),
+          { label: DEV_IMPORT, description: "Code with its git history, the keys you pick" },
+        ],
+        skippable: true,
+      },
+      then: (answer) =>
+        answer === DEV_SIGN_IN
+          ? openSetupStep("sign-in")
+          : answer === DEV_IMPORT
+            ? openSetupStep("import")
+            : after,
+    },
+  ];
+}
+
 function firstRun(ctx: ScriptContext): Script {
   const free = ctx.world.tier === "free";
   const closing: Script = [
@@ -362,14 +426,18 @@ function firstRun(ctx: ScriptContext): Script {
         input: { placeholder: "Or in your own words" },
         skippable: true,
       },
-      then: (answer, inner) => [
-        { say: aboutYou(answer) },
-        ...connectorsCard(inner, [
-          ...telegramCard(inner, [
-            ...modeCard(inner, [...(free ? freeNote : []), ...helpersOffer(closing), ...closing]),
+      then: (answer, inner) => {
+        const rest: Script = [
+          ...connectorsCard(inner, [
+            ...telegramCard(inner, [
+              ...modeCard(inner, [...(free ? freeNote : []), ...helpersOffer(closing), ...closing]),
+            ]),
           ]),
-        ]),
-      ],
+        ];
+        return BUILDS_SOFTWARE.test(answer.trim())
+          ? devWay(rest)
+          : [{ say: aboutYou(answer) }, ...rest];
+      },
     },
   ];
 }
