@@ -72,6 +72,7 @@ import {
   useSavedEnvironmentRegistryStore,
 } from "../environments/runtime";
 import { startOutboxFlusher } from "../outbox/outboxFlusher";
+import { startQueuedMessageSender } from "../queuedMessageSender";
 import { configureClientTracing } from "../observability/clientTracing";
 import {
   ensurePrimaryEnvironmentReady,
@@ -417,6 +418,8 @@ function EnvironmentConnectionManagerBootstrap() {
   }, [queryClient]);
   // Messages written offline go out once their computer is back (outbox/).
   useEffect(() => startOutboxFlusher(), []);
+  // "Up next" of the chats not on screen goes once their agent is done (T48).
+  useEffect(() => startQueuedMessageSender(), []);
 
   return null;
 }

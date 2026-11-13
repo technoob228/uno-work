@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
+  claimQueuedMessages,
+  isQueueOwnedOnScreen,
   joinQueuedAhead,
   nextQueuedMessageToSend,
+  queuedTurnIds,
+  queuePause,
   planQueuedSend,
   queuedAheadOfSend,
   QUEUED_MESSAGE_HOLD_AFTER_MS,
@@ -243,5 +247,74 @@ describe("nextQueuedMessageToSend", () => {
     store().enqueue(KEY, "two");
     store().holdAll(KEY);
     expect(nextQueuedMessageToSend({ ...base, queue: queue() })).toBeNull();
+  });
+});
+
+describe("T48: Up next goes once the agent is done, however the turn ended", () => {
+  const base = { phase: "ready" as const, busy: false, waitingForPerson: false, hasError: false };
+
+  it("goes into a chat whose session the computer let go (idle 15 min, a restart)", () => {
+    const first = store().enqueue(KEY, "one");
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), phase: "disconnected" })?.id).toBe(
+      first.id,
+    );
+  });
+
+  it("a long turn or an app update doesn't hold it at a reload: only a day-old tab does", () => {
+    const now = Date.parse("2026-11-13T12:00:00.000Z");
+    const message = (minutesAgo: number) => ({
+      id: `m-${minutesAgo}`,
+      text: "go on",
+      createdAt: new Date(now - minutesAgo * 60_000).toISOString(),
+    });
+    const restored = restoreQueues(
+      { queuesByThreadKey: { [KEY]: [message(45), message(13 * 60)] } },
+      now,
+    )[KEY]!;
+    expect(restored.map((entry) => entry.hold ?? false)).toEqual([false, true]);
+  });
+
+  it("says what it waits for: the person, or a failed turn — never 'when the agent is done'", () => {
+    expect(queuePause({ phase: "ready", waitingForPerson: true, hasError: false })).toBe("person");
+    expect(queuePause({ phase: "ready", waitingForPerson: false, hasError: true })).toBe("error");
+    expect(queuePause({ phase: "disconnected", waitingForPerson: false, hasError: false })).toBe(
+      null,
+    );
+    expect(queuePause({ phase: "running", waitingForPerson: true, hasError: true })).toBe(null);
+  });
+
+  it("the same message is the same command wherever it is tried", () => {
+    const message = store().enqueue(KEY, "one");
+    expect(queuedTurnIds(message)).toEqual(queuedTurnIds({ id: message.id }));
+    expect(queuedTurnIds(message).commandId).not.toBe(
+      queuedTurnIds(store().enqueue(KEY, "two")).commandId,
+    );
+  });
+
+  it("refused by the computer: back first, held, as a new try", () => {
+    const message = store().enqueue(KEY, "one");
+    store().enqueue(KEY, "two");
+    const taken = store().take(KEY, message.id)!;
+    store().holdAtFront(KEY, taken, { retry: true });
+    expect(queue().map((entry) => entry.text)).toEqual(["one", "two"]);
+    expect(queue()[0]!.hold).toBe(true);
+    expect(queue()[0]!.id).not.toBe(message.id);
+  });
+
+  it("never sent (no link at that moment): back first, as it was", () => {
+    const message = store().enqueue(KEY, "one");
+    store().enqueue(KEY, "two");
+    store().putBackFirst(KEY, store().take(KEY, message.id)!);
+    expect(queue()[0]).toEqual(message);
+  });
+
+  it("an open chat claims its queue until it closes, counted", () => {
+    const releaseMain = claimQueuedMessages(KEY);
+    const releasePanel = claimQueuedMessages(KEY);
+    releaseMain();
+    releaseMain();
+    expect(isQueueOwnedOnScreen(KEY)).toBe(true);
+    releasePanel();
+    expect(isQueueOwnedOnScreen(KEY)).toBe(false);
   });
 });

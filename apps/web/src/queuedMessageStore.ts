@@ -11,10 +11,19 @@
  * Text only: a message with pictures, files or a recording still goes at
  * once — with what waits here going first in it, so nothing typed later
  * overtakes the queue (planQueuedSend). Kept in localStorage: a reload must not lose what the person wrote
- * (qa 30.10: it vanished without a word). What waited long stops going by
- * itself: the person left, the chat moved on, "Send now" is theirs to press.
+ * (qa 30.10: it vanished without a word). What waited very long (a tab from
+ * yesterday) stops going by itself: "Send now" is theirs to press.
  * Several tabs share the queue, and a message leaves from one of them only.
+ *
+ * Who sends it (T48, 13.11): the open chat (ChatView, with the composer's
+ * model and effort) or, when the chat isn't on screen, the app-wide sender
+ * (queuedMessageSender.ts) with the chat's own settings. A chat the computer
+ * put to sleep after the turn (the session reaper, 15 min idle; a restart) is
+ * free too: the message wakes it, as a typed one does. Either way the turn
+ * goes with ids made from the queued message's id, so a second try anywhere
+ * (another tab, a retry) is the same command and the computer takes it once.
  */
+import { CommandId, MessageId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -37,8 +46,18 @@ interface QueuedMessageStoreState {
   enqueue: (threadKey: string, text: string) => QueuedChatMessage;
   /** Removes one message and returns it; null when someone already took it. */
   take: (threadKey: string, id: string) => QueuedChatMessage | null;
-  /** Puts a message back at the head, held (its send failed). */
-  holdAtFront: (threadKey: string, message: QueuedChatMessage) => void;
+  /**
+   * Puts a message back at the head, held (its send failed). `retry: true`:
+   * the computer refused that try, so the next one (Send now) is a new
+   * command — the same ids would only get the old refusal back.
+   */
+  holdAtFront: (
+    threadKey: string,
+    message: QueuedChatMessage,
+    options?: { readonly retry?: boolean },
+  ) => void;
+  /** Puts a message that never went back at the head, as it was. */
+  putBackFirst: (threadKey: string, message: QueuedChatMessage) => void;
   /** Every waiting message of the chat waits for "Send now" (the person pressed Stop). */
   holdAll: (threadKey: string) => void;
   /** The chat is gone: nothing of it waits. */
@@ -52,8 +71,12 @@ export const QUEUED_MESSAGES_STORAGE_KEY = "uno.queued-messages.v1";
 /** After a restart cut a turn off, how long the daemon gets to continue it itself. */
 export const QUEUE_AFTER_RESTART_DELAY_MS = 20_000;
 
-/** Older than this at a reload: waits for "Send now". */
-export const QUEUED_MESSAGE_HOLD_AFTER_MS = 30 * 60_000;
+/**
+ * Older than this at a reload: waits for "Send now". Not shorter: a long turn,
+ * or the app restarting for an update while the person is away, must not
+ * stop the queue (T48: 30 min held what Misha expected to go).
+ */
+export const QUEUED_MESSAGE_HOLD_AFTER_MS = 12 * 60 * 60_000;
 
 type Queues = Readonly<Record<string, ReadonlyArray<QueuedChatMessage>>>;
 
@@ -143,10 +166,20 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()(
         }));
         return elsewhere ? null : entry;
       },
-      holdAtFront: (threadKey, message) => {
+      holdAtFront: (threadKey, message, options) => {
         set((state) => ({
           queuesByThreadKey: withQueue(state.queuesByThreadKey, threadKey, [
-            { ...message, hold: true },
+            { ...message, ...(options?.retry ? { id: randomUUID() } : {}), hold: true },
+            ...(state.queuesByThreadKey[threadKey] ?? EMPTY_QUEUE).filter(
+              (entry) => entry.id !== message.id,
+            ),
+          ]),
+        }));
+      },
+      putBackFirst: (threadKey, message) => {
+        set((state) => ({
+          queuesByThreadKey: withQueue(state.queuesByThreadKey, threadKey, [
+            message,
             ...(state.queuesByThreadKey[threadKey] ?? EMPTY_QUEUE).filter(
               (entry) => entry.id !== message.id,
             ),
@@ -266,21 +299,84 @@ export function joinQueuedAhead(ahead: ReadonlyArray<string>, text: string): str
   return [...ahead, text].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
+type QueuePhase = "disconnected" | "connecting" | "ready" | "running";
+
 /**
  * The first waiting message goes by itself once the chat is free: the agent
  * finished, nothing is being sent, nothing asks the person, no error is on
  * screen (after a failed turn the person decides), and it isn't held.
+ *
+ * "disconnected" is free: the turn is over and the computer let the agent's
+ * session go (idle 15 min, a restart) — the message starts it again, like a
+ * typed one. Before T48 only "ready" counted, so anything still waiting 15
+ * minutes after the turn waited for good, under "Sends when the agent is done".
  */
 export function nextQueuedMessageToSend(input: {
   readonly queue: ReadonlyArray<QueuedChatMessage>;
-  readonly phase: "disconnected" | "connecting" | "ready" | "running";
+  readonly phase: QueuePhase;
   readonly busy: boolean;
   readonly waitingForPerson: boolean;
   readonly hasError: boolean;
 }): QueuedChatMessage | null {
   const first = input.queue[0];
   if (!first || first.hold) return null;
-  if (input.phase !== "ready") return null;
+  if (input.phase === "running" || input.phase === "connecting") return null;
   if (input.busy || input.waitingForPerson || input.hasError) return null;
   return first;
+}
+
+/**
+ * Why the first waiting message isn't going though the agent is done — for
+ * its line in "Up next", so it never says "Sends when the agent is done" over
+ * a queue that waits for the person.
+ */
+export type QueuePause = "error" | "person" | null;
+
+export function queuePause(input: {
+  readonly phase: QueuePhase;
+  readonly waitingForPerson: boolean;
+  readonly hasError: boolean;
+}): QueuePause {
+  if (input.phase === "running" || input.phase === "connecting") return null;
+  if (input.waitingForPerson) return "person";
+  if (input.hasError) return "error";
+  return null;
+}
+
+/**
+ * The turn a queued message starts: the same ids wherever and however often
+ * it is tried, so the computer's command receipts take it once (two tabs, two
+ * windows, a retry after a lost answer).
+ */
+export function queuedTurnIds(message: Pick<QueuedChatMessage, "id">): {
+  readonly commandId: CommandId;
+  readonly messageId: MessageId;
+} {
+  return {
+    commandId: CommandId.make(`queued-turn:${message.id}`),
+    messageId: MessageId.make(`queued:${message.id}`),
+  };
+}
+
+/**
+ * Chats whose queue an open chat view sends (with the composer's settings);
+ * the app-wide sender leaves those alone. A count: the same chat can be open
+ * twice (the main view and a panel).
+ */
+const queueOwners = new Map<string, number>();
+
+export function claimQueuedMessages(threadKey: string): () => void {
+  queueOwners.set(threadKey, (queueOwners.get(threadKey) ?? 0) + 1);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const left = (queueOwners.get(threadKey) ?? 1) - 1;
+    if (left <= 0) queueOwners.delete(threadKey);
+    else queueOwners.set(threadKey, left);
+  };
+}
+
+export function isQueueOwnedOnScreen(threadKey: string): boolean {
+  return queueOwners.has(threadKey);
 }
