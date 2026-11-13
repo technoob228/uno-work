@@ -15,7 +15,7 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
-import { isYourTurn, type YourTurnInput } from "./Sidebar.yourTurn";
+import { yourTurnKind, type YourTurnInput } from "./Sidebar.yourTurn";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -37,7 +37,14 @@ type SidebarProject = {
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
-  label: "Working" | "Connecting" | "Ready" | "Pending Approval" | "Awaiting Input" | "Plan Ready";
+  label:
+    | "Working"
+    | "Connecting"
+    | "Ready"
+    | "Needs you"
+    | "Pending Approval"
+    | "Awaiting Input"
+    | "Plan Ready";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -46,6 +53,7 @@ export interface ThreadStatusPill {
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
+  "Needs you": 4,
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
@@ -490,7 +498,16 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (isYourTurn(thread, input.now ?? new Date().toISOString())) {
+  const turnKind = yourTurnKind(thread, input.now ?? new Date().toISOString());
+  if (turnKind === "called") {
+    return {
+      label: "Needs you",
+      colorClass: "text-indigo-600 dark:text-indigo-300/90",
+      dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
+      pulse: false,
+    };
+  }
+  if (turnKind === "ready") {
     return {
       label: "Ready",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",

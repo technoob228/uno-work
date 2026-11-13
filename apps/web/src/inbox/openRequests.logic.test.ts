@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isPersonCallItem,
   approvalPhase,
   canDismissInboxItem,
   canOfferChatDone,
@@ -86,5 +87,16 @@ describe("approvalPhase", () => {
     expect(chatOpenRequests({ hasPendingApprovals: true, hasPendingUserInput: false })).toEqual(
       WAITS_FOR_OK,
     );
+  });
+});
+
+describe("isPersonCallItem", () => {
+  it("is an agent's call into the chat, not a question or help in the browser", () => {
+    expect(isPersonCallItem({ kind: "agent.input", body: "Needs you: Pick a plan" })).toBe(true);
+    expect(isPersonCallItem({ kind: "agent.input", body: "Asks: Which token?" })).toBe(false);
+    expect(
+      isPersonCallItem({ kind: "agent.input", body: "Needs you in the browser: sign in" }),
+    ).toBe(false);
+    expect(isPersonCallItem({ kind: "agent.done", body: "Needs you: x" })).toBe(false);
   });
 });

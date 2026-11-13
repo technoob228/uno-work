@@ -5398,8 +5398,8 @@ export default function ChatView(props: ChatViewProps) {
                       markdownCwd={gitCwd ?? undefined}
                     />
                   ) : null}
-                  {isServerThread &&
-                  (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
+                  {/* Every chat: the strip itself decides (agents may lead the person's own, 13.11). */}
+                  {isServerThread && activeThread ? (
                     <ThreadControlBar
                       environmentId={activeThread.environmentId}
                       threadId={activeThread.id}

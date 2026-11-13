@@ -9,7 +9,12 @@
  * `hasPendingUserInput`, kept by the server). An Inbox item's `readAt` is not:
  * opening the item marks it read without answering anything.
  */
-import { INBOX_NEEDS_YOU_KINDS, type InboxItem, type InboxItemKind } from "@t3tools/contracts";
+import {
+  INBOX_NEEDS_YOU_KINDS,
+  INBOX_PERSON_CALL_BODY_PREFIX,
+  type InboxItem,
+  type InboxItemKind,
+} from "@t3tools/contracts";
 
 import type { SidebarThreadStatus } from "../components/Sidebar.logic";
 
@@ -42,6 +47,11 @@ export function chatWaitsForPerson(status: SidebarThreadStatus): boolean {
  */
 export function canOfferChatDone(status: SidebarThreadStatus): boolean {
   return status !== "working" && !chatWaitsForPerson(status);
+}
+
+/** An agent called the person into the chat (`chat_call_person`): looking at it answers. */
+export function isPersonCallItem(item: Pick<InboxItem, "kind" | "body">): boolean {
+  return item.kind === "agent.input" && (item.body ?? "").startsWith(INBOX_PERSON_CALL_BODY_PREFIX);
 }
 
 /** Does this Inbox item stand for a request the chat still waits on? */

@@ -86,6 +86,9 @@ function sentence(
  *   offers "Don't let agents write here" (a human message already takes it
  *   over; there is no "Hand back to agent" any more — agents may write into
  *   any free chat unless it is closed);
+ * - a chat the person started where agents talk now (`agentLed`, see
+ *   Sidebar.owner: the last word is another chat's agent's and nobody
+ *   called the person) says so, with the same switch (Misha 13.11);
  * - any other chat: no strip (null).
  * `supportsAgentsAccess` false (an older daemon): the old take-over /
  * hand-back pair, which is the only way such a daemon unlocks a chat.
@@ -96,6 +99,8 @@ export function resolveThreadControlBarState(input: {
   readonly parentTitle: string | null | undefined;
   readonly agentsClosedAt?: string | null | undefined;
   readonly supportsAgentsAccess?: boolean | undefined;
+  /** An agent drives the chat now (Sidebar.owner's threadOwner is "agent"). */
+  readonly agentLed?: boolean | undefined;
 }): ThreadControlBarState | null {
   const controller = normalizeThreadController(input.controller);
   const spawned = Boolean(input.spawnedByThreadId);
@@ -123,13 +128,25 @@ export function resolveThreadControlBarState(input: {
       action: { kind: "agents-access", label: AGENTS_ACCESS_COPY.open, nextClosed: false },
     };
   }
-  if (!spawned) return null;
-
   const closeAction = {
     kind: "agents-access",
     label: AGENTS_ACCESS_COPY.close,
     nextClosed: true,
   } as const;
+  if (!spawned) {
+    if (input.agentLed !== true) return null;
+    return {
+      controller: "agent",
+      closedToAgents,
+      ...sentence(
+        "",
+        null,
+        "Agents are talking here · you'll see Ready or Needs you when it's your turn",
+      ),
+      action: closeAction,
+    };
+  }
+
   if (controller === "agent") {
     return {
       controller,

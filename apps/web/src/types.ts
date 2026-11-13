@@ -258,6 +258,19 @@ export interface SidebarThreadSummary {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /**
+   * The chats this chat's agent started (derived in the store from their own
+   * summaries, see childChatWork.ts); absent when it started none.
+   */
+  childWork?: ChildChatWork | undefined;
+}
+
+/** How the chats a chat's agent started are doing. */
+export interface ChildChatWork {
+  /** Still going: working, or waiting for the person's OK or answer. */
+  readonly working: number;
+  /** When the newest of them was started. */
+  readonly latestStartedAt: string;
 }
 
 export interface ThreadSession {

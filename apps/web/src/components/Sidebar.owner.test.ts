@@ -75,8 +75,40 @@ describe("isAgentStartedChat", () => {
 });
 
 describe("threadOwner", () => {
-  it("a chat the person started is always theirs", () => {
+  it("a chat the person started is theirs while the last word is theirs", () => {
     expect(threadOwner(agentChat({ startedBy: null, spawnedByThreadId: null }))).toBe("you");
+    expect(
+      threadOwner(
+        agentChat({
+          startedBy: null,
+          spawnedByThreadId: null,
+          latestPersonMessageAt: at(20),
+          latestUserMessageAt: at(20),
+        }),
+      ),
+    ).toBe("you");
+  });
+
+  it("the person's chat is the agent's while agents talk in it (Misha 13.11)", () => {
+    const talking = agentChat({
+      startedBy: null,
+      spawnedByThreadId: null,
+      controller: "human",
+      latestPersonMessageAt: at(60),
+      latestUserMessageAt: at(20),
+    });
+    expect(threadOwner(talking)).toBe("agent");
+    // Called in, asked something, or the chats started for the request are done: theirs.
+    expect(threadOwner({ ...talking, personCalledAt: at(5) })).toBe("you");
+    expect(threadOwner({ ...talking, hasPendingUserInput: true })).toBe("you");
+    expect(threadOwner({ ...talking, childWork: { working: 0, latestStartedAt: at(50) } })).toBe(
+      "you",
+    );
+    expect(threadOwner({ ...talking, childWork: { working: 1, latestStartedAt: at(50) } })).toBe(
+      "agent",
+    );
+    // An older daemon: the person's, as before.
+    expect(threadOwner({ ...talking, startedBy: undefined })).toBe("you");
   });
 
   it("an agent's chat working on its own is the agent's", () => {

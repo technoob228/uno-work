@@ -50,6 +50,33 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
     ).toBeNull();
   });
 
+  it("says agents talk in the person's own chat while one leads it (13.11)", () => {
+    const state = resolveThreadControlBarState({
+      ...base,
+      spawnedByThreadId: null,
+      controller: "human",
+      parentTitle: null,
+      agentLed: true,
+    });
+    expect(state).toMatchObject({
+      controller: "agent",
+      closedToAgents: false,
+      summary: "Agents are talking here · you'll see Ready or Needs you when it's your turn",
+      action: { kind: "agents-access", nextClosed: true },
+    });
+    // An older daemon has no switch for it: nothing.
+    expect(
+      resolveThreadControlBarState({
+        ...base,
+        supportsAgentsAccess: false,
+        spawnedByThreadId: null,
+        controller: "human",
+        parentTitle: null,
+        agentLed: true,
+      }),
+    ).toBeNull();
+  });
+
   it("offers to close a chat the agent drives, with no Take over", () => {
     const state = resolveThreadControlBarState({
       ...base,

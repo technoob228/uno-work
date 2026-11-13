@@ -26,6 +26,12 @@ export const InboxItemKind = Schema.Literals([
 ]);
 export type InboxItemKind = typeof InboxItemKind.Type;
 
+/**
+ * The body of the item an agent's `chat_call_person` posts ("Needs you: <reason>",
+ * kind `agent.input`): unlike a question, looking at the chat answers it.
+ */
+export const INBOX_PERSON_CALL_BODY_PREFIX = "Needs you: ";
+
 /** Kinds that wait for the person — shown as "Needs you". */
 export const INBOX_NEEDS_YOU_KINDS: ReadonlySet<InboxItemKind> = new Set([
   "agent.approval",

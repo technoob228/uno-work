@@ -114,4 +114,21 @@ describe("InboxService", () => {
       expect((await Effect.runPromise(service.snapshot)).unread).toBe(0);
     });
   });
+
+  it("a call into a chat is a Needs-you item until the agent takes it back", async () => {
+    await run(async (service, publish) => {
+      await publish(event("thread.person-called", { threadId: "t1", reason: "Pick a plan" }));
+      let snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(1);
+      expect(snapshot.items[0]).toMatchObject({
+        kind: "agent.input",
+        title: "Landing page for the bakery",
+        body: "Needs you: Pick a plan",
+        open: { kind: "thread", threadId: "t1" },
+      });
+      await publish(event("thread.person-released", { threadId: "t1" }));
+      snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(0);
+    });
+  });
 });

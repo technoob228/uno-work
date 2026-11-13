@@ -38,6 +38,7 @@ import {
 } from "./types";
 import { resolveEnvironmentHttpUrl } from "./environments/runtime";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
+import { withChildChatWork } from "./childChatWork";
 import { getThreadFromEnvironmentState } from "./threadDerivation";
 import { readThreadReadAt, writeThreadReadAt, writeThreadReadAts } from "./threadReadMarks";
 
@@ -1190,9 +1191,19 @@ function getStoredEnvironmentState(
 function commitEnvironmentState(
   state: AppState,
   environmentId: EnvironmentId,
-  nextEnvironmentState: EnvironmentState,
+  incomingEnvironmentState: EnvironmentState,
 ): AppState {
   const currentEnvironmentState = state.environmentStateById[environmentId];
+  // A chat's summary changed: its parent's view of the chats it started may too.
+  const summaries =
+    incomingEnvironmentState.sidebarThreadSummaryById ===
+    currentEnvironmentState?.sidebarThreadSummaryById
+      ? incomingEnvironmentState.sidebarThreadSummaryById
+      : withChildChatWork(incomingEnvironmentState.sidebarThreadSummaryById);
+  const nextEnvironmentState =
+    summaries === incomingEnvironmentState.sidebarThreadSummaryById
+      ? incomingEnvironmentState
+      : { ...incomingEnvironmentState, sidebarThreadSummaryById: summaries };
   const environmentStateById =
     currentEnvironmentState === nextEnvironmentState
       ? state.environmentStateById

@@ -10,6 +10,8 @@ import { useEnvironmentSupportsAgentsCloseChat } from "../../environments/agents
 import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThreadsSupport";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
 import { cn, newCommandId } from "../../lib/utils";
+import { selectSidebarThreadSummaryByRef, useStore } from "../../store";
+import { threadOwner } from "../Sidebar.owner";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
@@ -24,7 +26,8 @@ interface ThreadControlBarProps {
 
 /**
  * Slim strip above the composer: who started / drives a chat another chat's
- * agent created, and the person's "Don't let agents write here" switch. A
+ * agent created (or, in the person's own chat, that agents talk there now),
+ * and the person's "Don't let agents write here" switch. A
  * chat closed to agents shows the strip whoever created it, so the switch is
  * always one click away from where it is visible. The composer stays enabled
  * either way.
@@ -42,12 +45,17 @@ export const ThreadControlBar = memo(function ThreadControlBar({
   const parentTitle = useThreadTitle(environmentId, spawnedByThreadId);
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
+  const agentLed = useStore((store) => {
+    const summary = selectSidebarThreadSummaryByRef(store, { environmentId, threadId });
+    return summary !== undefined && threadOwner(summary) === "agent";
+  });
   const state = resolveThreadControlBarState({
     spawnedByThreadId,
     controller,
     parentTitle,
     agentsClosedAt,
     supportsAgentsAccess,
+    agentLed,
   });
 
   const action = state?.action ?? null;
@@ -94,7 +102,8 @@ export const ThreadControlBar = memo(function ThreadControlBar({
     return null;
   }
 
-  const agentDriving = !state.closedToAgents && state.controller === "agent" && !!spawnedByThreadId;
+  const agentDriving =
+    !state.closedToAgents && state.controller === "agent" && (!!spawnedByThreadId || agentLed);
   const Icon = state.closedToAgents ? LockIcon : agentDriving ? BotIcon : UserRoundIcon;
 
   return (

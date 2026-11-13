@@ -38,7 +38,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ServerConfig } from "../../config.ts";
-import { isPersonOrigin, startedByFromOrigin } from "../commandOrigin.ts";
+import { isOnPersonsBehalf, startedByFromOrigin } from "../commandOrigin.ts";
 import { laterIso } from "../projector.ts";
 import {
   OrchestrationProjectionPipeline,
@@ -951,11 +951,12 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
           const previousLatest = existingRow.value.latestUserMessageAt;
-          // The person's own message (not an agent's, Uno's or an app's):
+          // The person's own message or their automation's (not an agent's,
+          // Uno's or an app's):
           // what the chat does next answers them.
           const personWrote =
             event.payload.role === "user" &&
-            isPersonOrigin(event.metadata.origin) &&
+            isOnPersonsBehalf(event.metadata.origin) &&
             (existingRow.value.latestPersonMessageAt ?? "") < event.payload.createdAt;
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,

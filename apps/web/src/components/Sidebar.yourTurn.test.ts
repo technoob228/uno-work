@@ -11,7 +11,12 @@ import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary, ThreadSession } from "../types";
 import { isThreadSettled, resolveSidebarThreadSection } from "./Sidebar.sections";
-import { countChatsWaitingOnYou, isYourTurn, YOUR_TURN_SINCE } from "./Sidebar.yourTurn";
+import {
+  countChatsWaitingOnYou,
+  isYourTurn,
+  YOUR_TURN_SINCE,
+  yourTurnKind,
+} from "./Sidebar.yourTurn";
 
 const NOW = "2026-10-20T12:00:00.000Z";
 const MINUTE_MS = 60 * 1_000;
@@ -242,5 +247,65 @@ describe("countChatsWaitingOnYou", () => {
         NOW,
       ),
     ).toBe(2);
+  });
+});
+
+describe("the person's own chat where agents talk (Misha 13.11)", () => {
+  // A daemon from 28.10 on: it knows who wrote what (startedBy null = the person's chat).
+  const mine = (overrides: Partial<SidebarThreadSummary> = {}) =>
+    makeThread({ startedBy: null, ...overrides });
+  const agentSpokeLast = {
+    latestPersonMessageAt: ago(DAY_MS),
+    latestUserMessageAt: ago(HOUR_MS + MINUTE_MS),
+  };
+
+  it("is Ready when the turn answered the person", () => {
+    const answered = mine({
+      latestPersonMessageAt: ago(HOUR_MS + MINUTE_MS),
+      latestUserMessageAt: ago(HOUR_MS + MINUTE_MS),
+    });
+    expect(isYourTurn(answered, NOW)).toBe(true);
+    expect(yourTurnKind(answered, NOW)).toBe("ready");
+  });
+
+  it("waits on agents when the turn answered another chat's agent: no Ready, no badge", () => {
+    const talking = mine(agentSpokeLast);
+    expect(isYourTurn(talking, NOW)).toBe(false);
+    expect(countChatsWaitingOnYou([talking], NOW)).toBe(0);
+  });
+
+  it("is Needs you when an agent called the person in", () => {
+    const called = mine({ ...agentSpokeLast, personCalledAt: ago(30 * MINUTE_MS) });
+    expect(isYourTurn(called, NOW)).toBe(true);
+    expect(yourTurnKind(called, NOW)).toBe("called");
+    expect(countChatsWaitingOnYou([called], NOW)).toBe(1);
+  });
+
+  it("still shows an approval or a question", () => {
+    expect(
+      countChatsWaitingOnYou([mine({ ...agentSpokeLast, hasPendingApprovals: true })], NOW),
+    ).toBe(1);
+  });
+
+  it("an older daemon, or no message of the person's on record: as before", () => {
+    expect(isYourTurn(makeThread(agentSpokeLast), NOW)).toBe(true);
+    expect(
+      isYourTurn(mine({ latestPersonMessageAt: null, latestUserMessageAt: ago(2 * HOUR_MS) }), NOW),
+    ).toBe(true);
+  });
+
+  it("safety net: Ready once the chats started for the request are all done", () => {
+    const waited = (working: number, latestStartedAt: string) =>
+      mine({ ...agentSpokeLast, childWork: { working, latestStartedAt } });
+    // One still works: waiting.
+    expect(isYourTurn(waited(1, ago(20 * HOUR_MS)), NOW)).toBe(false);
+    // All done: the request is answered.
+    expect(isYourTurn(waited(0, ago(20 * HOUR_MS)), NOW)).toBe(true);
+    // Started before the person's latest message: not this request's.
+    expect(isYourTurn(waited(0, ago(2 * DAY_MS)), NOW)).toBe(false);
+    // Read after it finished: quiet until the next turn.
+    expect(isYourTurn({ ...waited(0, ago(20 * HOUR_MS)), readAt: ago(30 * MINUTE_MS) }, NOW)).toBe(
+      false,
+    );
   });
 });

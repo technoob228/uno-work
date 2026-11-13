@@ -8,14 +8,28 @@
  * the Inbox agree on what "finished" and "failed" mean, and adds questions
  * (`user-input.requested`) plus the moments an item stops being news: the
  * person answered, approved, or wrote to the chat again.
+ *
+ * Agents talking among themselves are not news (Misha 13.11): a turn another
+ * chat's agent (or Uno, an app) started posts no "Finished" — unless the
+ * chat is the person's request that waited for the chats it started and the
+ * last of them is done (the safety net for an agent that forgot to call the
+ * person). An agent calling the person in (`chat_call_person`) is news of
+ * its own: "Needs you", until they look at the chat, write there, press
+ * Done or the agent says they are no longer needed.
  */
-import type { InboxItemKind, OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+import {
+  INBOX_PERSON_CALL_BODY_PREFIX,
+  type InboxItemKind,
+  type OrchestrationEvent,
+  type ThreadId,
+} from "@t3tools/contracts";
 
 import {
   INITIAL_NOTIFY_TRACKER_STATE,
   trackDomainEvent,
   type NotifyTrackerState,
 } from "../manager/connectorNotify.ts";
+import { isOnPersonsBehalf } from "../orchestration/commandOrigin.ts";
 
 const DETAIL_MAX = 280;
 
@@ -28,22 +42,74 @@ export type InboxAgentAction =
       readonly detail: string | null;
     }
   | {
+      /** An agent called the person into the chat ("Needs you"), with its reason. */
+      readonly type: "call";
+      readonly threadId: ThreadId;
+      readonly reason: string | null;
+    }
+  | {
       /** These kinds of the thread's items are no longer news: mark them read. */
       readonly type: "resolve";
       readonly threadId: ThreadId;
       readonly kinds: ReadonlyArray<InboxItemKind>;
+    }
+  | {
+      /** The call into the chat is answered or taken back. */
+      readonly type: "resolve-call";
+      readonly threadId: ThreadId;
     };
+
+interface ChildChat {
+  readonly threadId: ThreadId;
+  readonly createdAt: string;
+}
 
 export interface InboxAgentTrackerState {
   readonly notify: NotifyTrackerState;
+  /** The latest message the person (or their automation) sent, per chat. */
+  readonly personAskedAt: ReadonlyMap<ThreadId, string>;
+  /** Chats an agent started from a chat, per parent (since this daemon started). */
+  readonly children: ReadonlyMap<ThreadId, ReadonlyArray<ChildChat>>;
 }
 
 export const INITIAL_INBOX_AGENT_STATE: InboxAgentTrackerState = {
   notify: INITIAL_NOTIFY_TRACKER_STATE,
+  personAskedAt: new Map(),
+  children: new Map(),
 };
 
 export function inboxGroupKey(threadId: string, kind: InboxItemKind): string {
   return `agent:${threadId}:${kind}`;
+}
+
+/** The person called into a chat: its own item, apart from the chat's questions. */
+export function inboxCallGroupKey(threadId: string): string {
+  return `agent:${threadId}:call`;
+}
+
+/**
+ * A turn an agent started in a chat where the person asked something and the
+ * chats started for it are all done: the request is answered, even though
+ * the agent did not say so.
+ */
+function waitedOnChildrenAndTheyAreDone(state: InboxAgentTrackerState, threadId: ThreadId) {
+  const askedAt = state.personAskedAt.get(threadId);
+  if (askedAt === undefined) return false;
+  const since = (state.children.get(threadId) ?? []).filter((child) => child.createdAt >= askedAt);
+  if (since.length === 0) return false;
+  return since.every((child) => {
+    const status = state.notify.sessionStatus.get(child.threadId);
+    return status !== "running" && status !== "starting";
+  });
+}
+
+function withoutThread(state: InboxAgentTrackerState, threadId: ThreadId): InboxAgentTrackerState {
+  if (!state.personAskedAt.has(threadId) && !state.children.has(threadId)) return state;
+  const personAskedAt = new Map(state.personAskedAt);
+  const children = new Map(state.children);
+  personAskedAt.delete(threadId);
+  children.delete(threadId);
+  return { ...state, personAskedAt, children };
 }
 
 function firstQuestion(payload: unknown): string | null {
@@ -68,16 +134,25 @@ export function trackInboxAgentEvent(
   event: OrchestrationEvent,
 ): { readonly state: InboxAgentTrackerState; readonly actions: ReadonlyArray<InboxAgentAction> } {
   const tracked = trackDomainEvent(state.notify, event);
-  const next: InboxAgentTrackerState = { notify: tracked.state };
+  let next: InboxAgentTrackerState = { ...state, notify: tracked.state };
   const actions: InboxAgentAction[] = [];
   const notification = tracked.notification;
   if (notification !== null) {
     switch (notification.kind) {
       case "turn.completed":
-        actions.push(
-          { type: "resolve", threadId: notification.threadId, kinds: ["agent.error"] },
-          { type: "post", threadId: notification.threadId, kind: "agent.done", detail: null },
-        );
+        actions.push({ type: "resolve", threadId: notification.threadId, kinds: ["agent.error"] });
+        // Agents talking among themselves are not news for the person.
+        if (
+          isOnPersonsBehalf(notification.origin) ||
+          waitedOnChildrenAndTheyAreDone(next, notification.threadId)
+        ) {
+          actions.push({
+            type: "post",
+            threadId: notification.threadId,
+            kind: "agent.done",
+            detail: null,
+          });
+        }
         break;
       case "turn.error":
         actions.push({
@@ -126,25 +201,72 @@ export function trackInboxAgentEvent(
       actions.push({ type: "resolve", threadId: event.payload.threadId, kinds: ["agent.input"] });
       break;
     case "thread.turn-start-requested":
-      // The person (or whoever) is back in the chat: its old news is read.
-      actions.push({
-        type: "resolve",
-        threadId: event.payload.threadId,
-        kinds: ["agent.done", "agent.error"],
-      });
+      // The person is back in the chat: its old news is read, a call answered.
+      // Another agent writing there does not read the person's news for them.
+      if (isOnPersonsBehalf(event.metadata.origin)) {
+        actions.push(
+          {
+            type: "resolve",
+            threadId: event.payload.threadId,
+            kinds: ["agent.done", "agent.error"],
+          },
+          { type: "resolve-call", threadId: event.payload.threadId },
+        );
+      }
       break;
     case "thread.settled":
       // Done from the sidebar, the chat header or Home: its news is dealt with.
+      actions.push(
+        { type: "resolve", threadId: event.payload.threadId, kinds: ["agent.done", "agent.error"] },
+        { type: "resolve-call", threadId: event.payload.threadId },
+      );
+      break;
+    case "thread.person-called":
       actions.push({
-        type: "resolve",
+        type: "call",
         threadId: event.payload.threadId,
-        kinds: ["agent.done", "agent.error"],
+        reason: event.payload.reason?.trim().slice(0, DETAIL_MAX) || null,
       });
+      break;
+    case "thread.person-released":
+      actions.push({ type: "resolve-call", threadId: event.payload.threadId });
+      break;
+    case "thread.message-sent": {
+      const { threadId, role, createdAt } = event.payload;
+      if (role === "user" && isOnPersonsBehalf(event.metadata.origin)) {
+        if ((next.personAskedAt.get(threadId) ?? "") < createdAt) {
+          const personAskedAt = new Map(next.personAskedAt);
+          personAskedAt.set(threadId, createdAt);
+          next = { ...next, personAskedAt };
+        }
+      }
+      break;
+    }
+    case "thread.created": {
+      const parent = event.payload.spawnedByThreadId;
+      if (parent !== undefined) {
+        const children = new Map(next.children);
+        children.set(parent, [
+          ...(children.get(parent) ?? []),
+          { threadId: event.payload.threadId, createdAt: event.payload.createdAt },
+        ]);
+        next = { ...next, children };
+      }
+      break;
+    }
+    case "thread.deleted":
+    case "thread.archived":
+      next = withoutThread(next, event.payload.threadId);
       break;
     default:
       break;
   }
   return { state: next, actions };
+}
+
+/** The line under the chat's title for a call into it. */
+export function callItemBody(reason: string | null): string {
+  return `${INBOX_PERSON_CALL_BODY_PREFIX}${reason ?? "take a look at this chat."}`;
 }
 
 /** The line under the chat's title in the Inbox. */

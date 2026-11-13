@@ -190,7 +190,7 @@ import {
   type SidebarSection,
 } from "./Sidebar.sections";
 import { threadOwnerWithStarter } from "./Sidebar.owner";
-import { isYourTurn } from "./Sidebar.yourTurn";
+import { isYourTurn, yourTurnKind } from "./Sidebar.yourTurn";
 import { getThreadSortTimestamp, toSortableTimestamp } from "../lib/threadSort";
 import {
   canSnoozeThread,
@@ -830,7 +830,7 @@ const D_ROW_TAIL_HIDE =
 const D_ROW_FADE =
   "group-hover/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))] group-focus-within/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))] group-data-[menu-open]/sidebar-row:[mask-image:linear-gradient(to_right,black,black_calc(100%_-_var(--row-actions-w)_-_1.25rem),transparent_calc(100%_-_var(--row-actions-w)_-_0.25rem))]";
 
-function SidebarDMark(props: { mark: DRowMark }) {
+function SidebarDMark(props: { mark: DRowMark; callReason?: string | null }) {
   switch (props.mark) {
     case "working":
       return (
@@ -858,6 +858,17 @@ function SidebarDMark(props: { mark: DRowMark }) {
           data-testid="sidebar-row-stopped"
           className="size-2 rounded-full bg-muted-foreground/50"
         />
+      );
+    case "called":
+      return (
+        <span
+          role="status"
+          data-testid="sidebar-row-called"
+          title={props.callReason ? `Needs you: ${props.callReason}` : "An agent called you here"}
+          className="text-[11px] font-medium whitespace-nowrap text-indigo-600 dark:text-indigo-300"
+        >
+          Needs you
+        </span>
       );
     case "your-turn":
       return (
@@ -887,6 +898,8 @@ interface SidebarThreadRowProps {
    * before the title, "Started by Mia" on hover. Wins over `fromUno`.
    */
   startedBy?: StartedByView | null;
+  /** Sidebar D: an agent drives the chat now (Sidebar.owner) — a small bot at its end. */
+  agentLed?: boolean;
   /** Sidebar D: whether the computer's mark shows (default: on any other computer). */
   showMachine?: boolean;
   /**
@@ -1035,7 +1048,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const status = resolveSidebarThreadStatus(thread);
   // Finished and waiting on the person until they reply or press Done;
   // opening the chat doesn't clear it (unlike isUnread).
-  const yourTurn = status === "ready" && isYourTurn(thread, props.now);
+  const turnKind = status === "ready" ? yourTurnKind(thread, props.now) : null;
+  const yourTurn = turnKind !== null;
   // Pinned chats sit with the other pins and never recede like history.
   const isPinnedRow = section === "pinned";
   const shouldRecede =
@@ -1075,13 +1089,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   icon: "stopped" as const,
                   className: "text-muted-foreground",
                 }
-              : yourTurn
+              : turnKind === "called"
                 ? {
-                    label: "Ready",
-                    icon: "your-turn" as const,
-                    className: "text-emerald-700 dark:text-emerald-300",
+                    label: "Needs you",
+                    icon: "input" as const,
+                    className: "text-indigo-600 dark:text-indigo-300",
                   }
-                : null;
+                : yourTurn
+                  ? {
+                      label: "Ready",
+                      icon: "your-turn" as const,
+                      className: "text-emerald-700 dark:text-emerald-300",
+                    }
+                  : null;
 
   const driverKind = resolveProviderDriverKind(thread, props.providerDriverByInstanceId);
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
@@ -1304,7 +1324,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ) : null;
 
   if (variant === "d") {
-    const mark = dRowMark(status, yourTurn);
+    const mark = dRowMark(status, turnKind);
+    const markWantsPerson =
+      mark === "your-turn" || mark === "called" || mark === "input" || mark === "approval";
     const parked = section === "settled" || section === "snoozed";
     // Read and Snooze come first: the chat stays or comes back. Done is the
     // quiet one, an icon that just takes the chat out of the list.
@@ -1396,13 +1418,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 title={thread.title}
                 className={cn(
                   "min-w-0 flex-1 truncate text-sm",
-                  props.isActive || mark === "your-turn" || mark === "input" || mark === "approval"
+                  props.isActive || markWantsPerson
                     ? "text-foreground"
                     : shouldRecede
                       ? "text-sidebar-foreground/70"
                       : "text-sidebar-foreground/90",
-                  (mark === "your-turn" || mark === "input" || mark === "approval") &&
-                    "font-medium",
+                  markWantsPerson && "font-medium",
                 )}
               >
                 {thread.title}
@@ -1425,6 +1446,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 tailHide,
               )}
             >
+              {props.agentLed && !markWantsPerson ? (
+                <span
+                  role="img"
+                  aria-label="An agent is driving this chat"
+                  title="An agent is driving this chat — you'll see Ready or Needs you when it's your turn"
+                  data-testid="sidebar-row-agent-led"
+                  className="inline-flex items-center"
+                >
+                  <BotIcon className="size-3 text-sidebar-muted-foreground/60" />
+                </span>
+              ) : null}
               {ageLabel ? (
                 <span
                   data-testid="sidebar-row-age"
@@ -1434,7 +1466,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {ageLabel}
                 </span>
               ) : null}
-              <SidebarDMark mark={mark} />
+              <SidebarDMark mark={mark} callReason={thread.personCallReason ?? null} />
             </span>
           </div>
           {hasActions ? (
@@ -2494,7 +2526,7 @@ export default function Sidebar() {
         ? withoutWorkingChats({
             chats,
             markOf: (thread) =>
-              dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+              dRowMark(resolveSidebarThreadStatus(thread), yourTurnKind(thread, now)),
             isOpen: (thread) => threadKeyOf(thread) === routeThreadKey,
           })
         : chats,
@@ -2504,7 +2536,7 @@ export default function Sidebar() {
     if (!dLegacyInbox) return [];
     return groupChatsByStatusForSidebarD({
       chats: dStatusViewChats(dLiveChats),
-      markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+      markOf: (thread) => dRowMark(resolveSidebarThreadStatus(thread), yourTurnKind(thread, now)),
       order: dStatusOrder,
     });
   }, [dLegacyInbox, dLiveChats, dStatusOrder, dStatusViewChats, now]);
@@ -2520,11 +2552,14 @@ export default function Sidebar() {
   // Only mine (Misha 28.10): hide the chats agents, Uno, assistants or apps run
   // on their own — the one filter of its kind (29.10: 0.0.161's "Chats
   // assistants started" switch went into it).
-  const [dOnlyMine, setDOnlyMine] = useLocalStorage<boolean, boolean>(
+  // On by default (Misha 13.11), for everyone who never switched it either
+  // way; only the view menu shows the switch, so without it nothing is hidden.
+  const [dOnlyMineChoice, setDOnlyMine] = useLocalStorage<boolean, boolean>(
     SIDEBAR_D_ONLY_MINE_KEY,
-    false,
+    true,
     Schema.Boolean,
   );
+  const dOnlyMine = dOnlyMineChoice && sidebarViewMenu;
   const dHasHomeChats = useMemo(
     () => dLiveChats.some((thread) => dGroupOf(thread).key === HOME_FOLDER_GROUP_KEY),
     [dGroupOf, dLiveChats],
@@ -2652,7 +2687,7 @@ export default function Sidebar() {
               project: (thread) => dGroupOf(thread).key,
               status: (thread) =>
                 statusSectionOf(
-                  dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                  dRowMark(resolveSidebarThreadStatus(thread), yourTurnKind(thread, now)),
                 ),
             },
             orderOf: {
@@ -3982,6 +4017,13 @@ export default function Sidebar() {
             ? (startedBy.byKey.get(startedByKey(thread.environmentId, thread.id)) ?? null)
             : null
         }
+        agentLed={
+          options?.d === true &&
+          threadOwnerWithStarter(
+            thread,
+            startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
+          ) === "agent"
+        }
         section={section}
         isActive={routeThreadKey === threadKey}
         jumpLabel={showThreadJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
@@ -4498,7 +4540,7 @@ export default function Sidebar() {
               folded={folded}
               mark={foldedProjectMark(
                 node.chats.map((thread) =>
-                  dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                  dRowMark(resolveSidebarThreadStatus(thread), yourTurnKind(thread, now)),
                 ),
               )}
               onToggle={() => toggleProjectFolded(node.path)}
@@ -4614,7 +4656,7 @@ export default function Sidebar() {
                 folded={folded}
                 mark={foldedProjectMark(
                   group.chats.map((thread) =>
-                    dRowMark(resolveSidebarThreadStatus(thread), isYourTurn(thread, now)),
+                    dRowMark(resolveSidebarThreadStatus(thread), yourTurnKind(thread, now)),
                   ),
                 )}
                 onToggle={() => toggleProjectFolded(group.key)}

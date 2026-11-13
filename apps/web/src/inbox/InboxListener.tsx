@@ -13,6 +13,7 @@ import {
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
+import { isPersonCallItem } from "./openRequests.logic";
 import { showSystemNotification, windowIsInFront } from "./systemNotifications";
 import { useOpenInboxItem } from "./useOpenInboxItem";
 
@@ -92,13 +93,14 @@ export function InboxListener() {
     if (!environmentId || !threadId) return;
     const snapshot = byEnvironment[environmentId];
     if (!snapshot) return;
-    // "Finished" and "failed" are news you have now seen. An approval or a
+    // "Finished" and "failed" are news you have now seen, and so is an
+    // agent's call into the chat (it wanted you to look). An approval or a
     // question stays in "Needs you" until it is answered (the daemon reads it then).
     const seen = snapshot.items
       .filter(
         (item) =>
           item.readAt === null &&
-          (item.kind === "agent.done" || item.kind === "agent.error") &&
+          (item.kind === "agent.done" || item.kind === "agent.error" || isPersonCallItem(item)) &&
           item.open?.kind === "thread" &&
           item.open.threadId === threadId,
       )

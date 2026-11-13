@@ -10,9 +10,11 @@ import { isLatestTurnSettled } from "../session-logic";
 import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
 import {
+  areChildChatsDoneSinceRequest,
   isAgentStartedChat,
   isAnsweringPerson,
   isPersonCallPending,
+  isWaitingOnAgents,
   type ThreadOwnerInput,
 } from "./Sidebar.owner";
 import { isThreadSnoozed, threadNeedsUser } from "./Sidebar.snooze";
@@ -38,6 +40,7 @@ export type YourTurnInput = ThreadOwnerInput &
       | "projectId"
       | "spawnedByThreadId"
       | "source"
+      | "childWork"
     >
   >;
 
@@ -45,11 +48,17 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   // A chat an agent or Uno started reports back to the chat that started it,
   // which is the one to answer, unless it called the person in or answers
   // their own message (Sidebar.owner). The person's other assistant chats
-  // answer in Telegram/Slack or the Uno chat.
+  // answer in Telegram/Slack or the Uno chat. In the person's own chats a
+  // turn that answered another chat's agent is not theirs either (Misha
+  // 13.11: "Ready" only when they are really needed).
   const calledIn = isPersonCallPending(thread);
   if (isAgentStartedChat(thread)) {
-    if (!calledIn && !isAnsweringPerson(thread)) return false;
+    if (!calledIn && !isAnsweringPerson(thread) && !areChildChatsDoneSinceRequest(thread)) {
+      return false;
+    }
   } else if (thread.projectId != null && isAssistantProjectId(thread.projectId)) {
+    return false;
+  } else if (isWaitingOnAgents(thread)) {
     return false;
   }
   // An approval or a question has its own, louder status.
@@ -85,6 +94,17 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   // Read: seen, and no turn finished since.
   if (isTurnRead(thread.readAt, completedAt)) return false;
   return !isThreadSnoozed(thread, now);
+}
+
+/**
+ * Why it is the person's turn: an agent called them in ("Needs you", with
+ * its reason) or the chat finished ("Ready"); null — not their turn.
+ */
+export type YourTurnKind = "called" | "ready";
+
+export function yourTurnKind(thread: YourTurnInput, now: string): YourTurnKind | null {
+  if (!isYourTurn(thread, now)) return null;
+  return isPersonCallPending(thread) ? "called" : "ready";
 }
 
 /** Chats waiting on the person: an approval, a question, or their turn. Drives the Dock badge. */

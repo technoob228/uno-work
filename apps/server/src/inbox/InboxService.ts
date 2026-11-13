@@ -29,6 +29,8 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import {
   INITIAL_INBOX_AGENT_STATE,
   agentItemBody,
+  callItemBody,
+  inboxCallGroupKey,
   inboxGroupKey,
   trackInboxAgentEvent,
   type InboxAgentAction,
@@ -176,31 +178,54 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
         Effect.map(Option.getOrNull),
       );
 
+    /** Marks the unread items that match read: they are no longer news. */
+    const markRead = (matches: (item: StoredInboxItem) => boolean) =>
+      Effect.gen(function* () {
+        const items = yield* Ref.get(itemsRef);
+        const at = new Date().toISOString();
+        let changed = false;
+        const next = items.map((item) => {
+          if (item.readAt === null && matches(item)) {
+            changed = true;
+            return { ...item, readAt: at };
+          }
+          return item;
+        });
+        if (changed) yield* commit(next);
+      });
+
     const handleAction = (action: InboxAgentAction) =>
       Effect.gen(function* () {
         if (action.type === "resolve") {
-          const items = yield* Ref.get(itemsRef);
           const kinds = new Set<InboxItemKind>(action.kinds);
-          const at = new Date().toISOString();
-          let changed = false;
-          const next = items.map((item) => {
-            if (
-              item.readAt === null &&
+          yield* markRead(
+            (item) =>
               kinds.has(item.kind) &&
               item.open?.kind === "thread" &&
-              item.open.threadId === action.threadId
-            ) {
-              changed = true;
-              return { ...item, readAt: at };
-            }
-            return item;
-          });
-          if (changed) yield* commit(next);
+              item.open.threadId === action.threadId,
+          );
+          return;
+        }
+        if (action.type === "resolve-call") {
+          const groupKey = inboxCallGroupKey(action.threadId);
+          yield* markRead((item) => item.groupKey === groupKey);
           return;
         }
         const shell = yield* threadShell(action.threadId);
         // Archived or deleted chats don't come back through the Inbox.
         if (shell === null || shell.archivedAt !== null) return;
+        if (action.type === "call") {
+          // A question-like item: "Needs you", a banner even in front, the badge.
+          yield* post({
+            kind: "agent.input",
+            source: agentSource(action.threadId, shell.title),
+            title: shell.title,
+            body: callItemBody(action.reason),
+            open: { kind: "thread", threadId: action.threadId },
+            groupKey: inboxCallGroupKey(action.threadId),
+          });
+          return;
+        }
         // A chat an assistant handed work to: the assistant checks the result
         // and reports it (its conversation's own item is the news), so this
         // chat's raw "Finished" / "Stopped with an error" would only double it.
