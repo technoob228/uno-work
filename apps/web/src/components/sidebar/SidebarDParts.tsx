@@ -51,6 +51,7 @@ import { toggleDevMode, useDevMode } from "../../devMode";
 import { FixWorkDialog } from "../../fixWork/FixWorkDialog";
 import { GetHelpDialog } from "./GetHelpDialog";
 import { FIX_WORK_COPY } from "../../fixWork/fixWork";
+import { SidebarDNetworkButton } from "./SidebarDNetworkButton";
 import { SidebarPinRow } from "./SidebarPinRow";
 import { isWebApp } from "../../webMode";
 import { BellPanel } from "../inbox/InboxBell";
@@ -298,6 +299,7 @@ export const SidebarDHeader = memo(function SidebarDHeader(props: { isElectron: 
   const row = (
     <>
       <SidebarDAccountMenu computerName={computerName} variant="header" />
+      <SidebarDNetworkButton />
       <SidebarDHeaderIcon
         label="Search"
         hint={`Search commands, projects and chats · ${searchShortcut()}`}
@@ -821,6 +823,7 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
         >
           <SearchIcon />
         </RailButton>
+        <SidebarDNetworkButton side="right" />
         <span aria-hidden className="my-1 h-px w-6 bg-border" />
         <RailButton
           label="Home"

@@ -41,6 +41,7 @@ import {
 } from "./world";
 import { lcDeletedBox } from "./lifecycle";
 import { linkUp } from "./links";
+import { networkHandlers } from "./network";
 
 // ── Per assistant: what its daemon keeps ─────────────────────────────────
 
@@ -532,6 +533,8 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
       ({ request }) => asleepHost(new URL(request.url).host),
       () => HttpResponse.error(),
     ),
+    // Network (12.11): the switch and the exits, per computer (assist/network.ts).
+    ...networkHandlers(),
     // Automations (28.10): kept per computer in assist/automations.ts.
     ...automationHandlers({
       machineOf,
