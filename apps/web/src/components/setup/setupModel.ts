@@ -1,10 +1,12 @@
 /**
  * "Set up your computer" — the guided setup after the welcome screen.
  *
- * Two ways through it, picked on the welcome screen:
+ * Three ways through it, picked on the welcome screen:
  * - just a computer: a three-stop tour (Home, Files, App Store) and done;
  * - a computer with AI: eight steps, each one skippable, each doing the real
- *   thing (default AI, project, AGENTS.md, skills, tools, channels, material).
+ *   thing (default AI, project, AGENTS.md, skills, tools, channels, material);
+ * - move my projects here (developers, 13.11): three steps — sign in to
+ *   Claude Code or Codex, import projects from the laptop, open a chat in one.
  *
  * This module is the pure part: step order, copy, the AGENTS.md it writes,
  * progress arithmetic. Progress itself lives on the machine
@@ -35,20 +37,79 @@ export const SETUP_STEP_LABEL: Readonly<Record<SetupStepId, string>> = {
   done: "Done",
 };
 
+/** The developer way ("Move my projects here"): three steps. Ids don't clash with the eight. */
+export const DEV_SETUP_STEPS = ["sign-in", "import", "first-chat"] as const;
+export type DevSetupStepId = (typeof DEV_SETUP_STEPS)[number];
+
+export const DEV_SETUP_STEP_LABEL: Readonly<Record<DevSetupStepId, string>> = {
+  "sign-in": "Sign in",
+  import: "Import",
+  "first-chat": "First chat",
+};
+
+/** A step of either way through the setup. */
+export type AnySetupStepId = SetupStepId | DevSetupStepId;
+
+export function isDevSetupStep(step: string): step is DevSetupStepId {
+  return (DEV_SETUP_STEPS as ReadonlyArray<string>).includes(step);
+}
+
+export function setupStepLabel(step: AnySetupStepId): string {
+  return isDevSetupStep(step) ? DEV_SETUP_STEP_LABEL[step] : SETUP_STEP_LABEL[step];
+}
+
 export const TOUR_STEPS = ["home", "files", "apps"] as const;
 export type TourStepId = (typeof TOUR_STEPS)[number];
 
 /**
- * `/setup?step=` values: the welcome screen (two ways to use the computer),
- * the eight steps, and the tour's closing screen.
+ * `/setup?step=` values: the goal-first start (`welcome`), the three ways to
+ * use the computer (`start`), the eight steps, the developer's three, and
+ * the tour's closing screen.
  */
-export type SetupRouteStep = SetupStepId | "welcome" | "tour-done";
+export type SetupRouteStep = AnySetupStepId | "welcome" | "start" | "tour-done";
 
 export function parseSetupRouteStep(value: unknown): SetupRouteStep | null {
-  if (value === "tour-done" || value === "welcome") return value;
-  return typeof value === "string" && (SETUP_STEPS as ReadonlyArray<string>).includes(value)
-    ? (value as SetupStepId)
-    : null;
+  if (value === "tour-done" || value === "welcome" || value === "start") return value;
+  if (typeof value !== "string") return null;
+  if (isDevSetupStep(value)) return value;
+  return (SETUP_STEPS as ReadonlyArray<string>).includes(value) ? (value as SetupStepId) : null;
+}
+
+// ── Which way ────────────────────────────────────────────────────────
+
+/** The way through the setup, as the welcome screen names it. */
+export type SetupFlow = "simple" | "ai" | "dev";
+
+/** `UnoSetupProgress.flow` for the developer way (with `mode: "ai"`). */
+export const DEV_FLOW = "dev";
+
+/**
+ * The way the saved progress is on. The developer way is `mode: "ai"` plus
+ * `flow: "dev"` (the contract explains why it isn't a `mode` of its own); an
+ * unknown `flow` from a newer client reads as the eight steps.
+ */
+export function setupFlowOf(progress: UnoSetupProgress): SetupFlow | null {
+  if (progress.mode === "ai" && progress.flow === DEV_FLOW) return "dev";
+  return progress.mode;
+}
+
+export function withSetupFlow(progress: UnoSetupProgress, flow: SetupFlow): UnoSetupProgress {
+  if (setupFlowOf(progress) === flow) return progress;
+  const { flow: _old, ...rest } = progress;
+  return flow === "dev" ? { ...rest, mode: "ai", flow: DEV_FLOW } : { ...rest, mode: flow };
+}
+
+/** The steps of a way (the simple one has a tour, not steps: the eight, as before). */
+export function stepsOfFlow(flow: SetupFlow | null): ReadonlyArray<AnySetupStepId> {
+  return flow === "dev" ? DEV_SETUP_STEPS : SETUP_STEPS;
+}
+
+const stepsOfStep = (step: AnySetupStepId): ReadonlyArray<AnySetupStepId> =>
+  isDevSetupStep(step) ? DEV_SETUP_STEPS : SETUP_STEPS;
+
+/** The way a step belongs to. */
+export function flowOfStep(step: AnySetupStepId): "ai" | "dev" {
+  return isDevSetupStep(step) ? "dev" : "ai";
 }
 
 export function parseTourStep(value: unknown): TourStepId | null {
@@ -67,14 +128,21 @@ export const EMPTY_SETUP_PROGRESS: UnoSetupProgress = {
   answers: {},
 };
 
-export function nextStep(step: SetupStepId): SetupStepId | null {
-  const index = SETUP_STEPS.indexOf(step);
-  return SETUP_STEPS[index + 1] ?? null;
+export function nextStep<T extends AnySetupStepId>(step: T): T | null {
+  const steps = stepsOfStep(step) as ReadonlyArray<T>;
+  return steps[steps.indexOf(step) + 1] ?? null;
 }
 
-export function previousStep(step: SetupStepId): SetupStepId | null {
-  const index = SETUP_STEPS.indexOf(step);
-  return index > 0 ? (SETUP_STEPS[index - 1] ?? null) : null;
+export function previousStep<T extends AnySetupStepId>(step: T): T | null {
+  const steps = stepsOfStep(step) as ReadonlyArray<T>;
+  const index = steps.indexOf(step);
+  return index > 0 ? (steps[index - 1] ?? null) : null;
+}
+
+/** The last step of its way: reaching it finishes the setup. */
+export function isLastSetupStep(step: AnySetupStepId): boolean {
+  const steps = stepsOfStep(step);
+  return steps[steps.length - 1] === step;
 }
 
 function withItem(list: ReadonlyArray<string>, item: string): ReadonlyArray<string> {
@@ -85,22 +153,22 @@ function withoutItem(list: ReadonlyArray<string>, item: string): ReadonlyArray<s
   return list.filter((entry) => entry !== item);
 }
 
-export function markVisited(progress: UnoSetupProgress, step: SetupStepId): UnoSetupProgress {
+export function markVisited(progress: UnoSetupProgress, step: AnySetupStepId): UnoSetupProgress {
   if (progress.visited.includes(step)) return progress;
   return { ...progress, visited: withItem(progress.visited, step) };
 }
 
-/** Continue on a step: it counts as done, not skipped. */
-export function markCompleted(progress: UnoSetupProgress, step: SetupStepId): UnoSetupProgress {
+/** Continue on a step: it counts as done, not skipped. The last step finishes the setup. */
+export function markCompleted(progress: UnoSetupProgress, step: AnySetupStepId): UnoSetupProgress {
   return {
     ...progress,
     visited: withItem(progress.visited, step),
     skipped: withoutItem(progress.skipped, step),
-    finished: progress.finished || step === "done",
+    finished: progress.finished || isLastSetupStep(step),
   };
 }
 
-export function markSkipped(progress: UnoSetupProgress, step: SetupStepId): UnoSetupProgress {
+export function markSkipped(progress: UnoSetupProgress, step: AnySetupStepId): UnoSetupProgress {
   return {
     ...progress,
     visited: withItem(progress.visited, step),
@@ -108,11 +176,11 @@ export function markSkipped(progress: UnoSetupProgress, step: SetupStepId): UnoS
   };
 }
 
-/** "Skip setup": every step not seen yet is skipped, and the setup is over. */
+/** "Skip setup": every step of its way not seen yet is skipped, and the setup is over. */
 export function skipRemaining(progress: UnoSetupProgress): UnoSetupProgress {
   let next = progress;
-  for (const step of SETUP_STEPS) {
-    if (step === "done") continue;
+  for (const step of stepsOfFlow(setupFlowOf(progress))) {
+    if (isLastSetupStep(step)) continue;
     if (!next.visited.includes(step)) next = markSkipped(next, step);
   }
   return { ...next, finished: true };
@@ -123,7 +191,7 @@ export interface SetupSidebarState {
   readonly hidden: boolean;
   /** "Set up" while in progress, "Finish setup" once only skipped steps remain. */
   readonly label: "Set up" | "Finish setup";
-  /** "3/8", "2 left" or "Tour". */
+  /** "3/8" (the developer way: "1/3"), "2 left" or "Tour". */
   readonly meta: string;
   /** 0..1 for the ring. */
   readonly ratio: number;
@@ -143,7 +211,11 @@ export function setupSidebarState(
   progress: UnoSetupProgress,
   context: SetupSidebarContext = {},
 ): SetupSidebarState {
-  const total = SETUP_STEPS.length;
+  const flow = setupFlowOf(progress);
+  const steps = stepsOfFlow(flow);
+  const total = steps.length;
+  // Neither the AI way nor the developer's: nothing to come back to.
+  const offPath = flow !== "ai" && flow !== "dev";
   if (context.tour) {
     const index = context.tour === "done" ? TOUR_STEPS.length : TOUR_STEPS.indexOf(context.tour);
     return {
@@ -158,23 +230,24 @@ export function setupSidebarState(
   if (context.onWelcome && !progress.finished) {
     return { hidden: true, label: "Set up", meta: `0/${total}`, ratio: 0, step: "welcome" };
   }
-  const skipped = SETUP_STEPS.filter((step) => progress.skipped.includes(step));
-  const doneCount = SETUP_STEPS.filter(
+  const skipped = steps.filter((step) => progress.skipped.includes(step));
+  const doneCount = steps.filter(
     (step) => progress.visited.includes(step) && !progress.skipped.includes(step),
   ).length;
-  const firstOpen =
-    SETUP_STEPS.find((step) => !progress.visited.includes(step)) ?? skipped[0] ?? "done";
+  const last = steps[steps.length - 1]!;
+  const firstOpen = steps.find((step) => !progress.visited.includes(step)) ?? skipped[0] ?? last;
   if (progress.finished) {
     return {
-      hidden: progress.mode !== "ai" || progress.dismissed || skipped.length === 0,
+      hidden: offPath || progress.dismissed || skipped.length === 0,
       label: "Finish setup",
       meta: `${skipped.length} left`,
       ratio: (total - skipped.length) / total,
-      step: "done",
+      // The developer way has no summary step: the first skipped one.
+      step: flow === "dev" ? (skipped[0] ?? last) : "done",
     };
   }
   return {
-    hidden: progress.mode !== "ai" || progress.dismissed,
+    hidden: offPath || progress.dismissed,
     label: "Set up",
     meta: `${doneCount}/${total}`,
     ratio: doneCount / total,
@@ -363,6 +436,26 @@ export function mergeAgentsMd(existing: string | null, generated: string): strin
   if (begin < 0 || end < begin) return generated;
   const block = existing.slice(begin, end + POINTER_END.length);
   return `${generated.trimEnd()}\n\n${block}\n`;
+}
+
+const SETUP_BLOCK_BEGIN = "<!-- uno-setup:begin -->";
+const SETUP_BLOCK_END = "<!-- uno-setup:end -->";
+
+/**
+ * The file to write into a project brought from the person's computer: its
+ * own AGENTS.md is the repository's, so the answers go after it in a block
+ * of their own (replaced when written again), never over it.
+ */
+export function appendAgentsMd(existing: string | null, generated: string): string {
+  if (!existing || existing.trim() === "") return generated;
+  const sections = generated.replace(/^# [^\n]*\n+/, "").trimEnd();
+  const block = `${SETUP_BLOCK_BEGIN}\n${sections}\n${SETUP_BLOCK_END}`;
+  const begin = existing.indexOf(SETUP_BLOCK_BEGIN);
+  const end = existing.indexOf(SETUP_BLOCK_END);
+  if (begin >= 0 && end > begin) {
+    return `${existing.slice(0, begin)}${block}${existing.slice(end + SETUP_BLOCK_END.length)}`;
+  }
+  return `${existing.trimEnd()}\n\n${block}\n`;
 }
 
 // ── Done ─────────────────────────────────────────────────────────────

@@ -15,10 +15,12 @@ import { useHomeFolderPath } from "../../../hooks/useFolderChats";
 import { cn } from "../../../lib/utils";
 import { UnoIcon } from "../../Icons";
 import { Textarea } from "../../ui/textarea";
+import { IMPORTED_PROJECT_KEY } from "../devSetup";
 import {
   AGENTS_MD_WAITING,
   NO_PREFERENCE,
   SETUP_QUESTIONS,
+  appendAgentsMd,
   buildAgentsMd,
   mergeAgentsMd,
   nextQuestionIndex,
@@ -201,10 +203,16 @@ export function InstructionsStep() {
       const text =
         custom ??
         buildAgentsMd({ answers, projectName, projectFolder: displayFolder, kind, final: true });
+      const generated = text.replaceAll(AGENTS_MD_WAITING, "").trimEnd() + "\n";
+      // A project brought from the person's computer keeps its own AGENTS.md.
+      const imported =
+        progress.project !== null && progress.answers[IMPORTED_PROJECT_KEY] === progress.project.id;
       await api.projects.writeFile({
         cwd: folder,
         relativePath: "AGENTS.md",
-        contents: mergeAgentsMd(existing, text.replaceAll(AGENTS_MD_WAITING, "").trimEnd() + "\n"),
+        contents: imported
+          ? appendAgentsMd(existing, generated)
+          : mergeAgentsMd(existing, generated),
         encoding: "utf8",
       });
       await completeStep("instructions");

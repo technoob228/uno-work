@@ -1,8 +1,9 @@
 /**
- * The first screen in the browser, inside the app (the sidebar with
- * "Set up 0/8" stays on the left): this is your computer, and two ways to
- * use it — just a computer (a three-stop tour) or a computer with AI (the
- * eight steps). "Use your own tools" opens the agent / SSH dialog.
+ * `/setup?step=start`, inside the app (the sidebar stays on the left): this is
+ * your computer, and three ways to use it — just a computer (a three-stop
+ * tour), a computer with AI (the eight steps), or move my projects here (the
+ * developer's three steps). "Use your own tools" opens the agent / SSH dialog.
+ * (Since 01.10 a newcomer starts on Home, not here: see GoalStep.)
  */
 import { ArrowRightIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -12,12 +13,15 @@ import { useServerConfig } from "../../../rpc/serverState";
 import { WorkWelcomeStep } from "../../onboarding/steps/web/WorkWelcomeStep";
 import { Button } from "../../ui/button";
 import { OwnToolsDialog, type OwnToolsTab } from "../OwnToolsDialog";
+import { setupFlowOf } from "../setupModel";
 import { SetupFrame } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
+import { currentSetupProgress } from "../useSetupProgress";
 import { useWelcomeActions, type WelcomeMode } from "../useWelcomeActions";
 
 export function WelcomeStep() {
-  const [mode, setMode] = useState<WelcomeMode>("ai");
+  // Back from a way's first step: that way is picked.
+  const [mode, setMode] = useState<WelcomeMode>(() => setupFlowOf(currentSetupProgress()) ?? "ai");
   const [ownTools, setOwnTools] = useState<OwnToolsTab | null>(null);
   const welcome = useWelcomeActions();
   const { updateSettings } = useUpdateSettings();

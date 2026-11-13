@@ -3,25 +3,28 @@
  * found on the person's computer with the NAMES of their keys, and bringing the
  * chosen ones over.
  *
- * Scan: ONE command on the computer lists the git folders directly in
- * `~/projects`, plus the folders found chats ran in (the chat import's index),
- * and for each the key names of its `.env` — the names are cut out there by
- * `sed`, so a value never leaves the computer during a scan. Nothing outside
- * those folders is read: no `~/.ssh`, `~/.aws`, keychains, shell profiles.
+ * Scan: ONE command on the computer lists the git folders directly in the
+ * usual places for repositories (`SCAN_ROOTS`: `~/projects`, `~/code`,
+ * `~/Developer`, `~/Documents/GitHub`…), plus the folders found chats ran in
+ * (the chat import's index), and for each the key names of its `.env` and
+ * `.env.local` — the names are cut out there by `sed`, so a value never
+ * leaves the computer during a scan. Nothing outside those folders is read:
+ * no `~/.ssh`, `~/.aws`, keychains, shell profiles.
  *
  * Bring, per project: copy the folder to `~/projects/<name>` here (without
- * `.env` and rebuilt folders, `projectCopy.ts`), make it a project, turn on
- * "On all my computers" for it, then read only the chosen keys' values on the
- * computer and keep them as the project's keys (the vault; each computer
- * writes them into `.env`, 0600). An unchosen key is never read. A project
- * brought before only gets its keys again. Values are never logged.
+ * any `.env*` file and rebuilt folders, `projectCopy.ts`), make it a project,
+ * turn on "On all my computers" for it, then read only the chosen keys'
+ * values on the computer (`.env`, then `.env.local`, which wins) and keep
+ * them as the project's keys (the vault; each computer writes them into
+ * `.env`, 0600). An unchosen key is never read. A project brought before only
+ * gets its keys again. Values are never logged.
  *
  * @module myComputer/bringWork
  */
 import { promises as fsp } from "node:fs";
 import path from "node:path";
 
-import type { ComputerWorkStatus, FoundProject } from "@t3tools/contracts";
+import { ProjectId, type ComputerWorkStatus, type FoundProject } from "@t3tools/contracts";
 
 import { safeSegment, writeJsonPrivately } from "./import/chatHistory.ts";
 import type { MyComputerCore } from "./myComputerCore.ts";
@@ -35,36 +38,87 @@ const SCAN_FRESH_MS = 60_000;
 const SCAN_TIMEOUT_MS = 60_000;
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/**
+ * Where developers keep their repositories, under the home folder (13.11):
+ * the git folders directly inside each one are projects. One level only.
+ */
+export const SCAN_ROOTS: ReadonlyArray<string> = [
+  "projects",
+  "Projects",
+  "code",
+  "Code",
+  "dev",
+  "Developer",
+  "src",
+  "repos",
+  "GitHub",
+  "github",
+  "workspace",
+  "Documents/GitHub",
+];
+
+/** Where a folder's key names come from; a later file's value wins for the same name. */
+export const KEY_FILES: ReadonlyArray<string> = [".env", ".env.local"];
+
 // ── The scan command ───────────────────────────────────────────────────
 
 /**
- * Prints `UNO_HOME <home>`, then per folder `UNO_P <git 0|1>\t<path>` and per
- * key `UNO_K <path>\t<NAME>`. Only names: `sed` keeps the part before `=`.
+ * Prints `UNO_HOME <home>`, then per folder `UNO_P <git 0|1>\t<path>`, `UNO_C
+ * <path>` when a found chat ran in it, and per key `UNO_K <path>\t<NAME>`.
+ * Only names: `sed` keeps the part before `=`.
+ *
+ * Folders: the git folders directly in each of `SCAN_ROOTS`, then the chat
+ * folders, at most `MAX_PROJECTS`. The same folder reached twice (`~/projects`
+ * and `~/Projects` on a Mac's case-insensitive disk, a symlinked root, a chat
+ * that ran in a listed folder) is one row: by device and inode in `sh`, by
+ * path ignoring case on Windows. The first spelling stays.
  */
 export function scanCommand(extraDirs: ReadonlyArray<string>, windows: boolean): string {
   if (windows) {
+    const roots = SCAN_ROOTS.map((root) => psQuote(root.replace(/\//g, "\\"))).join(", ");
     const extras = extraDirs.map(psQuote).join(", ");
+    const files = KEY_FILES.map(psQuote).join(", ");
     return [
       `Write-Output ("UNO_HOME " + $HOME)`,
-      `$dirs = @(Get-ChildItem -LiteralPath (Join-Path $HOME 'projects') -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path (Join-Path $_.FullName '.git') } | ForEach-Object { $_.FullName })`,
+      `$roots = @(@(${roots}) | ForEach-Object { Join-Path $HOME $_ })`,
+      // Documents can live elsewhere (OneDrive): GitHub Desktop's folder is in the real one.
+      `$docs = [Environment]::GetFolderPath('MyDocuments'); if ($docs) { $roots += @(Join-Path $docs 'GitHub') }`,
+      `$seen = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)`,
+      `$chats = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)`,
+      `$dirs = New-Object 'System.Collections.Generic.List[string]'`,
+      `foreach ($r in $roots) { if (Test-Path -LiteralPath $r -PathType Container) { foreach ($c in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue)) { $p = $c.FullName.TrimEnd('\\'); if ((Test-Path -LiteralPath (Join-Path $p '.git')) -and $seen.Add($p)) { $dirs.Add($p) } } } }`,
       ...(extras
-        ? [`$dirs += @(${extras} | Where-Object { Test-Path -LiteralPath $_ -PathType Container })`]
+        ? [
+            `foreach ($x in @(${extras})) { if (Test-Path -LiteralPath $x -PathType Container) { $p = $x.TrimEnd('\\'); [void]$chats.Add($p); if ($seen.Add($p)) { $dirs.Add($p) } } }`,
+          ]
         : []),
-      `foreach ($d in ($dirs | Select-Object -Unique -First ${MAX_PROJECTS})) {`,
-      `  $g = if (Test-Path (Join-Path $d '.git')) { 1 } else { 0 }`,
+      `foreach ($d in ($dirs | Select-Object -First ${MAX_PROJECTS})) {`,
+      `  $g = if (Test-Path -LiteralPath (Join-Path $d '.git')) { 1 } else { 0 }`,
       `  Write-Output ("UNO_P $g" + [char]9 + $d)`,
-      `  $env = Join-Path $d '.env'`,
-      `  if (Test-Path -LiteralPath $env -PathType Leaf) { Get-Content -LiteralPath $env | ForEach-Object { if ($_ -match '^\\s*(export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=') { Write-Output ("UNO_K " + $d + [char]9 + $Matches[2]) } } | Select-Object -First ${MAX_KEYS} }`,
+      `  if ($chats.Contains($d)) { Write-Output ("UNO_C " + $d) }`,
+      `  $names = New-Object 'System.Collections.Generic.List[string]'`,
+      `  foreach ($n in @(${files})) { $f = Join-Path $d $n; if (Test-Path -LiteralPath $f -PathType Leaf) { Get-Content -LiteralPath $f | ForEach-Object { if ($_ -match '^\\s*(export\\s+)?([A-Za-z_][A-Za-z0-9_]*)\\s*=') { if (-not $names.Contains($Matches[2])) { $names.Add($Matches[2]) } } } } }`,
+      `  $names | Select-Object -First ${MAX_KEYS} | ForEach-Object { Write-Output ("UNO_K " + $d + [char]9 + $_) }`,
       `}`,
     ].join("\n");
   }
+  const roots = SCAN_ROOTS.map(shQuote).join(" ");
   const extras = extraDirs.map(shQuote).join(" ");
+  const files = KEY_FILES.map((name) => `"$d"/${shQuote(name)}`).join(" ");
   return [
     `printf 'UNO_HOME %s\\n' "$HOME"`,
-    `{ for d in "$HOME"/projects/*/; do d="\${d%/}"; [ -e "$d/.git" ] && printf '%s\\n' "$d"; done;${extras ? ` for d in ${extras}; do [ -d "$d" ] && printf '%s\\n' "$d"; done;` : ""} } 2>/dev/null | awk '!seen[$0]++' | head -n ${MAX_PROJECTS} | while IFS= read -r d; do`,
+    `tab=$(printf '\\t')`,
+    // Device and inode of a folder (GNU stat, then BSD stat as on a Mac).
+    `if stat -L -c %i / >/dev/null 2>&1; then uno_id() { stat -L -c '%d:%i' "$1"; }; else uno_id() { stat -L -f '%d:%i' "$1"; }; fi`,
+    `{ for r in ${roots}; do [ -d "$HOME/$r" ] || continue; for d in "$HOME/$r"/*/; do d="\${d%/}"; [ -e "$d/.git" ] && printf 'r\\t%s\\n' "$d"; done; done;${extras ? ` for d in ${extras}; do [ -d "$d" ] && printf 'c\\t%s\\n' "$d"; done;` : ""} } 2>/dev/null | while IFS="$tab" read -r s d; do`,
+    `  k=$(uno_id "$d" 2>/dev/null) || k=`,
+    `  printf '%s\\t%s\\t%s\\n' "$s" "\${k:-$d}" "$d"`,
+    // One row per folder, in the order found; a chat in any of its spellings marks it.
+    `done | awk -F'\\t' '{ if (!($2 in at)) { at[$2] = ++n; p[n] = $3 } if ($1 == "c") c[at[$2]] = 1 } END { for (i = 1; i <= n; i++) printf "%s\\t%s\\n", (i in c ? "c" : "r"), p[i] }' | head -n ${MAX_PROJECTS} | while IFS="$tab" read -r s d; do`,
     `  if [ -e "$d/.git" ]; then g=1; else g=0; fi`,
     `  printf 'UNO_P %s\\t%s\\n' "$g" "$d"`,
-    `  if [ -f "$d/.env" ]; then sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\\2/p' "$d/.env" | head -n ${MAX_KEYS} | while IFS= read -r k; do printf 'UNO_K %s\\t%s\\n' "$d" "$k"; done; fi`,
+    `  if [ "$s" = c ]; then printf 'UNO_C %s\\n' "$d"; fi`,
+    `  for f in ${files}; do [ -f "$f" ] && sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=.*/\\2/p' "$f"; done | awk '!seen[$0]++' | head -n ${MAX_KEYS} | while IFS= read -r k; do printf 'UNO_K %s\\t%s\\n' "$d" "$k"; done`,
     `done`,
   ].join("\n");
 }
@@ -74,6 +128,8 @@ export interface ParsedScan {
   readonly projects: ReadonlyArray<{
     readonly path: string;
     readonly git: boolean;
+    /** A found chat ran in it (in this spelling or another one of the same folder). */
+    readonly chat: boolean;
     readonly keys: ReadonlyArray<string>;
   }>;
 }
@@ -81,7 +137,7 @@ export interface ParsedScan {
 export function parseScan(text: string): ParsedScan {
   let home: string | null = null;
   const order: Array<string> = [];
-  const found = new Map<string, { git: boolean; keys: Set<string> }>();
+  const found = new Map<string, { git: boolean; chat: boolean; keys: Set<string> }>();
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.replace(/\r$/, "");
     if (line.startsWith("UNO_HOME ")) {
@@ -93,7 +149,10 @@ export function parseScan(text: string): ParsedScan {
       const dir = rest.slice(tab + 1).trim();
       if (dir.length === 0 || found.has(dir)) continue;
       order.push(dir);
-      found.set(dir, { git: rest.slice(0, tab).trim() === "1", keys: new Set() });
+      found.set(dir, { git: rest.slice(0, tab).trim() === "1", chat: false, keys: new Set() });
+    } else if (line.startsWith("UNO_C ")) {
+      const entry = found.get(line.slice("UNO_C ".length).trim());
+      if (entry) entry.chat = true;
     } else if (line.startsWith("UNO_K ")) {
       const rest = line.slice("UNO_K ".length);
       const tab = rest.lastIndexOf("\t");
@@ -108,6 +167,7 @@ export function parseScan(text: string): ParsedScan {
     projects: order.map((dir) => ({
       path: dir,
       git: found.get(dir)!.git,
+      chat: found.get(dir)!.chat,
       keys: [...found.get(dir)!.keys].toSorted(),
     })),
   };
@@ -129,18 +189,24 @@ export const folderName = (dir: string): string =>
 
 // ── Reading chosen keys (values) ───────────────────────────────────────
 
-/** Prints only the chosen keys' lines of `<dir>/.env`. */
+/**
+ * Prints only the chosen keys' lines of `<dir>/.env`, then of `<dir>/.env.local`
+ * (`parseEnvLines` keeps the last value of a name, so `.env.local` wins).
+ */
 export function chosenKeysCommand(
   dir: string,
   names: ReadonlyArray<string>,
   windows: boolean,
 ): string {
   const safe = names.filter((name) => ENV_NAME.test(name));
+  if (safe.length === 0) return windows ? "$null" : "true";
   const alternation = safe.join("|");
   if (windows) {
-    return `$f = Join-Path ${psQuote(dir)} '.env'; if (Test-Path -LiteralPath $f) { Get-Content -LiteralPath $f | Where-Object { $_ -match '^\\s*(export\\s+)?(${alternation})\\s*=' } }`;
+    const files = KEY_FILES.map(psQuote).join(", ");
+    return `foreach ($n in @(${files})) { $f = Join-Path ${psQuote(dir)} $n; if (Test-Path -LiteralPath $f -PathType Leaf) { Get-Content -LiteralPath $f | Where-Object { $_ -match '^\\s*(export\\s+)?(${alternation})\\s*=' } } }`;
   }
-  return `f=${shQuote(`${dir}/.env`)}; [ -f "$f" ] && grep -E '^[[:space:]]*(export[[:space:]]+)?(${alternation})[[:space:]]*=' "$f" || true`;
+  const files = KEY_FILES.map((name) => shQuote(`${dir}/${name}`)).join(" ");
+  return `for f in ${files}; do [ -f "$f" ] && grep -E '^[[:space:]]*(export[[:space:]]+)?(${alternation})[[:space:]]*=' "$f"; done; true`;
 }
 
 /** `NAME=value` lines (dotenv style: quotes, `export`, trailing comments on bare values). */
@@ -269,7 +335,7 @@ export function createBringWork(deps: BringWorkDeps) {
           displayPath: displayPathOf(entry.path, parsed.home),
           git: entry.git,
           keys: entry.keys,
-          fromChats: fromChats.has(entry.path),
+          fromChats: entry.chat || fromChats.has(entry.path),
           synced: brought.folders[entry.path] !== undefined,
         }));
       scans.set(computerId, {
@@ -373,6 +439,8 @@ export function createBringWork(deps: BringWorkDeps) {
         (missing > 0
           ? `${missing} of the chosen keys weren't saved. Add them in the project's keys.`
           : null),
+      projectId: ProjectId.make(projectId),
+      folder,
     };
   };
 
@@ -406,6 +474,8 @@ export function createBringWork(deps: BringWorkDeps) {
             ok: false,
             keysSaved: 0,
             message: cause instanceof Error ? cause.message.slice(0, 400) : "It didn't work.",
+            projectId: null,
+            folder: null,
           });
         }
         brings.set(computerId, { ...state, done: results.length, results: [...results] });

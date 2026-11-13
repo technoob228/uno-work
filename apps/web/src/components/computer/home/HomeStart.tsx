@@ -35,6 +35,7 @@ import { useSetupProgress } from "../../setup/useSetupProgress";
 import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
 import { HomeNextStepCard, isAgentOnServerPlan, useNextStep } from "./HomeNextStep";
 import { isWebLite } from "../../../lite/webLite";
+import { isWebApp } from "../../../webMode";
 import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeAppWidgetPin, HomeWidgetPin } from "./HomeWidgetPin";
 import { HomeUnoEntry } from "./HomeUnoEntry";
@@ -597,8 +598,11 @@ export function HomeStart({
           onAskUno={(prompt) => void onAskUno(prompt)}
         />
       ) : null;
-    const ownAgentLine = (
-      <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
+    const ownWaysLine = (moveProjects: boolean) => (
+      <p
+        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-1 text-center text-[13px] text-muted-foreground"
+        data-testid="home-own-ways"
+      >
         <button
           type="button"
           onClick={() => setConnectChoice(true)}
@@ -607,8 +611,26 @@ export function HomeStart({
         >
           Connect your AI or other computers →
         </button>
+        {moveProjects ? (
+          <>
+            {/* On a phone the two wrap onto their own lines: no dot left hanging. */}
+            <span aria-hidden className="hidden text-muted-foreground/50 sm:inline">
+              ·
+            </span>
+            {/* Developers (13.11): sign in, import from the laptop, open a chat — /setup's three steps. */}
+            <button
+              type="button"
+              onClick={() => void goTo({ to: "/setup", search: { step: "sign-in" } })}
+              className="hover:text-foreground hover:underline"
+              data-testid="home-move-projects"
+            >
+              Move my projects here →
+            </button>
+          </>
+        ) : null}
       </p>
     );
+    const ownAgentLine = ownWaysLine(false);
     const ownToolsDialog = (
       <>
         <ConnectChoiceDialog
@@ -689,7 +711,8 @@ export function HomeStart({
             onUploadProject={() => openUpload()}
             onDropProject={dropProject}
           />
-          {ownAgentLine}
+          {/* A cloud computer: projects come over from the laptop into it. */}
+          {ownWaysLine(isWebApp)}
           {ownToolsDialog}
         </div>
       );
@@ -995,7 +1018,7 @@ function SetupDoneBanner({ setup }: { setup: SetupHome }) {
           <button
             type="button"
             className="text-primary hover:underline"
-            onClick={() => void navigate({ to: "/setup", search: { step: "done" } })}
+            onClick={() => void navigate({ to: "/setup", search: { step: setup.finishStep } })}
           >
             Finish {setup.skippedCount} skipped {setup.skippedCount === 1 ? "step" : "steps"}
           </button>

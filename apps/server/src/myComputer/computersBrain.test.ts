@@ -391,8 +391,13 @@ describe("bring your work: the scan (run in sh) and the keys", () => {
     const parsed = parseScan(output);
     expect(parsed.home).toBe(home);
     expect(parsed.projects.map((entry) => entry.path)).toEqual([app, elsewhere]);
-    expect(parsed.projects[0]).toEqual({ path: app, git: true, keys: ["DB_URL", "OPENAI_KEY"] });
-    expect(parsed.projects[1]!.git).toBe(false);
+    expect(parsed.projects[0]).toEqual({
+      path: app,
+      git: true,
+      chat: false,
+      keys: ["DB_URL", "OPENAI_KEY"],
+    });
+    expect(parsed.projects[1]).toMatchObject({ git: false, chat: true });
     expect(displayPathOf(app, home)).toBe("~/projects/app");
   });
 
