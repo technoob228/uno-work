@@ -75,6 +75,15 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("POST", "/api/v1/work/port-preview")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/api/v1/work/port-preview")).toBe(false);
     expect(isAllowedAccountRequest("GET", "/api/v1/boxes/../tokens")).toBe(false);
+    // Deploy-window requests (13.11): see, deny, close, freeze — never open one.
+    expect(isAllowedAccountRequest("GET", "/api/v1/ops-gate/inbox")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/inbox/42/deny")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/inbox/42/close")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/inbox/freeze")).toBe(true);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/inbox/42/approve")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/inbox/unfreeze")).toBe(false);
+    expect(isAllowedAccountRequest("POST", "/api/v1/ops-gate/requests/42/approve")).toBe(false);
+    expect(isAllowedAccountRequest("GET", "/api/v1/ops-gate/requests")).toBe(false);
     // "My Uno": read the account, set a role, add a server — never move money.
     expect(isAllowedAccountRequest("GET", "/api/v1/work/plans")).toBe(true);
     expect(isAllowedAccountRequest("GET", "/api/v1/work/sites")).toBe(true);

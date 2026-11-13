@@ -52,6 +52,7 @@ import {
   type ResolvedInboxActions,
   WithInboxItemActions,
 } from "./InboxItemActions";
+import { DeployApprovalCards } from "./DeployApprovalCards";
 
 type Filter = "all" | "needs-you" | "chats" | "apps" | "snoozed";
 
@@ -179,6 +180,10 @@ export const InboxPanel = memo(function InboxPanel(props: {
           </button>
         ))}
       </div>
+
+      {filter === "all" || filter === "needs-you" ? (
+        <DeployApprovalCards liveOnly={filter === "needs-you"} />
+      ) : null}
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground/70">
@@ -503,6 +508,7 @@ export const InboxNeedsYouList = memo(function InboxNeedsYouList() {
           Needs you
         </span>
       </div>
+      <DeployApprovalCards liveOnly />
       {needsYou.length === 0 ? (
         <p className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground/60">
           Nothing waits for you. Approvals and questions from agents show up here.
