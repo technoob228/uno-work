@@ -72,7 +72,7 @@ const (
 	DefaultMTU              = 1280
 	DefaultKeepalive        = 25
 	DefaultHandshakeTimeout = 12 * time.Second
-	DefaultProbeInterval    = 10 * time.Second
+	DefaultProbeInterval    = 5 * time.Second
 	DefaultProbeFailures    = 3
 )
 
