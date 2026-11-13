@@ -473,6 +473,21 @@ function defaultFile(projectId: string, name: string | null): string {
   if (name === "AGENTS.md") {
     return "You are Misha's personal assistant. Take tasks only from Misha.\nRun work in chats on his computers; write to him only when he is needed.";
   }
+  if (name === "ROUTING.md") {
+    return [
+      "# Routing table — which harness/model for which task",
+      "",
+      "| Task type | Harness | Model | Effort | Source | Why |",
+      "|---|---|---|---|---|---|",
+      "| Everything | claudeAgent | claude-opus-5-5 | high | you | Claude everywhere |",
+      "| Quick lookups | claudeAgent | claude-haiku-5-5 |  | default | cheap and fast |",
+      "| Docs reading, summaries | opencode |  |  | learned | did the job 9 times of 9 |",
+      "",
+      "## Outcomes log",
+      "",
+      "- 12.11 | Docs reading | opencode | ok | summary of the API docs",
+    ].join("\n");
+  }
   if (name === "NOTES.md" || name === null) {
     return "- Acme pays late; a gentle reminder after 5 days\n- Morning summary goes to Telegram at 08:00\n- The pitch deck lives on the MacBook";
   }

@@ -57,7 +57,7 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
-import { MemoryBlock } from "./AssistantMemoryModels";
+import { MemoryBlock, ModelsBlock } from "./AssistantMemoryModels";
 import {
   ASSISTANT_PROFILE_TABS,
   type AssistantProfileTab,
@@ -794,6 +794,17 @@ export function AssistantProfileSimple(props: {
                 >
                   <TeamRunsOn member={member} changing={changingBrain} />
                 </Section>
+
+                {/* ROUTING.md (13.11): which AI the chats it starts run on, by kind of
+                    task — with buttons, or the file itself behind "Edit file". */}
+                <ModelsBlock
+                  name={name}
+                  environmentId={member.environmentId as EnvironmentId}
+                  projectId={member.projectId}
+                  waking={false}
+                  onWake={() => undefined}
+                  inProfile
+                />
               </div>
             ) : null}
             {tab === "apps" ? (

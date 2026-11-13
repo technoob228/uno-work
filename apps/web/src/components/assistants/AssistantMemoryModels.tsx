@@ -7,7 +7,9 @@
  *   (advanced)", Uno's newer versions offered with "Update and keep my
  *   edits");
  * - Models — ROUTING.md as a table "kind of task → model, thinking", with the
- *   assistant's proposals to change the person's rows (Yes / No);
+ *   assistant's proposals to change the person's rows (Yes / No), and the
+ *   file itself behind "Edit file" (Misha, 13.11: "editable with buttons and
+ *   in the file itself");
  * - Chats it started — model, status, tokens per chat (no $, decision 02.10);
  * - Computers it can use — the place for cross-machine chats (Soon).
  *
@@ -50,7 +52,7 @@ import {
 } from "@t3tools/shared/assistantMemory";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, XIcon } from "lucide-react";
+import { FileTextIcon, LoaderCircleIcon, TableIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
@@ -69,6 +71,7 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
+import { Section } from "./AssistantProfileParts";
 import {
   chatCostText,
   chatTokensNote,
@@ -707,12 +710,15 @@ export function ModelsBlock({
   projectId = ASSISTANT_PROJECT_ID,
   waking,
   onWake,
+  inProfile = false,
 }: {
   name: string;
   environmentId: EnvironmentId | null;
   projectId?: string;
   waking: boolean;
   onWake: () => void;
+  /** On the team profile page: one of its Sections, not a Block of its own. */
+  inProfile?: boolean;
 }) {
   if (!environmentId) {
     return (
@@ -721,22 +727,33 @@ export function ModelsBlock({
       </Block>
     );
   }
-  return <AwakeModels name={name} environmentId={environmentId} projectId={projectId} />;
+  return (
+    <AwakeModels
+      name={name}
+      environmentId={environmentId}
+      projectId={projectId}
+      inProfile={inProfile}
+    />
+  );
 }
 
 function AwakeModels({
   name,
   environmentId,
   projectId,
+  inProfile,
 }: {
   name: string;
   environmentId: EnvironmentId;
   projectId: string;
+  inProfile: boolean;
 }) {
   const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
   const providers = useEnvironmentProviders(environmentId);
   const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
   const [newTask, setNewTask] = useState("");
+  // The table, or ROUTING.md as text: the same file, saved on blur.
+  const [asFile, setAsFile] = useState(false);
   const content = routing.file.data ?? "";
   const parsed = useMemo(() => parseRouting(content), [content]);
   const proposals = useMemo(() => parseProposals(content), [content]);
@@ -844,13 +861,53 @@ function AwakeModels({
     </>
   );
 
-  return (
-    <Block title="Models" action={<SavedHint at={routing.savedAt} />} testId="assistant-models">
-      <p className="pb-2 text-sm text-muted-foreground">
-        Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper
-        model keeps doing the job.
+  const file = (
+    <div className="flex flex-col gap-2" data-testid="assistant-models-file">
+      <p className="text-xs text-muted-foreground">
+        This is ROUTING.md, the file {name} reads before it starts a chat. A row with{" "}
+        <code>you</code> in the Source column is your rule: chats for that kind of task start on it,
+        and {name} never changes it. Saved when you click outside the text.
       </p>
-      {body}
+      <TextFile file={routing} placeholder="" testId="assistant-models-file-text" rows={16} mono />
+    </div>
+  );
+
+  const action = (
+    <div className="flex items-center gap-2">
+      <SavedHint at={routing.savedAt} />
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={() => setAsFile((value) => !value)}
+        disabled={routing.file.isLoading || routing.file.isError}
+        data-testid="assistant-models-file-toggle"
+      >
+        {asFile ? <TableIcon /> : <FileTextIcon />}
+        {asFile ? "Table" : "Edit file"}
+      </Button>
+    </div>
+  );
+  const intro = (
+    <p className="pb-2 text-sm text-muted-foreground">
+      Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper model
+      keeps doing the job.
+    </p>
+  );
+
+  if (inProfile) {
+    return (
+      <Section title="Which AI for which task" action={action} testId="assistant-profile-models">
+        <div className="px-3 py-2" data-testid="assistant-models">
+          {intro}
+          {asFile ? file : body}
+        </div>
+      </Section>
+    );
+  }
+  return (
+    <Block title="Models" action={action} testId="assistant-models">
+      {intro}
+      {asFile ? file : body}
     </Block>
   );
 }
