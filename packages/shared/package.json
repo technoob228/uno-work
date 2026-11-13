@@ -208,6 +208,10 @@
       "types": "./src/assistantMove.ts",
       "import": "./src/assistantMove.ts"
     },
+    "./modelStrength": {
+      "types": "./src/modelStrength.ts",
+      "import": "./src/modelStrength.ts"
+    },
     "./assistantMemory": {
       "types": "./src/assistantMemory.ts",
       "import": "./src/assistantMemory.ts"

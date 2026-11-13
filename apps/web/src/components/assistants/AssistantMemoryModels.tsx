@@ -54,7 +54,10 @@ import { LoaderCircleIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
-import { useEnvironmentProviders } from "../../environments/settings/serverSettings";
+import {
+  useEnvironmentProviders,
+  useEnvironmentSettings,
+} from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import {
   getAssistantInstructions,
@@ -70,6 +73,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
 import {
+  autoWorkChoice,
   chatCostText,
   chatTokensNote,
   choiceValue,
@@ -77,6 +81,8 @@ import {
   formatUsd,
   modelChoices,
   weekTotals,
+  withWorkModel,
+  workModelRule,
   type ModelChoice,
 } from "./assistantMemoryModels.logic";
 
@@ -724,6 +730,20 @@ export function ModelsBlock({
   return <AwakeModels name={name} environmentId={environmentId} projectId={projectId} />;
 }
 
+/** ROUTING.md with what its editors need: the rules, the model choices, a save. */
+function useRouting(environmentId: EnvironmentId, projectId: string, name: string) {
+  const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
+  const providers = useEnvironmentProviders(environmentId);
+  const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
+  const content = routing.file.data ?? "";
+  const parsed = useMemo(() => parseRouting(content), [content]);
+  const saveRules = (rules: ReadonlyArray<RoutingRule>) =>
+    void routing.save(writeRouting(content, rules), content);
+  return { routing, providers, choices, content, parsed, saveRules };
+}
+
+type Routing = ReturnType<typeof useRouting>;
+
 function AwakeModels({
   name,
   environmentId,
@@ -733,22 +753,32 @@ function AwakeModels({
   environmentId: EnvironmentId;
   projectId: string;
 }) {
-  const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
-  const providers = useEnvironmentProviders(environmentId);
-  const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
-  const [newTask, setNewTask] = useState("");
-  const content = routing.file.data ?? "";
-  const parsed = useMemo(() => parseRouting(content), [content]);
-  const proposals = useMemo(() => parseProposals(content), [content]);
+  const routing = useRouting(environmentId, projectId, name);
+  return (
+    <Block
+      title="Models"
+      action={<SavedHint at={routing.routing.savedAt} />}
+      testId="assistant-models"
+    >
+      <p className="pb-2 text-sm text-muted-foreground">
+        Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper
+        model keeps doing the job.
+      </p>
+      <RoutingTable name={name} routing={routing} />
+    </Block>
+  );
+}
 
-  const saveRules = (rules: ReadonlyArray<RoutingRule>) =>
-    void routing.save(writeRouting(content, rules), content);
+function RoutingTable({ name, routing: r }: { name: string; routing: Routing }) {
+  const { routing, choices, content, parsed, saveRules } = r;
+  const [newTask, setNewTask] = useState("");
+  const proposals = useMemo(() => parseProposals(content), [content]);
   const updateRule = (index: number, patch: Partial<RoutingRule>) =>
     saveRules(
       parsed.rules.map((rule, at) => (at === index ? { ...rule, ...patch, source: "you" } : rule)),
     );
 
-  const body = routing.file.isLoading ? (
+  return routing.file.isLoading ? (
     <p className="py-1 text-sm text-muted-foreground">Loading…</p>
   ) : routing.file.isError ? (
     <p className="py-1 text-sm text-muted-foreground">
@@ -843,15 +873,122 @@ function AwakeModels({
       ) : null}
     </>
   );
+}
 
-  return (
-    <Block title="Models" action={<SavedHint at={routing.savedAt} />} testId="assistant-models">
-      <p className="pb-2 text-sm text-muted-foreground">
-        Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper
-        model keeps doing the job.
+// ── Who does the work (13.11) ────────────────────────────────────────
+
+const AUTO_VALUE = "auto";
+
+/**
+ * "Who does the work: <model> ▾" — the one choice for the chats the
+ * assistant starts. A model writes the person's "Everything else" row of
+ * ROUTING.md (the server applies it, personRouting.ts); Auto removes it:
+ * then the table's rows by kind of task, else the strongest AI ready here.
+ * The table below refines it by kind of task.
+ */
+export function WorkModelBlock({
+  name,
+  environmentId,
+  projectId = ASSISTANT_PROJECT_ID,
+}: {
+  name: string;
+  environmentId: EnvironmentId | null;
+  projectId?: string;
+}) {
+  if (!environmentId) {
+    return (
+      <p className="px-3 py-2 text-sm text-muted-foreground" data-testid="assistant-work-model">
+        {name} is asleep. Its choice of AI lives on its computer.
       </p>
-      {body}
-    </Block>
+    );
+  }
+  return <AwakeWorkModel name={name} environmentId={environmentId} projectId={projectId} />;
+}
+
+function AwakeWorkModel({
+  name,
+  environmentId,
+  projectId,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId: string;
+}) {
+  const routing = useRouting(environmentId, projectId, name);
+  const settings = useEnvironmentSettings(environmentId);
+  const { choices, parsed, providers } = routing;
+  const rule = workModelRule(parsed.rules);
+  const auto = useMemo(
+    () => autoWorkChoice(providers, choices, settings?.harnessUnoCredits ?? {}),
+    [providers, choices, settings?.harnessUnoCredits],
+  );
+  const workChoices = choices.filter((choice) => choice.harness !== ROUTING_SELF_HARNESS);
+  const value = rule === null ? AUTO_VALUE : choiceValue(rule);
+  const current = rule === null ? null : (choices.find((choice) => choice.value === value) ?? null);
+  const autoLabel = auto ? `Auto · ${auto.label}` : "Auto · the strongest AI connected";
+
+  if (routing.routing.file.isLoading) {
+    return <p className="px-3 py-2 text-sm text-muted-foreground">Loading…</p>;
+  }
+  if (routing.routing.file.isError) {
+    return (
+      <p className="px-3 py-2 text-sm text-muted-foreground">
+        Couldn't read it: {errorText(routing.routing.file.error, "the computer didn't answer.")}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="assistant-work-model">
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={value}
+          aria-label="Who does the work"
+          className="max-w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+          data-testid="assistant-work-model-select"
+          onChange={(event) => {
+            const next = event.target.value;
+            if (next === AUTO_VALUE) {
+              routing.saveRules(withWorkModel(parsed.rules, null));
+              return;
+            }
+            const choice = workChoices.find((entry) => entry.value === next);
+            if (choice) routing.saveRules(withWorkModel(parsed.rules, choice));
+          }}
+        >
+          <option value={AUTO_VALUE}>{autoLabel}</option>
+          {rule !== null && current === null ? (
+            <option value={value}>{rule.model || rule.harness} (not on this computer)</option>
+          ) : null}
+          {workChoices.map((choice) => (
+            <option key={choice.value} value={choice.value} disabled={choice.reason !== null}>
+              {choice.label}
+              {choice.reason ? ` — ${choice.reason}` : ""}
+            </option>
+          ))}
+        </select>
+        <SavedHint at={routing.routing.savedAt} />
+      </div>
+      {rule !== null && (current === null || current.reason !== null) ? (
+        <p className="text-xs text-warning-foreground" data-testid="assistant-work-model-not-ready">
+          Not connected on this computer — {name}'s chats won't start until it is. Connect it in
+          Settings → Agents, or pick another.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {rule === null
+            ? auto
+              ? `The chats ${name} starts run on the strongest AI connected here, unless a row below names one.`
+              : `Nothing strong is connected here yet — connect Claude or ChatGPT in Settings → Agents.`
+            : `The chats ${name} starts run on this, unless a row you set below names another.`}
+        </p>
+      )}
+      <details className="mt-1" data-testid="assistant-work-model-table">
+        <summary className="cursor-pointer text-xs text-muted-foreground">By kind of task</summary>
+        <div className="pt-2">
+          <RoutingTable name={name} routing={routing} />
+        </div>
+      </details>
+    </div>
   );
 }
 

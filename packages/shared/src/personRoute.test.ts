@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { personRoute } from "./assistantMemory.ts";
+import { personRoute, tableRoute } from "./assistantMemory.ts";
 
 const table = (rows: string) =>
   `# Routing\n\n| Task type | Harness | Model | Effort | Source | Why |\n|---|---|---|---|---|---|\n${rows}\n`;
@@ -61,5 +61,57 @@ describe("personRoute", () => {
     });
     // A default row is not the person's: the task type falls back.
     expect(personRoute(content, "Reading code")).toBeNull();
+  });
+});
+
+describe("catch-all row (Who does the work)", () => {
+  const content = table(
+    [
+      "| Everything else | codex | gpt-5.6-terra | high | you | |",
+      "| Anything with UI | claudeAgent | claude-opus-5-5 | high | you | |",
+      "| Reading code | claudeAgent | claude-haiku-4-5 | low | default | |",
+    ].join("\n"),
+  );
+
+  it("decides work no row of the person's names, even with mixed harnesses", () => {
+    expect(personRoute(content)).toMatchObject({ harness: "codex", model: "gpt-5.6-terra" });
+    expect(personRoute(content, "Reading code")).toMatchObject({
+      harness: "codex",
+      taskType: "Everything else",
+    });
+  });
+
+  it("a row for the task type wins over it", () => {
+    expect(personRoute(content, "anything with UI")).toMatchObject({
+      harness: "claudeAgent",
+      model: "claude-opus-5-5",
+    });
+  });
+});
+
+describe("tableRoute (rows Uno or the assistant set)", () => {
+  const content = table(
+    [
+      "| Quick questions | self | — | — | default | |",
+      "| Hard bugs | claudeAgent | claude-opus-5-5 | max | default | |",
+      "| Simple tasks | codex | gpt-5.5 | medium | learned | |",
+      "| Anything with UI | claudeAgent | claude-opus-5-5 | high | you | |",
+    ].join("\n"),
+  );
+
+  it("the row the task type names, default or learned", () => {
+    expect(tableRoute(content, "hard bugs")).toEqual({
+      harness: "claudeAgent",
+      model: "claude-opus-5-5",
+      thinking: "max",
+      taskType: "Hard bugs",
+    });
+    expect(tableRoute(content, "Simple tasks")).toMatchObject({ harness: "codex" });
+  });
+
+  it("no task type, `self` rows and the person's rows: nothing", () => {
+    expect(tableRoute(content)).toBeNull();
+    expect(tableRoute(content, "Quick questions")).toBeNull();
+    expect(tableRoute(content, "Anything with UI")).toBeNull();
   });
 });

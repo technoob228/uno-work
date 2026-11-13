@@ -11,6 +11,7 @@
  * `AssistantProfileBlocks.tsx`.
  */
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
+import { assistantModelLabel } from "@t3tools/shared/assistantLlm";
 import { ASSISTANT_PRESET_COPY } from "@t3tools/shared/assistantPreset";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -181,10 +182,17 @@ export function TeamRunsOn(props: { readonly member: TeamMember; readonly changi
       />
     );
   }
+  const model = llm.status?.model ? assistantModelLabel(llm.status.model) : null;
   return (
     <div className="px-3 py-2" data-testid="assistant-profile-brain">
-      <p className="text-sm">{llm.loading ? "…" : BRAIN_NAME[card]}</p>
-      <p className="text-xs text-muted-foreground">{aiChoiceNote(computer)}</p>
+      <p className="text-xs text-muted-foreground">Its own AI</p>
+      <p className="text-sm">
+        {llm.loading ? "…" : model ? `${model} · ${BRAIN_NAME[card]}` : BRAIN_NAME[card]}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        What {member.profile.name} replies and plans with — the work itself goes to “Who does the
+        work”. {aiChoiceNote(computer)}
+      </p>
     </div>
   );
 }

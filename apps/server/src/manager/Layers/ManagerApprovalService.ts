@@ -76,9 +76,10 @@ const makeManagerApprovalService = Effect.gen(function* () {
           }
           const startedBy = yield* assistantOfToken(proposal.tokenId);
           const fromAssistant = startedBy !== null;
-          // A chat the Uno assistant starts without naming a model runs on the
-          // person's own AI (account default_ai, when usable here), else on
-          // the project's default. The assistant itself runs on Hermes.
+          // A chat the Uno assistant starts that no ROUTING.md row nor the
+          // model decided runs on the strongest ready model here (Claude Opus
+          // → Codex's strong models → Uno AI premium), else on the project's
+          // default. The assistant itself runs on Hermes.
           const personalDefault =
             action.modelSelection === null && fromAssistant
               ? yield* accountDefaultAi.spawnModelSelection()

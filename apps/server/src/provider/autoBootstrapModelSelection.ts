@@ -24,6 +24,7 @@ import {
   isProviderAvailable,
 } from "@t3tools/contracts";
 import { listedDefaultModel } from "@t3tools/shared/model";
+import { fallbackListedModel, strongestListedModel } from "@t3tools/shared/modelStrength";
 
 /**
  * The pick when nothing on the machine is usable (or provider probes have not
@@ -74,18 +75,23 @@ export function isUsableForDefault(provider: ServerProvider): boolean {
 }
 
 /**
- * The driver's canonical default when the instance actually offers it,
- * otherwise its first advertised model. `null` means the instance reports no
- * models at all and cannot serve as a default. Also used by the agent-threads
- * bridge when an agent names a provider without a model.
+ * The model a machine picks on this instance. Codex: its strongest listed
+ * model (GPT-5.6 Terra → Sol → GPT-5.5 → GPT-5.4); others: the driver's
+ * canonical default when listed. Otherwise the strongest known listed model,
+ * else the first that isn't small / fast — never the first of the list
+ * blindly (13.11: Codex without `gpt-5.4` handed the assistant's chats to
+ * GPT-5.6 Luna). An empty list (snapshot not enriched yet) → the canonical
+ * default. `null`: nothing fit to be a default. Also used by the
+ * agent-threads bridge when an agent names a provider without a model.
  */
 export function resolveModel(provider: ServerProvider): string | null {
+  const strongestFirst =
+    provider.driver === "codex" ? strongestListedModel(provider.driver, provider.models) : null;
+  if (strongestFirst !== null) return strongestFirst;
   const listed = listedDefaultModel(provider.driver, provider.models);
   if (listed !== undefined) return listed;
-  const preferred = DEFAULT_MODEL_BY_PROVIDER[provider.driver];
-  const first = provider.models[0];
-  if (first !== undefined) return first.slug;
-  return preferred ?? null;
+  if (provider.models.length === 0) return DEFAULT_MODEL_BY_PROVIDER[provider.driver] ?? null;
+  return fallbackListedModel(provider.driver, provider.models);
 }
 
 /**

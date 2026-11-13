@@ -8,7 +8,13 @@ import type {
   AssistantChatsResult,
   ServerProvider,
 } from "@t3tools/contracts";
-import { ROUTING_SELF_HARNESS, type RoutingRule } from "@t3tools/shared/assistantMemory";
+import {
+  isCatchAllTask,
+  ROUTING_CATCH_ALL_TASK,
+  ROUTING_SELF_HARNESS,
+  type RoutingRule,
+} from "@t3tools/shared/assistantMemory";
+import { strongestReadySelection } from "@t3tools/shared/modelStrength";
 
 export interface ModelChoice {
   readonly value: string;
@@ -121,4 +127,57 @@ export function weekTotals(chats: ReadonlyArray<AssistantChatSummary>, now: numb
     planChats: recent.filter((chat) => chat.billing === "plan").length,
     count: recent.length,
   };
+}
+
+// ── Who does the work (13.11) ─────────────────────────────────────────
+
+/** The person's "everything else" row — what "Who does the work" shows and sets. */
+export function workModelRule(rules: ReadonlyArray<RoutingRule>): RoutingRule | null {
+  return rules.find((rule) => rule.source === "you" && isCatchAllTask(rule.taskType)) ?? null;
+}
+
+/**
+ * The rows with "Who does the work" set to `choice` (one `you` row
+ * "Everything else", its thinking kept), or back to Auto (null: the row
+ * goes, the table's rows and then the strongest AI decide).
+ */
+export function withWorkModel(
+  rules: ReadonlyArray<RoutingRule>,
+  choice: Pick<ModelChoice, "harness" | "model"> | null,
+): ReadonlyArray<RoutingRule> {
+  const current = workModelRule(rules);
+  const rest = rules.filter((rule) => rule !== current);
+  if (choice === null) return rest;
+  return [
+    ...rest,
+    {
+      taskType: current?.taskType ?? ROUTING_CATCH_ALL_TASK,
+      harness: choice.harness,
+      model: choice.model,
+      effort: current !== null && current.harness === choice.harness ? current.effort : "",
+      source: "you",
+      note: current?.note ?? "",
+    },
+  ];
+}
+
+/**
+ * What Auto runs on now — the server's pick (personRouting.ts
+ * `strongestReadyModelSelection`): Claude Opus → Codex's strong models → Uno
+ * AI premium. null: none of them is ready on this computer.
+ */
+export function autoWorkChoice(
+  providers: ReadonlyArray<ServerProvider>,
+  choices: ReadonlyArray<ModelChoice>,
+  harnessUnoCredits: Readonly<Record<string, boolean>> = {},
+): ModelChoice | null {
+  const strongest = strongestReadySelection(
+    providers,
+    (provider) =>
+      providerReason(provider) === null &&
+      (provider.auth.type !== "unoAi" || harnessUnoCredits[provider.driver] === true),
+  );
+  if (strongest === null) return null;
+  const value = `${strongest.selection.instanceId}::${strongest.selection.model}`;
+  return choices.find((choice) => choice.value === value) ?? null;
 }

@@ -57,7 +57,7 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
-import { MemoryBlock } from "./AssistantMemoryModels";
+import { MemoryBlock, WorkModelBlock } from "./AssistantMemoryModels";
 import {
   ASSISTANT_PROFILE_TABS,
   type AssistantProfileTab,
@@ -644,6 +644,15 @@ export function AssistantProfileSimple(props: {
                   <TeamRoutines member={member} machine={homeMachine} />
                 </Section>
 
+                {/* The one choice of who does the work (13.11); its own AI is in Environment → Advanced. */}
+                <Section title="Who does the work" testId="assistant-profile-work-model">
+                  <WorkModelBlock
+                    name={name}
+                    environmentId={member.environmentId as EnvironmentId}
+                    projectId={member.projectId}
+                  />
+                </Section>
+
                 <Section
                   title={
                     member.isUno
@@ -778,8 +787,10 @@ export function AssistantProfileSimple(props: {
                   </div>
                 </Section>
 
+                {/* Its own AI — what it replies and plans with — is not who does the work (13.11). */}
                 <Section
-                  title="The AI it runs on"
+                  title="Advanced"
+                  testId="assistant-profile-advanced"
                   action={
                     member.revoked ? null : (
                       <button

@@ -50,7 +50,8 @@ import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import { checkTargetComputer } from "../assistants/targetComputer.ts";
 import {
   applyPersonRoute,
-  readPersonRoute,
+  applyTableRoute,
+  readRoutingRoutes,
   selectionNotReadyMessage,
 } from "../manager/personRouting.ts";
 import type {
@@ -173,9 +174,9 @@ export interface AgentThreadsDeps {
    */
   readonly registerFolder?: (cwd: string) => Effect.Effect<OrchestrationProjectShell | null>;
   /**
-   * What a chat an assistant starts without naming a model runs on: the
-   * account's default AI when usable here (as create_thread). Absent / null:
-   * the project's default.
+   * What a chat an assistant starts runs on when neither a row of ROUTING.md
+   * nor the model decided: the strongest ready model here (as create_thread,
+   * personRouting.ts). Absent / null: the project's default.
    */
   readonly personalDefault?: Effect.Effect<ModelSelection | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
@@ -686,8 +687,9 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const sameProject = project.id === caller.projectId;
 
         // Order (personRouting.ts): the person's routing rows → what the
-        // model named (first when the person asked for it) → the account's
-        // default AI → the project's default.
+        // model named (first when the person asked for it) → the table's own
+        // row when its harness is ready → the strongest ready model → the
+        // project's default.
         let modelSelection = sameProject ? caller.modelSelection : project.defaultModelSelection;
         let requested: ModelSelection | null = null;
         if (provider.value !== undefined) {
@@ -708,27 +710,33 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           const assistantProject = yield* deps.projections
             .getProjectShellById(ProjectId.make(assistantProjectId))
             .pipe(Effect.orElseSucceed(() => Option.none()));
-          const route = Option.isSome(assistantProject)
+          const routes = Option.isSome(assistantProject)
             ? yield* Effect.promise(() =>
-                readPersonRoute(assistantProject.value.workspaceRoot, taskType.value),
+                readRoutingRoutes(assistantProject.value.workspaceRoot, taskType.value),
               )
-            : null;
+            : { person: null, table: null };
           const routed = applyPersonRoute({
-            route,
+            route: routes.person,
             requested,
             personAsked: body.personAsked === true,
-            providers: route === null ? [] : yield* deps.getProviders,
+            providers: routes.person === null ? [] : yield* deps.getProviders,
           });
           if (routed.kind === "not-ready") {
             return yield* fail(409, "harness_not_ready", routed.message);
           }
           if (routed.kind === "selection") requested = routed.selection;
-          else if (
-            requested === null &&
-            deps.personalDefault !== undefined &&
-            caller.projectId === assistantProjectId
-          ) {
-            requested = yield* deps.personalDefault;
+          else if (requested === null && caller.projectId === assistantProjectId) {
+            requested =
+              (routes.table === null
+                ? null
+                : applyTableRoute({
+                    route: routes.table,
+                    providers: yield* deps.getProviders,
+                    harnessUnoCredits:
+                      deps.getHarnessUnoCredits === undefined
+                        ? {}
+                        : yield* deps.getHarnessUnoCredits,
+                  })) ?? (deps.personalDefault === undefined ? null : yield* deps.personalDefault);
           }
         }
         if (requested !== null) modelSelection = requested;

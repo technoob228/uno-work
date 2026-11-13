@@ -12,6 +12,7 @@ import {
   FALLBACK_AUTO_BOOTSTRAP_MODEL_SELECTION,
   isSignedOutAutoBootstrapDefault,
   isUnusableAutoBootstrapDefault,
+  resolveModel,
   selectAutoBootstrapModelSelection,
 } from "./autoBootstrapModelSelection.ts";
 
@@ -243,6 +244,42 @@ describe("selectAutoBootstrapModelSelection", () => {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-sonnet-4-6",
     });
+  });
+});
+
+describe("resolveModel (13.11: never the first model blindly)", () => {
+  it("Codex without gpt-5.4: its strongest model, not Luna listed first", () => {
+    expect(
+      resolveModel(
+        provider({
+          instanceId: "codex",
+          driver: "codex",
+          models: ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"],
+        }),
+      ),
+    ).toBe("gpt-5.6-terra");
+  });
+
+  it("Codex with only small models: no default at all", () => {
+    const smallOnly = provider({
+      instanceId: "codex",
+      driver: "codex",
+      models: ["gpt-5.6-luna", "gpt-5.4-mini"],
+    });
+    expect(resolveModel(smallOnly)).toBeNull();
+    expect(selectAutoBootstrapModelSelection([smallOnly])).toBeNull();
+  });
+
+  it("Claude without its canonical Sonnet: the strongest listed, not Haiku first", () => {
+    expect(
+      resolveModel(
+        provider({
+          instanceId: "claudeAgent",
+          driver: "claudeAgent",
+          models: ["claude-haiku-4-5", "claude-opus-4-8"],
+        }),
+      ),
+    ).toBe("claude-opus-4-8");
   });
 });
 

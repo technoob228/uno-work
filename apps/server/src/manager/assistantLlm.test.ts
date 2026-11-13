@@ -176,28 +176,3 @@ describe("orderAssistantModels", () => {
     ]);
   });
 });
-
-describe("spawnSelectionForDefaultAi", () => {
-  it("runs spawned chats on the account's AI when it is usable here", async () => {
-    const { spawnSelectionForDefaultAi } = await import("./Layers/AccountDefaultAi.ts");
-    const claude = snapshot({
-      instanceId: "claudeAgent" as never,
-      driver: "claudeAgent" as never,
-      enabled: true,
-      status: "ready",
-      models: [{ slug: "claude-sonnet-4-6", name: "Sonnet", isCustom: false }] as never,
-    });
-    expect(spawnSelectionForDefaultAi("claude", [claude])).toEqual({
-      instanceId: "claudeAgent",
-      model: "claude-sonnet-4-6",
-    });
-    // Not signed in / unknown / missing → the project's default decides.
-    expect(
-      spawnSelectionForDefaultAi("claude", [
-        { ...claude, auth: { status: "unauthenticated" } } as ServerProvider,
-      ]),
-    ).toBeNull();
-    expect(spawnSelectionForDefaultAi("codex", [claude])).toBeNull();
-    expect(spawnSelectionForDefaultAi(null, [claude])).toBeNull();
-  });
-});

@@ -11,7 +11,12 @@
  *    they all agree on);
  * 2. what the model passed — and when it marks `personAsked` (the person
  *    named a model in this conversation), that comes first;
- * 3. the account default AI, 4. the project's default (callers, as before).
+ * 3. (13.11) the table's own row for the task type (`default` / `learned`),
+ *    when its harness is ready here — else no error, just the next step;
+ * 4. the strongest ready model (modelStrength.ts: Claude Opus → Codex's
+ *    strong models → Uno AI premium) — it replaced the account's onboarding
+ *    AI, which handed a test account's work to GPT-5.6 Luna;
+ * 5. the project's default (callers, as before).
  *
  * A harness the rows name that isn't ready here (not installed, off, not
  * signed in) is NOT swapped for another: the chat isn't started and the
@@ -28,8 +33,14 @@ import {
   type ServerProvider,
   isProviderAvailable,
 } from "@t3tools/contracts";
-import { personRoute, thinkingOption, type PersonRoute } from "@t3tools/shared/assistantMemory";
+import {
+  personRoute,
+  tableRoute,
+  thinkingOption,
+  type PersonRoute,
+} from "@t3tools/shared/assistantMemory";
 import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
+import { strongestReadySelection } from "@t3tools/shared/modelStrength";
 
 import { resolveModel } from "../provider/autoBootstrapModelSelection.ts";
 
@@ -118,6 +129,31 @@ function unoCreditsNotAllowed(
   if (provider.driver !== "claudeAgent") return null;
   if (provider.auth.status !== "authenticated" || provider.auth.type !== "unoAi") return null;
   return harnessUnoCredits[provider.driver] === true ? null : UNO_CREDITS_NOT_ALLOWED;
+}
+
+/** The provider can take a chat now (ready, and allowed Uno credits when it runs on them). */
+export function isReadyForChat(
+  provider: ServerProvider,
+  harnessUnoCredits: Readonly<Record<string, boolean>> = {},
+): boolean {
+  return (
+    providerNotReadyReason(provider) === null &&
+    unoCreditsNotAllowed(provider, harnessUnoCredits) === null
+  );
+}
+
+/**
+ * The strongest model a ready harness here offers (modelStrength.ts), for a
+ * chat an assistant starts that no row decided; null: none is ready.
+ */
+export function strongestReadyModelSelection(
+  providers: ReadonlyArray<ServerProvider>,
+  harnessUnoCredits: Readonly<Record<string, boolean>> = {},
+): ModelSelection | null {
+  return (
+    strongestReadySelection(providers, (provider) => isReadyForChat(provider, harnessUnoCredits))
+      ?.selection ?? null
+  );
 }
 
 /**
@@ -212,15 +248,52 @@ export function applyPersonRoute(input: {
   return { kind: "selection", selection, route };
 }
 
+/**
+ * The table's own row (`default` / `learned`) as a selection — only when its
+ * harness is ready here; null otherwise (not an error: Uno's starting point
+ * is not the person's word, the caller goes on to the strongest ready model).
+ */
+export function applyTableRoute(input: {
+  readonly route: PersonRoute | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly harnessUnoCredits?: Readonly<Record<string, boolean>>;
+}): ModelSelection | null {
+  if (input.route === null) return null;
+  const provider = findProvider(input.route.harness, input.providers);
+  if (provider === undefined || !isReadyForChat(provider, input.harnessUnoCredits)) return null;
+  const routed = applyPersonRoute({
+    route: input.route,
+    requested: null,
+    personAsked: false,
+    providers: [provider],
+  });
+  return routed.kind === "selection" ? routed.selection : null;
+}
+
+export interface RoutingRoutes {
+  /** The person's rows (`you`). */
+  readonly person: PersonRoute | null;
+  /** The table's own row for the work (`default` / `learned`). */
+  readonly table: PersonRoute | null;
+}
+
+/** Both routes from `<workspaceRoot>/ROUTING.md`; nulls when none / unreadable. */
+export async function readRoutingRoutes(
+  workspaceRoot: string,
+  taskType?: string,
+): Promise<RoutingRoutes> {
+  try {
+    const content = await fs.readFile(nodePath.join(workspaceRoot, "ROUTING.md"), "utf8");
+    return { person: personRoute(content, taskType), table: tableRoute(content, taskType) };
+  } catch {
+    return { person: null, table: null };
+  }
+}
+
 /** The person's route from `<workspaceRoot>/ROUTING.md`; null when none / unreadable. */
 export async function readPersonRoute(
   workspaceRoot: string,
   taskType?: string,
 ): Promise<PersonRoute | null> {
-  try {
-    const content = await fs.readFile(nodePath.join(workspaceRoot, "ROUTING.md"), "utf8");
-    return personRoute(content, taskType);
-  } catch {
-    return null;
-  }
+  return (await readRoutingRoutes(workspaceRoot, taskType)).person;
 }

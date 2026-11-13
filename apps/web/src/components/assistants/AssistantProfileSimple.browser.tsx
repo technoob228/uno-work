@@ -269,7 +269,7 @@ describe("its page", () => {
       .element(screen.getByTestId("assistant-profile-works-on-section"))
       .toBeInTheDocument();
     await expect.element(screen.getByTestId("assistant-profile-where")).toBeInTheDocument();
-    await expect.element(screen.getByText("The AI it runs on")).toBeInTheDocument();
+    await expect.element(screen.getByTestId("assistant-profile-advanced")).toBeInTheDocument();
   });
 
   it("Role & instructions: edited on the first tab, not on another page", async () => {

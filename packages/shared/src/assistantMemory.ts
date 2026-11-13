@@ -405,33 +405,79 @@ const taskKey = (rule: RoutingRule) => rule.taskType.trim().toLowerCase();
 const shared = <T>(values: ReadonlyArray<T>): T | null =>
   values.every((value) => value === values[0]) ? (values[0] ?? null) : null;
 
-export function personRoute(content: string, taskType?: string): PersonRoute | null {
-  const rows = parseRouting(content).rules.filter(
+/**
+ * The row for work of every other kind — what "Who does the work" on the
+ * assistant's page writes. A row for the task type wins over it.
+ */
+export const ROUTING_CATCH_ALL_TASK = "Everything else";
+
+const CATCH_ALL_TASK_RE =
+  /^(everything|anything|all)( else| other)?( tasks?| work)?$|^\*$|^other( tasks?)?$/;
+
+export function isCatchAllTask(taskType: string): boolean {
+  return CATCH_ALL_TASK_RE.test(taskType.trim().toLowerCase());
+}
+
+function routeOfRow(row: RoutingRule): PersonRoute {
+  return {
+    harness: row.harness.trim(),
+    model: isBlankCell(row.model) ? null : row.model.trim(),
+    thinking: thinkingOf(row.effort),
+    taskType: row.taskType,
+  };
+}
+
+/** Rows that start a chat (a harness, not `self`) of the given sources. */
+function chatRows(
+  content: string,
+  sources: ReadonlyArray<RoutingSource>,
+): ReadonlyArray<RoutingRule> {
+  return parseRouting(content).rules.filter(
     (rule) =>
-      rule.source === "you" &&
+      sources.includes(rule.source) &&
       !isBlankCell(rule.harness) &&
       rule.harness.trim().toLowerCase() !== ROUTING_SELF_HARNESS,
   );
-  if (rows.length === 0) return null;
+}
+
+/** The row `taskType` names (exactly, else by containment), then the catch-all row. */
+function matchedRow(
+  rows: ReadonlyArray<RoutingRule>,
+  taskType: string | undefined,
+): RoutingRule | undefined {
   const wanted = taskType?.trim().toLowerCase() ?? "";
-  if (wanted.length > 0) {
-    const row =
-      rows.find((rule) => taskKey(rule) === wanted) ??
-      rows.find((rule) => taskKey(rule).includes(wanted) || wanted.includes(taskKey(rule)));
-    if (row !== undefined) {
-      return {
-        harness: row.harness.trim(),
-        model: isBlankCell(row.model) ? null : row.model.trim(),
-        thinking: thinkingOf(row.effort),
-        taskType: row.taskType,
-      };
-    }
-  }
+  const specific = rows.filter((rule) => !isCatchAllTask(rule.taskType));
+  const byTask =
+    wanted.length === 0
+      ? undefined
+      : (specific.find((rule) => taskKey(rule) === wanted) ??
+        specific.find((rule) => taskKey(rule).includes(wanted) || wanted.includes(taskKey(rule))));
+  return byTask ?? rows.find((rule) => isCatchAllTask(rule.taskType));
+}
+
+export function personRoute(content: string, taskType?: string): PersonRoute | null {
+  const rows = chatRows(content, ["you"]);
+  if (rows.length === 0) return null;
+  const row = matchedRow(rows, taskType);
+  if (row !== undefined) return routeOfRow(row);
   const harness = shared(rows.map((rule) => rule.harness.trim()));
   if (harness === null) return null;
   const model = shared(rows.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())));
   const thinking = shared(rows.map((rule) => thinkingOf(rule.effort)));
   return { harness, model, thinking, taskType: rows.length === 1 ? rows[0]!.taskType : null };
+}
+
+/**
+ * The table's own row for the work when no row of the person's decided —
+ * Uno's starting point (`default`) or the assistant's tuning (`learned`):
+ * the row `taskType` names, else a catch-all row. Unlike the person's rows
+ * it only applies when its harness is ready here (the caller checks); null:
+ * no row fits, the caller picks the strongest ready model.
+ */
+export function tableRoute(content: string, taskType?: string): PersonRoute | null {
+  const rows = chatRows(content, ["learned", "default"]);
+  const row = matchedRow(rows, taskType);
+  return row === undefined ? null : routeOfRow(row);
 }
 
 // ── Proposals to change the person's rules ───────────────────────────

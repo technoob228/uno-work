@@ -18,8 +18,8 @@ export const LEGACY_NO_CLAUDE_NOTE = `- No Claude on this computer (no subscript
   \`uno\`, model \`uno/uno/smart\` where the table says Sonnet or Haiku, the
   newest Premium Opus-class model of the Uno model list where it says Opus.`;
 
-/** What replaces it (2026-10-29). */
-export const PERSON_FIRST_NOTE = `- The person's word wins: a harness or model they name ("through Claude",
+/** What replaced it (2026-10-29 – 0.0.188), exactly as written into ROUTING.md. */
+export const PERSON_FIRST_NOTE_1029 = `- The person's word wins: a harness or model they name ("through Claude",
   "on Opus") or a row with Source \`you\` is used as it is — never another
   model in silence. Check \`settings_read\` → \`harnessReadiness\` first. Not
   ready here (not installed / not signed in)? Ask in ONE line and wait:
@@ -29,6 +29,22 @@ export const PERSON_FIRST_NOTE = `- The person's word wins: a harness or model t
   none: Uno AI — harness \`uno\`, model \`uno/uno/smart\` where the table says
   Sonnet or Haiku, the newest Premium Opus-class model of the Uno model list
   where it says Opus — and say which model in your one line.`;
+
+/**
+ * What replaces both (13.11): the server applies a ready `default` row and
+ * otherwise the strongest ready model, so the model no longer names Smart
+ * for a `default` row whose harness isn't ready (that was a quiet downgrade).
+ */
+export const PERSON_FIRST_NOTE = `- The person's word wins: a harness or model they name ("through Claude",
+  "on Opus") or a row with Source \`you\` is used as it is — never another
+  model in silence. Check \`settings_read\` → \`harnessReadiness\` first. Not
+  ready here (not installed / not signed in)? Ask in ONE line and wait:
+  "Claude isn't connected on this computer — connect it (Settings → Agents →
+  Sign in) or run it on <model>?"
+- A \`default\` row whose harness isn't ready, and the person named none:
+  don't pass a provider or model — the server starts it on the strongest
+  ready model here (Claude Opus → Codex GPT-5.6 Terra / Sol / GPT-5.5 → Uno
+  AI premium). Never pick a small model (Luna, mini, Fast) yourself.`;
 
 export const ROUTING_TEMPLATE = `# Routing table — which harness/model for which task
 
@@ -73,6 +89,8 @@ ${PERSON_FIRST_NOTE}
  */
 export function upgradeRoutingNotes(content: string): string | null {
   const normalized = content.replace(/\r\n/g, "\n");
-  if (!normalized.includes(LEGACY_NO_CLAUDE_NOTE)) return null;
-  return normalized.replace(LEGACY_NO_CLAUDE_NOTE, PERSON_FIRST_NOTE);
+  for (const old of [LEGACY_NO_CLAUDE_NOTE, PERSON_FIRST_NOTE_1029]) {
+    if (normalized.includes(old)) return normalized.replace(old, PERSON_FIRST_NOTE);
+  }
+  return null;
 }
