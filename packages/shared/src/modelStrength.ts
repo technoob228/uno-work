@@ -69,11 +69,13 @@ export function fallbackListedModel(driver: string, models: Models): string | nu
   return models[0]?.slug ?? null;
 }
 
-const OPUS_SLUG_RE = /claude-opus-(\d+)[-.](\d+)/i;
+// `claude-opus-5-5`, `claude-opus-4.7`, and `claude-opus-5` (no minor: 5.0;
+// a date suffix like `-20251001` is not a minor).
+const OPUS_SLUG_RE = /claude-opus-(\d+)(?:[-.](\d{1,2})(?!\d))?/i;
 
 function opusVersion(slug: string): number | null {
   const match = OPUS_SLUG_RE.exec(slug);
-  return match ? Number(match[1]) * 100 + Number(match[2]) : null;
+  return match ? Number(match[1]) * 100 + Number(match[2] ?? 0) : null;
 }
 
 /** Uno AI premium: the newest Opus of the gateway, else its first frontier premium model. */

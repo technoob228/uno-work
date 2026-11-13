@@ -13,6 +13,7 @@ import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
+import { useDefaultModelMirror } from "~/components/settings/useDefaultModelMirror";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
 import { liteRedirectHref } from "~/lite/webLite";
@@ -129,9 +130,16 @@ function ChatRouteLayout() {
     <>
       <ChatRouteGlobalShortcuts />
       <PromptLinkBridge />
+      <DefaultModelMirror />
       <Outlet />
     </>
   );
+}
+
+/** Settings → AI "Default model" reaches every computer's server (13.11 v2). */
+function DefaultModelMirror() {
+  useDefaultModelMirror();
+  return null;
 }
 
 /** `uno-work://new?prompt=…` opened from outside the desktop app. */

@@ -1,8 +1,6 @@
 import type { AssistantChatSummary, ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { parseRouting, personRoute, writeRouting } from "@t3tools/shared/assistantMemory";
-
 import {
   autoWorkChoice,
   chatCostText,
@@ -12,8 +10,6 @@ import {
   modelChoices,
   SELF_VALUE,
   weekTotals,
-  withWorkModel,
-  workModelRule,
 } from "./assistantMemoryModels.logic";
 
 const provider = (over: Record<string, unknown>) =>
@@ -111,17 +107,7 @@ describe("chatTokensNote (tokens shown, no $ — decision 02.10)", () => {
   });
 });
 
-describe("Who does the work (13.11)", () => {
-  const table = writeRouting("# Routing\n", [
-    {
-      taskType: "Anything with UI",
-      harness: "claudeAgent",
-      model: "claude-opus-5-5",
-      effort: "high",
-      source: "default",
-      note: "",
-    },
-  ]);
+describe("Auto for the assistant's work (13.11)", () => {
   const codex = provider({
     instanceId: "codex",
     driver: "codex",
@@ -130,30 +116,6 @@ describe("Who does the work (13.11)", () => {
       { slug: "gpt-5.6-luna", name: "GPT-5.6 Luna", isCustom: false, capabilities: null },
       { slug: "gpt-5.6-terra", name: "GPT-5.6 Terra", isCustom: false, capabilities: null },
     ],
-  });
-
-  it("a model writes the person's Everything else row; the server then follows it", () => {
-    const rules = withWorkModel(parseRouting(table).rules, {
-      harness: "codex",
-      model: "gpt-5.6-terra",
-    });
-    expect(workModelRule(rules)).toMatchObject({
-      taskType: "Everything else",
-      harness: "codex",
-      source: "you",
-    });
-    const written = writeRouting(table, rules);
-    expect(personRoute(written, "Anything with UI")).toMatchObject({
-      harness: "codex",
-      model: "gpt-5.6-terra",
-    });
-  });
-
-  it("Auto removes it, and keeps the other rows", () => {
-    const set = withWorkModel(parseRouting(table).rules, { harness: "codex", model: "gpt-5.5" });
-    const back = withWorkModel(set, null);
-    expect(workModelRule(back)).toBeNull();
-    expect(back).toHaveLength(1);
   });
 
   it("Auto shows what the server picks: Claude Opus first, Codex Terra (never Luna) without it", () => {

@@ -77,6 +77,14 @@ describe("strongestReadySelection", () => {
     });
   });
 
+  it("Claude Opus 5 (no minor in the slug) still counts as Opus", () => {
+    const plain = provider("claudeAgent", ["claude-sonnet-5", "claude-opus-5"]);
+    expect(strongestReadySelection([codex, plain], ready)).toEqual({
+      tier: "claude",
+      selection: { instanceId: "claudeAgent", model: "claude-opus-5" },
+    });
+  });
+
   it("no Claude ready: Codex's strongest, never Luna", () => {
     expect(
       strongestReadySelection([codex, claude], (entry) => entry.driver !== "claudeAgent"),

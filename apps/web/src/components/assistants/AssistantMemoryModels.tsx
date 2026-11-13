@@ -54,10 +54,7 @@ import { LoaderCircleIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
-import {
-  useEnvironmentProviders,
-  useEnvironmentSettings,
-} from "../../environments/settings/serverSettings";
+import { useEnvironmentProviders } from "../../environments/settings/serverSettings";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import {
   getAssistantInstructions,
@@ -73,7 +70,6 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
 import {
-  autoWorkChoice,
   chatCostText,
   chatTokensNote,
   choiceValue,
@@ -81,8 +77,6 @@ import {
   formatUsd,
   modelChoices,
   weekTotals,
-  withWorkModel,
-  workModelRule,
   type ModelChoice,
 } from "./assistantMemoryModels.logic";
 
@@ -875,119 +869,30 @@ function RoutingTable({ name, routing: r }: { name: string; routing: Routing }) 
   );
 }
 
-// ── Who does the work (13.11) ────────────────────────────────────────
-
-const AUTO_VALUE = "auto";
+// ── By kind of task (13.11 v2) ───────────────────────────────────────
 
 /**
- * "Who does the work: <model> ▾" — the one choice for the chats the
- * assistant starts. A model writes the person's "Everything else" row of
- * ROUTING.md (the server applies it, personRouting.ts); Auto removes it:
- * then the table's rows by kind of task, else the strongest AI ready here.
- * The table below refines it by kind of task.
+ * An assistant's rows by kind of task (its ROUTING.md), folded inside
+ * Settings → AI → "Default model": a row the person set beats the default
+ * model for that kind of task; the table's own rows ("Starting point",
+ * "Learned") apply only on Auto (personRouting.ts).
  */
-export function WorkModelBlock({
+export function KindOfTaskTable({
   name,
   environmentId,
   projectId = ASSISTANT_PROJECT_ID,
 }: {
   name: string;
-  environmentId: EnvironmentId | null;
+  environmentId: EnvironmentId;
   projectId?: string;
 }) {
-  if (!environmentId) {
-    return (
-      <p className="px-3 py-2 text-sm text-muted-foreground" data-testid="assistant-work-model">
-        {name} is asleep. Its choice of AI lives on its computer.
-      </p>
-    );
-  }
-  return <AwakeWorkModel name={name} environmentId={environmentId} projectId={projectId} />;
-}
-
-function AwakeWorkModel({
-  name,
-  environmentId,
-  projectId,
-}: {
-  name: string;
-  environmentId: EnvironmentId;
-  projectId: string;
-}) {
   const routing = useRouting(environmentId, projectId, name);
-  const settings = useEnvironmentSettings(environmentId);
-  const { choices, parsed, providers } = routing;
-  const rule = workModelRule(parsed.rules);
-  const auto = useMemo(
-    () => autoWorkChoice(providers, choices, settings?.harnessUnoCredits ?? {}),
-    [providers, choices, settings?.harnessUnoCredits],
-  );
-  const workChoices = choices.filter((choice) => choice.harness !== ROUTING_SELF_HARNESS);
-  const value = rule === null ? AUTO_VALUE : choiceValue(rule);
-  const current = rule === null ? null : (choices.find((choice) => choice.value === value) ?? null);
-  const autoLabel = auto ? `Auto · ${auto.label}` : "Auto · the strongest AI connected";
-
-  if (routing.routing.file.isLoading) {
-    return <p className="px-3 py-2 text-sm text-muted-foreground">Loading…</p>;
-  }
-  if (routing.routing.file.isError) {
-    return (
-      <p className="px-3 py-2 text-sm text-muted-foreground">
-        Couldn't read it: {errorText(routing.routing.file.error, "the computer didn't answer.")}
-      </p>
-    );
-  }
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2.5" data-testid="assistant-work-model">
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          value={value}
-          aria-label="Who does the work"
-          className="max-w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
-          data-testid="assistant-work-model-select"
-          onChange={(event) => {
-            const next = event.target.value;
-            if (next === AUTO_VALUE) {
-              routing.saveRules(withWorkModel(parsed.rules, null));
-              return;
-            }
-            const choice = workChoices.find((entry) => entry.value === next);
-            if (choice) routing.saveRules(withWorkModel(parsed.rules, choice));
-          }}
-        >
-          <option value={AUTO_VALUE}>{autoLabel}</option>
-          {rule !== null && current === null ? (
-            <option value={value}>{rule.model || rule.harness} (not on this computer)</option>
-          ) : null}
-          {workChoices.map((choice) => (
-            <option key={choice.value} value={choice.value} disabled={choice.reason !== null}>
-              {choice.label}
-              {choice.reason ? ` — ${choice.reason}` : ""}
-            </option>
-          ))}
-        </select>
+    <div className="flex flex-col gap-1" data-testid="settings-kind-of-task">
+      <div className="flex items-center justify-end">
         <SavedHint at={routing.routing.savedAt} />
       </div>
-      {rule !== null && (current === null || current.reason !== null) ? (
-        <p className="text-xs text-warning-foreground" data-testid="assistant-work-model-not-ready">
-          Not connected on this computer — {name}'s chats won't start until it is. Connect it in
-          Settings → Agents, or pick another.
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {rule === null
-            ? auto
-              ? `The chats ${name} starts run on the strongest AI connected here, unless a row below names one.`
-              : `Nothing strong is connected here yet — connect Claude or ChatGPT in Settings → Agents.`
-            : `The chats ${name} starts run on this, unless a row you set below names another.`}
-        </p>
-      )}
-      <details className="mt-1" data-testid="assistant-work-model-table">
-        <summary className="cursor-pointer text-xs text-muted-foreground">By kind of task</summary>
-        <div className="pt-2">
-          <RoutingTable name={name} routing={routing} />
-        </div>
-      </details>
+      <RoutingTable name={name} routing={routing} />
     </div>
   );
 }

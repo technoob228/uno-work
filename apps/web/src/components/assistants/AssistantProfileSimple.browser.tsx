@@ -260,7 +260,7 @@ describe("its page", () => {
     expect(screen.getByTestId("assistant-connect-telegram").query()).toBeNull();
   });
 
-  it("Where it works: its computer, projects and AI", async () => {
+  it("Where it works: its computer and projects; no model picker of its own (13.11 v2)", async () => {
     tabInUrl = "where";
     const screen = await wrap(
       <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
@@ -269,7 +269,15 @@ describe("its page", () => {
       .element(screen.getByTestId("assistant-profile-works-on-section"))
       .toBeInTheDocument();
     await expect.element(screen.getByTestId("assistant-profile-where")).toBeInTheDocument();
-    await expect.element(screen.getByTestId("assistant-profile-advanced")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-profile-advanced").query()).toBeNull();
+  });
+
+  it("Role & instructions: its AI is shown with a link to Settings → AI", async () => {
+    const screen = await wrap(
+      <AssistantProfileSimple environmentId="env-1" projectId="assistant-scout" />,
+    );
+    await expect.element(screen.getByTestId("assistant-profile-ai")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-work-model").query()).toBeNull();
   });
 
   it("Role & instructions: edited on the first tab, not on another page", async () => {

@@ -57,7 +57,8 @@ import { assistantOwnRuntimeMode } from "@t3tools/shared/assistantPreset";
 import { AssistantAvatar, avatarImageOf } from "./AssistantAvatar";
 import { AssistantFacePicker } from "./AssistantFacePicker";
 import { TeamDuties, TeamMail, TeamWhoEditor, TeamWorksOn } from "./AssistantProfileBlocks";
-import { MemoryBlock, WorkModelBlock } from "./AssistantMemoryModels";
+import { AssistantAiLine } from "./AssistantAiLine";
+import { MemoryBlock } from "./AssistantMemoryModels";
 import {
   ASSISTANT_PROFILE_TABS,
   type AssistantProfileTab,
@@ -68,7 +69,7 @@ import { AssistantModeSwitch } from "./PersonaMode";
 import { AutomationsSection } from "../automations/AutomationsSection";
 import { JoinCallsSection } from "./JoinCallsSection";
 import { ChatLine, Pill, Row, Section, TreeBranch } from "./AssistantProfileParts";
-import { TeamConnectors, TeamPresetEditor, TeamRoutines, TeamRunsOn } from "./AssistantProfileReal";
+import { TeamConnectors, TeamPresetEditor, TeamRoutines } from "./AssistantProfileReal";
 import { ACTIVITY_LABEL, buildAssistantTree, descendantKeys } from "./assistantTeam.logic";
 import { setupProgressLine } from "./teamFromDaemon.logic";
 import { type TeamMember, useAssistantTeam } from "./useAssistantTeam";
@@ -344,7 +345,6 @@ export function AssistantProfileSimple(props: {
   const actions = useTeamActions();
   const quick = useQuickCreateAssistant();
   const [editingWho, setEditingWho] = useState(false);
-  const [changingBrain, setChangingBrain] = useState(false);
   const [faceOpen, setFaceOpen] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState(false);
   // The tab lives in the address (?tab=…): Settings in its chat and links open
@@ -641,16 +641,15 @@ export function AssistantProfileSimple(props: {
                       )}
                     </div>
                   </Row>
+                  {/* Chosen in Settings → AI → Default model (13.11 v2); shown, not picked, here. */}
+                  <Row label="AI">
+                    <AssistantAiLine
+                      environmentId={member.environmentId as EnvironmentId}
+                      name={name}
+                      revoked={member.revoked}
+                    />
+                  </Row>
                   <TeamRoutines member={member} machine={homeMachine} />
-                </Section>
-
-                {/* The one choice of who does the work (13.11); its own AI is in Environment → Advanced. */}
-                <Section title="Who does the work" testId="assistant-profile-work-model">
-                  <WorkModelBlock
-                    name={name}
-                    environmentId={member.environmentId as EnvironmentId}
-                    projectId={member.projectId}
-                  />
                 </Section>
 
                 <Section
@@ -785,25 +784,6 @@ export function AssistantProfileSimple(props: {
                   <div className="p-2">
                     <AssistantModeSwitch member={member} />
                   </div>
-                </Section>
-
-                {/* Its own AI — what it replies and plans with — is not who does the work (13.11). */}
-                <Section
-                  title="Advanced"
-                  testId="assistant-profile-advanced"
-                  action={
-                    member.revoked ? null : (
-                      <button
-                        type="button"
-                        onClick={() => setChangingBrain((value) => !value)}
-                        className="cursor-pointer text-xs text-primary hover:underline"
-                      >
-                        {changingBrain ? "Done" : "Change"}
-                      </button>
-                    )
-                  }
-                >
-                  <TeamRunsOn member={member} changing={changingBrain} />
                 </Section>
               </div>
             ) : null}

@@ -124,6 +124,17 @@ describe("the model for new chats", () => {
       defaultModelSelection: model,
     });
     expect(plan.clientPatch).toEqual({ newChatModelSelection: model });
+    // The awake computer gets it too: its server reads it for the assistant's work.
+    expect(plan.serverWrites.map((write) => write.environmentId)).toEqual([mac]);
+    expect(plan.serverWrites[0]?.patch).toEqual({ defaultModelSelection: model });
+  });
+
+  it("doesn't write a computer that already has the same model", () => {
+    const environments = [computer(mac, "Mainbook", { defaultModelSelection: model })];
+    const plan = planScopedSettingsPatch(scopeOf({}, environments), environments, {
+      defaultModelSelection: model,
+    });
+    expect(plan.clientPatch).toEqual({ newChatModelSelection: model });
     expect(plan.serverWrites).toEqual([]);
   });
 

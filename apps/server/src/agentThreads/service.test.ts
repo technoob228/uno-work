@@ -139,6 +139,7 @@ function makeFixture(options?: {
   readonly remote?: AgentThreadsRemoteDeps;
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly personalDefault?: Effect.Effect<ModelSelection | null>;
+  readonly defaultModelSelection?: ModelSelection | null;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -221,6 +222,9 @@ function makeFixture(options?: {
         : {}),
     getProviders: Effect.succeed(options?.providers ?? providers),
     ...(options?.personalDefault ? { personalDefault: options.personalDefault } : {}),
+    ...(options?.defaultModelSelection !== undefined
+      ? { getDefaultModelSelection: Effect.succeed(options.defaultModelSelection) }
+      : {}),
     ...(options?.remote ? { remote: options.remote } : {}),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
@@ -1181,13 +1185,17 @@ describe("agent threads bridge: which model an assistant's chat runs on (13.11)"
     status: "unauthenticated",
   });
 
-  const fixture = (list: ReadonlyArray<ServerProvider>) => {
+  const fixture = (
+    list: ReadonlyArray<ServerProvider>,
+    defaultModelSelection: ModelSelection | null = null,
+  ) => {
     const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "routing-"));
     fs.writeFileSync(nodePath.join(root, "ROUTING.md"), ROUTING_TEMPLATE);
     return makeFixture({
       scope: "own-project",
       assistantAllowlist: "all",
       providers: list,
+      defaultModelSelection,
       personalDefault: Effect.succeed(strongestReadyModelSelection(list)),
       projects: [projectShell(ASSISTANT_HOME, { workspaceRoot: root }), projectShell(OWN_PROJECT)],
       threads: [threadShell(CALLER, { projectId: ASSISTANT_HOME })],
@@ -1218,6 +1226,36 @@ describe("agent threads bridge: which model an assistant's chat runs on (13.11)"
         text: "Fix the crash",
         projectId: OWN_PROJECT,
         taskType: "Hard bugs, architecture",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "codex",
+        model: "gpt-5.6-terra",
+      });
+    }),
+  );
+
+  it.effect("the person's Default model (Settings → AI) beats the table's starting rows", () =>
+    Effect.gen(function* () {
+      const terra = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+      const { handlers, dispatched } = fixture([codex, claude], terra);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+        taskType: "Hard bugs, architecture",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), terra);
+    }),
+  );
+
+  it.effect("a Default model that can't run here now: Auto decides, the chat still starts", () =>
+    Effect.gen(function* () {
+      const opus = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" };
+      const { handlers, dispatched } = fixture([codex, claudeSignedOut], opus);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
       });
       assert.strictEqual(created.status, 200);
       assert.deepStrictEqual(startedOn(dispatched), {

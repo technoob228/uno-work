@@ -16,20 +16,15 @@ import {
   LockIcon,
 } from "lucide-react";
 import {
-  ASSISTANT_PROJECT_ID,
   defaultInstanceIdForDriver,
   ProviderDriverKind,
-  type EnvironmentId,
-  type ModelSelection,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
-import { scopeProjectRef } from "@t3tools/client-runtime";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { CONSOLE_URL } from "../../account/accountOverview";
 import { accountTransport } from "../../account/unoAccount";
 import { useAssistantChannels } from "../../assistant/useAssistantChannels";
-import { useAssistantLlm } from "../../assistant/useAssistantLlm";
 import { setDevMode, useDevMode } from "../../devMode";
 import { isElectron } from "../../env";
 import {
@@ -43,15 +38,10 @@ import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
-import { setAssistantDefaultModel } from "../../lib/managerApi";
-import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
-import { AssistantModelPicker } from "../chat/AssistantEngine";
-import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
-import { AssistantAiChoice } from "../assistants/AssistantAiChoice";
 import { useTeamShown } from "../assistants/useAssistantTeam";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
+import { DefaultModelFolds } from "./DefaultModelFolds";
 import { NewChatAccessRow, NewChatModelRow } from "./NewChatDefaultsRows";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
@@ -72,7 +62,6 @@ import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { AiProviderKeysSection } from "./AiProviderKeysSection";
 import { AiPlansSection } from "./AiPlansSection";
-import { AppsAiDefaultRows } from "./AppsAiSettingsPanel";
 import { HarnessesSettingsPanel } from "./HarnessesSettingsPanel";
 import { ChatCopiesCleanupSection } from "./ChatCopiesCleanup";
 import { MachineAccessSections } from "./MachineAccessSettings";
@@ -207,86 +196,6 @@ const AGENTS = [
 /** While a row waits for a sign-in, re-check the computer this often. */
 const AGENTS_RECHECK_MS = 10_000;
 
-/**
- * "Default AI": what the assistant and the apps run on when nobody picked
- * something for one chat or one app (Misha 13.10). The assistant's AI moved
- * here from the Uno chat's header.
- */
-function DefaultAiSection({ environmentId }: { readonly environmentId: EnvironmentId }) {
-  const picker = useHomeModelPicker(environmentId);
-  const assistantLlm = useAssistantLlm(environmentId);
-  const teamShown = useTeamShown();
-  const assistantProject = useStore((state) =>
-    selectProjectByRef(state, scopeProjectRef(environmentId, ASSISTANT_PROJECT_ID)),
-  );
-  // Hermes is the assistant itself, not something its work is handed to.
-  const workAgents = useMemo(
-    () => picker.instanceEntries.filter((entry) => entry.driverKind !== "hermes"),
-    [picker.instanceEntries],
-  );
-  const work = assistantProject?.defaultModelSelection ?? null;
-  const workEntry = work ? workAgents.find((entry) => entry.instanceId === work.instanceId) : null;
-  return (
-    <SettingsSection title="Default AI for your assistant and apps">
-      {assistantLlm.supported ? (
-        <>
-          <SettingsRow
-            title="Assistant"
-            description="What Uno, your assistant, thinks with: Uno AI, your own Claude or ChatGPT plan, or a key of your own from “AI provider keys” below."
-            control={
-              <AssistantModelPicker environmentId={environmentId} testId="settings-ai-uno" />
-            }
-          />
-          {teamShown ? (
-            <AssistantAiChoice
-              environmentId={environmentId}
-              computer="this computer"
-              className="px-4 pb-3 sm:px-5"
-            />
-          ) : (
-            <AssistantPowerPicker environmentId={environmentId} className="px-4 pb-3 sm:px-5" />
-          )}
-        </>
-      ) : null}
-      {assistantProject && work ? (
-        <SettingsRow
-          title="Work the assistant starts"
-          description="The chats the assistant opens to do a task run on this agent: Uno AI, your Claude or ChatGPT subscription, OpenCode, Cursor or an agent you added."
-          control={
-            <ProviderModelPicker
-              compact
-              activeInstanceId={
-                workEntry ? work.instanceId : (workAgents[0]?.instanceId ?? work.instanceId)
-              }
-              model={work.model}
-              lockedProvider={null}
-              instanceEntries={workAgents}
-              environmentId={environmentId}
-              modelOptionsByInstance={picker.modelOptionsByInstance}
-              onInstanceModelChange={(instanceId, model) =>
-                void setAssistantDefaultModel({
-                  environmentId,
-                  projectId: ASSISTANT_PROJECT_ID,
-                  instanceId,
-                  model,
-                }).catch((error: unknown) =>
-                  toastManager.add({
-                    type: "error",
-                    title: "Couldn't change the assistant's agent",
-                    description: error instanceof Error ? error.message : String(error),
-                  }),
-                )
-              }
-              triggerVariant="outline"
-            />
-          }
-        />
-      ) : null}
-      <AppsAiDefaultRows environmentId={environmentId} />
-    </SettingsSection>
-  );
-}
-
 export function AiSettings() {
   const { environmentId } = useActiveMachine();
   const { singleComputer, allEnvironments } = useSettingsScope();
@@ -375,8 +284,14 @@ export function AiSettings() {
 
   return (
     <SettingsPageContainer>
+      {/* The one place a model is chosen (13.11 v2); a chat's own picker changes only that chat. */}
+      <SettingsSection title="Model">
+        <NewChatModelRow environmentId={environmentId}>
+          {environmentId ? <DefaultModelFolds environmentId={environmentId} /> : null}
+        </NewChatModelRow>
+      </SettingsSection>
+
       <SettingsSection title="New chats">
-        <NewChatModelRow environmentId={environmentId} />
         <NewChatAccessRow />
       </SettingsSection>
 
@@ -398,8 +313,6 @@ export function AiSettings() {
 
       <AiPlansSection />
 
-      {environmentId ? <DefaultAiSection environmentId={environmentId} /> : null}
-
       <SettingsSection title="Agents">
         {agents.map(({ agent, entry, row }) => {
           // Claude and ChatGPT sign in (and out) with the person's own account here.
@@ -420,10 +333,10 @@ export function AiSettings() {
                   : `Not signed in. Have ${agent.plans ?? "your own plan"}? Sign in to use it. Chats ask before using your Uno credits.`
                 : row.state === "connected"
                   ? ownAccount
-                    ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick it in any chat, or under "New chats start on".`
+                    ? `Signed in${row.detail ? ` · ${row.detail}` : ""}. Pick it in any chat, or as the Default model above.`
                     : agent.driver === "opencode"
                       ? agent.description
-                      : `Ready${row.detail ? ` · ${row.detail}` : ""}. Pick it in any chat, or under "New chats start on".`
+                      : `Ready${row.detail ? ` · ${row.detail}` : ""}. Pick it in any chat, or as the Default model above.`
                   : agent.description;
           const switchedOff = row.state === "none" && (!entry || !entry.enabled);
           const ownKey = agent.driver === "opencode" && row.state === "connected";

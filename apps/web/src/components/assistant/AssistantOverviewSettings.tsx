@@ -107,7 +107,7 @@ export function AssistantOverviewSettings({
         <SettingsRow title="What it does" description={ASSISTANT_VALUE_LINE} />
         <SettingsRow
           title="Runs on Hermes"
-          description={`${ASSISTANT_HARNESS_NOTE} Its AI is picked in Settings → AI, under "Default AI".`}
+          description={`${ASSISTANT_HARNESS_NOTE} Its AI is picked in Settings → AI, under "Default model" → Advanced.`}
         />
         <SettingsRow
           title="Show in sidebar"

@@ -190,8 +190,8 @@ export function TeamRunsOn(props: { readonly member: TeamMember; readonly changi
         {llm.loading ? "…" : model ? `${model} · ${BRAIN_NAME[card]}` : BRAIN_NAME[card]}
       </p>
       <p className="text-xs text-muted-foreground">
-        What {member.profile.name} replies and plans with — the work itself goes to “Who does the
-        work”. {aiChoiceNote(computer)}
+        What {member.profile.name} replies and plans with — its work runs on the Default model
+        (Settings → AI). {aiChoiceNote(computer)}
       </p>
     </div>
   );

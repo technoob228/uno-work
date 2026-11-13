@@ -634,7 +634,7 @@ function AppRow({
 
 /**
  * The two defaults every app starts from: the model for answers and the agent
- * for jobs. Shown here and in Settings → AI ("Default AI"), written to the
+ * for jobs. Shown on the Apps page (13.11 v2: no longer in Settings → AI), written to the
  * same machine settings.
  */
 export function AppsAiDefaultRows({ environmentId }: { readonly environmentId: EnvironmentId }) {

@@ -52,6 +52,7 @@ import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import {
   applyPersonRoute,
   applyTableRoute,
+  defaultModelChoice,
   readRoutingRoutes,
   selectionNotReadyMessage,
 } from "../personRouting.ts";
@@ -252,13 +253,11 @@ const makeManagerToolService = Effect.gen(function* () {
         readRoutingRoutes(assistantProject.value.workspaceRoot, input.taskType),
       );
       const providers = yield* providerRegistry.getProviders;
-      const harnessUnoCredits =
+      const settings =
         settingsService === null
-          ? {}
-          : yield* settingsService.getSettings.pipe(
-              Effect.map((settings) => settings.harnessUnoCredits),
-              Effect.orElseSucceed(() => ({})),
-            );
+          ? null
+          : yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const harnessUnoCredits = settings?.harnessUnoCredits ?? {};
       const routed = applyPersonRoute({
         route: routes.person,
         requested,
@@ -268,12 +267,19 @@ const makeManagerToolService = Effect.gen(function* () {
       if (routed.kind === "not-ready") {
         return yield* new ManagerInvalidRequestError({ detail: routed.message });
       }
-      // Nothing named: the table's own row when its harness is ready here;
-      // still null → the strongest ready model (ManagerApprovalService).
+      // Nothing named: the person's Default model (Settings → AI) when its
+      // harness is ready here, then the table's own row; still null → the
+      // strongest ready model (ManagerApprovalService) — the app's "Auto".
       const selection =
         routed.kind === "selection"
           ? routed.selection
-          : (requested ?? applyTableRoute({ route: routes.table, providers, harnessUnoCredits }));
+          : (requested ??
+            defaultModelChoice(
+              settings?.defaultModelSelection ?? null,
+              providers,
+              harnessUnoCredits,
+            ) ??
+            applyTableRoute({ route: routes.table, providers, harnessUnoCredits }));
       // Not started on a harness that can't take it here: the model asks.
       const notReady =
         selection === null

@@ -157,6 +157,26 @@ export function strongestReadyModelSelection(
 }
 
 /**
+ * Settings → AI "Default model" (13.11 v2: the one place a model is chosen),
+ * for a chat an assistant starts that no row of the person's named: the
+ * person's pick when its harness can take a chat here and still lists the
+ * model; null otherwise (Auto, or not usable here now — the table's rows and
+ * then the strongest ready model decide, as the app's "Auto" says).
+ */
+export function defaultModelChoice(
+  selection: ModelSelection | null,
+  providers: ReadonlyArray<ServerProvider>,
+  harnessUnoCredits: Readonly<Record<string, boolean>> = {},
+): ModelSelection | null {
+  if (selection === null) return null;
+  const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
+  if (provider === undefined || !isReadyForChat(provider, harnessUnoCredits)) return null;
+  const listed =
+    provider.models.length === 0 || provider.models.some((entry) => entry.slug === selection.model);
+  return listed ? selection : null;
+}
+
+/**
  * A chat an assistant starts on a harness that can't take it here (not
  * installed, off, not signed in) is not started: the model gets one line to
  * ask the person. Applies to whatever the selection came from — the

@@ -51,6 +51,7 @@ import { checkTargetComputer } from "../assistants/targetComputer.ts";
 import {
   applyPersonRoute,
   applyTableRoute,
+  defaultModelChoice,
   readRoutingRoutes,
   selectionNotReadyMessage,
 } from "../manager/personRouting.ts";
@@ -179,6 +180,12 @@ export interface AgentThreadsDeps {
    * personRouting.ts). Absent / null: the project's default.
    */
   readonly personalDefault?: Effect.Effect<ModelSelection | null>;
+  /**
+   * Settings → AI "Default model" (settings `defaultModelSelection`; null =
+   * Auto). Beats the table's own rows when its harness is ready here.
+   * Absent: Auto.
+   */
+  readonly getDefaultModelSelection?: Effect.Effect<ModelSelection | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -726,17 +733,23 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           }
           if (routed.kind === "selection") requested = routed.selection;
           else if (requested === null && caller.projectId === assistantProjectId) {
+            // The person's Default model (Settings → AI), then the table's own
+            // row, then the strongest ready model ("Auto").
+            const providers = yield* deps.getProviders;
+            const harnessUnoCredits =
+              deps.getHarnessUnoCredits === undefined ? {} : yield* deps.getHarnessUnoCredits;
             requested =
+              defaultModelChoice(
+                deps.getDefaultModelSelection === undefined
+                  ? null
+                  : yield* deps.getDefaultModelSelection,
+                providers,
+                harnessUnoCredits,
+              ) ??
               (routes.table === null
                 ? null
-                : applyTableRoute({
-                    route: routes.table,
-                    providers: yield* deps.getProviders,
-                    harnessUnoCredits:
-                      deps.getHarnessUnoCredits === undefined
-                        ? {}
-                        : yield* deps.getHarnessUnoCredits,
-                  })) ?? (deps.personalDefault === undefined ? null : yield* deps.personalDefault);
+                : applyTableRoute({ route: routes.table, providers, harnessUnoCredits })) ??
+              (deps.personalDefault === undefined ? null : yield* deps.personalDefault);
           }
         }
         if (requested !== null) modelSelection = requested;

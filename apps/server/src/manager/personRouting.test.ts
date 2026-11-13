@@ -11,6 +11,7 @@ import {
 import {
   applyPersonRoute,
   applyTableRoute,
+  defaultModelChoice,
   selectionNotReadyMessage,
   strongestReadyModelSelection,
 } from "./personRouting.ts";
@@ -234,5 +235,34 @@ describe("ROUTING notes upgrade", () => {
     expect(old1029).toContain("uno/uno/smart");
     expect(upgradeRoutingNotes(old1029)).toBe(ROUTING_TEMPLATE);
     expect(ROUTING_TEMPLATE).not.toContain("uno/uno/smart");
+  });
+});
+
+describe('defaultModelChoice (Settings → AI "Default model", 13.11 v2)', () => {
+  const terra = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+  const codex = provider("codex", {}, ["gpt-5.6-luna", "gpt-5.6-terra"]);
+
+  it("is the person's pick when its harness is ready and lists the model", () => {
+    expect(defaultModelChoice(terra, [codex])).toEqual(terra);
+  });
+
+  it("Auto (null), a harness not ready or a model gone: null, so Auto decides", () => {
+    expect(defaultModelChoice(null, [codex])).toBeNull();
+    expect(
+      defaultModelChoice(terra, [provider("codex", { auth: { status: "unauthenticated" } })]),
+    ).toBeNull();
+    expect(defaultModelChoice(terra, [provider("codex", {}, ["gpt-5.6-luna"])])).toBeNull();
+    expect(defaultModelChoice(terra, [])).toBeNull();
+  });
+
+  it("Claude Code on Uno credits only when they're allowed here", () => {
+    const opus = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" };
+    const onCredits = provider(
+      "claudeAgent",
+      { auth: { status: "authenticated", type: "unoAi" } },
+      ["claude-opus-5-5"],
+    );
+    expect(defaultModelChoice(opus, [onCredits])).toBeNull();
+    expect(defaultModelChoice(opus, [onCredits], { claudeAgent: true })).toEqual(opus);
   });
 });
