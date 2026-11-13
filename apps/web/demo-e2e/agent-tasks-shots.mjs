@@ -64,7 +64,7 @@ async function setOnlyMine(on) {
   const item = page.locator("[data-testid=sidebar-d-only-mine]");
   const checked = (await item.getAttribute("aria-checked")) === "true";
   if (checked !== on) await item.click();
-  else await page.keyboard.press("Escape");
+  await page.keyboard.press("Escape");
   await page.waitForTimeout(800);
 }
 async function openChat(text) {
@@ -135,7 +135,7 @@ await step("move-up", async () => {
 await step("archive", async () => {
   const row = page.locator("[data-testid=sidebar-row-d]", { hasText: "Pricing page" }).first();
   await row.click({ button: "right", timeout: 5000 });
-  await page.getByRole("menuitem", { name: "Archive" }).click({ timeout: 3000 });
+  await page.getByRole("button", { name: "Archive", exact: true }).last().click({ timeout: 3000 });
   await page.waitForTimeout(1500);
   console.log("confirm:", dialogs.at(-1) ?? "(none)");
   console.log("after archive:\n  " + (await rows()).join("\n  "));
