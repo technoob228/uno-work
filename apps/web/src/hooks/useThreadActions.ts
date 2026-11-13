@@ -23,6 +23,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { readEnvironmentServerConfig } from "../environments/settings/serverSettings";
 import { readEnvironmentSupportsWorktreeCleanup } from "../environments/worktreeCleanupSupport";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
+import type { SidebarThreadSummary } from "../types";
 import { useSettings } from "./useSettings";
 import { offerThreadUndo, snapshotThreadForUndo, withdrawThreadUndo } from "./threadUndoActions";
 
@@ -95,6 +96,48 @@ export function useThreadActions() {
       }
     },
     [getCurrentRouteThreadRef, resolveThreadTarget],
+  );
+
+  /**
+   * Archive a chat's agent tasks along with it (Misha 13.11; upstream T3
+   * #33884): a task still working is stopped first. Each is archived as the
+   * person would, without the "running" refusal and without moving the view.
+   */
+  const archiveAgentTasks = useCallback(
+    async (
+      environmentId: ScopedThreadRef["environmentId"],
+      tasks: ReadonlyArray<Pick<SidebarThreadSummary, "id" | "session">>,
+    ) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+      for (const task of tasks) {
+        const taskRef = scopeThreadRef(environmentId, task.id);
+        const activeTurnId = task.session?.activeTurnId;
+        if (
+          task.session?.status === "running" ||
+          task.session?.status === "connecting" ||
+          activeTurnId != null
+        ) {
+          await api.orchestration
+            .dispatchCommand({
+              type: "thread.turn.interrupt",
+              commandId: newCommandId(),
+              threadId: task.id,
+              ...(activeTurnId != null ? { turnId: activeTurnId } : {}),
+              createdAt: new Date().toISOString(),
+            })
+            // Already stopped by itself: archiving is what matters.
+            .catch(() => undefined);
+        }
+        await api.orchestration.dispatchCommand({
+          type: "thread.archive",
+          commandId: newCommandId(),
+          threadId: task.id,
+        });
+        useStore.getState().setThreadArchivedAt(taskRef, new Date().toISOString());
+      }
+    },
+    [],
   );
 
   const unarchiveThread = useCallback(async (target: ScopedThreadRef) => {
@@ -295,6 +338,7 @@ export function useThreadActions() {
 
   return {
     archiveThread,
+    archiveAgentTasks,
     unarchiveThread,
     deleteThread,
     confirmAndDeleteThread,

@@ -241,6 +241,7 @@ import { refreshEnvironmentProviders } from "~/environments/settings/serverSetti
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { useReconnectWarningVisible } from "./chat/reconnectWarningGrace";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
+import { AgentTasksBar } from "./chat/AgentTasksBar";
 import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -5406,6 +5407,13 @@ export default function ChatView(props: ChatViewProps) {
                       spawnedByThreadId={activeThread.spawnedByThreadId}
                       controller={activeThread.controller}
                       agentsClosedAt={activeThread.agentsClosedAt}
+                    />
+                  ) : null}
+                  {/* The chats this chat's agent started: its tasks (Misha 13.11). */}
+                  {isServerThread && activeThread ? (
+                    <AgentTasksBar
+                      environmentId={activeThread.environmentId}
+                      threadId={activeThread.id}
                     />
                   ) : null}
                   {activeThread && isAssistantConversation(activeThread) ? (

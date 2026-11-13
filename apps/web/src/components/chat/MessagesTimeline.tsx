@@ -105,6 +105,8 @@ import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { useNavigate } from "@tanstack/react-router";
 import { describeAgentSentMessage } from "~/agentThreads.logic";
+import { latestReportIdBySender } from "~/agentTasks.logic";
+import { AgentTaskReportRow } from "./AgentTaskReportRow";
 import { useThreadTitle } from "~/hooks/useThreadTitle";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
@@ -138,6 +140,8 @@ interface TimelineRowSharedState {
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
   activeThreadEnvironmentId: EnvironmentId;
+  /** Each agent task's latest message here (agentTasks.logic): it says "done". */
+  latestTaskReportIds: ReadonlySet<string>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -399,10 +403,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [listRef, onIsAtEndChange, rows.length]);
 
+  // Keyed by value: a streaming chunk must not change the context.
+  const latestTaskReportKey = useMemo(
+    () =>
+      [
+        ...latestReportIdBySender(
+          timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+        ).values(),
+      ].join("\n"),
+    [timelineEntries],
+  );
+  const latestTaskReportIds = useMemo(
+    () => new Set(latestTaskReportKey.split("\n")),
+    [latestTaskReportKey],
+  );
   // Memoised context value — only changes on state transitions, NOT on
   // every streaming chunk. Callbacks from ChatView are useCallback-stable.
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
+      latestTaskReportIds,
       activeTurnInProgress,
       activeTurnId: activeTurnId ?? null,
       isWorking,
@@ -434,6 +453,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       resolvedTheme,
       workspaceRoot,
       activeThreadEnvironmentId,
+      latestTaskReportIds,
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
@@ -635,7 +655,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = devMode && typeof row.revertTurnCount === "number";
           const sentByThreadId = row.message.sentByThreadId ?? null;
-          return (
+          const bubble = (
             <div className="group flex justify-end">
               <div className="relative flex max-w-[80%] min-w-0 flex-col items-end">
                 <div
@@ -759,6 +779,20 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 </div>
               </div>
             </div>
+          );
+          // A report from one of this chat's tasks folds into one line.
+          return sentByThreadId ? (
+            <AgentTaskReportRow
+              environmentId={ctx.activeThreadEnvironmentId}
+              chatKey={ctx.routeThreadKey}
+              sentByThreadId={sentByThreadId}
+              text={row.message.text}
+              latest={ctx.latestTaskReportIds.has(row.message.id)}
+              markdownCwd={ctx.markdownCwd}
+              fallback={bubble}
+            />
+          ) : (
+            bubble
           );
         })()}
 

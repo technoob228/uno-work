@@ -284,7 +284,7 @@ export function agentMessageEnvelope(input: {
   })`;
   const header =
     (input.recipientSpawnedByThreadId ?? null) === input.senderThreadId
-      ? `[Uno Work: сообщение от ${who} — это чат, который создал тебя. Он сам читает ответы в этом чате: просто ответь здесь.]`
+      ? `[Uno Work: сообщение от ${who} — это чат, который создал тебя: ты его задача. Он сам читает ответы в этом чате: просто ответь здесь. Человека не зови (chat_call_person) и вопросов ему не задавай: если без него дальше никак (решение, вход, доступ), так и напиши в ответе — позовёт тот, кто поручил.]`
       : `[Uno Work: сообщение от ${who}. Он не видит этот чат автоматически. Чтобы ответить, отправь POST $UNO_WORK_BRIDGE_URL/api/threads/${input.senderThreadId}/messages с {"text": "..."} (Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN). Если ответ не нужен или добавить нечего — не отвечай.]`;
   return `${header}\n\n${input.text}`;
 }

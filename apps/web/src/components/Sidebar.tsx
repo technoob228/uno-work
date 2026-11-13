@@ -190,6 +190,12 @@ import {
   type SidebarSection,
 } from "./Sidebar.sections";
 import { threadOwnerWithStarter } from "./Sidebar.owner";
+import {
+  SIDEBAR_SHOW_AGENT_TASKS_KEY,
+  agentTaskDescendants,
+  archiveWithTasksPrompt,
+  isHiddenAgentTask,
+} from "../agentTasks.logic";
 import { isYourTurn, yourTurnKind } from "./Sidebar.yourTurn";
 import { getThreadSortTimestamp, toSortableTimestamp } from "../lib/threadSort";
 import {
@@ -2212,9 +2218,37 @@ export default function Sidebar() {
 
   // ── Sections ──────────────────────────────────────────────────────────
   const now = useMinuteClock();
+  // Agents' tasks (Misha 13.11): the chats a chat's agent started live in that
+  // chat's Tasks strip; the sidebar shows one only while it needs the person,
+  // once it is moved up (pinned), while open, or with this switch on (the
+  // view menu, this device). Only where the view menu shows the switch.
+  const [dShowAgentTasksChoice, setDShowAgentTasks] = useLocalStorage<boolean, boolean>(
+    SIDEBAR_SHOW_AGENT_TASKS_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const dShowAgentTasks = dShowAgentTasksChoice || !sidebarViewMenu;
+  const threadByKey = useMemo(
+    () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
+    [threads],
+  );
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = useMemo(() => {
     const visible = threads.filter((thread) => {
       if (thread.archivedAt !== null) return false;
+      if (
+        thread.spawnedByThreadId != null &&
+        isHiddenAgentTask({
+          thread,
+          parent: threadByKey.get(
+            threadKeyOf({ environmentId: thread.environmentId, id: thread.spawnedByThreadId }),
+          ),
+          assistantChatId,
+          showAgentTasks: dShowAgentTasks,
+          isOpen: threadKeyOf(thread) === routeThreadKey,
+        })
+      ) {
+        return false;
+      }
       // A chat Uno opened by itself that nobody wrote in yet is noise.
       if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
       const byAssistant =
@@ -2249,6 +2283,7 @@ export default function Sidebar() {
     };
   }, [
     assistantChatId,
+    dShowAgentTasks,
     dStartedByInList,
     isHelperScope,
     now,
@@ -2257,6 +2292,7 @@ export default function Sidebar() {
     scopedProjectKeys,
     sidebarThreadSortOrder,
     startedBy.byKey,
+    threadByKey,
     threads,
   ]);
 
@@ -2946,10 +2982,6 @@ export default function Sidebar() {
   const orderedThreadKeys = useMemo(() => orderedThreads.map(threadKeyOf), [orderedThreads]);
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
   orderedThreadKeysRef.current = orderedThreadKeys;
-  const threadByKey = useMemo(
-    () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
-    [threads],
-  );
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
   const sectionByKey = useMemo(
@@ -3098,7 +3130,7 @@ export default function Sidebar() {
   );
 
   // ── Thread actions ────────────────────────────────────────────────────
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, archiveAgentTasks, deleteThread } = useThreadActions();
   const dispatch = useCallback(
     async (
       threadRef: ScopedThreadRef,
@@ -3696,11 +3728,25 @@ export default function Sidebar() {
             });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await api.dialogs.confirm(`Archive chat "${thread.title}"?`);
+            // Its agent tasks go with it; asked first while some still work.
+            const tasks = agentTaskDescendants(
+              thread.id,
+              selectSidebarThreadsForEnvironment(useStore.getState(), thread.environmentId),
+            );
+            const tasksPrompt = archiveWithTasksPrompt(thread.title, tasks);
+            if (tasksPrompt !== null || confirmThreadArchive) {
+              const confirmed = await api.dialogs.confirm(
+                tasksPrompt ?? `Archive chat "${thread.title}"?`,
+              );
               if (!confirmed) return;
             }
             try {
+              // A running chat refuses to archive: then its tasks stay too.
+              const parentRunning =
+                thread.session?.status === "running" && thread.session.activeTurnId != null;
+              if (!parentRunning && tasks.length > 0) {
+                await archiveAgentTasks(thread.environmentId, tasks);
+              }
               await archiveThread(threadRef);
             } catch (error) {
               showErrorToast("Failed to archive chat", error);
@@ -3726,6 +3772,7 @@ export default function Sidebar() {
       })();
     },
     [
+      archiveAgentTasks,
       archiveThread,
       attemptSettle,
       attemptSnooze,
@@ -4815,6 +4862,8 @@ export default function Sidebar() {
                 onComputersChange={setDComputerPicks}
                 onlyMine={dOnlyMine}
                 onOnlyMineChange={setDOnlyMine}
+                showAgentTasks={dShowAgentTasksChoice}
+                onShowAgentTasksChange={setDShowAgentTasks}
                 onOpenSettings={() => {
                   if (isMobile) setOpenMobile(false);
                   void router.navigate({ to: "/settings" });
