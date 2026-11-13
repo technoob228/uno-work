@@ -8,7 +8,7 @@
  * Made-up work of a small founder (a landing, an orders bot, a pitch deck);
  * no client data.
  */
-import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+import { ASSISTANT_PROJECT_ID, INBOX_PERSON_CALL_BODY_PREFIX } from "@t3tools/contracts";
 
 import {
   CHATS,
@@ -133,6 +133,117 @@ const UNO_MAIN: ChatSpec = {
   ],
 };
 
+/**
+ * Ready / Needs you only when the person is really needed (Misha 13.11):
+ * - a chat of theirs where agents talk among themselves — no Ready, the bot
+ *   icon, hidden by Only mine;
+ * - a chat an agent called them into, with the reason ("Needs you", Inbox);
+ * - a chat whose helper is done but whose agent forgot to call them — Ready
+ *   all the same (the safety net).
+ */
+const PERSON_NEEDED_CHATS: ChatSpec[] = [
+  {
+    id: "w-launch",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Pricing page: copy, checkout, launch",
+    minutesAgo: 3,
+    state: "read",
+    role: "coordinator",
+    messages: [
+      [
+        "user",
+        "Ship the pricing page today: the copy, the checkout and a launch check. Split it between helpers.",
+      ],
+      [
+        "assistant",
+        "Started a helper on the copy; the checkout is next. I'll put the page together when both are in.",
+      ],
+      [
+        "user",
+        "From the copy helper: the headline and the three plans are written, checking them against the old page now.",
+        "h-copy",
+      ],
+      ["assistant", "Good. Waiting for the copy check, then the checkout."],
+    ],
+  },
+  {
+    id: "h-copy",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Pricing page copy",
+    minutesAgo: 1,
+    runningFor: 8,
+    state: "running",
+    role: "helper",
+    parent: "w-launch",
+    now: "Checking the plans against the old page",
+    messages: [
+      ["user", "From the pricing page chat: write the headline and the three plans, plain words."],
+      ["assistant", "Headline and plans written. Checking them against the old page."],
+    ],
+  },
+  {
+    id: "w-stripe",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Card payments in the orders bot",
+    minutesAgo: 4,
+    state: "read",
+    role: "solo",
+    call: "Stripe asks you to sign in once to finish connecting the account.",
+    messages: [
+      ["user", "Take card payments in the orders bot with Stripe."],
+      [
+        "assistant",
+        "The /pay command is written and its tests are green. To go live Stripe needs your sign-in once — calling you in.",
+      ],
+    ],
+  },
+  {
+    id: "w-backup",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Nightly backups of the orders DB — do they restore?",
+    minutesAgo: 6,
+    state: "unread",
+    role: "coordinator",
+    messages: [
+      [
+        "user",
+        "Check that the nightly backups of the orders DB really restore. Use a helper for the restore test.",
+      ],
+      [
+        "assistant",
+        "Backups run every night at 03:00. Started a helper to restore the last three.",
+      ],
+      [
+        "user",
+        "From the restore test: 3 of 3 backups restore in under 4 min, row counts match.",
+        "h-restore",
+      ],
+      ["assistant", "Checked: the backups run every night and restore in under 4 minutes."],
+    ],
+  },
+  {
+    id: "h-restore",
+    machine: "work",
+    project: "p-work-bot",
+    title: "Restore test: the last three backups",
+    minutesAgo: 9,
+    state: "read",
+    role: "helper",
+    parent: "w-backup",
+    messages: [
+      [
+        "user",
+        "From the backups chat: restore the last three backups on a scratch DB, compare row counts.",
+      ],
+      ["assistant", "3 of 3 restored in under 4 min each, row counts match. Scratch DB removed."],
+    ],
+  },
+];
+
 function liveChats(world: AssistWorld): ChatSpec[] {
   const chats: ChatSpec[] = [
     UNO_MAIN,
@@ -195,6 +306,7 @@ function liveChats(world: AssistWorld): ChatSpec[] {
       ],
     },
   ];
+  chats.push(...PERSON_NEEDED_CHATS);
   // Multi-computer variants (28.10): one chat at work on each computer that's on.
   chats.push({
     id: "w-refunds",
@@ -268,6 +380,24 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       chat: "uno-main",
       title: "Uno: your morning summary",
       body: "Acme is 5 days late · landing build fixed on the MacBook · 212 orders exported.",
+    },
+    {
+      id: "i-stripe-call",
+      machine: "work",
+      kind: "agent.input",
+      minutesAgo: 4,
+      chat: "w-stripe",
+      title: "Card payments in the orders bot",
+      body: `${INBOX_PERSON_CALL_BODY_PREFIX}Stripe asks you to sign in once to finish connecting the account.`,
+    },
+    {
+      id: "i-backup",
+      machine: "work",
+      kind: "agent.done",
+      minutesAgo: 6,
+      chat: "w-backup",
+      title: "Finished: Nightly backups of the orders DB — do they restore?",
+      body: "The backups run every night and restore in under 4 minutes.",
     },
     {
       id: "i-export",
