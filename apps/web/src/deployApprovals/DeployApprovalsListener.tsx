@@ -6,11 +6,14 @@
  */
 import { useEffect } from "react";
 
+import { useFeatureFlag } from "../hooks/useFeatureFlags";
+
 import { useNavStore } from "../navigation/navStore";
 import { newlyWaiting } from "./deployApprovals.logic";
 import {
   nextPollDelay,
   refreshDeployApprovals,
+  setDeployApprovalsEnabled,
   useDeployApprovalsStore,
 } from "./deployApprovalsStore";
 import { showSystemNotification } from "../inbox/systemNotifications";
@@ -21,7 +24,11 @@ function openInbox(): void {
 }
 
 export function DeployApprovalsListener() {
+  // Labs → "Deploy windows in the Inbox": off by default (Misha 13.11).
+  const enabled = useFeatureFlag("deployApprovals");
   useEffect(() => {
+    setDeployApprovalsEnabled(enabled);
+    if (!enabled) return;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
     let running = false;
@@ -86,7 +93,7 @@ export function DeployApprovalsListener() {
       window.removeEventListener("focus", now);
       document.removeEventListener("visibilitychange", now);
     };
-  }, []);
+  }, [enabled]);
 
   return null;
 }

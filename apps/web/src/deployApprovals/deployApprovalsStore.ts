@@ -6,6 +6,9 @@
  * with Touch ID and comes back to see it open). A person who isn't an
  * approver, or an interface without the account (`accountTransport() ===
  * "none"`), asks once and stops.
+ *
+ * Behind the Labs flag `deployApprovals` (off by default, Misha 13.11): off —
+ * `enabled` false, nothing asked, nothing kept, every count 0.
  */
 import { create } from "zustand";
 
@@ -30,6 +33,8 @@ import {
 const INBOX_PATH = "/api/v1/ops-gate/inbox";
 
 interface DeployApprovalsState {
+  /** The Labs flag is on (DeployApprovalsListener sets it). */
+  readonly enabled: boolean;
   /** null — not asked yet. */
   readonly gate: DeployApprovals | null;
   /** The console said no for good (not signed in, not this interface, no such route). */
@@ -41,6 +46,7 @@ interface DeployApprovalsState {
 }
 
 export const useDeployApprovalsStore = create<DeployApprovalsState>(() => ({
+  enabled: false,
   gate: null,
   stopped: false,
   busy: {},
@@ -62,22 +68,36 @@ export function useDeployLiveCount(): number {
 
 let inFlight: Promise<DeployApprovals | null> | null = null;
 
+/** The Labs flag changed: off forgets everything (cards and counts disappear). */
+export function setDeployApprovalsEnabled(enabled: boolean): void {
+  if (useDeployApprovalsStore.getState().enabled === enabled) return;
+  useDeployApprovalsStore.setState(
+    enabled
+      ? { enabled: true, stopped: false }
+      : { enabled: false, gate: null, stopped: false, busy: {}, fastUntil: 0 },
+  );
+}
+
 /** Ask the console now; the previous answer is kept on a passing error. */
 export function refreshDeployApprovals(): Promise<DeployApprovals | null> {
   if (inFlight) return inFlight;
   const run = async (): Promise<DeployApprovals | null> => {
+    if (!useDeployApprovalsStore.getState().enabled) return null;
     if (accountTransport() === "none") {
       useDeployApprovalsStore.setState({ gate: NOT_AN_APPROVER, stopped: true });
       return null;
     }
     try {
       const gate = parseDeployApprovals(await accountRequest("GET", INBOX_PATH));
+      // Turned off while it was asking: keep nothing.
+      if (!useDeployApprovalsStore.getState().enabled) return null;
       useDeployApprovalsStore.setState({ gate, stopped: !gate.approver });
       return gate;
     } catch (cause) {
       const status = cause instanceof AccountHttpError ? cause.status : 0;
       // 403 — not the person's own interface session (an operator, an agent
       // key); 404 — a console without the gate. Signed out — the same.
+      if (!useDeployApprovalsStore.getState().enabled) return null;
       if (status === 403 || status === 404 || cause instanceof AccountSignInRequiredError) {
         useDeployApprovalsStore.setState({ gate: NOT_AN_APPROVER, stopped: true });
       }

@@ -152,6 +152,15 @@ export const FEATURE_FLAGS = [
       "The ↗ button of a file in the panel opens it in your editor or shares it with a link.",
     default: true,
   },
+  {
+    // Misha 13.11: "fine without it for now, keep the work, hide it" — off
+    // everywhere, the stage channel too. Off: no cards, no polling.
+    key: "deployApprovals",
+    label: "Deploy windows in the Inbox (team)",
+    description:
+      "Requests from agents for a window to production show in the Inbox, Needs you and on Home: deny, close or freeze from here. Only for the team's approvers.",
+    default: false,
+  },
 ] as const satisfies readonly FeatureFlagDefinition[];
 
 export type FeatureFlagKey = (typeof FEATURE_FLAGS)[number]["key"];
