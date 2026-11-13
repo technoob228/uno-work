@@ -16,7 +16,7 @@ import type { LocalOs } from "../components/localComputer/connectComputer.logic"
 export type { ComputerPurpose };
 export type AddStep = "choose" | "own" | "purpose" | "bring" | "done";
 
-/** A Remove / Delete confirmation, open over the page (it outlives the menu it came from). */
+/** A Remove / Delete / Stop all confirmation, open over the page (it outlives the menu it came from). */
 export type LifecycleConfirm =
   | {
       readonly kind: "remove";
@@ -29,7 +29,9 @@ export type LifecycleConfirm =
       readonly boxId: number;
       readonly environmentId: string | null;
       readonly lastOnPlan: boolean;
-    };
+    }
+  /** "Stop all agents on my computer" (trust tiers, 13.11). */
+  | { readonly kind: "stop-all" };
 
 export interface BroughtWork {
   readonly chats: number;

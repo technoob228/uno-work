@@ -392,7 +392,11 @@ import {
   MyComputerPairing,
   MyComputerPairStatus,
   MyComputerPairStatusInput,
+  MyComputerRevokeGrantInput,
   MyComputerStatus,
+  MyComputerStopAllResult,
+  MyComputerTrustSettings,
+  MyComputerTrustState,
 } from "./myComputer.ts";
 import {
   ComputerInput,
@@ -585,6 +589,11 @@ export const WS_METHODS = {
   myComputerImportStart: "myComputer.importStart",
   myComputerImportDecline: "myComputer.importDecline",
   myComputerChatHistory: "myComputer.chatHistory",
+  myComputerTrust: "myComputer.trust",
+  myComputerSetTrust: "myComputer.setTrust",
+  myComputerRevokeGrant: "myComputer.revokeGrant",
+  myComputerStopAll: "myComputer.stopAll",
+  myComputerResume: "myComputer.resume",
 
   // Computers lifecycle (computers.ts): what a computer is for, its work, chats on it
   computersState: "computers.state",
@@ -928,6 +937,36 @@ export const WsMyComputerImportDeclineRpc = Rpc.make(WS_METHODS.myComputerImport
 export const WsMyComputerChatHistoryRpc = Rpc.make(WS_METHODS.myComputerChatHistory, {
   payload: MyComputerChatHistoryInput,
   success: MyComputerChatHistory,
+  error: MyComputerError,
+});
+
+export const WsMyComputerTrustRpc = Rpc.make(WS_METHODS.myComputerTrust, {
+  payload: Schema.Struct({}),
+  success: MyComputerTrustState,
+  error: MyComputerError,
+});
+
+export const WsMyComputerSetTrustRpc = Rpc.make(WS_METHODS.myComputerSetTrust, {
+  payload: MyComputerTrustSettings,
+  success: MyComputerTrustState,
+  error: MyComputerError,
+});
+
+export const WsMyComputerRevokeGrantRpc = Rpc.make(WS_METHODS.myComputerRevokeGrant, {
+  payload: MyComputerRevokeGrantInput,
+  success: MyComputerTrustState,
+  error: MyComputerError,
+});
+
+export const WsMyComputerStopAllRpc = Rpc.make(WS_METHODS.myComputerStopAll, {
+  payload: Schema.Struct({}),
+  success: MyComputerStopAllResult,
+  error: MyComputerError,
+});
+
+export const WsMyComputerResumeRpc = Rpc.make(WS_METHODS.myComputerResume, {
+  payload: Schema.Struct({}),
+  success: MyComputerTrustState,
   error: MyComputerError,
 });
 
@@ -2676,6 +2715,11 @@ export const WsMyComputerRpcGroup = RpcGroup.make(
   WsMyComputerImportStartRpc,
   WsMyComputerImportDeclineRpc,
   WsMyComputerChatHistoryRpc,
+  WsMyComputerTrustRpc,
+  WsMyComputerSetTrustRpc,
+  WsMyComputerRevokeGrantRpc,
+  WsMyComputerStopAllRpc,
+  WsMyComputerResumeRpc,
 );
 
 /** Computers lifecycle (computers.ts), apart from the main group for the same reason. */

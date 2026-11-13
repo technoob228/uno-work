@@ -644,6 +644,8 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(MyComputerService)({
             core: {} as MyComputerCore,
+            trust: {} as MyComputerShape["trust"],
+            judge: {} as MyComputerShape["judge"],
             status: Effect.succeed({ enabled: false, computers: [] }),
             toolsVisible: Effect.succeed(false),
             ...options?.layers?.myComputer,

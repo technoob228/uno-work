@@ -304,6 +304,11 @@ export interface WsRpcClient {
     readonly importStart: RpcUnaryMethod<typeof WS_METHODS.myComputerImportStart>;
     readonly importDecline: RpcUnaryMethod<typeof WS_METHODS.myComputerImportDecline>;
     readonly chatHistory: RpcUnaryMethod<typeof WS_METHODS.myComputerChatHistory>;
+    readonly trust: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerTrust>;
+    readonly setTrust: RpcUnaryMethod<typeof WS_METHODS.myComputerSetTrust>;
+    readonly revokeGrant: RpcUnaryMethod<typeof WS_METHODS.myComputerRevokeGrant>;
+    readonly stopAll: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerStopAll>;
+    readonly resume: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerResume>;
   };
   /** Computers lifecycle (contracts computers.ts). */
   readonly computers: {
@@ -829,6 +834,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.myComputerImportDecline](input)),
       chatHistory: (input) =>
         transport.request((client) => client[WS_METHODS.myComputerChatHistory](input)),
+      trust: () => transport.request((client) => client[WS_METHODS.myComputerTrust]({})),
+      setTrust: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerSetTrust](input)),
+      revokeGrant: (input) =>
+        transport.request((client) => client[WS_METHODS.myComputerRevokeGrant](input)),
+      stopAll: () => transport.request((client) => client[WS_METHODS.myComputerStopAll]({})),
+      resume: () => transport.request((client) => client[WS_METHODS.myComputerResume]({})),
     },
     computers: {
       state: () => transport.request((client) => client[WS_METHODS.computersState]({})),

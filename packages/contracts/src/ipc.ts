@@ -47,7 +47,11 @@ import type {
   MyComputerPairing,
   MyComputerPairStatus,
   MyComputerPairStatusInput,
+  MyComputerRevokeGrantInput,
   MyComputerStatus,
+  MyComputerStopAllResult,
+  MyComputerTrustSettings,
+  MyComputerTrustState,
 } from "./myComputer.ts";
 import type {
   ComputerInput,
@@ -1132,6 +1136,13 @@ export interface EnvironmentApi {
     importStart: (input: MyComputerImportStartInput) => Promise<MyComputerImportStatus>;
     importDecline: (input: MyComputerImportInput) => Promise<MyComputerImportStatus>;
     chatHistory: (input: MyComputerChatHistoryInput) => Promise<MyComputerChatHistory>;
+    /** What agents may do there without asking (Settings → My computer). */
+    trust: () => Promise<MyComputerTrustState>;
+    setTrust: (input: MyComputerTrustSettings) => Promise<MyComputerTrustState>;
+    revokeGrant: (input: MyComputerRevokeGrantInput) => Promise<MyComputerTrustState>;
+    /** Stop every agent call on the person's computers and disconnect them. */
+    stopAll: () => Promise<MyComputerStopAllResult>;
+    resume: () => Promise<MyComputerTrustState>;
   };
   /** Computers lifecycle (computers.ts): what each own computer is for, its work, chats on it. */
   computers: {

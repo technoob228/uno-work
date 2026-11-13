@@ -1,10 +1,12 @@
 /**
- * The agent's hands on the person's own computer (`my_computer_*`). They go
- * through the same gate as every `uno-work` tool:
- * - listing and reading run;
- * - writing is a `change` (asks in Ask mode), a command is a `command` (asks
- *   unless the chat has full access);
- * - a Cautious assistant asks before both (`my-computer` in `assistantPreset`);
+ * The agent's hands on the person's own computer (`my_computer_*`). Each call
+ * is judged by trust tier (`trust/`, by code, before anything runs there):
+ * reading in allowed folders and checks run; writing there, git without push
+ * and allowed commands run once the chat has an Allow; anything unknown asks
+ * (except in full access); sudo, installs, push, deploys, secrets and places
+ * outside the folders always ask; containers and full test runs are refused.
+ * - a Cautious assistant asks before everything but plain reading
+ *   (`my-computer` in `assistantPreset`);
  * - an assistant held to selected projects doesn't reach the computer at all:
  *   the laptop is outside every boundary it was given.
  *
@@ -19,11 +21,19 @@ import path from "node:path";
 import type { MyComputer } from "@t3tools/contracts";
 import { Effect } from "effect";
 
-import type { UnoWorkTool, UnoWorkToolDeps, UnoWorkToolError } from "../unoWork/tools.ts";
+import type {
+  ComputerTrustGate,
+  UnoWorkTool,
+  UnoWorkToolDeps,
+  UnoWorkToolError,
+} from "../unoWork/tools.ts";
+import { decideUnoWorkGate } from "../unoWork/policy.ts";
 import { summarize } from "./activitySummary.ts";
 import type { MyComputerShape } from "./MyComputerService.ts";
 import { MAX_FILE_BYTES, MyComputerFailure, pickComputer } from "./myComputerCore.ts";
 import { OUTPUT_LIMIT_BYTES } from "./outputCollector.ts";
+import { computerTrustGate } from "./trust/gate.ts";
+import type { TrustOperation } from "./trust/judge.ts";
 
 type Deps = UnoWorkToolDeps;
 
@@ -52,6 +62,7 @@ const READ_DEFAULT_BYTES = OUTPUT_LIMIT_BYTES;
 const READ_MAX_BYTES = 256 * 1024;
 const WRITE_TEXT_MAX_CHARS = 1024 * 1024;
 const TITLE_COMMAND_CHARS = 120;
+const STATUS_RECENT_MS = 5_000;
 const DETAIL_COMMAND_CHARS = 600;
 
 const computerArg = {
@@ -107,6 +118,8 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
   const target = (
     deps: Deps,
     args: Record<string, unknown>,
+    /** The list of a moment ago will do (the gate, right before the call). */
+    recent = false,
   ): Effect.Effect<
     { readonly api: MyComputerShape; readonly computer: MyComputer },
     UnoWorkToolError
@@ -114,7 +127,12 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
     Effect.gen(function* () {
       yield* refuseOutOfBounds(deps);
       const api = yield* service(deps);
-      const status = yield* asFailure(api.status);
+      const status = recent
+        ? yield* Effect.tryPromise({
+            try: () => api.core.cachedStatus(STATUS_RECENT_MS),
+            catch: (cause) => kit.fail(cause instanceof Error ? cause.message : String(cause)),
+          })
+        : yield* asFailure(api.status);
       const computer = yield* Effect.try({
         try: () => pickComputer(status, str(args, "computer")),
         catch: (cause) =>
@@ -127,6 +145,34 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
   const prepare = (deps: Deps, args: Record<string, unknown>) =>
     target(deps, args).pipe(Effect.asVoid);
 
+  /** The `trust` hook: this call's tier there, decided for this chat. */
+  const judged =
+    (
+      describe: (args: Record<string, unknown>) => {
+        readonly operation: TrustOperation;
+        readonly kind: "run" | "read" | "write" | "list";
+        readonly summary: string;
+      },
+    ) =>
+    (
+      deps: Deps,
+      args: Record<string, unknown>,
+      context: { readonly cautious: boolean; readonly outsideText: boolean },
+    ): Effect.Effect<ComputerTrustGate, UnoWorkToolError> =>
+      Effect.gen(function* () {
+        const { api, computer } = yield* target(deps, args, true);
+        const { operation, kind, summary } = describe(args);
+        return yield* computerTrustGate({
+          deps,
+          api,
+          computer,
+          operation,
+          journal: { kind, summary },
+          context,
+          fail: kit.fail,
+        });
+      });
+
   const readForChat = (deps: Deps, args: Record<string, unknown>, computer: MyComputer) =>
     Effect.gen(function* () {
       const api = yield* service(deps);
@@ -138,6 +184,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
           offset,
           maxBytes: num(args, "maxBytes") ?? READ_DEFAULT_BYTES,
           threadId: deps.caller.threadId,
+          trust: deps.callTrust,
         }),
       );
       const base = {
@@ -184,6 +231,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
           path: source,
           maxBytes: MAX_FILE_BYTES + 1,
           threadId: deps.caller.threadId,
+          trust: deps.callTrust,
         }),
       );
       if (read.data.length > MAX_FILE_BYTES) return yield* tooBig(read.data.length);
@@ -277,7 +325,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
     {
       name: "my_computer_run",
       group: "my-computer",
-      description: `Run a shell command on the person's own computer (their laptop or desktop, not this cloud computer), in its login shell. It touches their real files and accounts, and every command shows in a journal they can read. Get their OK in the chat before anything destructive: deleting, overwriting, installing, changing settings. The answer has the exit code and up to ${OUTPUT_LIMIT_BYTES / 1024} KiB of output (start and end). timeoutSeconds: 120 by default, 1800 at most.`,
+      description: `Run a shell command on the person's own computer (their laptop or desktop, not this cloud computer), in its login shell. It touches their real files and accounts, and every command shows in a journal they can read. What runs without asking is decided by code: reading and checks in their allowed folders run; writes, git without push and their allowed commands run once this chat has their Allow; sudo, installs, git push, deploys and anything outside the folders ask each time. Docker / VMs and full test runs are refused there: run one package or one file, or run it on this cloud computer. The answer has the exit code and up to ${OUTPUT_LIMIT_BYTES / 1024} KiB of output (start and end). timeoutSeconds: 120 by default, 1800 at most.`,
       inputSchema: {
         type: "object",
         properties: {
@@ -305,6 +353,11 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
         );
       },
       prepare,
+      trust: judged((args) => ({
+        operation: { kind: "run", command: str(args, "command")!, cwd: str(args, "cwd") },
+        kind: "run",
+        summary: str(args, "command")!,
+      })),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { api, computer } = yield* target(deps, args);
@@ -316,6 +369,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
               cwd: str(args, "cwd"),
               timeoutMs: seconds === undefined ? undefined : seconds * 1000,
               threadId: deps.caller.threadId,
+              trust: deps.callTrust,
             }),
           );
           return {
@@ -354,8 +408,22 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
       level: (args) => (args.saveTo === undefined ? "safe" : "change"),
       approvalTitle: (args) =>
         `Copy ${summarize(str(args, "path") ?? "", TITLE_COMMAND_CHARS)} from your computer to this one`,
-      // Only saving can bring a card; reading checks everything in `run`.
-      prepare: (deps, args) => (args.saveTo === undefined ? Effect.void : prepare(deps, args)),
+      prepare,
+      trust: (deps, args, context) =>
+        judged((args) => ({
+          operation: { kind: "read", path: str(args, "path")! },
+          kind: "read",
+          summary: str(args, "path")!,
+        }))(deps, args, context).pipe(
+          // Saving also writes this cloud computer's disk: a `change` here.
+          Effect.map((gate) =>
+            gate.verdict === "run" &&
+            args.saveTo !== undefined &&
+            decideUnoWorkGate("change", deps.caller.runtimeMode) === "ask"
+              ? { ...gate, verdict: "ask" as const, detail: "Saves a copy on this cloud computer." }
+              : gate,
+          ),
+        ),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { computer } = yield* target(deps, args);
@@ -400,6 +468,11 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
           }
           yield* prepare(deps, args);
         }),
+      trust: judged((args) => ({
+        operation: { kind: "write", path: str(args, "path")! },
+        kind: "write",
+        summary: str(args, "path")!,
+      })),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { api, computer } = yield* target(deps, args);
@@ -412,6 +485,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
               append: args.append === true,
               mkdirs: true,
               threadId: deps.caller.threadId,
+              trust: deps.callTrust,
             }),
           );
           return { computer: computer.name, path: str(args, "path")!, bytes: written.bytes };
@@ -431,12 +505,23 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
         additionalProperties: false,
       },
       level: "safe",
+      prepare,
+      trust: judged((args) => ({
+        operation: { kind: "read", path: str(args, "path") ?? "~" },
+        kind: "list",
+        summary: str(args, "path") ?? "~",
+      })),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { api, computer } = yield* target(deps, args);
           const folder = str(args, "path") ?? "~";
           const answer = yield* asFailure(
-            api.list({ computerId: computer.id, path: folder, threadId: deps.caller.threadId }),
+            api.list({
+              computerId: computer.id,
+              path: folder,
+              threadId: deps.caller.threadId,
+              trust: deps.callTrust,
+            }),
           );
           const entries = Array.isArray(answer["entries"]) ? answer["entries"] : [];
           return {

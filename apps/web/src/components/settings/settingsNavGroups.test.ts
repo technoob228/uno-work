@@ -115,6 +115,7 @@ describe("simple settings (01.10)", () => {
       "Assistants & phone",
       "Projects",
       "Computer",
+      "My computer",
       "Keyboard",
       "Developer",
     ]);
@@ -136,6 +137,7 @@ describe("simple settings (01.10)", () => {
     expect(isSimpleSettingsPath("/settings/ai")).toBe(true);
     expect(isSimpleSettingsPath("/settings/connectors")).toBe(true);
     expect(isSimpleSettingsPath("/settings/skills")).toBe(true);
+    expect(isSimpleSettingsPath("/settings/my-computer")).toBe(true);
     expect(isSimpleSettingsPath("/settings/app/general")).toBe(false);
   });
 });
@@ -157,6 +159,7 @@ describe("gating 28.10: Connectors and Skills only with the assistants update", 
       "Assistants & phone",
       "Projects",
       "Computer",
+      "My computer",
       "Keyboard",
       "Developer",
     ]);

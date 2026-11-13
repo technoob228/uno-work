@@ -117,6 +117,11 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       importStart: rpcClient.myComputer.importStart,
       importDecline: rpcClient.myComputer.importDecline,
       chatHistory: rpcClient.myComputer.chatHistory,
+      trust: () => rpcClient.myComputer.trust(),
+      setTrust: rpcClient.myComputer.setTrust,
+      revokeGrant: rpcClient.myComputer.revokeGrant,
+      stopAll: () => rpcClient.myComputer.stopAll(),
+      resume: () => rpcClient.myComputer.resume(),
     },
     computers: {
       state: () => rpcClient.computers.state(),

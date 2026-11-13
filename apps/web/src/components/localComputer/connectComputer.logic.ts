@@ -404,7 +404,11 @@ const ACTIVITY_VERB: Readonly<Record<MyComputerActivityEntry["kind"], string>> =
   list: "Listed",
 };
 
-export function activityLine(entry: Pick<MyComputerActivityEntry, "kind" | "summary">): string {
+export function activityLine(
+  entry: Pick<MyComputerActivityEntry, "kind" | "summary" | "outcome">,
+): string {
+  // Refused by policy: it never ran.
+  if (entry.outcome === "refused") return `Not run: ${entry.summary}`;
   return `${ACTIVITY_VERB[entry.kind]} ${entry.summary}`;
 }
 

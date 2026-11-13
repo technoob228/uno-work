@@ -75,6 +75,11 @@ const rpcClientMock = {
     importStart: vi.fn(),
     importDecline: vi.fn(),
     chatHistory: vi.fn(),
+    trust: vi.fn(),
+    setTrust: vi.fn(),
+    revokeGrant: vi.fn(),
+    stopAll: vi.fn(),
+    resume: vi.fn(),
   },
   computers: {
     state: vi.fn(),

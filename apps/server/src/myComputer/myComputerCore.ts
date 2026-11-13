@@ -16,10 +16,11 @@ import type {
   MyComputerPairState,
   MyComputerPairStatus,
   MyComputerStatus,
+  MyComputerTier,
 } from "@t3tools/contracts";
 
 import { consoleRequest, type ConsoleRequest } from "../unoWork/consoleClient.ts";
-import { makeActivityLog, type ActivityLog } from "./activityLog.ts";
+import { makeActivityLog, type ActivityFinish, type ActivityLog } from "./activityLog.ts";
 import {
   MAX_DATA_CHUNK_BYTES,
   openComputerChannel,
@@ -89,9 +90,16 @@ export class MyComputerFailure extends Error {
 const OFF_MESSAGE =
   "Connecting a computer works from an Uno cloud computer; this one isn't linked to the Uno console.";
 
+/** How the trust gate judged a call (`trust/`): the journal line says so. */
+export interface CallTrust {
+  readonly tier: MyComputerTier;
+  readonly threadTitle?: string | undefined;
+}
+
 export interface ExecInput {
   readonly computerId: string;
   readonly cmd: string;
+  readonly trust?: CallTrust | undefined;
   readonly cwd?: string | undefined;
   readonly timeoutMs?: number | undefined;
   readonly threadId?: string | undefined;
@@ -111,6 +119,7 @@ export interface ExecResult extends CollectedOutput {
 export interface ReadInput {
   readonly computerId: string;
   readonly path: string;
+  readonly trust?: CallTrust | undefined;
   readonly offset?: number | undefined;
   /** How much to read at most. */
   readonly maxBytes: number;
@@ -129,6 +138,7 @@ export interface ReadResult {
 export interface WriteInput {
   readonly computerId: string;
   readonly path: string;
+  readonly trust?: CallTrust | undefined;
   readonly data: Uint8Array;
   readonly append?: boolean | undefined;
   readonly mkdirs?: boolean | undefined;
@@ -138,6 +148,7 @@ export interface WriteInput {
 export interface ListInput {
   readonly computerId: string;
   readonly path: string;
+  readonly trust?: CallTrust | undefined;
   readonly threadId?: string | undefined;
   /** See ExecInput.quiet. */
   readonly quiet?: boolean | undefined;
@@ -195,6 +206,8 @@ export interface MyComputerCoreOptions {
 }
 
 export interface MyComputerCore {
+  /** Where its journal lives; the trust settings live next to it. */
+  readonly stateDir: string;
   readonly status: () => Promise<MyComputerStatus>;
   /** `status`, or the last answer when it is at most `maxAgeMs` old (tool calls). */
   readonly cachedStatus: (maxAgeMs: number) => Promise<MyComputerStatus>;
@@ -224,6 +237,20 @@ export interface MyComputerCore {
     signal?: AbortSignal,
   ) => Promise<HelperAnswer>;
   readonly info: (computerId: string, signal?: AbortSignal) => Promise<HelperAnswer>;
+  /** A call the trust gate refused: one journal line, nothing runs. */
+  readonly refused: (input: {
+    readonly computerId: string;
+    readonly kind: "run" | "read" | "write" | "list";
+    readonly summary: string;
+    readonly threadId?: string | undefined;
+    readonly threadTitle?: string | undefined;
+    readonly tier: MyComputerTier;
+    readonly reason: string;
+  }) => Promise<void>;
+  /** Agents' calls running there now (exec, read, write, list). */
+  readonly running: () => number;
+  /** Stop every running call ("Stop all agents"): how many were stopped. */
+  readonly abortAll: () => number;
   readonly closeAll: () => void;
 }
 
@@ -424,6 +451,11 @@ function remoteFailure(frame: HelperFrame): MyComputerFailure {
 }
 
 const cancelled = () => new MyComputerFailure("cancelled", "Cancelled.");
+/** How a read, write or list ended when it returned. */
+const ran = (_value: unknown, durationMs: number): ActivityFinish => ({
+  outcome: "ran",
+  durationMs,
+});
 
 const notStarted = () =>
   new MyComputerFailure(
@@ -662,17 +694,74 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     return opened;
   };
 
+  const journalFailed = (cause: unknown) => {
+    options.warn?.(
+      `my-computer journal: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return null;
+  };
+
+  /** The journal line before the action; its id, for how it ended. */
   const record = (
     computerId: string,
     kind: "run" | "read" | "write" | "list",
     summary: string,
     threadId: string | undefined,
-  ) =>
-    journal.record(computerId, { kind, summary, threadId }).catch((cause) => {
-      options.warn?.(
-        `my-computer journal: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
-    });
+    trust?: CallTrust,
+  ): Promise<string | null> =>
+    journal
+      .record(computerId, {
+        kind,
+        summary,
+        threadId,
+        ...(trust ? { tier: trust.tier, threadTitle: trust.threadTitle } : {}),
+      })
+      .catch(journalFailed);
+
+  // Agents' calls running now: "Stop all agents" aborts them.
+  const inflight = new Set<AbortController>();
+
+  /**
+   * One agent call: abortable by `abortAll` as well as by its own signal; its
+   * journal line (`line`, set by the body once written) gets how it ended.
+   */
+  const tracked = async <T>(
+    signal: AbortSignal | undefined,
+    body: (
+      signal: AbortSignal,
+      line: (computerId: string, id: string | null) => void,
+    ) => Promise<T>,
+    finishOf: (value: T, durationMs: number) => ActivityFinish,
+  ): Promise<T> => {
+    const controller = new AbortController();
+    const forward = () => controller.abort();
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener("abort", forward, { once: true });
+    inflight.add(controller);
+    let written: { readonly computerId: string; readonly id: string } | null = null;
+    const startedAt = Date.now();
+    const finish = (value: ActivityFinish) => {
+      if (written !== null) {
+        void journal.finish(written.computerId, written.id, value).catch(journalFailed);
+      }
+    };
+    try {
+      const value = await body(controller.signal, (computerId, id) => {
+        written = id === null ? null : { computerId, id };
+      });
+      finish(finishOf(value, Date.now() - startedAt));
+      return value;
+    } catch (cause) {
+      finish({
+        outcome: controller.signal.aborted ? "stopped" : "failed",
+        durationMs: Date.now() - startedAt,
+      });
+      throw cause;
+    } finally {
+      inflight.delete(controller);
+      signal?.removeEventListener("abort", forward);
+    }
+  };
 
   /** One request, one `result` frame. */
   const ask = (
@@ -720,6 +809,7 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     });
 
   return {
+    stateDir: options.stateDir,
     status,
     meta: () => lastMeta?.value ?? null,
     cachedStatus: async (maxAgeMs) =>
@@ -799,7 +889,9 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
       forgetVisible();
     },
     activity: (computerId, limit) => journal.read(computerId, limit),
-    note: (computerId, kind, summary, threadId) => record(computerId, kind, summary, threadId),
+    note: async (computerId, kind, summary, threadId) => {
+      await record(computerId, kind, summary, threadId);
+    },
     toolsVisible: async () => {
       if ((await options.token()).length === 0) return false;
       if (
@@ -821,191 +913,234 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
         clearTimeout(timer);
       }
     },
-    exec: async (input, signal) => {
-      if (signal?.aborted) throw cancelled();
-      const timeoutMs = Math.min(
-        Math.max(1, input.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS),
-        EXEC_MAX_TIMEOUT_MS,
-      );
-      const channel = await channelFor(input.computerId);
-      if (input.quiet !== true) await record(input.computerId, "run", input.cmd, input.threadId);
-      if (signal?.aborted) throw cancelled();
-      return new Promise<ExecResult>((resolve, reject) => {
-        const output = new OutputCollector(input.maxOutputBytes);
-        const startedAt = Date.now();
-        let settled = false;
-        let call: ChannelCall | null = null;
-        let deadline: ReturnType<typeof setTimeout> | null = null;
-        let startWait: ReturnType<typeof setTimeout> | null = null;
-        let hardKill: ReturnType<typeof setTimeout> | null = null;
-        let started = false;
-
-        const stopWatching = () => {
-          if (deadline !== null) clearTimeout(deadline);
-          if (startWait !== null) clearTimeout(startWait);
-          if (hardKill !== null) clearTimeout(hardKill);
-          signal?.removeEventListener("abort", onAbort);
-          call?.end();
-        };
-        const answer = (exit: {
-          readonly exitCode: number | null;
-          readonly signal: string | null;
-          readonly timedOut: boolean;
-        }) => {
-          stopWatching();
-          if (settled) return;
-          settled = true;
-          resolve({ ...exit, ...output.result(), durationMs: Date.now() - startedAt });
-        };
-        const fail = (cause: unknown) => {
-          stopWatching();
-          if (settled) return;
-          settled = true;
-          reject(cause);
-        };
-        /** Ask it to stop, then stop it. `then`: after the hard kill. */
-        const stopProcess = (then: () => void) => {
-          if (hardKill !== null) return;
-          call?.send({ op: "kill" });
-          hardKill = setTimeout(() => {
-            call?.send({ op: "kill", signal: "SIGKILL" });
-            then();
-          }, killGraceMs);
-        };
-        const onAbort = () => {
-          // The agent's turn is over: it hears at once, the process is stopped
-          // in the background (the call stays open for the hard kill).
-          settled = true;
-          reject(cancelled());
-          stopProcess(stopWatching);
-        };
-
-        signal?.addEventListener("abort", onAbort, { once: true });
-        try {
-          call = channel.start(
-            {
-              op: "exec",
-              cmd: input.cmd,
-              ...(input.cwd ? { cwd: input.cwd } : {}),
-              timeoutMs,
-            },
-            {
-              onFrame: (frame) => {
-                started = true;
-                if (startWait !== null) clearTimeout(startWait);
-                switch (frame.type) {
-                  case "out":
-                    output.push(decodeData(frame["data"]));
-                    break;
-                  case "exit":
-                    answer({
-                      exitCode: typeof frame["code"] === "number" ? frame["code"] : null,
-                      signal: nullableString(frame["signal"]),
-                      timedOut: frame["timedOut"] === true,
-                    });
-                    break;
-                  case "error":
-                    fail(remoteFailure(frame));
-                    break;
-                  // `started`: noted above.
-                }
-              },
-              onClosed: fail,
-            },
+    exec: (input, outerSignal) =>
+      tracked(
+        outerSignal,
+        async (signal, line) => {
+          if (signal.aborted) throw cancelled();
+          const timeoutMs = Math.min(
+            Math.max(1, input.timeoutMs ?? EXEC_DEFAULT_TIMEOUT_MS),
+            EXEC_MAX_TIMEOUT_MS,
           );
-        } catch (cause) {
-          fail(cause);
-          return;
-        }
-        startWait = setTimeout(() => {
-          call?.send({ op: "kill" });
-          fail(notStarted());
-        }, timings.execStartTimeoutMs ?? EXEC_START_TIMEOUT_MS);
-        deadline = setTimeout(
-          () => {
-            // "Ran out of time" would be untrue for what never started.
-            if (started) {
-              stopProcess(() => answer({ exitCode: null, signal: null, timedOut: true }));
-            }
-          },
-          timeoutMs + (timings.execBackstopMs ?? EXEC_BACKSTOP_MS),
-        );
-      });
-    },
-    read: async (input, signal) => {
-      const channel = await channelFor(input.computerId);
-      if (input.quiet !== true) await record(input.computerId, "read", input.path, input.threadId);
-      const start = input.offset ?? 0;
-      const pieces: Array<Buffer> = [];
-      let total = 0;
-      let eof = false;
-      while (total < input.maxBytes && !eof) {
-        const answer = await ask(
-          channel,
-          {
-            op: "read",
-            path: input.path,
-            offset: start + total,
-            length: Math.min(MAX_DATA_CHUNK_BYTES, input.maxBytes - total),
-          },
-          signal,
-        );
-        const data = decodeData(answer["data"]);
-        pieces.push(data);
-        total += data.length;
-        // An answer without `eof` still ends the file with an empty read.
-        eof = answer["eof"] === true || data.length === 0;
-      }
-      return { data: Buffer.concat(pieces), offset: start, eof };
-    },
-    write: async (input, signal) => {
-      if (input.data.length > MAX_FILE_BYTES) {
-        throw new MyComputerFailure(
-          "too-large",
-          `That is ${input.data.length} bytes; up to ${MAX_FILE_BYTES} bytes (50 MiB) go through at once. Split it or use cloud storage.`,
-        );
-      }
-      const channel = await channelFor(input.computerId);
-      await record(
-        input.computerId,
-        "write",
-        `${input.path} (${input.data.length} bytes)`,
-        input.threadId,
-      );
-      let sent = 0;
-      do {
-        const chunk = input.data.subarray(sent, sent + MAX_DATA_CHUNK_BYTES);
-        try {
-          await ask(
-            channel,
-            {
-              op: "write",
-              path: input.path,
-              data: Buffer.from(chunk).toString("base64"),
-              // Each next chunk continues the file; the first one follows the call.
-              ...(sent > 0 || input.append === true ? { append: true } : {}),
-              ...(sent === 0 && input.mkdirs === true ? { mkdirs: true } : {}),
-            },
-            signal,
-          );
-        } catch (cause) {
-          if (sent > 0 && cause instanceof Error) {
-            throw new MyComputerFailure(
-              cause instanceof MyComputerFailure ? cause.kind : "remote",
-              `${cause.message} Only ${sent} of ${input.data.length} bytes were written: the file on the computer is incomplete.`,
+          const channel = await channelFor(input.computerId);
+          if (input.quiet !== true) {
+            line(
+              input.computerId,
+              await record(input.computerId, "run", input.cmd, input.threadId, input.trust),
             );
           }
-          throw cause;
-        }
-        sent += chunk.length;
-      } while (sent < input.data.length);
-      return { bytes: sent };
-    },
-    list: async (input, signal) => {
-      const channel = await channelFor(input.computerId);
-      if (input.quiet !== true) await record(input.computerId, "list", input.path, input.threadId);
-      return ask(channel, { op: "list", path: input.path }, signal);
-    },
+          if (signal.aborted) throw cancelled();
+          return new Promise<ExecResult>((resolve, reject) => {
+            const output = new OutputCollector(input.maxOutputBytes);
+            const startedAt = Date.now();
+            let settled = false;
+            let call: ChannelCall | null = null;
+            let deadline: ReturnType<typeof setTimeout> | null = null;
+            let startWait: ReturnType<typeof setTimeout> | null = null;
+            let hardKill: ReturnType<typeof setTimeout> | null = null;
+            let started = false;
+
+            const stopWatching = () => {
+              if (deadline !== null) clearTimeout(deadline);
+              if (startWait !== null) clearTimeout(startWait);
+              if (hardKill !== null) clearTimeout(hardKill);
+              signal?.removeEventListener("abort", onAbort);
+              call?.end();
+            };
+            const answer = (exit: {
+              readonly exitCode: number | null;
+              readonly signal: string | null;
+              readonly timedOut: boolean;
+            }) => {
+              stopWatching();
+              if (settled) return;
+              settled = true;
+              resolve({ ...exit, ...output.result(), durationMs: Date.now() - startedAt });
+            };
+            const fail = (cause: unknown) => {
+              stopWatching();
+              if (settled) return;
+              settled = true;
+              reject(cause);
+            };
+            /** Ask it to stop, then stop it. `then`: after the hard kill. */
+            const stopProcess = (then: () => void) => {
+              if (hardKill !== null) return;
+              call?.send({ op: "kill" });
+              hardKill = setTimeout(() => {
+                call?.send({ op: "kill", signal: "SIGKILL" });
+                then();
+              }, killGraceMs);
+            };
+            const onAbort = () => {
+              // The agent's turn is over: it hears at once, the process is stopped
+              // in the background (the call stays open for the hard kill).
+              settled = true;
+              reject(cancelled());
+              stopProcess(stopWatching);
+            };
+
+            signal?.addEventListener("abort", onAbort, { once: true });
+            try {
+              call = channel.start(
+                {
+                  op: "exec",
+                  cmd: input.cmd,
+                  ...(input.cwd ? { cwd: input.cwd } : {}),
+                  timeoutMs,
+                },
+                {
+                  onFrame: (frame) => {
+                    started = true;
+                    if (startWait !== null) clearTimeout(startWait);
+                    switch (frame.type) {
+                      case "out":
+                        output.push(decodeData(frame["data"]));
+                        break;
+                      case "exit":
+                        answer({
+                          exitCode: typeof frame["code"] === "number" ? frame["code"] : null,
+                          signal: nullableString(frame["signal"]),
+                          timedOut: frame["timedOut"] === true,
+                        });
+                        break;
+                      case "error":
+                        fail(remoteFailure(frame));
+                        break;
+                      // `started`: noted above.
+                    }
+                  },
+                  onClosed: fail,
+                },
+              );
+            } catch (cause) {
+              fail(cause);
+              return;
+            }
+            startWait = setTimeout(() => {
+              call?.send({ op: "kill" });
+              fail(notStarted());
+            }, timings.execStartTimeoutMs ?? EXEC_START_TIMEOUT_MS);
+            deadline = setTimeout(
+              () => {
+                // "Ran out of time" would be untrue for what never started.
+                if (started) {
+                  stopProcess(() => answer({ exitCode: null, signal: null, timedOut: true }));
+                }
+              },
+              timeoutMs + (timings.execBackstopMs ?? EXEC_BACKSTOP_MS),
+            );
+          });
+        },
+        (result) => ({
+          outcome: result.timedOut ? "stopped" : "ran",
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+        }),
+      ),
+    read: (input, outerSignal) =>
+      tracked(
+        outerSignal,
+        async (signal, line) => {
+          const channel = await channelFor(input.computerId);
+          if (input.quiet !== true) {
+            line(
+              input.computerId,
+              await record(input.computerId, "read", input.path, input.threadId, input.trust),
+            );
+          }
+          const start = input.offset ?? 0;
+          const pieces: Array<Buffer> = [];
+          let total = 0;
+          let eof = false;
+          while (total < input.maxBytes && !eof) {
+            const answer = await ask(
+              channel,
+              {
+                op: "read",
+                path: input.path,
+                offset: start + total,
+                length: Math.min(MAX_DATA_CHUNK_BYTES, input.maxBytes - total),
+              },
+              signal,
+            );
+            const data = decodeData(answer["data"]);
+            pieces.push(data);
+            total += data.length;
+            // An answer without `eof` still ends the file with an empty read.
+            eof = answer["eof"] === true || data.length === 0;
+          }
+          return { data: Buffer.concat(pieces), offset: start, eof };
+        },
+        ran,
+      ),
+    write: (input, outerSignal) =>
+      tracked(
+        outerSignal,
+        async (signal, line) => {
+          if (input.data.length > MAX_FILE_BYTES) {
+            throw new MyComputerFailure(
+              "too-large",
+              `That is ${input.data.length} bytes; up to ${MAX_FILE_BYTES} bytes (50 MiB) go through at once. Split it or use cloud storage.`,
+            );
+          }
+          const channel = await channelFor(input.computerId);
+          line(
+            input.computerId,
+            await record(
+              input.computerId,
+              "write",
+              `${input.path} (${input.data.length} bytes)`,
+              input.threadId,
+              input.trust,
+            ),
+          );
+          let sent = 0;
+          do {
+            const chunk = input.data.subarray(sent, sent + MAX_DATA_CHUNK_BYTES);
+            try {
+              await ask(
+                channel,
+                {
+                  op: "write",
+                  path: input.path,
+                  data: Buffer.from(chunk).toString("base64"),
+                  // Each next chunk continues the file; the first one follows the call.
+                  ...(sent > 0 || input.append === true ? { append: true } : {}),
+                  ...(sent === 0 && input.mkdirs === true ? { mkdirs: true } : {}),
+                },
+                signal,
+              );
+            } catch (cause) {
+              if (sent > 0 && cause instanceof Error) {
+                throw new MyComputerFailure(
+                  cause instanceof MyComputerFailure ? cause.kind : "remote",
+                  `${cause.message} Only ${sent} of ${input.data.length} bytes were written: the file on the computer is incomplete.`,
+                );
+              }
+              throw cause;
+            }
+            sent += chunk.length;
+          } while (sent < input.data.length);
+          return { bytes: sent };
+        },
+        ran,
+      ),
+    list: (input, outerSignal) =>
+      tracked(
+        outerSignal,
+        async (signal, line) => {
+          const channel = await channelFor(input.computerId);
+          if (input.quiet !== true) {
+            line(
+              input.computerId,
+              await record(input.computerId, "list", input.path, input.threadId, input.trust),
+            );
+          }
+          return ask(channel, { op: "list", path: input.path }, signal);
+        },
+        ran,
+      ),
     stat: async (input, signal) =>
       ask(await channelFor(input.computerId), { op: "stat", path: input.path }, signal),
     info: async (computerId, signal) => {
@@ -1015,7 +1150,26 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
         Object.entries(answer).filter(([field]) => !FRAME_FIELDS.has(field)),
       );
     },
+    refused: async (input) => {
+      await journal
+        .record(input.computerId, {
+          kind: input.kind,
+          summary: input.summary,
+          threadId: input.threadId,
+          threadTitle: input.threadTitle,
+          tier: input.tier,
+          refused: { reason: input.reason },
+        })
+        .catch(journalFailed);
+    },
+    running: () => inflight.size,
+    abortAll: () => {
+      const stopped = inflight.size;
+      for (const controller of inflight) controller.abort();
+      return stopped;
+    },
     closeAll: () => {
+      for (const controller of inflight) controller.abort();
       for (const channel of channels.values()) channel.close();
     },
   };

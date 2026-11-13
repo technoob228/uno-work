@@ -52,6 +52,7 @@ import {
   type ResolvedInboxActions,
   WithInboxItemActions,
 } from "./InboxItemActions";
+import { MyComputerActivityBanner } from "./MyComputerActivityBanner";
 
 type Filter = "all" | "needs-you" | "chats" | "apps" | "snoozed";
 
@@ -180,6 +181,7 @@ export const InboxPanel = memo(function InboxPanel(props: {
         ))}
       </div>
 
+      <MyComputerActivityBanner />
       {visible.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground/70">
           <InboxIcon className="size-5" />

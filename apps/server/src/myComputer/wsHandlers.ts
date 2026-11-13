@@ -57,6 +57,32 @@ export const MyComputerRpcLayer = WsMyComputerRpcGroup.toLayer(
           chatImport.decline(computerId),
           attributes,
         ),
+      [WS_METHODS.myComputerTrust]: (_input) =>
+        observeRpcEffect(WS_METHODS.myComputerTrust, myComputer.trustState, attributes),
+      [WS_METHODS.myComputerSetTrust]: (settings) =>
+        observeRpcEffect(WS_METHODS.myComputerSetTrust, myComputer.setTrust(settings), attributes),
+      [WS_METHODS.myComputerRevokeGrant]: ({ threadId, computerId }) =>
+        observeRpcEffect(
+          WS_METHODS.myComputerRevokeGrant,
+          myComputer.revokeGrant({ threadId, computerId }),
+          attributes,
+        ),
+      [WS_METHODS.myComputerStopAll]: (_input) =>
+        observeRpcEffect(
+          WS_METHODS.myComputerStopAll,
+          myComputer.stopAll.pipe(
+            // Disconnected: what each computer was for goes with it, as with Disconnect.
+            Effect.tap(({ removed }) =>
+              Effect.forEach(removed, (computerId) => lifecycle.forget(computerId), {
+                discard: true,
+              }),
+            ),
+            Effect.map(({ stopped, disconnected, failed }) => ({ stopped, disconnected, failed })),
+          ),
+          attributes,
+        ),
+      [WS_METHODS.myComputerResume]: (_input) =>
+        observeRpcEffect(WS_METHODS.myComputerResume, myComputer.resume, attributes),
       [WS_METHODS.myComputerChatHistory]: ({ threadId }) =>
         observeRpcEffect(
           WS_METHODS.myComputerChatHistory,

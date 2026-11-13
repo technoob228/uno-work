@@ -116,6 +116,7 @@ import { mailTools, type MailOwner } from "./mailTools.ts";
 import { automationChatTools } from "../automations/chatTools.ts";
 import type { AutomationChatTools } from "../automations/AutomationsService.ts";
 import type { MyComputerShape } from "../myComputer/MyComputerService.ts";
+import type { CallTrust } from "../myComputer/myComputerCore.ts";
 import { myComputerTools } from "../myComputer/myComputerTools.ts";
 import { workspaceTools, type WorkspaceToolDeps } from "../myComputer/workspaceTools.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
@@ -537,6 +538,8 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
   };
   /** The person's own computers. Absent (tests, older wiring): the tools say they can't reach them. */
   readonly myComputer?: MyComputerShape;
+  /** Set by the gate for a call it judged by trust tier: the journal line carries it. */
+  readonly callTrust?: CallTrust;
   /**
    * Pictures from the Uno gateway (`POST /v1/images/generations`) with the
    * harness key. Absent (tests, older wiring): `image_generate` says so.
@@ -809,6 +812,30 @@ export interface UnoWorkTool {
     deps: UnoWorkToolDeps,
     args: Record<string, unknown>,
   ) => Effect.Effect<unknown, UnoWorkToolError>;
+  /**
+   * Calls on the person's own computer: judged by trust tier
+   * (`myComputer/trust/`) instead of by `level` and the chat's mode. Runs
+   * after `prepare`; what it says is final (Allow, refusal or run).
+   */
+  readonly trust?: (
+    deps: UnoWorkToolDeps,
+    args: Record<string, unknown>,
+    context: { readonly cautious: boolean; readonly outsideText: boolean },
+  ) => Effect.Effect<ComputerTrustGate, UnoWorkToolError>;
+}
+
+/** What the trust tiers say about one call on the person's computer. */
+export interface ComputerTrustGate {
+  readonly verdict: "run" | "ask" | "refuse";
+  /** `refuse`: what the agent reads. */
+  readonly message?: string | undefined;
+  /** `ask`: the card's line on why. */
+  readonly detail?: string | undefined;
+  /** `ask`: it asks whatever the mode. */
+  readonly sensitive?: boolean | undefined;
+  /** `ask`: after Allow, before the call (the chat's Allow, a resume). */
+  readonly onApproved?: Effect.Effect<void> | undefined;
+  readonly trust: CallTrust;
 }
 
 export function toolLevel(tool: UnoWorkTool, args: Record<string, unknown>): UnoWorkToolLevel {
@@ -4952,6 +4979,41 @@ export function runUnoWorkTool(
     const asking = outward !== null && deps.asksFirst ? yield* deps.asksFirst : null;
     const outside =
       outsideTextAsks(tool.name, args) && deps.outsideText ? yield* deps.outsideText : false;
+    if (tool.trust) {
+      const gate = yield* tool.trust(deps, args, {
+        cautious: asking !== null,
+        outsideText: outside,
+      });
+      const judged: UnoWorkToolDeps = { ...deps, callTrust: gate.trust };
+      if (gate.verdict === "refuse") {
+        return yield* toolError(gate.message ?? "That isn't allowed on the person's computer.");
+      }
+      if (gate.verdict === "ask") {
+        const title = tool.approvalTitle?.(args) ?? tool.name;
+        const detail =
+          [
+            tool.approvalDetail?.(args),
+            gate.detail,
+            asking !== null ? `${asking.name} is Cautious, so it asks first.` : null,
+            outside ? OUTSIDE_TEXT_NOTE : null,
+          ]
+            .filter(Boolean)
+            .join(" · ") || undefined;
+        const approved = gate.onApproved ?? Effect.void;
+        const outcome = yield* askPerson(deps, {
+          tool: tool.name,
+          level: gate.sensitive === true ? "sensitive" : level,
+          title,
+          detail,
+          later: lateRun(deps, title, approved.pipe(Effect.andThen(tool.run(judged, args)))),
+        });
+        if (outcome === "queued") {
+          return { ok: false, waiting: true, message: queuedApprovalMessage(title) };
+        }
+        yield* approved;
+      }
+      return yield* tool.run(judged, args);
+    }
     if (decideUnoWorkGate(level, deps.caller.runtimeMode, asking !== null || outside) === "ask") {
       // The person reads the app's name, not its id ("Stop Notes", not
       // "Stop manifest:notes").
