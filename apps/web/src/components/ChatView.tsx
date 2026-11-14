@@ -234,6 +234,9 @@ import { useEnvironmentSettings } from "~/environments/settings/serverSettings";
 import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
+import { OutsideTextNote } from "./chat/OutsideTextNote";
+import { outsideTextSource } from "./chat/OutsideTextNote.logic";
+import { useChatOutsideText } from "../lib/outsideTextApi";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
 import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
 import { wasEverSignedIn } from "./harness/harnessSignInMemory";
@@ -1908,6 +1911,17 @@ export default function ChatView(props: ChatViewProps) {
   const outsideText = useMemo(
     () => holdsOutsideText(timelineMessages.map((message) => ({ kind: "message", message }))),
     [timelineMessages],
+  );
+  // The daemon's own mark (its Uno Work tools ask first): what the note and
+  // its "Trust this chat" go by. Asked again whenever a message lands.
+  const outsideMarked = useChatOutsideText(
+    isServerThread ? (activeThread?.environmentId ?? null) : null,
+    isServerThread ? (activeThread?.id ?? null) : null,
+    serverMessages?.length ?? 0,
+  );
+  const outsideSource = useMemo(
+    () => (outsideMarked ? outsideTextSource(serverMessages ?? []) : null),
+    [outsideMarked, serverMessages],
   );
   const timelineEntries = useMemo(
     () =>
@@ -5443,6 +5457,13 @@ export default function ChatView(props: ChatViewProps) {
                       isWorking && (selectedProvider === "uno" || selectedProvider === "hermes")
                     }
                   />
+                  {outsideMarked && activeThread && importedSource === null ? (
+                    <OutsideTextNote
+                      environmentId={activeThread.environmentId}
+                      threadId={activeThread.id}
+                      source={outsideSource}
+                    />
+                  ) : null}
                   <ComposerBannerStack
                     className="relative z-0"
                     items={

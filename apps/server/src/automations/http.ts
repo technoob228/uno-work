@@ -235,11 +235,9 @@ export const threadTrustOutsideRouteLayer = HttpRouter.add(
       if (yield* outside.has(threadId)) {
         return json(
           {
-            error: {
-              code: "OUTSIDE_MARKS_UNREADABLE",
-              message:
-                "Uno Work can't read its list of chats with outside text, so every chat asks first until it's repaired.",
-            },
+            code: "OUTSIDE_MARKS_UNREADABLE",
+            error:
+              "Uno Work can't read its list of chats with outside text, so every chat asks first until it's repaired.",
           },
           409,
         );
@@ -255,10 +253,8 @@ export const threadTrustOutsideRouteLayer = HttpRouter.add(
           Effect.as(
             json(
               {
-                error: {
-                  code: "TRUST_NOT_SAVED",
-                  message: "Couldn't save that. The chat still asks first — try again.",
-                },
+                code: "TRUST_NOT_SAVED",
+                error: "Couldn't save that. The chat still asks first — try again.",
               },
               500,
             ),

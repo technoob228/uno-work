@@ -1529,6 +1529,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("trusting a chat can't open a marks file it can't read", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "outside-trust-" });
+      const file = `${dir}/automations-outside-threads.json`;
+      yield* fileSystem.writeFileString(file, "{ not json");
+      const marks = yield* makeOutsideThreads(file);
+      yield* buildAppUnderTest({ layers: { outsideThreads: marks } });
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      const trusted = yield* HttpClient.post("/api/manager/threads/thread-form/trust-outside", {
+        headers: { cookie },
+      });
+      assert.equal(trusted.status, 409);
+      assert.isTrue(yield* marks.has("thread-form"));
+      assert.equal(yield* fileSystem.readFileString(file), "{ not json");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect(
     "serves automations to the owner only; a laptop says they run on a cloud computer",
     () =>
