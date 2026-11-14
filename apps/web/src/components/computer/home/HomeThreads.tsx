@@ -22,6 +22,8 @@ import { useShallow } from "zustand/react/shallow";
 
 import { cn } from "~/lib/utils";
 import { usePendingApproval } from "../../../inbox/usePendingApproval";
+import { useDeployLiveCount } from "../../../deployApprovals/deployApprovalsStore";
+import { DeployApprovalCards } from "../../inbox/DeployApprovalCards";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
@@ -433,7 +435,9 @@ function QuestionRow({
 export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: number }) {
   const open = useOpenThread();
   const waiting = useAttentionThreads(threads, now).slice(0, 4);
-  if (waiting.length === 0) {
+  // Deploy-window requests and open windows (deployApprovals/): on top.
+  const deployLive = useDeployLiveCount();
+  if (waiting.length === 0 && deployLive === 0) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
         <span className="size-2 rounded-full bg-success" aria-hidden />
@@ -442,17 +446,22 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
     );
   }
   return (
-    <ul className="-mx-2 flex flex-col">
-      {waiting.map((thread) => (
-        <li key={`${thread.environmentId}:${thread.id}`}>
-          {thread.hasPendingApprovals ? (
-            <ApprovalRow thread={thread} onOpen={() => open(thread)} />
-          ) : (
-            <QuestionRow thread={thread} now={now} onOpen={() => open(thread)} />
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <DeployApprovalCards liveOnly className="-mx-1 px-0" />
+      {waiting.length > 0 ? (
+        <ul className="-mx-2 flex flex-col">
+          {waiting.map((thread) => (
+            <li key={`${thread.environmentId}:${thread.id}`}>
+              {thread.hasPendingApprovals ? (
+                <ApprovalRow thread={thread} onOpen={() => open(thread)} />
+              ) : (
+                <QuestionRow thread={thread} now={now} onOpen={() => open(thread)} />
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </>
   );
 }
 

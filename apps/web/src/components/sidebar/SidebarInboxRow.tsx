@@ -7,6 +7,7 @@
 import { InboxIcon } from "lucide-react";
 import { memo } from "react";
 
+import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
 import { cn } from "../../lib/utils";
 import { useNavStore } from "../../navigation/navStore";
@@ -33,8 +34,10 @@ export const SidebarInboxRow = memo(function SidebarInboxRow() {
   const mode = useNavStore((state) => state.sidebarMode);
   const lastListMode = useNavStore((state) => state.lastListMode);
   const setMode = useNavStore((state) => state.setSidebarMode);
-  const unread = useInboxUnreadCount();
-  const needsYou = useInboxNeedsYouCount();
+  // Deploy-window requests that wait count as needing the person.
+  const deployWaiting = useDeployWaitingCount();
+  const unread = useInboxUnreadCount() + deployWaiting;
+  const needsYou = useInboxNeedsYouCount() + deployWaiting;
   const active = mode === "inbox";
 
   return (

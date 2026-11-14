@@ -128,6 +128,12 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
     pattern: /^\/api\/v1\/boxes\/\d+\/applogs$/,
     query: /^source=(auto|journal|docker)&tail=\d{1,4}$/,
   },
+  // Deploy-window requests in the Inbox (13.11): see them, and the safe
+  // answers — deny, close a window now, freeze all. Opening a window is not
+  // here: it needs Touch ID on the gate page the console serves itself.
+  { method: "GET", pattern: /^\/api\/v1\/ops-gate\/inbox$/ },
+  { method: "POST", pattern: /^\/api\/v1\/ops-gate\/inbox\/\d{1,12}\/(deny|close)$/ },
+  { method: "POST", pattern: /^\/api\/v1\/ops-gate\/inbox\/freeze$/ },
 ];
 
 export function isAllowedAccountRequest(method: string, path: string): boolean {

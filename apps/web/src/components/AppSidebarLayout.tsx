@@ -8,6 +8,7 @@ import { isElectron } from "../env";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 import { InboxListener } from "../inbox/InboxListener";
 import { DockBadgeListener } from "../inbox/DockBadgeListener";
+import { DeployApprovalsListener } from "../deployApprovals/DeployApprovalsListener";
 import { PaymentNoticeBanner } from "./billing/PaymentNoticeBanner";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
@@ -163,6 +164,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <AppShortcuts />
         {/* Inside the provider: opening an item may close the phone sidebar. */}
         <InboxListener />
+        <DeployApprovalsListener />
         <DockBadgeListener />
       </SidebarProvider>
       <FileBrowser />

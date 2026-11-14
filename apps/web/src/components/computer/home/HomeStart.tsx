@@ -108,6 +108,7 @@ import { AssistantQuiz } from "../../assistants/AssistantQuiz";
 import { planFromHermes, quizPlanHandoff } from "../../assistants/assistantQuizApi";
 import { useAssistantsAvailability } from "../../assistants/useAssistants";
 import { openUploadAndAsk } from "../../newProject/uploadAndAsk";
+import { useDeployLiveCount } from "../../../deployApprovals/deployApprovalsStore";
 
 const LAYOUT_SCHEMA = Schema.Array(Schema.String);
 /** "Everything else on Home" opened by the person (remembered per device). */
@@ -278,6 +279,8 @@ export function HomeStart({
     [allThreads, space],
   );
   const skippedQuestions = useSkippedQuestionThreads(now);
+  // Deploy-window requests: Home's Needs you shows for them too (13.11).
+  const deployLive = useDeployLiveCount();
   const bootstrapped = useStore(selectBootstrapCompleteForActiveEnvironment);
   // The computer's chats haven't come yet: "Needs you" / "In progress" would
   // appear above the widgets a moment later and push them down (S6 flicker
@@ -744,7 +747,7 @@ export function HomeStart({
           {ownAgentLine}
           {ownToolsDialog}
         </div>
-        {waiting.length > 0 ? (
+        {waiting.length > 0 || deployLive > 0 ? (
           <section className="flex flex-col gap-2" data-testid="home-needs-you-section">
             <HomeSectionTitle>Needs you</HomeSectionTitle>
             <NeedsYouWidget threads={threads} now={now} />

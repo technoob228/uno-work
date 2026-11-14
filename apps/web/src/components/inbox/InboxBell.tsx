@@ -33,14 +33,18 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InboxActionButtons, WithInboxItemActions } from "./InboxItemActions";
 import { ItemIcon, filterInbox } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
+import { DeployApprovalCards } from "./DeployApprovalCards";
+import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
-  const unread = useInboxUnreadCount();
-  const needsYou = useInboxNeedsYouCount();
+  // Deploy-window requests that wait count as needing the person.
+  const deployWaiting = useDeployWaitingCount();
+  const unread = useInboxUnreadCount() + deployWaiting;
+  const needsYou = useInboxNeedsYouCount() + deployWaiting;
   const label =
     unread > 0
       ? `Notifications: ${unread} unread${needsYou > 0 ? `, ${needsYou} need you` : ""}`
@@ -157,6 +161,9 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+        {filter === "all" || filter === "needs-you" ? (
+          <DeployApprovalCards liveOnly={filter === "needs-you"} className="px-0 pt-2" />
+        ) : null}
         {empty ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground/70">
             <InboxIcon className="size-5" />
