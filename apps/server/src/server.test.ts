@@ -157,6 +157,11 @@ import { AppSdkService } from "./appSdk/AppSdkService.ts";
 import { ConnectorsService, type ConnectorsServiceShape } from "./setupTools/ConnectorsService.ts";
 import { AssistantCallsService } from "./assistants/AssistantCallsService.ts";
 import { AutomationsService, makeAutomationsService } from "./automations/AutomationsService.ts";
+import {
+  makeOutsideThreads,
+  OutsideThreads,
+  type OutsideThreadsShape,
+} from "./automations/outsideThreads.ts";
 import { GithubAccountService } from "./setupTools/GithubAccountService.ts";
 import { AgentMailService, type AgentMailServiceShape } from "./setupTools/AgentMailService.ts";
 import { ConnectorsError } from "./setupTools/connectors.ts";
@@ -428,6 +433,8 @@ const buildAppUnderTest = (options?: {
     connectors?: Partial<ConnectorsServiceShape>;
     agentMail?: Partial<AgentMailServiceShape>;
     materials?: Partial<MaterialsServiceShape>;
+    /** Marks of chats that read a stranger's text; none when left out. */
+    outsideThreads?: OutsideThreadsShape;
   };
 }) =>
   Effect.gen(function* () {
@@ -786,6 +793,9 @@ const buildAppUnderTest = (options?: {
             Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
           ),
           Layer.mock(InboxService)({ ...options?.layers?.inbox }),
+          options?.layers?.outsideThreads
+            ? Layer.succeed(OutsideThreads, options.layers.outsideThreads)
+            : Layer.empty,
           Layer.mock(ComputerResourcesService)({}),
           Layer.mock(HarnessSetup)({}),
           Layer.mock(ManagerAssistantLlm)({}),
@@ -1459,6 +1469,63 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         headers: { authorization: "Bearer uwm_not-a-session" },
       });
       assert.equal(tokensWithManagerToken.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("only the person trusts a chat that read outside text, never an agent's token", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "outside-trust-" });
+      const file = `${dir}/automations-outside-threads.json`;
+      const marks = yield* makeOutsideThreads(file);
+      yield* marks.mark("thread-form");
+      yield* marks.mark("thread-other");
+      yield* buildAppUnderTest({ layers: { outsideThreads: marks } });
+      const trust = (headers: Record<string, string>) =>
+        HttpClient.post("/api/manager/threads/thread-form/trust-outside", { headers });
+
+      // The chat's own agent (its bridge token), a manager token, nobody: refused.
+      assert.equal(
+        (yield* trust({ authorization: `Bearer ${threadBridgeToken("thread-form")}` })).status,
+        401,
+      );
+      assert.equal((yield* trust({ authorization: "Bearer uwm_not-a-session" })).status, 401);
+      assert.equal((yield* trust({})).status, 401);
+      assert.equal(
+        (yield* HttpClient.get("/api/manager/threads/thread-form/outside-text")).status,
+        401,
+      );
+      assert.isTrue(yield* marks.has("thread-form"));
+
+      const cookie = yield* getAuthenticatedSessionCookieHeader();
+      // A paired device that isn't the owner's: refused too.
+      const clientTokenResponse = yield* HttpClient.post("/api/auth/pairing-token", {
+        headers: { cookie },
+      });
+      const clientToken = (yield* clientTokenResponse.json) as { readonly credential: string };
+      const clientCookie = yield* getAuthenticatedSessionCookieHeader(clientToken.credential);
+      assert.equal((yield* trust({ cookie: clientCookie })).status, 403);
+      assert.isTrue(yield* marks.has("thread-form"));
+
+      const before = yield* HttpClient.get("/api/manager/threads/thread-form/outside-text", {
+        headers: { cookie },
+      });
+      assert.deepEqual(yield* before.json, { holdsOutsideText: true });
+
+      const trusted = yield* trust({ cookie });
+      assert.equal(trusted.status, 200);
+      assert.deepEqual(yield* trusted.json, { holdsOutsideText: false });
+      assert.isFalse(yield* marks.has("thread-form"));
+      assert.isTrue(yield* marks.has("thread-other"));
+      const after = yield* HttpClient.get("/api/manager/threads/thread-form/outside-text", {
+        headers: { cookie },
+      });
+      assert.deepEqual(yield* after.json, { holdsOutsideText: false });
+
+      // A restart reads the same: the chat stays trusted, the other stays marked.
+      const reloaded = yield* makeOutsideThreads(file);
+      assert.isFalse(yield* reloaded.has("thread-form"));
+      assert.isTrue(yield* reloaded.has("thread-other"));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

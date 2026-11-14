@@ -71,6 +71,7 @@ function stand(
       input: AssistantEventTurnInput,
     ) => Effect.Effect<AssistantEventTurnResult, AssistantTurnError>;
     runChatTurn?: (input: ChatTurnInput) => Effect.Effect<ChatTurnResult, AssistantTurnError>;
+    markOutside?: (threadId: string) => Effect.Effect<void>;
   } = {},
 ) {
   const world: World = {
@@ -108,6 +109,7 @@ function stand(
       linked: Effect.sync(() => world.linked),
       assistantName: (assistant) => Effect.succeed(world.assistants[assistant] ?? null),
       ...(options.runChatTurn ? { runChatTurn: options.runChatTurn } : {}),
+      ...(options.markOutside ? { markOutside: options.markOutside } : {}),
       now: () => Date.parse("2026-10-29T09:00:00Z"),
       runTurn:
         options.runTurn ??
@@ -376,12 +378,15 @@ describe("an automation a chat runs (29.10)", () => {
 
   it("a form runs in Ask mode, marks the chat, waits long for a busy one", async () => {
     const chatTurns: ChatTurnInput[] = [];
+    const marked: string[] = [];
     const { world, loop } = stand({
       runChatTurn: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           chatTurns.push(input);
+          if (input.onThread) yield* input.onThread("thread-7");
           return { status: "answered" as const, threadId: "thread-7", reply: "Noted." };
         }),
+      markOutside: (threadId) => Effect.sync(() => void marked.push(threadId)),
     });
     world.queue = [
       event(31, {
@@ -396,6 +401,7 @@ describe("an automation a chat runs (29.10)", () => {
     await poll(loop);
     await vi.waitFor(() => expect(world.results).toHaveLength(1));
     expect(chatTurns[0]).toMatchObject({ ask: true });
+    expect(marked).toEqual(["thread-7"]);
     expect(chatTurns[0]!.busyWaitMs).toBeGreaterThan(5 * 60_000);
     expect(chatTurns[0]!.prompt).toContain("<outside_input_");
   });
@@ -409,14 +415,17 @@ describe("an automation a chat runs (29.10)", () => {
     expect(world.results[0]!.body.state).toBe("failed");
   });
 
-  it("the person turned Ask off: the chat's own mode", async () => {
+  it("the person turned Ask off: the chat's own mode, and the chat isn't marked", async () => {
     const chatTurns: ChatTurnInput[] = [];
+    const marked: string[] = [];
     const { world, loop } = stand({
       runChatTurn: (input) =>
-        Effect.sync(() => {
+        Effect.gen(function* () {
           chatTurns.push(input);
+          if (input.onThread) yield* input.onThread("thread-7");
           return { status: "answered" as const, threadId: "thread-7", reply: "Done." };
         }),
+      markOutside: (threadId) => Effect.sync(() => void marked.push(threadId)),
     });
     world.queue = [
       event(32, {
@@ -426,11 +435,23 @@ describe("an automation a chat runs (29.10)", () => {
         kind: "webhook",
         payload: { ask: false, body: "x" },
       }),
+      event(34, {
+        assistant: "",
+        assistantName: "",
+        executor: { kind: "chat", threadId: "thread-7" },
+        kind: "site.form",
+        payload: { ask: false, slug: "report", fields: [{ name: "m", value: "hi" }] },
+      }),
     ];
     await poll(loop);
-    await vi.waitFor(() => expect(world.results).toHaveLength(1));
-    expect(chatTurns[0]!.ask).toBeUndefined();
-    expect(chatTurns[0]!.prompt).toContain("<outside_input_");
+    await vi.waitFor(() => expect(world.results).toHaveLength(2));
+    expect(chatTurns).toHaveLength(2);
+    for (const turn of chatTurns) {
+      expect(turn.ask).toBeUndefined();
+      expect(turn.onThread).toBeUndefined();
+      expect(turn.prompt).toContain("<outside_input_");
+    }
+    expect(marked).toEqual([]);
   });
 
   it("an older wiring without chat turns fails the run with a note", async () => {
