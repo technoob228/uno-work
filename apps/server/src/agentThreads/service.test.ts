@@ -289,6 +289,25 @@ describe("agent threads bridge: POST /api/threads", () => {
     }),
   );
 
+  it.effect("keeps what the chat is for: a subagent or a thread (Misha 14.11)", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = makeFixture();
+      const reply = yield* handlers.createThread(scoped(), {
+        text: "Review the copy",
+        kind: "subagent",
+      });
+      assert.strictEqual(reply.status, 200);
+      assert.strictEqual(body(reply).kind, "subagent");
+      const createCommand = dispatched[0]?.command as Extract<
+        OrchestrationCommand,
+        { type: "thread.create" }
+      >;
+      assert.strictEqual(createCommand.spawnKind, "subagent");
+      const bad = yield* handlers.createThread(scoped(), { text: "x", kind: "helper" });
+      assert.strictEqual(bad.status, 400);
+    }),
+  );
+
   it.effect("rejects empty text and oversized text", () =>
     Effect.gen(function* () {
       const { handlers, dispatched } = makeFixture();

@@ -156,15 +156,16 @@ export function sidebarAgentPlacement(input: {
   return "agents";
 }
 
+const newestFirst = (left: TaskSummary, right: TaskSummary) =>
+  (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt);
+
 /** The chats behind the "Agents' chats" button: threads, then subagents, newest first. */
 export function groupAgentChats<T extends TaskSummary>(
   chats: ReadonlyArray<T>,
 ): { readonly threads: ReadonlyArray<T>; readonly subagents: ReadonlyArray<T> } {
-  const newest = (left: T, right: T) =>
-    (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt);
   return {
-    threads: chats.filter((chat) => agentChatKind(chat) === "thread").toSorted(newest),
-    subagents: chats.filter((chat) => agentChatKind(chat) === "subagent").toSorted(newest),
+    threads: chats.filter((chat) => agentChatKind(chat) === "thread").toSorted(newestFirst),
+    subagents: chats.filter((chat) => agentChatKind(chat) === "subagent").toSorted(newestFirst),
   };
 }
 
