@@ -138,19 +138,6 @@ await step("inline-threads", async () => {
 // 5. The coordinator: the Tasks strip, threads and subagents grouped, Join /
 // Hand to agent on each.
 await step("coordinator", async () => {
-  // Only mine counts the coordinator as the agent's (its agent wrote last, a
-  // rule of the sidebar branch): "Show" on the hidden line brings it back.
-  const coordinator = page.locator("[data-testid=sidebar-row-d]", {
-    hasText: "Pricing page: copy",
-  });
-  if ((await coordinator.count()) === 0) {
-    await page
-      .getByText(/agent chats? hidden/)
-      .locator("..")
-      .getByText("Show")
-      .click({ timeout: 3000 });
-    await page.waitForTimeout(600);
-  }
   await openChat("Pricing page: copy");
   const bar = page.locator("[data-testid=agent-tasks-bar]").first();
   if ((await bar.getAttribute("data-expanded", { timeout: 3000 })) !== "true") {

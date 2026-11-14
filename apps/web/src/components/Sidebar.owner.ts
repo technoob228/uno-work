@@ -1,11 +1,12 @@
 // Who a chat answers to right now: the person or an agent (Misha 28.10, the
 // sidebar's "Only mine" filter).
-// A chat the person started is theirs, except while agents talk in it
-// (Misha 13.11): the last message that started a turn is another chat's
-// agent's, nobody called the person in and nothing asks them anything —
-// "waiting on agents": no Ready, no badge, the agent's in Only mine. The
-// safety net: their request waited for the chats this one started and the
-// last of them is done, which makes it theirs again (Ready).
+// A chat the person started is always theirs (Misha 14.11: their coordinator
+// stays in Only mine even while agents talk in it). While agents talk there
+// — the last message that started a turn is another chat's agent's, nobody
+// called the person in and nothing asks them anything — it is "waiting on
+// agents": no Ready, no badge (Sidebar.yourTurn). The safety net: their
+// request waited for the chats this one started and the last of them is
+// done, which makes it Ready.
 // A chat an agent, Uno or an app started is the person's while it needs them:
 // - it asks them something (an approval or a question);
 // - an agent called them into it (`chat_call_person`) and they have not
@@ -152,7 +153,7 @@ export function threadOwner(thread: ThreadOwnerInput): ThreadOwner {
     if (thread.controller === "agent" && thread.controlChangedAt != null) {
       return threadNeedsUser(thread) || isPersonCallPending(thread) ? "you" : "agent";
     }
-    return isWaitingOnAgents(thread) ? "agent" : "you";
+    return "you";
   }
   if (threadNeedsUser(thread)) return "you";
   // A server from before 28.10 knows neither the person's messages nor calls:

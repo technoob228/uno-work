@@ -89,7 +89,8 @@ describe("threadOwner", () => {
     ).toBe("you");
   });
 
-  it("the person's chat is the agent's while agents talk in it (Misha 13.11)", () => {
+  it("the person's own chat stays theirs while agents talk in it (Misha 14.11)", () => {
+    // Their coordinator: another chat's agent wrote last, nothing asks them.
     const talking = agentChat({
       startedBy: null,
       spawnedByThreadId: null,
@@ -97,18 +98,16 @@ describe("threadOwner", () => {
       latestPersonMessageAt: at(60),
       latestUserMessageAt: at(20),
     });
-    expect(threadOwner(talking)).toBe("agent");
-    // Called in, asked something, or the chats started for the request are done: theirs.
-    expect(threadOwner({ ...talking, personCalledAt: at(5) })).toBe("you");
-    expect(threadOwner({ ...talking, hasPendingUserInput: true })).toBe("you");
-    expect(threadOwner({ ...talking, childWork: { working: 0, latestStartedAt: at(50) } })).toBe(
+    expect(threadOwner(talking)).toBe("you");
+    expect(threadOwner({ ...talking, childWork: { working: 1, latestStartedAt: at(50) } })).toBe(
       "you",
     );
-    expect(threadOwner({ ...talking, childWork: { working: 1, latestStartedAt: at(50) } })).toBe(
+    expect(threadOwner({ ...talking, session: session("running") })).toBe("you");
+    expect(threadOwner({ ...talking, startedBy: undefined })).toBe("you");
+    // Only handing it to its agent takes it out of Only mine.
+    expect(threadOwner({ ...talking, controller: "agent", controlChangedAt: at(30) })).toBe(
       "agent",
     );
-    // An older daemon: the person's, as before.
-    expect(threadOwner({ ...talking, startedBy: undefined })).toBe("you");
   });
 
   it("an agent's chat working on its own is the agent's", () => {
