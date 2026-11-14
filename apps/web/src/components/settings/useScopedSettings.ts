@@ -120,7 +120,10 @@ export function useScopedNewChatModel() {
         ? targets.some((candidate) => candidate.sources.defaultModelSelection === "project")
         : scope.kind === "environment"
           ? targets.some((candidate) => candidate.settings.defaultModelSelection !== null)
-          : appChoice !== null;
+          : // All computers: the app's choice, or one Uno set on the computer by
+            // itself for its plans (useAutoModelRoles: Uno AI only → Smart).
+            appChoice !== null ||
+            targets.some((candidate) => candidate.settings.defaultModelSelection !== null);
     return { effective: first, mixed, setHere, appChoice };
   }, [appChoice, scope.kind, target, targets]);
 }

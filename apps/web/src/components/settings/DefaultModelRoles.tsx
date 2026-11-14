@@ -136,7 +136,9 @@ export function DefaultModelRoles({ environmentId }: { readonly environmentId: E
   const simpleHint = [
     "Small fixes and quick jobs your assistant hands out.",
     simpleRow?.source === "you"
-      ? "Your pick, saved in ROUTING.md."
+      ? simpleRow.note.startsWith("Uno's set")
+        ? "Uno set it for your plans, in ROUTING.md."
+        : "Your pick, saved in ROUTING.md."
       : simpleHere && simpleNow
         ? `Now the table's starting point, ${modelSelectionLabel(providers, simpleNow)}.`
         : simpleNow && roles.simple
