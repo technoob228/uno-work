@@ -27,6 +27,10 @@ function providerReason(provider: ServerProvider): string | null {
   if (!provider.enabled) return "turned off";
   if (!provider.installed) return "not installed";
   if (provider.auth.status === "unauthenticated") return "not signed in";
+  // Codex with no account answers "ready" (server: personRouting.ts, 12.11).
+  if (provider.driver === "codex" && provider.auth.status !== "authenticated") {
+    return "not signed in";
+  }
   if (provider.status === "error" || provider.status === "disabled") return "not available";
   return null;
 }
@@ -145,4 +149,51 @@ export function autoWorkChoice(
   if (strongest === null) return null;
   const value = `${strongest.selection.instanceId}::${strongest.selection.model}`;
   return choices.find((choice) => choice.value === value) ?? null;
+}
+
+/** A harness the row names that isn't on this computer, as people call it. */
+const HARNESS_NAMES: Readonly<Record<string, string>> = {
+  claudeAgent: "Claude",
+  codex: "Codex",
+  opencode: "OpenCode",
+  cursor: "Cursor",
+  uno: "Uno AI",
+};
+
+export interface AppliedRule {
+  readonly taskType: string;
+  /** "Claude · Opus 5.5 · high" — what the row starts chats on. */
+  readonly model: string;
+  /** Why it can't start here now (the assistant asks first); null: it applies. */
+  readonly notReady: string | null;
+}
+
+/**
+ * The person's own rows of ROUTING.md (Source `you`) — set in the table, by
+ * "Edit file" or in a chat — as Settings shows them: "Your rules from
+ * ROUTING.md · applied" (Misha 14.11: the person must see the file's rules
+ * are theirs and are used).
+ */
+export function appliedPersonRules(
+  rules: ReadonlyArray<RoutingRule>,
+  choices: ReadonlyArray<ModelChoice>,
+): ReadonlyArray<AppliedRule> {
+  return rules
+    .filter((rule) => rule.source === "you")
+    .map((rule) => {
+      const choice = choices.find((entry) => entry.value === choiceValue(rule));
+      const harness = HARNESS_NAMES[rule.harness] ?? rule.harness;
+      const model = choice?.label ?? [harness, rule.model].filter(Boolean).join(" · ");
+      const effort = rule.effort.trim();
+      return {
+        taskType: rule.taskType,
+        model: effort ? `${model} · ${effort}` : model,
+        notReady:
+          rule.harness === ROUTING_SELF_HARNESS
+            ? null
+            : choice === undefined
+              ? "not on this computer"
+              : choice.reason,
+      };
+    });
 }

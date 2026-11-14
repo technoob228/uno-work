@@ -50,7 +50,8 @@ const CLAUDE_TRAITS: ModelCapabilities = {
 };
 
 export const DEMO_ACCOUNTS = WORLD.plans === "accounts";
-export const DEMO_PLANS = WORLD.plans === "full" || DEMO_ACCOUNTS;
+export const DEMO_PLANS =
+  WORLD.plans === "full" || WORLD.plans === "both" || WORLD.plans === "codex" || DEMO_ACCOUNTS;
 
 const NOW = Date.now();
 const later = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
@@ -327,25 +328,52 @@ export function planProvidersFor(machineKey: string, checkedAt: string, version:
       email: machineKey === "work" ? "misha@getuno.xyz" : "misha.work@studio.io",
     },
     checkedAt,
+    // What Claude Code 2.1.321 lists (14.11): it recommends Opus 5.5.
     models: [
-      { slug: "claude-sonnet-5", name: "Sonnet 5", isCustom: false, capabilities: CLAUDE_TRAITS },
-      { slug: "claude-opus-5", name: "Opus 5", isCustom: false, capabilities: CLAUDE_TRAITS },
+      {
+        slug: "claude-opus-5-5",
+        name: "Opus 5.5",
+        isCustom: false,
+        capabilities: CLAUDE_TRAITS,
+        isDefault: true,
+      },
+      { slug: "claude-fable-5-2", name: "Fable 5.2", isCustom: false, capabilities: CLAUDE_TRAITS },
+      {
+        slug: "claude-sonnet-5-5",
+        name: "Sonnet 5.5",
+        isCustom: false,
+        capabilities: CLAUDE_TRAITS,
+      },
+      { slug: "claude-haiku-4-5", name: "Haiku 4.5", isCustom: false, capabilities: CLAUDE_TRAITS },
     ],
     slashCommands: [],
     skills: [],
   };
-  if (machineKey !== "mac") return [claude, ...secondAccountProviders(machineKey, claude)];
-  return [
-    claude,
-    {
-      ...claude,
-      driver: "codex",
-      instanceId: "codex",
-      displayName: "Codex",
-      auth: { status: "authenticated", type: "chatgpt", label: "Plus", email: "misha@getuno.xyz" },
-      models: [{ slug: "gpt-5.4", name: "GPT-5.4", isCustom: false, capabilities: null }],
-    },
-  ];
+  const codex = {
+    ...claude,
+    driver: "codex",
+    instanceId: "codex",
+    displayName: "Codex",
+    auth: { status: "authenticated", type: "chatgpt", label: "Plus", email: "misha@getuno.xyz" },
+    // Codex `model/list` on a ChatGPT plan (14.11): Terra is its default.
+    models: [
+      {
+        slug: "gpt-5.6-terra",
+        name: "GPT-5.6 Terra",
+        isCustom: false,
+        capabilities: null,
+        isDefault: true,
+      },
+      { slug: "gpt-5.6-sol", name: "GPT-5.6 Sol", isCustom: false, capabilities: null },
+      { slug: "gpt-5.6-luna", name: "GPT-5.6 Luna", isCustom: false, capabilities: null },
+    ],
+  };
+  // plans=codex: only ChatGPT here; plans=both: Claude and ChatGPT on uno-work too.
+  if (WORLD.plans === "codex") return [codex];
+  if (machineKey !== "mac" && WORLD.plans !== "both") {
+    return [claude, ...secondAccountProviders(machineKey, claude)];
+  }
+  return [claude, codex];
 }
 
 /** The chat that stopped at the limit (uno-work, landing project's home). */

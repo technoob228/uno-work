@@ -104,6 +104,43 @@ describe("strongestReadySelection", () => {
     expect(strongestReadySelection([claudeUnknown, codex], ready)?.tier).toBe("codex");
   });
 
+  it("14.11: the model the CLI recommends wins over the built-in order", () => {
+    const fable = provider("claudeAgent", ["claude-opus-5-5", "claude-fable-5-2"], {
+      models: [
+        { slug: "claude-opus-5-5", name: "Opus 5.5", isCustom: false, capabilities: null },
+        {
+          slug: "claude-fable-5-2",
+          name: "Fable 5.2",
+          isCustom: false,
+          capabilities: null,
+          isDefault: true,
+        },
+      ],
+    });
+    expect(strongestReadySelection([fable], ready)?.selection.model).toBe("claude-fable-5-2");
+    const codexSol = provider("codex", [], {
+      models: [
+        { slug: "gpt-5.6-terra", name: "Terra", isCustom: false, capabilities: null },
+        { slug: "gpt-5.7", name: "GPT-5.7", isCustom: false, capabilities: null, isDefault: true },
+      ],
+    });
+    expect(strongestReadySelection([codexSol], ready)?.selection.model).toBe("gpt-5.7");
+    // A small model as the CLI's default is not taken for complex work.
+    const lunaDefault = provider("codex", [], {
+      models: [
+        {
+          slug: "gpt-5.6-luna",
+          name: "Luna",
+          isCustom: false,
+          capabilities: null,
+          isDefault: true,
+        },
+        { slug: "gpt-5.6-terra", name: "Terra", isCustom: false, capabilities: null },
+      ],
+    });
+    expect(strongestReadySelection([lunaDefault], ready)?.selection.model).toBe("gpt-5.6-terra");
+  });
+
   it("Codex with only small models is skipped", () => {
     expect(strongestReadySelection([provider("codex", ["gpt-5.6-luna"])], ready)).toBeNull();
   });

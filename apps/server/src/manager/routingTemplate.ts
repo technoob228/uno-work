@@ -43,8 +43,9 @@ export const PERSON_FIRST_NOTE = `- The person's word wins: a harness or model t
   Sign in) or run it on <model>?"
 - A \`default\` row whose harness isn't ready, and the person named none:
   don't pass a provider or model — the server starts it on the strongest
-  ready model here (Claude Opus → Codex GPT-5.6 Terra / Sol / GPT-5.5 → Uno
-  AI premium). Never pick a small model (Luna, mini, Fast) yourself.`;
+  ready model here (what Claude Code, else Codex recommends → Uno AI
+  premium). A small model (Haiku, Luna, mini, Fast) only where a row says
+  so — the Simple tasks row, say — never for complex work by yourself.`;
 
 export const ROUTING_TEMPLATE = `# Routing table — which harness/model for which task
 

@@ -2,6 +2,7 @@ import type { AssistantChatSummary, ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  appliedPersonRules,
   autoWorkChoice,
   chatCostText,
   chatTokensNote,
@@ -123,5 +124,42 @@ describe("Auto for the assistant's work (13.11)", () => {
     expect(autoWorkChoice([provider({}), codex], choices)?.model).toBe("claude-opus-5-5");
     const noClaude = [provider({ auth: { status: "unauthenticated" } }), codex];
     expect(autoWorkChoice(noClaude, modelChoices(noClaude, "Uno"))?.model).toBe("gpt-5.6-terra");
+  });
+});
+
+describe("Your rules from ROUTING.md · applied (14.11)", () => {
+  const rule = (over: Record<string, string>) => ({
+    taskType: "UI and hard bugs",
+    harness: "claudeAgent",
+    model: "claude-opus-5-5",
+    effort: "high",
+    source: "you" as const,
+    note: "",
+    ...over,
+  });
+  const codexNoAccount = provider({
+    instanceId: "codex",
+    driver: "codex",
+    displayName: "Codex",
+    auth: { status: "unknown" },
+    models: [{ slug: "gpt-5.6-luna", name: "GPT-5.6 Luna", isCustom: false, capabilities: null }],
+  });
+
+  it("only the person's rows, each with what it starts chats on and whether it can here", () => {
+    const choices = modelChoices([provider({}), codexNoAccount], "Uno");
+    const applied = appliedPersonRules(
+      [
+        rule({}),
+        rule({ taskType: "Quick lookups", source: "default", model: "claude-haiku-4-5" }),
+        rule({ taskType: "Simple tasks", harness: "codex", model: "gpt-5.6-luna", effort: "" }),
+        rule({ taskType: "Docs", harness: "opencode", model: "x" }),
+      ],
+      choices,
+    );
+    expect(applied).toEqual([
+      { taskType: "UI and hard bugs", model: "Claude · Claude Opus 5.5 · high", notReady: null },
+      { taskType: "Simple tasks", model: "Codex · GPT-5.6 Luna", notReady: "not signed in" },
+      { taskType: "Docs", model: "OpenCode · x · high", notReady: "not on this computer" },
+    ]);
   });
 });

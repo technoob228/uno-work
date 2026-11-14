@@ -41,7 +41,7 @@ import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { isWebApp } from "../../webMode";
 import { ConnectChannelDialog, type ConnectChannel } from "../assistant/ConnectChannelDialog";
 import { useTeamShown } from "../assistants/useAssistantTeam";
-import { DefaultModelFolds } from "./DefaultModelFolds";
+import { DefaultModelRoles } from "./DefaultModelRoles";
 import { NewChatAccessRow, NewChatModelRow } from "./NewChatDefaultsRows";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { ProviderSetupPane } from "../chat/ProviderSetupPane";
@@ -286,9 +286,11 @@ export function AiSettings() {
     <SettingsPageContainer>
       {/* The one place a model is chosen (13.11 v2); a chat's own picker changes only that chat. */}
       <SettingsSection title="Model">
-        <NewChatModelRow environmentId={environmentId}>
-          {environmentId ? <DefaultModelFolds environmentId={environmentId} /> : null}
-        </NewChatModelRow>
+        {environmentId ? (
+          <DefaultModelRoles environmentId={environmentId} />
+        ) : (
+          <NewChatModelRow environmentId={environmentId} />
+        )}
       </SettingsSection>
 
       <SettingsSection title="New chats">

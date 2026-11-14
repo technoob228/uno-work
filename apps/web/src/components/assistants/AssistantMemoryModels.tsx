@@ -23,7 +23,9 @@ import {
   type AssistantChatSummary,
   type AssistantEditableFileName,
   type EnvironmentId,
+  type ModelSelection,
 } from "@t3tools/contracts";
+import { withSimpleTask } from "@t3tools/shared/modelRoles";
 import {
   merge3,
   splitAgentsProfile,
@@ -48,7 +50,7 @@ import {
   type RoutingRule,
   type RoutingThinking,
 } from "@t3tools/shared/assistantMemory";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { FileTextIcon, LoaderCircleIcon, TableIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -70,6 +72,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
 import {
+  appliedPersonRules,
   chatCostText,
   chatTokensNote,
   choiceValue,
@@ -118,7 +121,7 @@ function SavedHint({ at }: { at: number }) {
 }
 
 /** One assistant file: its content, and a save that keeps crossing writes. */
-function useAssistantFile(
+export function useAssistantFile(
   environmentId: EnvironmentId,
   projectId: string,
   name: AssistantEditableFileName,
@@ -725,7 +728,7 @@ export function ModelsBlock({
 }
 
 /** ROUTING.md with what its editors need: the rules, the model choices, a save. */
-function useRouting(environmentId: EnvironmentId, projectId: string, name: string) {
+export function useRouting(environmentId: EnvironmentId, projectId: string, name: string) {
   const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
   const providers = useEnvironmentProviders(environmentId);
   const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
@@ -736,7 +739,7 @@ function useRouting(environmentId: EnvironmentId, projectId: string, name: strin
   return { routing, providers, choices, content, parsed, saveRules };
 }
 
-type Routing = ReturnType<typeof useRouting>;
+export type Routing = ReturnType<typeof useRouting>;
 
 function AwakeModels({
   name,
@@ -872,6 +875,94 @@ function RoutingTable({ name, routing: r }: { name: string; routing: Routing }) 
 // ── By kind of task (13.11 v2) ───────────────────────────────────────
 
 /**
+ * Settings → AI → "Simple tasks" (14.11): the "Simple tasks" row of each
+ * assistant's ROUTING.md on this computer, set as the person's own row.
+ */
+export async function saveSimpleTaskRow(input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectIds: ReadonlyArray<string>;
+  readonly selection: Pick<ModelSelection, "instanceId" | "model">;
+  readonly queryClient: QueryClient;
+}): Promise<void> {
+  for (const projectId of input.projectIds) {
+    const target = { environmentId: input.environmentId, projectId, name: "ROUTING.md" as const };
+    const base = (await readAssistantFile(target)).content ?? "";
+    const next = writeRouting(base, withSimpleTask(parseRouting(base).rules, input.selection));
+    if (next !== base) await writeAssistantFile({ ...target, content: next, base });
+    await input.queryClient.invalidateQueries({
+      queryKey: ["uno-assistant-file", input.environmentId, projectId, "ROUTING.md"],
+    });
+  }
+}
+
+/**
+ * "Your rules from ROUTING.md · applied": the person's own rows and whether
+ * each can start here (Misha 14.11: rules edited in the file must show up in
+ * the interface as applied). `compact`: one line, for the top of Settings → AI.
+ */
+export function AppliedRules({
+  name,
+  routing,
+  compact = false,
+}: {
+  name: string;
+  routing: Routing;
+  compact?: boolean;
+}) {
+  const applied = useMemo(
+    () => appliedPersonRules(routing.parsed.rules, routing.choices),
+    [routing.parsed.rules, routing.choices],
+  );
+  if (applied.length === 0) return null;
+  const title = (
+    <span className="font-medium text-foreground">
+      Your rules from ROUTING.md · <span className="text-success-foreground">applied</span>
+    </span>
+  );
+  if (compact) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="routing-applied-rules-line">
+        {title}
+        {": "}
+        {applied.map((rule, index) => (
+          <span key={rule.taskType}>
+            {index > 0 ? "; " : null}
+            <span className="text-foreground">{rule.taskType}</span> → {rule.model}
+            {rule.notReady ? (
+              <span className="text-warning-foreground"> ({rule.notReady})</span>
+            ) : null}
+          </span>
+        ))}
+      </p>
+    );
+  }
+  return (
+    <div
+      className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs"
+      data-testid="routing-applied-rules"
+    >
+      <p>{title}</p>
+      <p className="text-muted-foreground">
+        {name} starts these kinds of task on your pick, before the default model:
+      </p>
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {applied.map((rule) => (
+          <li key={rule.taskType} className="flex flex-wrap gap-x-1.5">
+            <span className="text-foreground">{rule.taskType}</span>
+            <span className="text-muted-foreground">→ {rule.model}</span>
+            {rule.notReady ? (
+              <span className="text-warning-foreground">
+                · {rule.notReady} — {name} asks you first
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * An assistant's rows by kind of task (its ROUTING.md), folded inside
  * Settings → AI → "Default model": a row the person set beats the default
  * model for that kind of task; the table's own rows ("Starting point",
@@ -906,6 +997,7 @@ export function KindOfTaskTable({
           {asFile ? "Table" : "Edit file"}
         </Button>
       </div>
+      <AppliedRules name={name} routing={routing} />
       {asFile ? (
         <div className="flex flex-col gap-2" data-testid="assistant-models-file">
           <p className="text-xs text-muted-foreground">

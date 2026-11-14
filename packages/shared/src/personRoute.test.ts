@@ -115,3 +115,31 @@ describe("tableRoute (rows Uno or the assistant set)", () => {
     expect(tableRoute(content, "Anything with UI")).toBeNull();
   });
 });
+
+describe("a small model's row (14.11, Settings → AI → Simple tasks)", () => {
+  const content = table(
+    "| Simple tasks, small fixes | codex | gpt-5.6-luna | | you | Settings → AI → Simple tasks |",
+  );
+
+  it("simple tasks start on it", () => {
+    expect(personRoute(content, "Simple tasks, small fixes")).toMatchObject({
+      harness: "codex",
+      model: "gpt-5.6-luna",
+    });
+  });
+
+  it("other work doesn't follow it onto Luna", () => {
+    expect(personRoute(content, "Hard bugs")).toBeNull();
+    expect(personRoute(content)).toBeNull();
+    const withOpus = table(
+      [
+        "| Simple tasks, small fixes | codex | gpt-5.6-luna | | you | |",
+        "| Anything with UI | claudeAgent | claude-opus-5-5 | high | you | |",
+      ].join("\n"),
+    );
+    expect(personRoute(withOpus)).toMatchObject({
+      harness: "claudeAgent",
+      model: "claude-opus-5-5",
+    });
+  });
+});

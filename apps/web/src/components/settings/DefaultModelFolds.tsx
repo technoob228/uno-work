@@ -3,7 +3,8 @@
  * setting, not five"): the rows by kind of task of each assistant on this
  * computer (its ROUTING.md), and — in Advanced — what the assistant itself
  * replies with (Hermes' AI), which connects to an AI on its own and so is
- * chosen apart from the default model.
+ * chosen apart from the default model (its picker: "Assistant replies",
+ * DefaultModelRoles.tsx).
  *
  * @module components/settings/DefaultModelFolds
  */
@@ -15,7 +16,6 @@ import { useAssistantLlm } from "../../assistant/useAssistantLlm";
 import { cn } from "../../lib/utils";
 import { AssistantPowerPicker } from "../assistant/AssistantPowerPicker";
 import { KindOfTaskTable } from "../assistants/AssistantMemoryModels";
-import { AssistantModelPicker } from "../chat/AssistantEngine";
 import { useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 
 /** Folds open from a link ("Settings → AI → Default model → Advanced"). */
@@ -123,17 +123,14 @@ export function DefaultModelFolds({ environmentId }: { readonly environmentId: E
         <Fold
           id={DEFAULT_MODEL_FOLD_HASH.advanced}
           title="Advanced"
-          hint="what your assistant itself replies with"
+          hint="how your assistant connects to its AI"
         >
           <div className="flex flex-col gap-2">
             <p className="text-xs text-muted-foreground">
               Your assistant talks to its AI directly, not through Claude Code or Codex, so its own
-              replies are set here; the work it hands out runs on the default model.
+              replies ("Assistant replies" above) can run on Uno AI, your own plan or a key; the
+              work it hands out runs on the models above.
             </p>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              Now
-              <AssistantModelPicker environmentId={environmentId} testId="settings-assistant-ai" />
-            </div>
             <AssistantPowerPicker
               environmentId={environmentId}
               note="One choice for every assistant on this computer. Uno AI is in your plan; with your own plan or key Uno doesn't charge."

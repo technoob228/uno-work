@@ -4,9 +4,14 @@
  *
  * 13.11: on a test account the assistant's chats ran on GPT-5.6 Luna — the
  * account's onboarding AI was Codex, Codex didn't list `gpt-5.4` (the old
- * default) and the first model of its list won. A machine pick now follows a
- * known order of strength, and never lands on a small / fast model by itself
- * (`luna`, `mini`, `fast`, `haiku`, …). Those stay one explicit choice away.
+ * default) and the first model of its list won. 14.11 (Misha: "Opus 5 is
+ * long not the top — don't hard-code the order"): the strongest model of a
+ * harness is the one the harness itself recommends for this sign-in (Claude
+ * Code's "Default (recommended)", Codex's `isDefault`, see
+ * `ServerProviderModel.isDefault`); the built-in order below is only the
+ * fallback for a harness that doesn't say. Small / fast models (`luna`,
+ * `mini`, `fast`, `haiku`, …) are never the default for complex work — they
+ * are what "Simple tasks" may run on (modelRoles.ts).
  *
  * Pure: no I/O. Readiness is the caller's (server: personRouting.ts).
  *
@@ -14,7 +19,7 @@
  */
 import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
 
-/** Small / fast models: never a machine's default pick. */
+/** Small / fast models: never a machine's default pick for complex work. */
 const WEAK_MODEL_RE = /(^|[-/_.~])(luna|mini|nano|fast|spark|flash|lite|haiku)([-/_.:]|$)/i;
 
 export function isWeakModel(slug: string): boolean {
@@ -22,8 +27,9 @@ export function isWeakModel(slug: string): boolean {
 }
 
 /**
- * Strongest first, per harness. Codex slugs as the ChatGPT plan serves them
- * (assistantLlm.ts `SUBSCRIPTION_MODELS`, Codex `model/list`).
+ * Fallback only — a harness that doesn't say which model it recommends (an
+ * older server or CLI): strongest first, per harness. Codex slugs as the
+ * ChatGPT plan serves them (assistantLlm.ts `SUBSCRIPTION_MODELS`).
  */
 export const STRONG_MODELS_BY_DRIVER: Readonly<Record<string, ReadonlyArray<string>>> = {
   claudeAgent: [
@@ -46,10 +52,20 @@ const KNOWN_LINEUP_DRIVERS: ReadonlySet<string> = new Set([
   "hermes",
 ]);
 
-type Models = ReadonlyArray<Pick<ServerProvider["models"][number], "slug">>;
+type Models = ReadonlyArray<Pick<ServerProvider["models"][number], "slug" | "isDefault">>;
 
-/** The strongest model of {@link STRONG_MODELS_BY_DRIVER} the list offers, or null. */
+/** The model the harness itself recommends for this sign-in, unless it is a small one. */
+export function recommendedListedModel(models: Models): string | null {
+  return models.find((model) => model.isDefault === true && !isWeakModel(model.slug))?.slug ?? null;
+}
+
+/**
+ * The strongest model the list offers: the harness's own recommendation,
+ * else the first of {@link STRONG_MODELS_BY_DRIVER} it lists; null: neither.
+ */
 export function strongestListedModel(driver: string, models: Models): string | null {
+  const recommended = recommendedListedModel(models);
+  if (recommended !== null) return recommended;
   const order = STRONG_MODELS_BY_DRIVER[driver] ?? [];
   return order.find((slug) => models.some((model) => model.slug === slug)) ?? null;
 }
@@ -115,8 +131,9 @@ export interface StrongestReady {
  * The strongest model a ready harness of this machine offers, for work no
  * row of the person's decided:
  *
- * 1. Claude Opus (5.5 first) on the person's own Claude sign-in;
- * 2. Codex's strong models (GPT-5.6 Terra, Sol, GPT-5.5, GPT-5.4) on their plan;
+ * 1. Claude Code's recommended model (else the newest Opus) on the person's
+ *    own Claude sign-in;
+ * 2. Codex's recommended model (else Terra, Sol, GPT-5.5, GPT-5.4) on their plan;
  * 3. Uno AI premium (paid from Uno credit): Claude Code on Uno credits with
  *    Opus, else Uno Code's newest premium Opus-class model.
  *
@@ -142,7 +159,11 @@ export function strongestReadySelection(
     }
     return null;
   };
+  // Claude: what Claude Code recommends (Opus, Fable — whatever is newest
+  // for this plan), else the newest Opus it lists.
   const claudeOpus = (provider: ServerProvider) => {
+    const recommended = recommendedListedModel(provider.models);
+    if (recommended !== null) return recommended;
     const slug = strongestListedModel("claudeAgent", provider.models);
     return slug !== null && opusVersion(slug) !== null ? slug : null;
   };

@@ -12,6 +12,7 @@
  *
  * @module assistantMemory
  */
+import { isWeakModel } from "./modelStrength.ts";
 
 // ── NOTES.md ─────────────────────────────────────────────────────────
 
@@ -460,10 +461,17 @@ export function personRoute(content: string, taskType?: string): PersonRoute | n
   if (rows.length === 0) return null;
   const row = matchedRow(rows, taskType);
   if (row !== undefined) return routeOfRow(row);
-  const harness = shared(rows.map((rule) => rule.harness.trim()));
+  // Work of another kind takes the one harness the person's rows agree on —
+  // but a row for a small model ("Simple tasks → Luna", Settings → AI, 14.11)
+  // says nothing about the rest: it never pulls complex work onto Luna.
+  const agreeing = rows.filter((rule) => isBlankCell(rule.model) || !isWeakModel(rule.model));
+  if (agreeing.length === 0) return null;
+  const harness = shared(agreeing.map((rule) => rule.harness.trim()));
   if (harness === null) return null;
-  const model = shared(rows.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())));
-  const thinking = shared(rows.map((rule) => thinkingOf(rule.effort)));
+  const model = shared(
+    agreeing.map((rule) => (isBlankCell(rule.model) ? null : rule.model.trim())),
+  );
+  const thinking = shared(agreeing.map((rule) => thinkingOf(rule.effort)));
   return { harness, model, thinking, taskType: rows.length === 1 ? rows[0]!.taskType : null };
 }
 
