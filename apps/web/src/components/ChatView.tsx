@@ -89,6 +89,7 @@ import {
 import {
   selectEnvironmentState,
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectThreadsAcrossEnvironments,
   useStore,
 } from "../store";
@@ -1019,6 +1020,13 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  // An answer to the person they have not seen (the Inbox's unread "Answer
+  // to your question"): the feed opens at it (MessagesTimeline).
+  const activeThreadHasUnreadAnswer = useStore((state) =>
+    activeThreadRef
+      ? selectSidebarThreadSummaryByRef(state, activeThreadRef)?.unreadAnswerAt != null
+      : false,
+  );
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
@@ -5233,6 +5241,7 @@ export default function ChatView(props: ChatViewProps) {
                   pendingApprovals={pendingApprovals}
                   respondingRequestIds={respondingRequestIds}
                   onRespondToApproval={onRespondToApproval}
+                  openAtAnswer={activeThreadHasUnreadAnswer}
                   endOfFeed={
                     <>
                       <QueuedMessagesList
@@ -5398,8 +5407,8 @@ export default function ChatView(props: ChatViewProps) {
                       markdownCwd={gitCwd ?? undefined}
                     />
                   ) : null}
-                  {isServerThread &&
-                  (activeThread?.spawnedByThreadId || activeThread?.agentsClosedAt) ? (
+                  {/* Every chat: the strip itself decides (agents may lead the person's own, 13.11). */}
+                  {isServerThread && activeThread ? (
                     <ThreadControlBar
                       environmentId={activeThread.environmentId}
                       threadId={activeThread.id}

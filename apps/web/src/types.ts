@@ -258,6 +258,26 @@ export interface SidebarThreadSummary {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /**
+   * The chats this chat's agent started (derived in the store from their own
+   * summaries, see childChatWork.ts); absent when it started none.
+   */
+  childWork?: ChildChatWork | undefined;
+  /**
+   * The answer to the person's own message is in and they have not opened
+   * the chat since: the Inbox's unread "Answer to your question" item, put
+   * on the summary by the store (unreadAnswers.ts). Agents' turns after it
+   * don't clear it (Misha 13.11).
+   */
+  unreadAnswerAt?: string | undefined;
+}
+
+/** How the chats a chat's agent started are doing. */
+export interface ChildChatWork {
+  /** Still going: working, or waiting for the person's OK or answer. */
+  readonly working: number;
+  /** When the newest of them was started. */
+  readonly latestStartedAt: string;
 }
 
 export interface ThreadSession {

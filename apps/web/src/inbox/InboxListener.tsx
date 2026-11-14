@@ -12,7 +12,10 @@ import {
   listEnvironmentConnections,
   subscribeEnvironmentConnections,
 } from "../environments/runtime";
+import { useStore } from "../store";
+import { unreadAnswersFromInbox } from "../unreadAnswers";
 import { type InboxEntry, updateInbox, useInboxStore } from "./inboxStore";
+import { isPersonCallItem } from "./openRequests.logic";
 import { showSystemNotification, windowIsInFront } from "./systemNotifications";
 import { useOpenInboxItem } from "./useOpenInboxItem";
 
@@ -56,7 +59,10 @@ export function InboxListener() {
     const connections = listEnvironmentConnections();
     const live = new Set<string>(connections.map((connection) => connection.environmentId));
     for (const environmentId of Object.keys(useInboxStore.getState().byEnvironment)) {
-      if (!live.has(environmentId)) useInboxStore.getState().forget(environmentId as EnvironmentId);
+      if (!live.has(environmentId)) {
+        useInboxStore.getState().forget(environmentId as EnvironmentId);
+        useStore.getState().setUnreadAnswers(environmentId as EnvironmentId, new Map());
+      }
     }
     const unsubscribers = connections.map((connection) => {
       const environmentId = connection.environmentId;
@@ -85,20 +91,32 @@ export function InboxListener() {
     };
   }, [connectionsVersion]);
 
-  // Looking at a chat reads its news.
+  // The sidebar keeps a chat's Ready while its answer is unread (any change
+  // of the Inbox: a push from the computer or this window's own Read).
   const byEnvironment = useInboxStore((state) => state.byEnvironment);
+  useEffect(() => {
+    for (const [environmentId, snapshot] of Object.entries(byEnvironment)) {
+      if (!snapshot) continue;
+      useStore
+        .getState()
+        .setUnreadAnswers(environmentId as EnvironmentId, unreadAnswersFromInbox(snapshot.items));
+    }
+  }, [byEnvironment]);
+
+  // Looking at a chat reads its news.
   useEffect(() => {
     const { environmentId, threadId } = params;
     if (!environmentId || !threadId) return;
     const snapshot = byEnvironment[environmentId];
     if (!snapshot) return;
-    // "Finished" and "failed" are news you have now seen. An approval or a
+    // "Finished" and "failed" are news you have now seen, and so is an
+    // agent's call into the chat (it wanted you to look). An approval or a
     // question stays in "Needs you" until it is answered (the daemon reads it then).
     const seen = snapshot.items
       .filter(
         (item) =>
           item.readAt === null &&
-          (item.kind === "agent.done" || item.kind === "agent.error") &&
+          (item.kind === "agent.done" || item.kind === "agent.error" || isPersonCallItem(item)) &&
           item.open?.kind === "thread" &&
           item.open.threadId === threadId,
       )

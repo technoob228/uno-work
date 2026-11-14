@@ -153,6 +153,20 @@ describe("the person's own messages", () => {
     );
     expect(readModel.threads[0]?.latestPersonMessageAt).toBe(T2);
   });
+
+  it("counts an automation the person set up, not the daemon's other jobs (13.11)", async () => {
+    let readModel = await created(undefined);
+    readModel = await project(
+      readModel,
+      userMessage("m-sync", T1, { kind: "system", component: "project-sync" }),
+    );
+    expect(readModel.threads[0]?.latestPersonMessageAt ?? null).toBeNull();
+    readModel = await project(
+      readModel,
+      userMessage("m-auto", T2, { kind: "system", component: "automations", reason: "daily" }),
+    );
+    expect(readModel.threads[0]?.latestPersonMessageAt).toBe(T2);
+  });
 });
 
 describe("calling the person into a chat", () => {

@@ -87,7 +87,14 @@ describe("sidebar D: marks", () => {
   it("shows Your turn only for a finished chat that waits on the person", () => {
     expect(dRowMark("ready", true)).toBe("your-turn");
     expect(dRowMark("ready", false)).toBeNull();
+    // An agent called the person in: Needs you, not Ready (Misha 13.11).
+    expect(dRowMark("ready", "called")).toBe("called");
+    expect(dRowMark("ready", "ready")).toBe("your-turn");
+    expect(dRowMark("ready", null)).toBeNull();
     expect(dRowMark("working", true)).toBe("working");
+    // Agents work after an answer the person has not seen: the answer shows.
+    expect(dRowMark("working", "ready")).toBe("your-turn");
+    expect(dRowMark("working", null)).toBe("working");
     expect(dRowMark("approval", false)).toBe("approval");
     expect(dRowMark("stopped", false)).toBe("stopped");
   });
@@ -288,6 +295,7 @@ describe("sidebar D grouped by status", () => {
   it("maps every mark to a section", () => {
     expect(statusSectionOf("approval")).toBe("needs-you");
     expect(statusSectionOf("input")).toBe("needs-you");
+    expect(statusSectionOf("called")).toBe("needs-you");
     expect(statusSectionOf("your-turn")).toBe("your-turn");
     expect(statusSectionOf("failed")).toBe("failed");
     expect(statusSectionOf("stopped")).toBe("stopped");

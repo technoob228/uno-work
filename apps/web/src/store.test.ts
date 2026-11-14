@@ -26,6 +26,8 @@ import {
   selectThreadExistsByRef,
   setThreadArchivedAt,
   setThreadBranch,
+  setUnreadAnswers,
+  selectSidebarThreadSummaryByRef,
   selectThreadsAcrossEnvironments,
   type AppState,
   type EnvironmentState,
@@ -1423,5 +1425,59 @@ describe("computers lifecycle events (CONTRACT.md §7.6)", () => {
     expect(
       localEnvironmentStateOf(next).projectById[ProjectId.make("project-1")]?.computer,
     ).toEqual(computer);
+  });
+});
+
+describe("unread answers from the Inbox (Misha 13.11)", () => {
+  const upsert = (state: AppState, sequence: number, title: string) =>
+    applyShellEvent(
+      state,
+      {
+        kind: "thread-upserted",
+        sequence,
+        thread: {
+          id: ThreadId.make("thread-1"),
+          projectId: ProjectId.make("project-1"),
+          title,
+          modelSelection: { instanceId: ProviderInstanceId.make("harness-fake"), model: "fake-1" },
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          branch: null,
+          worktreePath: null,
+          latestTurn: null,
+          createdAt: "2026-11-13T09:00:00.000Z",
+          updatedAt: `2026-11-13T10:0${sequence}:00.000Z`,
+          archivedAt: null,
+          pinnedAt: null,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        } as unknown as Extract<
+          Parameters<typeof applyShellEvent>[1],
+          { kind: "thread-upserted" }
+        >["thread"],
+      },
+      localEnvironmentId,
+    );
+
+  it("stay on a chat's summary when the chat changes, until the Inbox reads them", () => {
+    const ref = scopeThreadRef(localEnvironmentId, ThreadId.make("thread-1"));
+    const at = "2026-11-13T10:00:00.000Z";
+    const marked = setUnreadAnswers(
+      upsert(makeEmptyState(), 1, "Pricing page"),
+      localEnvironmentId,
+      new Map([[ThreadId.make("thread-1"), at]]),
+    );
+    expect(selectSidebarThreadSummaryByRef(marked, ref)?.unreadAnswerAt).toBe(at);
+    // An agent's turn rewrites the summary: the answer stays on it.
+    const rewritten = upsert(marked, 2, "Pricing page, by an agent");
+    expect(selectSidebarThreadSummaryByRef(rewritten, ref)?.title).toBe(
+      "Pricing page, by an agent",
+    );
+    expect(selectSidebarThreadSummaryByRef(rewritten, ref)?.unreadAnswerAt).toBe(at);
+    const read = setUnreadAnswers(rewritten, localEnvironmentId, new Map());
+    expect(selectSidebarThreadSummaryByRef(read, ref)?.unreadAnswerAt).toBeUndefined();
   });
 });

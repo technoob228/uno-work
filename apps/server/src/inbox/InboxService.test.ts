@@ -88,7 +88,7 @@ describe("InboxService", () => {
       expect(snapshot.items[0]).toMatchObject({
         kind: "agent.done",
         title: "Landing page for the bakery",
-        body: "Finished — Done — button added.",
+        body: "Answer to your question: Done — button added.",
         open: { kind: "thread", threadId: "t1" },
       });
       await Effect.runPromise(
@@ -112,6 +112,60 @@ describe("InboxService", () => {
       expect(snapshot.unread).toBe(1);
       await Effect.runPromise(service.update({ action: "readAll" }));
       expect((await Effect.runPromise(service.snapshot)).unread).toBe(0);
+    });
+  });
+
+  it("a call into a chat is a Needs-you item until the agent takes it back", async () => {
+    await run(async (service, publish) => {
+      await publish(event("thread.person-called", { threadId: "t1", reason: "Pick a plan" }));
+      let snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(1);
+      expect(snapshot.items[0]).toMatchObject({
+        kind: "agent.input",
+        title: "Landing page for the bakery",
+        body: "Needs you: Pick a plan",
+        open: { kind: "thread", threadId: "t1" },
+      });
+      await publish(event("thread.person-released", { threadId: "t1" }));
+      snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(0);
+    });
+  });
+
+  it("the answer to the person stays unread through three agent turns, until they open the chat (Misha 13.11)", async () => {
+    const agent = { kind: "agent", threadId: "helper" };
+    await run(async (service, publish) => {
+      const turn = async (origin?: unknown) => {
+        await publish({
+          ...event("thread.turn-start-requested", { threadId: "t1" }),
+          metadata: origin === undefined ? {} : { origin },
+        } as unknown as OrchestrationEvent);
+        for (const status of ["running", "ready"]) {
+          await publish(
+            event("thread.session-set", {
+              threadId: "t1",
+              session: { status, activeTurnId: status === "running" ? "x" : null, lastError: null },
+            }),
+          );
+        }
+      };
+      await turn();
+      await turn(agent);
+      await turn(agent);
+      await turn(agent);
+      let snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(1);
+      expect(snapshot.items).toHaveLength(1);
+      const answer = snapshot.items[0]!;
+      expect(answer).toMatchObject({
+        kind: "agent.done",
+        body: "Answer to your question: Done — button added.",
+        readAt: null,
+      });
+      // The person opens the chat: the window reads its news.
+      await Effect.runPromise(service.update({ action: "read", ids: [answer.id] }));
+      snapshot = await Effect.runPromise(service.snapshot);
+      expect(snapshot.unread).toBe(0);
     });
   });
 });

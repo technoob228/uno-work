@@ -57,6 +57,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  CircleCheckIcon,
   EyeIcon,
   EllipsisIcon,
   FileIcon,
@@ -142,6 +143,7 @@ interface TimelineRowSharedState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
+  onToggleAgentTalk: () => void;
   /** Call before opening/closing a part of the feed: at the end, the end stays in view. */
   onDisclosureToggle: () => void;
   respondingRequestIds: ReadonlyArray<ApprovalRequestId>;
@@ -212,6 +214,12 @@ interface MessagesTimelineProps {
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<void>;
+  /**
+   * The person opens the chat for an answer they have not seen (the
+   * sidebar's held Ready): the feed opens at "Your answer", not at the end.
+   * Read once, when the chat opens.
+   */
+  openAtAnswer?: boolean;
 }
 
 /** Shown only if loading takes a noticeable moment: a quick load stays blank. */
@@ -274,9 +282,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   respondingRequestIds = EMPTY_REQUEST_IDS,
   onRespondToApproval,
   endOfFeed = null,
+  openAtAnswer = false,
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
+  // The agents' talk after the answer to the person, opened (Misha 13.11).
+  const [agentTalkExpanded, setAgentTalkExpanded] = useState(false);
+  // Opening the chat reads the answer, so the prop turns false right after.
+  const [openedAtAnswer] = useState(openAtAnswer);
   // A toggle made at the end keeps the end in view while rows re-measure;
   // anywhere else the list holds the toggled row in place (upstream 1cfd1c1a44).
   const pinEndUntilRef = useRef(0);
@@ -306,6 +319,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     },
     [onDisclosureToggle],
   );
+  const onToggleAgentTalk = useCallback(() => {
+    onDisclosureToggle();
+    setAgentTalkExpanded((current) => !current);
+  }, [onDisclosureToggle]);
   const latestTurnId = latestTurn?.turnId ?? null;
   const latestTurnState = latestTurn?.state ?? null;
   const latestTurnStartedAt = latestTurn?.startedAt ?? null;
@@ -330,6 +347,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             : null,
         expandedTurnIds,
         pendingApprovals,
+        agentTalkExpanded,
       }),
     [
       timelineEntries,
@@ -344,6 +362,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurnCompletedAt,
       expandedTurnIds,
       pendingApprovals,
+      agentTalkExpanded,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -390,13 +409,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
 
-    onIsAtEndChange(true);
+    // Opened for an answer agents talked after: start at "Your answer".
+    const answerIndex = openedAtAnswer ? rows.findIndex((row) => row.kind === "answer-anchor") : -1;
+    if (answerIndex < 0) onIsAtEndChange(true);
     const frameId = window.requestAnimationFrame(() => {
+      if (answerIndex >= 0) {
+        void listRef.current?.scrollToIndex?.({
+          index: answerIndex,
+          animated: false,
+          viewOffset: 12,
+        });
+        return;
+      }
       void listRef.current?.scrollToEnd?.({ animated: false });
     });
     return () => {
       window.cancelAnimationFrame(frameId);
     };
+    // Only the first rows decide where the chat opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listRef, onIsAtEndChange, rows.length]);
 
   // Memoised context value — only changes on state transitions, NOT on
@@ -418,6 +449,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      onToggleAgentTalk,
       onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
@@ -438,6 +470,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onToggleTurnFold,
+      onToggleAgentTalk,
       onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
@@ -580,6 +613,16 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           pendingCount={row.pendingCount}
           isResponding={ctx.respondingRequestIds.includes(row.approval.requestId)}
           onRespondToApproval={ctx.onRespondToApproval}
+        />
+      )}
+
+      {row.kind === "answer-anchor" && <AnswerAnchorRow />}
+
+      {row.kind === "agent-talk-fold" && (
+        <AgentTalkFoldRow
+          agentMessageCount={row.agentMessageCount}
+          expanded={row.expanded}
+          createdAt={row.createdAt}
         />
       )}
 
@@ -1097,6 +1140,49 @@ function TimelineRowTimestamp(props: { createdAt: string; timestampFormat: Times
     </span>
   );
 }
+
+/** "Your answer": above the answer to the person's message when agents talked after it. */
+const AnswerAnchorRow = memo(function AnswerAnchorRow() {
+  return (
+    <div
+      className="mx-1 flex items-center gap-1.5 pb-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300/90"
+      data-testid="answer-anchor"
+    >
+      <CircleCheckIcon aria-hidden className="size-3.5 shrink-0" />
+      <span>Your answer</span>
+    </div>
+  );
+});
+
+/** "Agents talked after this (3)": the agents' talk after the answer to the person, folded. */
+const AgentTalkFoldRow = memo(function AgentTalkFoldRow(props: {
+  agentMessageCount: number;
+  expanded: boolean;
+  createdAt: string;
+}) {
+  const { onToggleAgentTalk, timestampFormat } = use(TimelineRowCtx);
+  const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
+  return (
+    <div
+      className="group/timeline-row mx-1 flex items-center gap-3 border-b border-border/60 pb-2"
+      data-testid="agent-talk-fold"
+    >
+      <button
+        type="button"
+        data-scroll-anchor-ignore
+        aria-expanded={props.expanded}
+        className="group/fold flex items-center gap-1.5 rounded-md py-0.5 pr-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
+        onClick={onToggleAgentTalk}
+      >
+        <BotIcon aria-hidden className="size-3.5 shrink-0" />
+        <span>Agents talked after this ({props.agentMessageCount})</span>
+        <ToggleIcon className="size-3.5 shrink-0 opacity-60 group-hover/fold:opacity-100" />
+      </button>
+      <span className="flex-1" />
+      <TimelineRowTimestamp createdAt={props.createdAt} timestampFormat={timestampFormat} />
+    </div>
+  );
+});
 
 /** "Worked for 2m 10s" — a finished turn's steps and notes, folded (upstream 1916ac6d55). */
 const TurnFoldRow = memo(function TurnFoldRow(props: {

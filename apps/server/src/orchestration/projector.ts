@@ -9,7 +9,7 @@ import { Effect, Schema } from "effect";
 
 import { capThreadActivities } from "@t3tools/shared/htmlRender";
 
-import { isPersonOrigin, startedByFromOrigin } from "./commandOrigin.ts";
+import { isOnPersonsBehalf, startedByFromOrigin } from "./commandOrigin.ts";
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
   MessageSentPayloadSchema,
@@ -660,12 +660,13 @@ export function projectEvent(
             )
           : [...thread.messages, message];
         const cappedMessages = messages.slice(-MAX_THREAD_MESSAGES);
-        // The person's own message (not an agent's, Uno's or an app's): what
+        // The person's own message or their automation's (not an agent's, Uno's
+        // or an app's): what
         // the chat does next answers them.
         const personWrote =
           existingMessage === undefined &&
           payload.role === "user" &&
-          isPersonOrigin(event.metadata.origin) &&
+          isOnPersonsBehalf(event.metadata.origin) &&
           (thread.latestPersonMessageAt ?? "") < payload.createdAt;
 
         return {

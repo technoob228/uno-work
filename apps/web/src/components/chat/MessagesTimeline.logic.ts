@@ -67,6 +67,20 @@ export type MessagesTimelineRow =
       htmlRender: HtmlRenderReference;
     }
   | {
+      /** "Your answer": above the answer to the person's message, when agents talked after it. */
+      kind: "answer-anchor";
+      id: string;
+      createdAt: string;
+    }
+  | {
+      /** What agents said in the chat after the answer to the person: "Agents talked after this (3)". */
+      kind: "agent-talk-fold";
+      id: string;
+      createdAt: string;
+      agentMessageCount: number;
+      expanded: boolean;
+    }
+  | {
       /** The chat moved to another agent: a quiet line. */
       kind: "agent-switch";
       id: string;
@@ -308,6 +322,59 @@ export function deriveTurnFolds(input: {
   return foldsByAnchorEntryId;
 }
 
+export interface AgentTalkFold {
+  /** The answer to the person's message: its turn's last answer before agents wrote. */
+  answerEntryId: string;
+  /** Everything from the first message another chat's agent sent after it. */
+  firstHiddenEntryId: string;
+  hiddenEntryIds: ReadonlySet<string>;
+  /** How many messages other chats' agents sent in it. */
+  agentMessageCount: number;
+}
+
+const isAgentSentMessage = (entry: TimelineEntry) =>
+  entry.kind === "message" && entry.message.role === "user" && entry.message.sentByThreadId != null;
+
+/**
+ * The person asked, the chat answered, then agents talked here (Misha 13.11):
+ * the answer stays the last thing the person sees, the agents' talk after it
+ * folds behind one row. Null when the person's latest message got no answer
+ * before an agent wrote, or nobody wrote after it.
+ */
+export function deriveAgentTalkFold(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+): AgentTalkFold | null {
+  const personIndex = timelineEntries.findLastIndex(
+    (entry) =>
+      entry.kind === "message" &&
+      entry.message.role === "user" &&
+      entry.message.sentByThreadId == null,
+  );
+  if (personIndex < 0) return null;
+  const firstAgentIndex = timelineEntries.findIndex(
+    (entry, index) => index > personIndex && isAgentSentMessage(entry),
+  );
+  if (firstAgentIndex < 0) return null;
+  let answerIndex = -1;
+  for (let index = firstAgentIndex - 1; index > personIndex; index -= 1) {
+    const entry = timelineEntries[index];
+    if (entry?.kind === "message" && entry.message.role === "assistant") {
+      answerIndex = index;
+      break;
+    }
+  }
+  const answer = timelineEntries[answerIndex];
+  const firstHidden = timelineEntries[firstAgentIndex];
+  if (!answer || !firstHidden) return null;
+  const hidden = timelineEntries.slice(firstAgentIndex);
+  return {
+    answerEntryId: answer.id,
+    firstHiddenEntryId: firstHidden.id,
+    hiddenEntryIds: new Set(hidden.map((entry) => entry.id)),
+    agentMessageCount: hidden.filter(isAgentSentMessage).length,
+  };
+}
+
 /**
  * The live line's thought: the latest reasoning row of the running turn
  * (after the person's last message), as one sentence.
@@ -340,6 +407,8 @@ export function deriveMessagesTimelineRows(input: {
   latestTurn?: TimelineLatestTurn | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
   pendingApprovals?: ReadonlyArray<PendingApproval>;
+  /** The agents' talk after the answer to the person is open. */
+  agentTalkExpanded?: boolean;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -360,6 +429,13 @@ export function deriveMessagesTimelineRows(input: {
     if (input.expandedTurnIds?.has(fold.turnId)) continue;
     for (const entryId of fold.hiddenEntryIds) collapsedEntryIds.add(entryId);
   }
+  const agentTalk = deriveAgentTalkFold(input.timelineEntries);
+  const agentTalkCollapsed =
+    agentTalk !== null && input.agentTalkExpanded !== true ? agentTalk.hiddenEntryIds : null;
+  if (agentTalkCollapsed) for (const entryId of agentTalkCollapsed) collapsedEntryIds.add(entryId);
+  // The answer stays in sight even when its turn went on after an agent
+  // wrote (one turn, folded to its last answer — which is the agents').
+  if (agentTalk !== null) collapsedEntryIds.delete(agentTalk.answerEntryId);
   const lastUserIndex = input.timelineEntries.findLastIndex(
     (entry) => entry.kind === "message" && entry.message.role === "user",
   );
@@ -368,6 +444,20 @@ export function deriveMessagesTimelineRows(input: {
     const timelineEntry = input.timelineEntries[index];
     if (!timelineEntry) {
       continue;
+    }
+
+    if (agentTalk !== null) {
+      if (timelineEntry.id === agentTalk.firstHiddenEntryId) {
+        nextRows.push({
+          kind: "agent-talk-fold",
+          id: "agent-talk-fold",
+          createdAt: timelineEntry.createdAt,
+          agentMessageCount: agentTalk.agentMessageCount,
+          expanded: input.agentTalkExpanded === true,
+        });
+      }
+      // Folded with the agents' talk, a turn's own fold row goes too.
+      if (agentTalkCollapsed?.has(timelineEntry.id)) continue;
     }
 
     const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
@@ -379,6 +469,15 @@ export function deriveMessagesTimelineRows(input: {
         turnId: turnFold.turnId,
         label: turnFold.label,
         expanded: input.expandedTurnIds?.has(turnFold.turnId) ?? false,
+      });
+    }
+
+    // "Your answer" sits right above the answer, under its turn's fold row.
+    if (agentTalk !== null && timelineEntry.id === agentTalk.answerEntryId) {
+      nextRows.push({
+        kind: "answer-anchor",
+        id: "answer-anchor",
+        createdAt: timelineEntry.createdAt,
       });
     }
 
@@ -554,6 +653,18 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
     case "agent-switch":
     case "approval-expired":
       return a.text === (b as typeof a).text;
+
+    case "answer-anchor":
+      return a.createdAt === (b as typeof a).createdAt;
+
+    case "agent-talk-fold": {
+      const bf = b as typeof a;
+      return (
+        a.createdAt === bf.createdAt &&
+        a.agentMessageCount === bf.agentMessageCount &&
+        a.expanded === bf.expanded
+      );
+    }
 
     case "support-draft":
       return a.draft === (b as typeof a).draft;

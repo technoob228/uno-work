@@ -175,6 +175,8 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       threadSnooze: true,
       threadSettlement: true,
       agentThreads: true,
+      // The strip above the composer of a chat agents talk in (13.11) and its "Don't let agents write here".
+      agentsCloseChat: true,
       threadContinueDirect: true,
       threadContinuePages: true,
       assistantChat: true,
@@ -430,7 +432,13 @@ export interface ChatSpec {
   readonly pinned?: boolean;
   /** Runs on the person's own Claude (T3 port 30.10, `plans=full`); Uno AI otherwise. */
   readonly harness?: "claude";
-  readonly messages: ReadonlyArray<readonly ["user" | "assistant", string]>;
+  /**
+   * Who wrote each line. A user line may name the chat whose agent sent it
+   * (third item); a chat with a parent gets its first line from the parent.
+   */
+  readonly messages: ReadonlyArray<readonly ["user" | "assistant", string, string?]>;
+  /** An agent called the person in (`chat_call_person`), with this reason (Misha 13.11). */
+  readonly call?: string;
 }
 
 export const CHATS: ChatSpec[] = [
@@ -1127,13 +1135,16 @@ export function buildThread(chat: ChatSpec) {
   const running = chat.state === "running";
   const failed = chat.state === "failed";
   const step = chat.messages.length > 1 ? 1 : 0;
-  const messages = chat.messages.map(([role, text], index) => {
+  const messages = chat.messages.map(([role, text, sentBy], index) => {
     const at = ago(chat.minutesAgo + (chat.messages.length - 1 - index) * (step + 2));
     const last = index === chat.messages.length - 1;
+    const sentByThreadId =
+      role === "user" ? (sentBy ?? (index === 0 ? chat.parent : undefined)) : undefined;
     return {
       id: `${chat.id}-m${index}`,
       role,
       text,
+      ...(sentByThreadId ? { sentByThreadId } : {}),
       turnId: role === "assistant" ? turnId : null,
       streaming: running && last && role === "assistant",
       createdAt: index === 0 ? created : at,
@@ -1180,6 +1191,10 @@ export function buildThread(chat: ChatSpec) {
     controller: chat.parent ? "agent" : "human",
     controlChangedAt: null,
     assistantRole: chat.role === "assistant" ? "chat" : chat.role === "from-uno" ? "spawned" : null,
+    // Who started it (28.10) and an agent's call (13.11), as a daemon of today says.
+    startedBy: chat.parent ? (chat.role === "from-uno" ? "assistant" : "agent") : null,
+    personCalledAt: chat.call ? updated : null,
+    personCallReason: chat.call ?? null,
     deletedAt: null,
     messages,
     proposedPlans: [],
@@ -1302,7 +1317,16 @@ function demoDevDetails(thread: WireThread) {
 
 export function toShellThread(thread: WireThread) {
   const pending = pendingOf(thread);
-  const lastUser = [...thread.messages].reverse().find((message) => message.role === "user");
+  const userLines = thread.messages.filter((message) => message.role === "user");
+  const lastUser = userLines.at(-1);
+  // The person's own latest line: no other chat's agent sent it.
+  const lastPersons = userLines.findLast(
+    (message) => (message as { sentByThreadId?: string }).sentByThreadId === undefined,
+  );
+  // A chat the demo makes as it goes says nothing of its author: an old daemon.
+  const owner = thread as Partial<
+    Pick<WireThread, "startedBy" | "personCalledAt" | "personCallReason">
+  >;
   return {
     id: thread.id,
     projectId: thread.projectId,
@@ -1324,9 +1348,18 @@ export function toShellThread(thread: WireThread) {
     spawnedByThreadId: thread.spawnedByThreadId,
     controller: thread.controller,
     controlChangedAt: null,
+    agentsClosedAt: (thread as { agentsClosedAt?: string | null }).agentsClosedAt ?? null,
     assistantRole: thread.assistantRole,
     session: thread.session,
     latestUserMessageAt: lastUser?.createdAt ?? null,
+    ...(owner.startedBy !== undefined
+      ? {
+          startedBy: owner.startedBy,
+          latestPersonMessageAt: lastPersons?.createdAt ?? null,
+          personCalledAt: owner.personCalledAt ?? null,
+          personCallReason: owner.personCallReason ?? null,
+        }
+      : {}),
     hasPendingApprovals: pending.approvals,
     hasPendingUserInput: pending.input,
     hasActionableProposedPlan: false,

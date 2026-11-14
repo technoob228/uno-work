@@ -26,19 +26,39 @@ export const SIDEBAR_D_PANEL_OPEN_DELAY_MS = 150;
 /** The panel hides this long after the pointer leaves it (and the rail). */
 export const SIDEBAR_D_PANEL_CLOSE_DELAY_MS = 300;
 
-/** The one mark a D row shows at its end. */
-export type DRowMark = "approval" | "input" | "your-turn" | "failed" | "stopped" | "working" | null;
+/**
+ * The one mark a D row shows at its end. "called": an agent called the
+ * person in (`chat_call_person`) — "Needs you", with the approvals and the
+ * questions (Misha 13.11).
+ */
+export type DRowMark =
+  | "approval"
+  | "input"
+  | "called"
+  | "your-turn"
+  | "failed"
+  | "stopped"
+  | "working"
+  | null;
 
-export function dRowMark(status: SidebarThreadStatus, yourTurn: boolean): DRowMark {
+/** `yourTurn`: isYourTurn, or yourTurnKind to tell a call from a finished turn. */
+export function dRowMark(
+  status: SidebarThreadStatus,
+  yourTurn: boolean | "called" | "ready" | null,
+): DRowMark {
   switch (status) {
     case "approval":
     case "input":
     case "failed":
     case "stopped":
-    case "working":
       return status;
+    case "working":
+      // Agents work in a chat whose answer the person has not seen: the
+      // answer is the news (Misha 13.11); a call into it is too.
+      // (Only a kind says so: a plain `true` predates it.)
+      return yourTurn === "called" ? "called" : yourTurn === "ready" ? "your-turn" : status;
     case "ready":
-      return yourTurn ? "your-turn" : null;
+      return yourTurn === "called" ? "called" : yourTurn ? "your-turn" : null;
   }
 }
 
@@ -50,6 +70,7 @@ export function isRunningStatus(status: SidebarThreadStatus): boolean {
 const MARK_RANK: Readonly<Record<Exclude<DRowMark, null>, number>> = {
   approval: 0,
   input: 0,
+  called: 0,
   "your-turn": 0,
   failed: 1,
   stopped: 1,
@@ -228,6 +249,7 @@ export function statusSectionOf(mark: DRowMark): DStatusSectionId {
   switch (mark) {
     case "approval":
     case "input":
+    case "called":
       return "needs-you";
     case "your-turn":
     case "failed":

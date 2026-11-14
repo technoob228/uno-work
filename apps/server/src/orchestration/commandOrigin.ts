@@ -67,6 +67,15 @@ export const isPersonOrigin = (origin: OrchestrationCommandOrigin | undefined): 
   origin === undefined || origin.kind === "connector";
 
 /**
+ * A message that asks something of the chat for the person: theirs, or an
+ * automation they set up (its turn answers them, Misha 13.11). Not another
+ * chat's agent, Uno, an app or a teammate. What `latestPersonMessageAt`
+ * tracks, and what decides whether a finished turn is news for them.
+ */
+export const isOnPersonsBehalf = (origin: OrchestrationCommandOrigin | undefined): boolean =>
+  isPersonOrigin(origin) || (origin?.kind === "system" && origin.component === "automations");
+
+/**
  * Who started a chat, from the origin of the command that created it (see
  * ThreadStartedBy). Migration 051 backfills with the same table.
  */

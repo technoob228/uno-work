@@ -782,6 +782,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
         if (typeof command.title === "string") thread.title = command.title;
         if (command.pinnedAt !== undefined) thread.pinnedAt = command.pinnedAt as string | null;
         if (command.modelSelection) thread.modelSelection = command.modelSelection as never;
+        // "Don't let agents write here" on the strip above the composer.
+        if (command.agentsClosedAt !== undefined) {
+          (thread as Record<string, unknown>).agentsClosedAt = command.agentsClosedAt;
+        }
       }
       break;
     case "thread.delete":

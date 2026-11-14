@@ -2936,7 +2936,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_call_person",
     group: "chats",
     description:
-      "Call the person into a chat (this one by default, or another chat by threadId): a chat started by an agent or by Uno then shows as theirs in the sidebar until they open it, write there or mark it done. Use it when they should look at a result there; a question or an approval calls them anyway. reason: a few words they will see.",
+      'Call the person into a chat (this one by default, or another chat by threadId): it shows as theirs in the sidebar ("Needs you"), in their Inbox and as a notification until they open it, write there or mark it done. Use it when they should look at a result there — also on yourself when you finish what they asked after waiting for other chats; working for another agent or Uno, don\'t call them unless nothing moves without them. A question or an approval calls them anyway. reason: a few words they will see.',
     inputSchema: {
       type: "object",
       properties: {
