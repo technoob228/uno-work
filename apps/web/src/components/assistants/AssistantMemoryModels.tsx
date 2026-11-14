@@ -25,7 +25,7 @@ import {
   type EnvironmentId,
   type ModelSelection,
 } from "@t3tools/contracts";
-import { withSimpleTask } from "@t3tools/shared/modelRoles";
+import { simpleTaskRule, withSimpleTask } from "@t3tools/shared/modelRoles";
 import {
   merge3,
   splitAgentsProfile,
@@ -883,11 +883,32 @@ export async function saveSimpleTaskRow(input: {
   readonly projectIds: ReadonlyArray<string>;
   readonly selection: Pick<ModelSelection, "instanceId" | "model">;
   readonly queryClient: QueryClient;
+  /**
+   * Uno applying its set by itself (useAutoModelRoles): an assistant whose
+   * row the person set is skipped — unless it is still this, what Uno set.
+   */
+  readonly auto?: { readonly unoSet: Pick<ModelSelection, "instanceId" | "model"> | null };
 }): Promise<void> {
   for (const projectId of input.projectIds) {
     const target = { environmentId: input.environmentId, projectId, name: "ROUTING.md" as const };
     const base = (await readAssistantFile(target)).content ?? "";
-    const next = writeRouting(base, withSimpleTask(parseRouting(base).rules, input.selection));
+    const rules = parseRouting(base).rules;
+    if (input.auto) {
+      if (base.trim() === "") continue; // no assistant set up here yet
+      const row = simpleTaskRule(rules);
+      if (row?.source === "you") {
+        const unoSet = input.auto.unoSet;
+        if (!unoSet || row.harness !== unoSet.instanceId || row.model !== unoSet.model) continue;
+      }
+    }
+    const next = writeRouting(
+      base,
+      withSimpleTask(
+        rules,
+        input.selection,
+        input.auto ? "Uno's set for your plans" : "Settings → AI → Simple tasks",
+      ),
+    );
     if (next !== base) await writeAssistantFile({ ...target, content: next, base });
     await input.queryClient.invalidateQueries({
       queryKey: ["uno-assistant-file", input.environmentId, projectId, "ROUTING.md"],

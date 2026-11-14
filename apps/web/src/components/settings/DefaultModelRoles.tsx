@@ -21,16 +21,14 @@ import {
   type EnvironmentId,
   type ModelSelection,
   ProviderInstanceId,
-  type ServerProvider,
-  isProviderAvailable,
 } from "@t3tools/contracts";
 import { sameSelection, simpleTaskRule, suggestRoles } from "@t3tools/shared/modelRoles";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useAssistantLlm } from "../../assistant/useAssistantLlm";
+import { useEnvironmentSettings } from "../../environments/settings/serverSettings";
 import { AppliedRules, saveSimpleTaskRow, useRouting } from "../assistants/AssistantMemoryModels";
-import { useAssistantTeam, useTeamShown } from "../assistants/useAssistantTeam";
 import { AssistantModelPicker } from "../chat/AssistantEngine";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { Button } from "../ui/button";
@@ -43,18 +41,7 @@ import {
   useDefaultModelState,
 } from "./NewChatDefaultsRows";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
-
-/** A harness that can take a chat now; sign-ins are modelRoles' to check. */
-function isReadyHere(provider: ServerProvider): boolean {
-  return (
-    provider.enabled &&
-    provider.installed &&
-    isProviderAvailable(provider) &&
-    provider.status !== "disabled" &&
-    provider.status !== "error" &&
-    provider.models.length > 0
-  );
-}
+import { isReadyHere, useAssistantProjectIdsHere } from "./useAutoModelRoles";
 
 function RoleLine(props: {
   readonly title: string;
@@ -83,8 +70,6 @@ export function DefaultModelRoles({ environmentId }: { readonly environmentId: E
   const { providers, effective, auto, picker, pickerEnvironmentId, save, scope, setHere } = state;
   const llm = useAssistantLlm(environmentId);
   const queryClient = useQueryClient();
-  const team = useAssistantTeam();
-  const teamShown = useTeamShown();
   const uno = useRouting(environmentId, ASSISTANT_PROJECT_ID, "Uno");
   const [applying, setApplying] = useState(false);
 
@@ -95,14 +80,8 @@ export function DefaultModelRoles({ environmentId }: { readonly environmentId: E
   );
 
   // Every assistant on this computer gets the same "Simple tasks" row.
-  const projectIds = useMemo(() => {
-    const ids = teamShown
-      ? team
-          .filter((member) => member.environmentId === environmentId && !member.revoked)
-          .map((member) => member.projectId)
-      : [];
-    return ids.includes(ASSISTANT_PROJECT_ID) ? ids : [ASSISTANT_PROJECT_ID, ...ids];
-  }, [team, teamShown, environmentId]);
+  const projectIds = useAssistantProjectIdsHere(environmentId);
+  const unoSetAt = useEnvironmentSettings(environmentId)?.modelRolesPreset?.appliedAt ?? null;
 
   const complexNow = effective ?? auto;
   const simpleRow = simpleTaskRule(uno.parsed.rules);
@@ -174,7 +153,9 @@ export function DefaultModelRoles({ environmentId }: { readonly environmentId: E
         <>
           {roles.why}{" "}
           {allInUse && roles.sources.length > 0 ? (
-            <span className="text-success-foreground">In use.</span>
+            <span className="text-success-foreground">
+              {unoSetAt ? "In use: Uno set it when your plans connected." : "In use."}
+            </span>
           ) : null}
         </>
       }

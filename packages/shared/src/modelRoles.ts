@@ -175,6 +175,7 @@ export function simpleTaskRule(rules: ReadonlyArray<RoutingRule>): RoutingRule |
 export function withSimpleTask(
   rules: ReadonlyArray<RoutingRule>,
   selection: Pick<ModelSelection, "instanceId" | "model">,
+  note = "Settings → AI → Simple tasks",
 ): ReadonlyArray<RoutingRule> {
   const current = simpleTaskRule(rules);
   const row: RoutingRule = {
@@ -183,7 +184,7 @@ export function withSimpleTask(
     model: selection.model,
     effort: current?.effort ?? "",
     source: "you",
-    note: "Settings → AI → Simple tasks",
+    note,
   };
   return current === null ? [...rules, row] : rules.map((rule) => (rule === current ? row : rule));
 }
@@ -209,7 +210,7 @@ export interface AutoRolesPlan {
   readonly preset: ModelRolesPreset;
 }
 
-const OWN_PLAN_SOURCES: ReadonlyArray<PlanSource> = ["claude", "codex"];
+const OWN_PLAN_SOURCES: ReadonlySet<string> = new Set<PlanSource>(["claude", "codex"]);
 const sameReply = (
   a: { readonly provider: string; readonly model: string } | undefined | null,
   b: { readonly provider: string; readonly model: string } | undefined | null,
@@ -233,11 +234,9 @@ export function planAutoRoles(input: {
 }): AutoRolesPlan | null {
   const { roles, preset, current } = input;
   if (roles.sources.length === 0) return null;
-  const ownPlanNow = roles.sources.some((source) => OWN_PLAN_SOURCES.includes(source));
+  const ownPlanNow = roles.sources.some((source) => OWN_PLAN_SOURCES.has(source));
   if (preset) {
-    const ownPlanThen = preset.sources.some((source) =>
-      OWN_PLAN_SOURCES.includes(source as PlanSource),
-    );
+    const ownPlanThen = preset.sources.some((source) => OWN_PLAN_SOURCES.has(source));
     if (ownPlanThen || !ownPlanNow) return null;
   }
 

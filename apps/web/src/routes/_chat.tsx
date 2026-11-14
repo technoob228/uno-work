@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useFolderChats } from "../hooks/useFolderChats";
@@ -13,7 +14,9 @@ import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
+import { useAutoModelRoles } from "~/components/settings/useAutoModelRoles";
 import { useDefaultModelMirror } from "~/components/settings/useDefaultModelMirror";
+import { useActiveMachine } from "~/hooks/useActiveMachine";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
 import { liteRedirectHref } from "~/lite/webLite";
@@ -131,6 +134,7 @@ function ChatRouteLayout() {
       <ChatRouteGlobalShortcuts />
       <PromptLinkBridge />
       <DefaultModelMirror />
+      <AutoModelRoles />
       <Outlet />
     </>
   );
@@ -139,6 +143,19 @@ function ChatRouteLayout() {
 /** Settings → AI "Default model" reaches every computer's server (13.11 v2). */
 function DefaultModelMirror() {
   useDefaultModelMirror();
+  return null;
+}
+
+/** The model set for the plans connected on the computer in view (T41 v4). */
+function AutoModelRoles() {
+  const { environmentId } = useActiveMachine();
+  return environmentId ? (
+    <AutoModelRolesFor key={environmentId} environmentId={environmentId} />
+  ) : null;
+}
+
+function AutoModelRolesFor({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  useAutoModelRoles(environmentId);
   return null;
 }
 
