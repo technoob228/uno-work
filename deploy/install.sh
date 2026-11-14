@@ -190,6 +190,15 @@ if [ -f "${INSTALL_DIR}/app.new/package.json" ]; then
   log "Installing runtime dependencies"
   (cd "${INSTALL_DIR}/app.new" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null) \
     || { rm -rf "${INSTALL_DIR}/app.new"; die "Could not install runtime dependencies; the installed version is untouched."; }
+  # node-pty comes built for linux-x64 in the bundle (prebuilt/, 0.0.189): no
+  # compiler during an update, which a 2 GB computer with a live assistant
+  # could not afford. If that build doesn't load here (another arch, an older
+  # glibc), compile it from source as before — the terminal needs it.
+  if ! (cd "${INSTALL_DIR}/app.new" && node -e 'require("node-pty")' >/dev/null 2>&1); then
+    log "Building the terminal module from source"
+    (cd "${INSTALL_DIR}/app.new" && npm rebuild node-pty --build-from-source --no-audit --no-fund --loglevel=error >/dev/null) \
+      || { rm -rf "${INSTALL_DIR}/app.new"; die "Could not install runtime dependencies; the installed version is untouched."; }
+  fi
 fi
 
 if [ -d "${INSTALL_DIR}/app" ]; then
