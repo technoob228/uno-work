@@ -8,9 +8,18 @@
 
 ---
 
-## Unreleased
+## v0.0.189 — 2026-11-14
 
+- Move my projects here. A new cloud computer's first screen has "Move my projects here" next to "Add a project": sign in to Claude Code or Codex (or use Uno AI), connect your laptop with one command, tick the projects and the keys they need, and open a chat in one of them. Uno Work finds git projects in `~/projects`, `~/code`, `~/Developer`, `~/GitHub`, `~/source/repos` and the other usual places, and reads key names from `.env` and `.env.local`. Only the keys you tick come over, into the project's keys; no `.env` file is copied.
+- Setup's Project step can import a project from your computer too: "Import from my computer" next to "New project".
 - Long Google Docs no longer fail halfway. The agent now writes a long document on the computer part by part and sends it to Google Drive (or another connected app) in one small step. Before, a big document had to go out in one piece, and the request could stall and break again and again.
+- A chat that answered your question keeps "Ready" in the sidebar while agents go on talking in it, the Inbox keeps "Answer to your question" with the start of the answer, and the chat opens on your answer with the agents' messages after it folded.
+- A message in "Up next" goes out by itself when the agent is done, even after you left the chat or the agent fell asleep, and only once.
+- Agents on your own computer: reading and checks in your project folders run without asking; edits there need one Allow per chat; sudo, installs, git push, deploys, keys and anything outside the project folders always ask; Docker and full test runs are refused. Settings → My computer shows the folders, the journal and "Stop all agents".
+- Settings → Phone pairs the phone with each of your computers, cloud ones first, and never offers an address only this computer can open.
+- The desktop app saves and deletes automations on a cloud computer again (it said "Could not reach … on this environment").
+- Updating Uno Work no longer compiles the terminal module on the computer, so the update goes through on a 2 GB computer with a working assistant. Before, it could stop with "couldn't be installed. Nothing changed".
+- Agents know Spark's real limits (requests per second by plan, CPU per call, 30 s / 300 s per request).
 
 ## v0.0.188 — 2026-11-11
 
