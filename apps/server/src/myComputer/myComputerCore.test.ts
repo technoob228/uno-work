@@ -358,7 +358,11 @@ describe("running a command", () => {
 
   it("a new channel opens after the old one closed", async () => {
     fake.helper = (_frame, reply) => reply({ type: "exit", code: 0 });
-    const core = makeCore({ timings: { idleCloseMs: 10 } });
+    // Not 10 ms: the idle clock starts when the channel opens, and the journal
+    // line written before the command (a disk write) can take longer than that
+    // on a slow box — the channel then closed before its first command (seen on
+    // the work-build box, 14.11). Production waits 60 s.
+    const core = makeCore({ timings: { idleCloseMs: 250 } });
     await core.exec(exec());
     await waitFor(() => fake.channels[0]!.closed(), "the idle close");
     await core.exec(exec());
