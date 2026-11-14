@@ -124,6 +124,7 @@ import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
 import { ComputersLifecycle } from "./computers/ComputersLifecycle.ts";
 import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
+import { DEFAULT_TRUST_SETTINGS } from "./myComputer/trust/trustStore.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
 import {
   BrowserTraceCollector,
@@ -1253,6 +1254,24 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           myComputer: {
             toolsVisible: Effect.sync(() => visible),
             status: Effect.succeed({ enabled: true, computers: [computer] }),
+            // The trust gate runs before every my_computer_* call (13.11):
+            // listing is "free" here, so the call reaches `list` below.
+            core: {
+              cachedStatus: async () => ({ enabled: true, computers: [computer] }),
+              refused: async () => {},
+            } as unknown as MyComputerCore,
+            trust: {
+              paused: async () => null,
+              settings: async () => DEFAULT_TRUST_SETTINGS,
+              grantActive: () => false,
+              grant: async () => {},
+              resume: async () => {},
+              touch: async () => {},
+            } as unknown as MyComputerShape["trust"],
+            judge: {
+              judge: async () => ({ tier: "free", reason: "test" }),
+              forget: () => {},
+            } as unknown as MyComputerShape["judge"],
             list: () =>
               Deferred.succeed(started, undefined).pipe(
                 Effect.andThen(Effect.never),

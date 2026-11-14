@@ -38,7 +38,10 @@ let closers: Array<() => void>;
 beforeEach(async () => {
   fake = await startFakeConsole();
   fake.listing = { status: 200, body: { enabled: true, computers: [computerRow()] } };
-  macHome = mkdtempSync(path.join(os.tmpdir(), "my-computer-mac-"));
+  // Not under os.tmpdir(): /tmp is a temp folder to the trust policy (writes
+  // there are free), and on a runner whose tmpdir is /tmp the fake home inside
+  // it would make every "outside the folders" case free. /var/tmp is not one.
+  macHome = mkdtempSync(path.join("/var/tmp", "my-computer-mac-"));
   mkdirSync(path.join(macHome, "projects", "notes"), { recursive: true });
   fake.helper = (frame, reply) => {
     if (answerTrustCheck(frame, reply, macHome)) return;
