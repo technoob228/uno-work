@@ -198,6 +198,7 @@ import {
   AGENT_CHAT_KIND_LABEL,
   SIDEBAR_INLINE_AGENT_THREADS_KEY,
   SIDEBAR_INLINE_SUBAGENTS_KEY,
+  agentChatKind,
   agentChatsShelfLabel,
   agentTaskDescendants,
   archiveWithTasksPrompt,
@@ -2732,10 +2733,19 @@ export default function Sidebar() {
           startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
         ) === "you" ||
         thread.pinnedAt !== null ||
-        threadKeyOf(thread) === routeThreadKey,
+        threadKeyOf(thread) === routeThreadKey ||
+        // Agents' chats the person asked to see in the list (view menu) stay there.
+        (!dAgentsShelfOff &&
+          thread.controller === "agent" &&
+          (agentChatKind(thread) === "subagent"
+            ? dInlineSubagentsChoice
+            : dInlineAgentThreadsChoice)),
     );
     return { dShownChats: mine, dHiddenAgentChats: placed.length - mine.length };
   }, [
+    dAgentsShelfOff,
+    dInlineAgentThreadsChoice,
+    dInlineSubagentsChoice,
     dComputerPicks,
     dGroupOf,
     dLiveChats,

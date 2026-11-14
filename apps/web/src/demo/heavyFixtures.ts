@@ -1355,8 +1355,11 @@ export function toShellThread(thread: WireThread) {
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
     spawnedByThreadId: thread.spawnedByThreadId,
+    spawnKind: thread.spawnKind ?? null,
     controller: thread.controller,
-    controlChangedAt: null,
+    // When the person joined or handed it off: an agent-handled chat of theirs
+    // is told apart by it (14.11).
+    controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: (thread as { agentsClosedAt?: string | null }).agentsClosedAt ?? null,
     assistantRole: thread.assistantRole,
     session: thread.session,
