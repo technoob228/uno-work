@@ -128,7 +128,11 @@ const PRIVATE_NETWORK_ALLOW_HEADER = "access-control-allow-private-network";
 
 const browserApiCors = HttpMiddleware.cors({
   allowedOrigins: isAllowedCorsOrigin,
-  allowedMethods: ["GET", "POST", "OPTIONS"],
+  // The browser sends a preflight for every PATCH/PUT/DELETE from a remote
+  // environment (desktop → cloud computer). Missing methods here surfaced as
+  // "Could not reach /api/manager/automations/25 on this environment." when
+  // saving an automation, so list every method the browser-facing routes use.
+  allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
   maxAge: 600,
 });
