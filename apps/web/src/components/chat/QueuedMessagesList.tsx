@@ -8,7 +8,7 @@ import { ArrowUpIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { memo } from "react";
 
 import { extractQuotes } from "../../lib/chatQuotes";
-import { type QueuedChatMessage } from "../../queuedMessageStore";
+import { type QueuedChatMessage, type QueuePause } from "../../queuedMessageStore";
 
 /** What the person wrote, with a word for the quotes that go with it. */
 function queuedMessageText(text: string): string {
@@ -18,13 +18,29 @@ function queuedMessageText(text: string): string {
   return own ? `${own}\n+ ${count}` : count;
 }
 
+/** The line under a waiting message: what it waits for, truthfully (T48). */
+export function queuedMessageStatus(input: {
+  readonly hold: boolean;
+  readonly index: number;
+  readonly pause: QueuePause;
+}): string {
+  if (input.hold) return "Waiting for you to send it";
+  if (input.index > 0) return "Sends after the one above";
+  if (input.pause === "error") return "Paused: the last turn didn't finish. Send now to go on";
+  if (input.pause === "person") return "Sends once you answer the agent above";
+  return "Sends when the agent is done";
+}
+
 export const QueuedMessagesList = memo(function QueuedMessagesList({
   messages,
+  pause = null,
   onSendNow,
   onEdit,
   onDelete,
 }: {
   messages: ReadonlyArray<QueuedChatMessage>;
+  /** Why the first message isn't going though the agent is done (queuePause). */
+  pause?: QueuePause;
   onSendNow: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -44,11 +60,7 @@ export const QueuedMessagesList = memo(function QueuedMessagesList({
           </p>
           <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span className="mr-auto">
-              {message.hold
-                ? "Waiting for you to send it"
-                : index === 0
-                  ? "Sends when the agent is done"
-                  : "Sends after the one above"}
+              {queuedMessageStatus({ hold: message.hold === true, index, pause })}
             </span>
             <button
               type="button"

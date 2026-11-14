@@ -402,7 +402,8 @@ export interface LocalDispatchSnapshot {
 }
 
 export function createLocalDispatchSnapshot(
-  activeThread: Thread | undefined,
+  // Only these two are read: the app-wide "Up next" sender has no full thread.
+  activeThread: (Pick<Thread, "latestTurn" | "session"> & Partial<Thread>) | undefined,
   options?: { preparingWorktree?: boolean },
 ): LocalDispatchSnapshot {
   const latestTurn = activeThread?.latestTurn ?? null;

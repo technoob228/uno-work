@@ -302,9 +302,12 @@ import { useNotificationSoftAsk } from "../inbox/systemNotifications";
 import { useDemoSwitch } from "~/demo/demoFlag";
 import { useFeatureFlag } from "~/hooks/useFeatureFlags";
 import {
+  claimQueuedMessages,
   joinQueuedAhead,
   nextQueuedMessageToSend,
   planQueuedSend,
+  queuedTurnIds,
+  queuePause,
   type QueuedChatMessage,
   type QueuedSendPlan,
   QUEUE_AFTER_RESTART_DELAY_MS,
@@ -3686,7 +3689,10 @@ export default function ChatView(props: ChatViewProps) {
       appendRecordingToPrompt(appendQuotesToPrompt(promptForSend, takenQuotes), recordingForAgent),
       composerTerminalContextsSnapshot,
     );
-    const messageIdForSend = newMessageId();
+    // A message from "Up next" goes with ids of its own (queuedTurnIds): tried
+    // twice — another tab, the app-wide sender — the computer takes it once.
+    const queuedIds = queued ? queuedTurnIds(queued) : null;
+    const messageIdForSend = queuedIds?.messageId ?? newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
       provider: ctxSelectedProvider,
@@ -3821,7 +3827,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     let turnStartSucceeded = false;
-    const turnCommandId = newCommandId();
+    const turnCommandId = queuedIds?.commandId ?? newCommandId();
     // Text-only send to an existing chat: if the link drops under it, it goes
     // to the outbox with this same command (same commandId: no double send).
     let outboxFallbackCommand: OutboxTurnStartCommand | null = null;
@@ -4004,11 +4010,12 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
       if (queued && !turnStartSucceeded) {
-        // It goes back first in "Up next", waiting for Send now.
+        // It goes back first in "Up next", waiting for Send now — as a new
+        // try: the computer answered, so these ids only get its refusal back.
         setOptimisticUserMessages((existing) =>
           existing.filter((message) => message.id !== messageIdForSend),
         );
-        useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued);
+        useQueuedMessageStore.getState().holdAtFront(routeThreadKey, queued, { retry: true });
       } else if (
         !turnStartSucceeded &&
         promptRef.current.length === 0 &&
@@ -4103,18 +4110,38 @@ export default function ChatView(props: ChatViewProps) {
     const timer = window.setTimeout(() => setRestartWaitOver(true), QUEUE_AFTER_RESTART_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [cutOffByRestart, routeThreadKey]);
+  // This view sends the chat's queue (with the composer's settings) while it
+  // has a composer; otherwise the app-wide sender does (queuedMessageSender.ts).
+  useEffect(
+    () => (showComposer ? claimQueuedMessages(routeThreadKey) : undefined),
+    [routeThreadKey, showComposer],
+  );
+  const queueWaitingForPerson = activePendingApproval !== null || pendingUserInputs.length > 0;
+  const queueHasError = Boolean(activeThread?.error) && !restartWaitOver;
   const nextQueued = nextQueuedMessageToSend({
     queue: queuedMessages,
     phase,
     busy: isSendBusy || isConnecting || activeEnvironmentUnavailable,
-    waitingForPerson: activePendingApproval !== null || pendingUserInputs.length > 0,
-    hasError: Boolean(activeThread?.error) && !restartWaitOver,
+    waitingForPerson: queueWaitingForPerson,
+    hasError: queueHasError,
   });
+  const queuedPause = queuePause({
+    phase,
+    waitingForPerson: queueWaitingForPerson,
+    hasError: queueHasError,
+  });
+  // The ref isn't state: a message that came due while another send was on
+  // its way looks again shortly, instead of waiting for an unrelated render.
+  const [queueRetryTick, setQueueRetryTick] = useState(0);
   useEffect(() => {
-    if (!nextQueued || sendInFlightRef.current) return;
+    if (!nextQueued) return;
+    if (sendInFlightRef.current) {
+      const timer = window.setTimeout(() => setQueueRetryTick((tick) => tick + 1), 500);
+      return () => window.clearTimeout(timer);
+    }
     const taken = useQueuedMessageStore.getState().take(routeThreadKey, nextQueued.id);
     if (taken) void onSendRef.current(undefined, taken);
-  }, [nextQueued, routeThreadKey]);
+  }, [nextQueued, routeThreadKey, queueRetryTick]);
   const onSendQueuedNow = useCallback(
     (id: string) => {
       // "Send now": into the running turn, as Enter used to do.
@@ -5246,6 +5273,7 @@ export default function ChatView(props: ChatViewProps) {
                     <>
                       <QueuedMessagesList
                         messages={queuedMessages}
+                        pause={queuedPause}
                         onSendNow={onSendQueuedNow}
                         onEdit={onEditQueued}
                         onDelete={onDeleteQueued}
