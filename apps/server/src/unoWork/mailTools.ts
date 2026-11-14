@@ -28,7 +28,7 @@ import { isSecretSiteFileName } from "../files/sitePublish.ts";
 import { mimeTypeForFileName } from "../files/mimeTypes.ts";
 import type { ObjectSchema } from "./argsSchema.ts";
 import type { ConsoleReply } from "./consoleClient.ts";
-import { boundaryDenial } from "./pathBoundary.ts";
+import { boundaryDenial, isWithinRoot } from "./pathBoundary.ts";
 import type { UnoWorkTool, UnoWorkToolDeps, UnoWorkToolError } from "./tools.ts";
 
 type Deps = UnoWorkToolDeps;
@@ -273,9 +273,18 @@ export async function attachmentTarget(folder: string, name: string): Promise<st
   throw new Error("Too many files with this name in the folder.");
 }
 
-/** Why a file may not go out by mail, or null. Hidden folders/files and key files never do. */
-export function attachmentRefusal(realPath: string): string | null {
-  const segments = realPath.split(path.sep).filter((segment) => segment.length > 0);
+/**
+ * Why a file may not go out by mail (or to a connected app), or null. Hidden
+ * folders/files and key files never do. `trustedFolder`: hidden folders above
+ * it don't count (a chat copy's own folder sits in a hidden one) — only the
+ * path below it, when the file is inside it.
+ */
+export function attachmentRefusal(realPath: string, trustedFolder?: string): string | null {
+  const below =
+    trustedFolder !== undefined && isWithinRoot(realPath, trustedFolder)
+      ? path.relative(trustedFolder, realPath)
+      : realPath;
+  const segments = below.split(path.sep).filter((segment) => segment.length > 0);
   if (segments.some((segment) => segment.startsWith("."))) {
     return "it is a hidden file or sits in a hidden folder (settings, keys, caches)";
   }
