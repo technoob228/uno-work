@@ -95,6 +95,15 @@ function packPrebuiltNodePty(): string | null {
   const ptyDir = dirname(require.resolve("node-pty/package.json"));
   const built = join(ptyDir, "build", "Release", "pty.node");
   if (!existsSync(built)) {
+    // An install that skipped lifecycle scripts (a reused node_modules, as on
+    // the work-build box): build it here once, the way its install script would.
+    try {
+      execFileSync("npx", ["--yes", "node-gyp", "rebuild"], { cwd: ptyDir, stdio: "inherit" });
+    } catch (cause) {
+      console.log(`[pack] node-pty: couldn't build ${built} (${String(cause)}), machines compile it`);
+    }
+  }
+  if (!existsSync(built)) {
     console.log(`[pack] node-pty: no ${built}, machines compile it`);
     return null;
   }
