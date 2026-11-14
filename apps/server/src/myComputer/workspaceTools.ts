@@ -7,9 +7,9 @@
  * for such a chat (`computerWorkspaceHarness.ts`), so these are its hands.
  *
  * They are `uno-work` tools (one MCP server, one per-thread token), listed
- * only to a chat that has a computer workspace. The person's approval rules
- * apply as to every uno-work tool: the shell is a `command`, writing and
- * editing are a `change`, the rest is `safe`.
+ * only to a chat that has a computer workspace. Each call is judged by trust
+ * tier there, like `my_computer_*` (`trust/`): the chat's project folder
+ * counts as an allowed folder for that chat.
  *
  * The computer asleep or offline: a call waits for it (up to 25 minutes) and
  * the chat shows "Waiting for <name>…" (`thread.computerWait`) instead of
@@ -26,11 +26,18 @@ import path from "node:path";
 import type { MyComputer } from "@t3tools/contracts";
 import { Data, Effect } from "effect";
 
-import type { UnoWorkTool, UnoWorkToolDeps, UnoWorkToolError } from "../unoWork/tools.ts";
+import type {
+  ComputerTrustGate,
+  UnoWorkTool,
+  UnoWorkToolDeps,
+  UnoWorkToolError,
+} from "../unoWork/tools.ts";
 import { summarize } from "./activitySummary.ts";
 import type { MyComputerCore } from "./myComputerCore.ts";
 import { MyComputerFailure } from "./myComputerCore.ts";
 import { ChannelFailure } from "./channel.ts";
+import { computerTrustGate } from "./trust/gate.ts";
+import type { TrustOperation } from "./trust/judge.ts";
 
 import type { ComputerWorkspacePlan } from "../provider/Services/ComputerWorkspacePolicy.ts";
 
@@ -432,6 +439,51 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
 
   const windowsOf = (plan: ComputerWorkspacePlan) => isWindowsPath(plan.path);
 
+  /** The `trust` hook: judged on the chat's computer once it is online. */
+  const judged =
+    (
+      describe: (
+        plan: ComputerWorkspacePlan,
+        args: Record<string, unknown>,
+      ) => {
+        readonly operation: TrustOperation;
+        readonly kind: "run" | "read" | "write" | "list";
+        readonly summary: string;
+      },
+    ) =>
+    (
+      deps: Deps,
+      args: Record<string, unknown>,
+      context: { readonly cautious: boolean; readonly outsideText: boolean },
+    ): Effect.Effect<ComputerTrustGate, UnoWorkToolError> =>
+      Effect.gen(function* () {
+        yield* kit.requireAccess(deps);
+        if (deps.caller.boundary) {
+          return yield* kit.fail(
+            `${deps.caller.boundary.name} is held to selected projects, and the person's own computer is outside them.`,
+          );
+        }
+        const core = yield* coreOf(deps);
+        const plan = yield* planOf(deps);
+        const computer = yield* waitOnline(deps, core, plan);
+        const { operation, kind, summary } = describe(plan, args);
+        return yield* computerTrustGate({
+          deps,
+          api: deps.myComputer!,
+          computer,
+          operation,
+          journal: { kind, summary },
+          extraAllowed: windowsOf(plan) ? [] : [plan.path],
+          context,
+          fail: kit.fail,
+        });
+      });
+  const pathOp = (kind: "read" | "write", key: string, journal: "read" | "write" | "list" = kind) =>
+    judged((plan, args) => {
+      const target = resolveOnComputer(plan, str(args, key));
+      return { operation: { kind, path: target }, kind: journal, summary: target };
+    });
+
   /** Run a search command; its output, clipped. */
   const search = (
     deps: Deps,
@@ -447,6 +499,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
           timeoutMs,
           threadId: deps.caller.threadId,
           maxOutputBytes: SEARCH_OUTPUT_BYTES,
+          trust: deps.callTrust,
         },
         signal,
       ),
@@ -481,6 +534,11 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "command",
+      trust: judged((plan, args) => ({
+        operation: { kind: "run", command: str(args, "command")!, cwd: plan.path },
+        kind: "run",
+        summary: str(args, "command")!,
+      })),
       approvalTitle: (args) =>
         `Run on your computer: ${summarize(str(args, "command") ?? "", 120)}`,
       approvalDetail: (args) => {
@@ -506,6 +564,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 ),
                 threadId: deps.caller.threadId,
                 maxOutputBytes: BASH_OUTPUT_BYTES,
+                trust: deps.callTrust,
               },
               signal,
             ),
@@ -542,6 +601,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "safe",
+      trust: pathOp("read", "file_path"),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { value: read, plan } = yield* onComputer(deps, true, (core, plan, signal) =>
@@ -551,6 +611,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 path: resolveOnComputer(plan, str(args, "file_path")),
                 maxBytes: READ_MAX_BYTES,
                 threadId: deps.caller.threadId,
+                trust: deps.callTrust,
               },
               signal,
             ),
@@ -593,6 +654,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "change",
+      trust: pathOp("write", "file_path"),
       approvalTitle: (args) =>
         `Write ${summarize(str(args, "file_path") ?? "", 120)} on your computer`,
       run: (deps, args) =>
@@ -606,6 +668,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 data: content,
                 mkdirs: true,
                 threadId: deps.caller.threadId,
+                trust: deps.callTrust,
               },
               signal,
             ),
@@ -634,6 +697,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "change",
+      trust: pathOp("write", "file_path"),
       approvalTitle: (args) =>
         `Edit ${summarize(str(args, "file_path") ?? "", 120)} on your computer`,
       run: (deps, args) =>
@@ -683,6 +747,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 path: file(plan),
                 data: Buffer.from(next, "utf8"),
                 threadId: deps.caller.threadId,
+                trust: deps.callTrust,
               },
               signal,
             ),
@@ -712,6 +777,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "safe",
+      trust: pathOp("read", "path", "list"),
       run: (deps, args) =>
         Effect.gen(function* () {
           const { value: answer, plan } = yield* onComputer(deps, true, (core, plan, signal) =>
@@ -720,6 +786,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
                 computerId: plan.computerId,
                 path: resolveOnComputer(plan, str(args, "path")),
                 threadId: deps.caller.threadId,
+                trust: deps.callTrust,
               },
               signal,
             ),
@@ -763,6 +830,7 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "safe",
+      trust: pathOp("read", "path", "list"),
       run: (deps, args) =>
         Effect.gen(function* () {
           const matcher = globToRegExp(str(args, "pattern")!);
@@ -833,6 +901,14 @@ export function workspaceTools(kit: WorkspaceToolKit): ReadonlyArray<UnoWorkTool
         additionalProperties: false,
       },
       level: "safe",
+      trust: judged((plan, args) => {
+        const target = resolveOnComputer(plan, str(args, "path"));
+        return {
+          operation: { kind: "read", path: target, recursive: true },
+          kind: "read",
+          summary: `search ${str(args, "pattern") ?? ""} in ${target}`,
+        };
+      }),
       run: (deps, args) =>
         Effect.gen(function* () {
           const mode = (str(args, "output_mode") ?? "content") as GrepOptions["mode"];

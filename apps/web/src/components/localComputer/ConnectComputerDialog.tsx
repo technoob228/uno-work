@@ -8,6 +8,7 @@
  * What a computer sent (`message`, `step`) and the journal are plain text here.
  */
 import type { EnvironmentId, MyComputer } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -21,7 +22,6 @@ import { useEffect, useState } from "react";
 import { useComputersLifecycleOn } from "../../computersLifecycle/flag";
 import { useDevMode } from "../../devMode";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
-import { useSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { localComputer, useLocalComputer } from "../../localComputer/localComputerStore";
 import { useImportActions, useImportStatus } from "../../localComputer/useChatImport";
@@ -30,19 +30,15 @@ import {
   requestPairing,
   STATUS_POLL_CARD_MS,
   STATUS_POLL_PAIRING_MS,
-  useMyComputerActivity,
   useMyComputers,
   usePairStatus,
   useRefreshMyComputers,
 } from "../../localComputer/useMyComputers";
-import { formatShortTimestamp } from "../../timestampFormat";
 import { CopyButton } from "../computer/computerUi";
 import { STATUS_DOT_CLASS } from "../computerSwitcher/useComputerSwitcher";
 import { Button } from "../ui/button";
 import { hasOffer, importedLine } from "./chatImport.logic";
 import {
-  activityLine,
-  activityTimeLabel,
   computerStatusLine,
   diagnoseInstall,
   disconnectNote,
@@ -55,6 +51,8 @@ import {
 } from "./connectComputer.logic";
 import { Heading, Shell } from "./ConnectShell";
 import { ImportDialog, ImportOfferBody, ImportSearching } from "./ImportScreens";
+import { MyComputerJournal } from "./MyComputerJournal";
+import { STOP_ALL_TITLE, StopAllLines, useStopAllAgents } from "./StopAllAgents";
 
 function PairError() {
   const pairError = useLocalComputer((state) => state.pairError);
@@ -479,49 +477,36 @@ function ConnectFlow() {
   return <Command finishing={progress.kind === "finishing"} unreachable={unreachable} />;
 }
 
-function Journal({
-  environmentId,
-  computerId,
-}: {
-  environmentId: EnvironmentId | null;
-  computerId: string;
-}) {
-  const activity = useMyComputerActivity(environmentId, computerId);
-  const timestampFormat = useSettings((settings) => settings.timestampFormat);
-  const formatTime = (iso: string) => formatShortTimestamp(iso, timestampFormat);
-  if (activity.data === undefined) {
-    return activity.isError ? (
-      <p className="text-sm text-muted-foreground">Couldn’t load what agents did.</p>
-    ) : null;
-  }
-  if (activity.data.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground" data-testid="connect-actions-empty">
-        Agents haven’t used it yet.
-      </p>
-    );
-  }
-  const nowMs = activity.dataUpdatedAt;
+/** Stop all agents, confirmed in the card itself (it is a dialog already). */
+function ConfirmStopAll({ onCancel }: { onCancel: () => void }) {
+  const { run, pending, error } = useStopAllAgents();
   return (
-    <ul
-      className="flex max-h-56 flex-col gap-1.5 overflow-y-auto text-sm"
-      aria-label="What agents did"
-      data-testid="connect-actions"
-    >
-      {activity.data.map((entry) => {
-        const line = activityLine(entry);
-        return (
-          <li key={`${entry.at}-${entry.kind}-${entry.summary}`} className="flex gap-3">
-            <span className="w-16 shrink-0 text-muted-foreground tabular-nums">
-              {activityTimeLabel(entry.at, nowMs, formatTime)}
-            </span>
-            <span className="min-w-0 truncate" title={line}>
-              {line}
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+    <Shell testId="connect-stop-all-confirm" onEscape={onCancel}>
+      <Heading
+        icon={<ShieldAlertIcon className="size-4" />}
+        title={STOP_ALL_TITLE}
+        tone="warning"
+      />
+      <StopAllLines />
+      {error !== null ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button
+          variant="destructive"
+          disabled={pending}
+          onClick={() => void run().then((done) => done && localComputer.close())}
+          data-testid="connect-stop-all-confirm-button"
+        >
+          {pending ? "Stopping…" : "Stop all agents"}
+        </Button>
+      </div>
+    </Shell>
   );
 }
 
@@ -614,7 +599,8 @@ function Manage() {
   const { computers, settled, updatedAt } = useMyComputers(environmentId, {
     pollMs: STATUS_POLL_CARD_MS,
   });
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"disconnect" | "stop-all" | null>(null);
+  const navigate = useNavigate();
   const devMode = useDevMode();
   const lifecycleOn = useComputersLifecycleOn();
   const computer = computers.find((one) => one.id === manageId);
@@ -623,12 +609,13 @@ function Manage() {
     if (gone) localComputer.close();
   }, [gone]);
   if (computer === undefined) return null;
-  if (confirming) {
+  if (confirming === "stop-all") return <ConfirmStopAll onCancel={() => setConfirming(null)} />;
+  if (confirming === "disconnect") {
     return (
       <ConfirmDisconnect
         computer={computer}
         environmentId={environmentId}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => setConfirming(null)}
       />
     );
   }
@@ -648,7 +635,32 @@ function Manage() {
         {computerStatusLine(computer, updatedAt)}
       </div>
       <ImportRow environmentId={environmentId} computer={computer} />
-      <Journal environmentId={environmentId} computerId={computer.id} />
+      <MyComputerJournal
+        environmentId={environmentId}
+        computerId={computer.id}
+        className="max-h-56"
+      />
+      <div className="flex items-center gap-3 text-xs">
+        <button
+          type="button"
+          onClick={() => {
+            localComputer.close();
+            void navigate({ to: "/settings/my-computer" });
+          }}
+          data-testid="connect-permissions"
+          className="cursor-pointer text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          Agent permissions
+        </button>
+        <button
+          type="button"
+          onClick={() => setConfirming("stop-all")}
+          data-testid="connect-stop-all"
+          className="ml-auto cursor-pointer text-destructive/90 underline-offset-2 hover:text-destructive hover:underline"
+        >
+          Stop all agents
+        </button>
+      </div>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={localComputer.close}>
           Close
@@ -657,7 +669,7 @@ function Manage() {
         {lifecycleOn && !devMode ? null : (
           <Button
             variant="destructive-outline"
-            onClick={() => setConfirming(true)}
+            onClick={() => setConfirming("disconnect")}
             data-testid="connect-disconnect"
           >
             Disconnect computer

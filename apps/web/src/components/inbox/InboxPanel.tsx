@@ -53,6 +53,7 @@ import {
   WithInboxItemActions,
 } from "./InboxItemActions";
 import { DeployApprovalCards } from "./DeployApprovalCards";
+import { MyComputerActivityBanner } from "./MyComputerActivityBanner";
 
 type Filter = "all" | "needs-you" | "chats" | "apps" | "snoozed";
 
@@ -181,6 +182,7 @@ export const InboxPanel = memo(function InboxPanel(props: {
         ))}
       </div>
 
+      <MyComputerActivityBanner />
       {filter === "all" || filter === "needs-you" ? (
         <DeployApprovalCards liveOnly={filter === "needs-you"} />
       ) : null}

@@ -41,6 +41,7 @@ import type { LifecycleDemoHooks } from "../../computersLifecycle/backend";
 import { demoHooks } from "../demoFlag";
 import { MACHINES, type DemoMachine, type MachineKey } from "../heavyFixtures";
 import { isSleeping, setSleeping } from "./links";
+import { answerTrustRpc } from "./myComputerTrust";
 
 export const LC_ON = LC_START !== "off";
 export const MAC_COMPUTER_ID = "41";
@@ -566,6 +567,8 @@ export function answerLifecycleRpc(machine: DemoMachine, tag: string, body: unkn
     return tag === WS_METHODS.myComputerStatus ? { enabled: false, computers: [] } : undefined;
   }
   const input = body as Record<string, unknown>;
+  const trustAnswer = answerTrustRpc(tag, input, macConnected ? mac() : null);
+  if (trustAnswer !== undefined) return trustAnswer;
   switch (tag) {
     case WS_METHODS.myComputerStatus:
       return { enabled: true, lifecycle: true, computers: macConnected ? [mac()] : [] };
@@ -593,8 +596,6 @@ export function answerLifecycleRpc(machine: DemoMachine, tag: string, body: unkn
       declined = false;
       scanStartedAt = null;
       return null;
-    case WS_METHODS.myComputerActivity:
-      return [];
     case WS_METHODS.myComputerImportStatus:
       return importStatus();
     case WS_METHODS.myComputerImportScan:

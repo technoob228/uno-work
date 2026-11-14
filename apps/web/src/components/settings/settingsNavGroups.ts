@@ -29,6 +29,7 @@ import {
   GlobeIcon,
   KeyboardIcon,
   KeyRoundIcon,
+  LaptopIcon,
   LayersIcon,
   LockIcon,
   Link2Icon,
@@ -163,6 +164,8 @@ export const SIMPLE_SETTINGS_PATHS = {
   assistants: "/settings/assistants-phone",
   projects: "/settings/projects",
   computer: "/settings/computer",
+  /** The person's own computer: what agents may do there, the journal, Stop all (13.11). */
+  myComputer: "/settings/my-computer",
   keyboard: "/settings/keyboard",
   developer: "/settings/developer",
 } as const;
@@ -176,6 +179,7 @@ export const SIMPLE_NAV_ENTRIES: ReadonlyArray<SettingsNavEntry> = [
   { label: "Assistants & phone", to: SIMPLE_SETTINGS_PATHS.assistants, icon: SmartphoneIcon },
   { label: "Projects", to: SIMPLE_SETTINGS_PATHS.projects, icon: FolderKanbanIcon },
   { label: "Computer", to: SIMPLE_SETTINGS_PATHS.computer, icon: MonitorIcon },
+  { label: "My computer", to: SIMPLE_SETTINGS_PATHS.myComputer, icon: LaptopIcon },
   { label: "Keyboard", to: SIMPLE_SETTINGS_PATHS.keyboard, icon: KeyboardIcon },
   { label: "Developer", to: SIMPLE_SETTINGS_PATHS.developer, icon: CodeIcon },
 ];

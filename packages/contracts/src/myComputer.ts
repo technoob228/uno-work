@@ -105,6 +105,28 @@ export const MyComputerActivityInput = Schema.Struct({
 });
 export type MyComputerActivityInput = typeof MyComputerActivityInput.Type;
 
+// ── Trust tiers (what an agent may do there without asking) ───────────
+
+/**
+ * How much a call on the person's computer may do without them, decided by
+ * the daemon's code (`myComputer/trust/`), never by the prompt:
+ * - `free`    — runs: reading in allowed folders, the agent's own browser
+ *               profile, `xcrun simctl`, a typecheck / lint / one package's tests;
+ * - `chat`    — one Allow per chat for some hours: writing in allowed folders,
+ *               git without push, the person's allowed commands;
+ * - `ask`     — not known: asks every time, except in full access;
+ * - `always`  — asks every time, full access too: deleting or overwriting
+ *               outside the folders, sudo, installs, git push, deploys, system
+ *               settings, the personal browser, mail and messengers, payments;
+ * - `blocked` — refused by policy: containers and VMs, full test runs, benchmarks.
+ */
+export const MyComputerTier = Schema.Literals(["free", "chat", "ask", "always", "blocked"]);
+export type MyComputerTier = typeof MyComputerTier.Type;
+
+/** How a journal line ended. Absent: still running, or a line from before 0.0.189. */
+export const MyComputerActivityOutcome = Schema.Literals(["ran", "failed", "stopped", "refused"]);
+export type MyComputerActivityOutcome = typeof MyComputerActivityOutcome.Type;
+
 /** One thing an agent did. Never a file's content or a command's output. */
 export const MyComputerActivityEntry = Schema.Struct({
   /** ISO-8601. */
@@ -113,11 +135,81 @@ export const MyComputerActivityEntry = Schema.Struct({
   /** A short line: a clipped command or a path, secrets masked. */
   summary: Schema.String,
   threadId: Schema.optionalKey(Schema.String),
+  /** The chat's title when it ran. */
+  threadTitle: Schema.optionalKey(Schema.String),
+  tier: Schema.optionalKey(MyComputerTier),
+  outcome: Schema.optionalKey(MyComputerActivityOutcome),
+  /** A command's exit code; null: it was killed by a signal or never ended. */
+  exitCode: Schema.optionalKey(Schema.NullOr(Schema.Int)),
+  durationMs: Schema.optionalKey(NonNegativeInt),
+  /** Why it was refused (`outcome: "refused"`). */
+  reason: Schema.optionalKey(Schema.String),
 });
 export type MyComputerActivityEntry = typeof MyComputerActivityEntry.Type;
 
 export const MyComputerActivity = Schema.Array(MyComputerActivityEntry);
 export type MyComputerActivity = typeof MyComputerActivity.Type;
+
+/** What the person set for agents on their computers (Settings → My computer). */
+export const MyComputerTrustSettings = Schema.Struct({
+  /** Folders on the computer agents read freely and write with a chat's Allow: `~/projects`. */
+  allowedFolders: Schema.Array(Schema.String.check(Schema.isMaxLength(1024))).check(
+    Schema.isMaxLength(100),
+  ),
+  /** Commands that run with a chat's Allow, by their start: `make`, `bun run dev`. */
+  allowedCommands: Schema.Array(Schema.String.check(Schema.isMaxLength(200))).check(
+    Schema.isMaxLength(200),
+  ),
+  /** How long one Allow lasts in a chat. */
+  grantHours: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 24 })),
+  /** Agents' access pauses after this long without agent activity. */
+  idleHours: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 168 })),
+});
+export type MyComputerTrustSettings = typeof MyComputerTrustSettings.Type;
+
+/** One chat's Allow: writing and allowed commands on one computer until `expiresAt`. */
+export const MyComputerChatGrant = Schema.Struct({
+  threadId: Schema.String,
+  threadTitle: Schema.String,
+  computerId: Schema.String,
+  grantedAt: Schema.String,
+  expiresAt: Schema.String,
+});
+export type MyComputerChatGrant = typeof MyComputerChatGrant.Type;
+
+export const MyComputerPause = Schema.Struct({
+  at: Schema.String,
+  /** `idle`: nothing for `idleHours`; `stopped`: the person pressed Stop. */
+  reason: Schema.Literals(["idle", "stopped"]),
+});
+export type MyComputerPause = typeof MyComputerPause.Type;
+
+export const MyComputerTrustState = Schema.Struct({
+  settings: MyComputerTrustSettings,
+  defaults: MyComputerTrustSettings,
+  grants: Schema.Array(MyComputerChatGrant),
+  /** Agents can't reach any of the person's computers until they resume. */
+  paused: Schema.NullOr(MyComputerPause),
+  lastActivityAt: Schema.NullOr(Schema.String),
+  /** Agent calls running on the person's computers right now. */
+  running: NonNegativeInt,
+});
+export type MyComputerTrustState = typeof MyComputerTrustState.Type;
+
+export const MyComputerRevokeGrantInput = Schema.Struct({
+  threadId: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  computerId: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type MyComputerRevokeGrantInput = typeof MyComputerRevokeGrantInput.Type;
+
+/** "Stop all agents": what was stopped and which computers were disconnected. */
+export const MyComputerStopAllResult = Schema.Struct({
+  stopped: NonNegativeInt,
+  disconnected: Schema.Array(Schema.String),
+  /** Computers the console didn't let go: they stay connected, agents stay paused. */
+  failed: Schema.Array(Schema.String),
+});
+export type MyComputerStopAllResult = typeof MyComputerStopAllResult.Type;
 
 export class MyComputerError extends Schema.TaggedErrorClass<MyComputerError>()("MyComputerError", {
   message: TrimmedNonEmptyString,

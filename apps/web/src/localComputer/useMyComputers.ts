@@ -7,9 +7,17 @@
  * isn't connected yet, shows no trace of the feature; a hiccup after a good
  * answer keeps the last one, so the row doesn't blink.
  */
-import type { EnvironmentId, MyComputerPairStatus, MyComputerStatus } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  MyComputerPairStatus,
+  MyComputerRevokeGrantInput,
+  MyComputerStatus,
+  MyComputerStopAllResult,
+  MyComputerTrustSettings,
+  MyComputerTrustState,
+} from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 
 import { ensureEnvironmentApi } from "../environmentApi";
 import { localComputer, useLocalComputer } from "./localComputerStore";
@@ -26,6 +34,8 @@ export const STATUS_POLL_PAIRING_MS = 2_000;
 const PAIR_POLL_MS = 2_000;
 const ACTIVITY_POLL_MS = 10_000;
 const ACTIVITY_LIMIT = 50;
+/** Settings → My computer and the Inbox's banner: is anything running there? */
+export const TRUST_POLL_MS = 10_000;
 
 export function useMyComputers(
   environmentId: EnvironmentId | null,
@@ -77,20 +87,88 @@ export function usePairStatus(
   });
 }
 
-export function useMyComputerActivity(environmentId: EnvironmentId | null, computerId: string) {
+export function useMyComputerActivity(
+  environmentId: EnvironmentId | null,
+  computerId: string,
+  options: { readonly limit?: number } = {},
+) {
+  const limit = options.limit ?? ACTIVITY_LIMIT;
   return useQuery({
-    queryKey: [...MY_COMPUTER_KEY, "activity", environmentId, computerId],
-    queryFn: () =>
-      ensureEnvironmentApi(environmentId!).myComputer.activity({
-        computerId,
-        limit: ACTIVITY_LIMIT,
-      }),
+    queryKey: [...MY_COMPUTER_KEY, "activity", environmentId, computerId, limit],
+    queryFn: () => ensureEnvironmentApi(environmentId!).myComputer.activity({ computerId, limit }),
     enabled: environmentId !== null,
     staleTime: 5_000,
     retry: false,
     refetchInterval: ACTIVITY_POLL_MS,
     refetchIntervalInBackground: false,
   });
+}
+
+const trustKey = (environmentId: EnvironmentId | null) =>
+  [...MY_COMPUTER_KEY, "trust", environmentId] as const;
+
+/**
+ * What agents may do on the person's computers, the chats' Allows, the pause
+ * and what runs now. Polls only while a screen that shows it is mounted.
+ */
+export function useMyComputerTrust(
+  environmentId: EnvironmentId | null,
+  options: { readonly pollMs?: number | undefined; readonly enabled?: boolean } = {},
+) {
+  return useQuery({
+    queryKey: trustKey(environmentId),
+    queryFn: () => ensureEnvironmentApi(environmentId!).myComputer.trust(),
+    enabled: environmentId !== null && (options.enabled ?? true),
+    staleTime: 5_000,
+    retry: false,
+    refetchInterval: options.pollMs ?? false,
+    refetchIntervalInBackground: false,
+  });
+}
+
+/**
+ * Changing the trust settings, revoking a chat's Allow, Resume and Stop all.
+ * Each answers the new state, which replaces the cached one; a failure throws
+ * a sentence to show (`myComputerErrorText`).
+ */
+export function useMyComputerTrustActions(environmentId: EnvironmentId | null) {
+  const queryClient = useQueryClient();
+  return useMemo(() => {
+    const key = trustKey(environmentId);
+    const api = () => {
+      if (environmentId === null) throw new Error("Uno isn’t connected yet. Try again.");
+      return ensureEnvironmentApi(environmentId).myComputer;
+    };
+    const keep = (state: MyComputerTrustState) => {
+      queryClient.setQueryData(key, state);
+      return state;
+    };
+    return {
+      /** Replaces the whole settings object; the form shows it before the answer. */
+      setTrust: async (settings: MyComputerTrustSettings) => {
+        const before = queryClient.getQueryData<MyComputerTrustState>(key);
+        if (before !== undefined) queryClient.setQueryData(key, { ...before, settings });
+        try {
+          return keep(await api().setTrust(settings));
+        } catch (cause) {
+          if (before !== undefined) queryClient.setQueryData(key, before);
+          throw cause;
+        }
+      },
+      revokeGrant: async (input: MyComputerRevokeGrantInput) =>
+        keep(await api().revokeGrant(input)),
+      resume: async () => keep(await api().resume()),
+      stopAll: async (): Promise<MyComputerStopAllResult> => {
+        const result = await api().stopAll();
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: key }),
+          queryClient.invalidateQueries({ queryKey: [...MY_COMPUTER_KEY, "status"] }),
+          queryClient.invalidateQueries({ queryKey: [...MY_COMPUTER_KEY, "activity"] }),
+        ]);
+        return result;
+      },
+    };
+  }, [environmentId, queryClient]);
 }
 
 /** Refreshes the rows behind the dialog after something changed. */
@@ -102,7 +180,7 @@ export function useRefreshMyComputers() {
   );
 }
 
-const errorText = (cause: unknown) =>
+export const myComputerErrorText = (cause: unknown) =>
   cause instanceof Error && cause.message.trim() !== ""
     ? cause.message
     : "Uno didn’t answer. Try again.";
@@ -117,7 +195,7 @@ export async function requestPairing(environmentId: EnvironmentId | null): Promi
     if (useLocalComputer.getState().dialog !== "connect") return;
     localComputer.paired(pairing);
   } catch (cause) {
-    localComputer.pairFailed(errorText(cause));
+    localComputer.pairFailed(myComputerErrorText(cause));
   }
 }
 
@@ -130,6 +208,6 @@ export async function disconnectComputer(
     await ensureEnvironmentApi(environmentId).myComputer.disconnect({ computerId });
     return null;
   } catch (cause) {
-    return errorText(cause);
+    return myComputerErrorText(cause);
   }
 }

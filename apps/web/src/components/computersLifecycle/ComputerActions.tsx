@@ -12,7 +12,7 @@
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon, LaptopIcon, Loader2Icon, WrenchIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -34,6 +34,7 @@ import { workspaceQueryKeys } from "../../lib/workspaceReactQuery";
 import { useImportStatus } from "../../localComputer/useChatImport";
 import { disconnectComputer, useRefreshMyComputers } from "../../localComputer/useMyComputers";
 import { selectEnvironmentState, useStore } from "../../store";
+import { StopAllAgentsDialog } from "../localComputer/StopAllAgents";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -375,7 +376,7 @@ function PurposeSwitch({ computerId }: { computerId: string }) {
   );
 }
 
-/** Own computer: what it is for, Remove. */
+/** Own computer: what it is for, its agents' permissions, Stop all agents, Remove. */
 export function OwnComputerActions({
   computer,
   onBeforeDialog,
@@ -392,6 +393,25 @@ export function OwnComputerActions({
           command).
         </p>
       ) : null}
+      <Link
+        to="/settings/my-computer"
+        onClick={() => onBeforeDialog?.()}
+        data-testid="lc-permissions"
+        className="self-start text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+      >
+        Agent permissions
+      </Link>
+      <button
+        type="button"
+        onClick={() => {
+          onBeforeDialog?.();
+          lifecycle.confirm({ kind: "stop-all" });
+        }}
+        data-testid="lc-stop-all"
+        className="self-start text-xs text-destructive/90 underline-offset-2 hover:text-destructive hover:underline"
+      >
+        Stop all agents on my computer
+      </button>
       <button
         type="button"
         onClick={() => {
@@ -444,6 +464,7 @@ export function LifecycleConfirmDialogs() {
     if (!open) lifecycle.confirm(null);
   };
   if (confirm === null) return null;
+  if (confirm.kind === "stop-all") return <StopAllAgentsDialog open onOpenChange={close} />;
   return confirm.kind === "remove" ? (
     <RemoveComputerDialog
       open

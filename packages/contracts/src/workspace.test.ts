@@ -85,7 +85,7 @@ describe("legacy registry commands (migration 038)", () => {
   it("serves the computer methods, which live in a group of their own", () => {
     const served = new Set<string>(WsRpcGroup.requests.keys());
     const computer = Object.values(WS_METHODS).filter((method) => method.startsWith("myComputer."));
-    assert.lengthOf(computer, 10);
+    assert.lengthOf(computer, 15);
     assert.deepEqual(
       computer.filter((method) => !served.has(method)),
       [],

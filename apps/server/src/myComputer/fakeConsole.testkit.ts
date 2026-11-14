@@ -8,6 +8,7 @@
  *
  * @module myComputer/fakeConsole.testkit
  */
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -271,3 +272,31 @@ export async function waitFor(condition: () => boolean, what = "the condition", 
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
+
+/**
+ * The trust gate's path check (`trust/resolver.ts`) asks the computer with a
+ * fixed `/bin/sh` script: answer it by running that script here, with `home`
+ * as the computer's home folder. True: it was that check (and is answered).
+ */
+export function answerTrustCheck(
+  frame: Frame,
+  reply: (answer: Frame) => void,
+  home: string,
+): boolean {
+  if (
+    frame.op !== "exec" ||
+    typeof frame.cmd !== "string" ||
+    !frame.cmd.includes("__uno_trust_v1__")
+  ) {
+    return false;
+  }
+  const out = execFileSync("/bin/sh", ["-c", frame.cmd], {
+    env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: home },
+  });
+  reply({ type: "out", stream: 1, data: base64(out) });
+  reply({ type: "exit", code: 0 });
+  return true;
+}
+
+export const isTrustCheck = (frame: Frame) =>
+  frame.op === "exec" && typeof frame.cmd === "string" && frame.cmd.includes("__uno_trust_v1__");

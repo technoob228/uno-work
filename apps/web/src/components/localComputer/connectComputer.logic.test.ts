@@ -397,6 +397,9 @@ describe("the journal", () => {
       "Ran ls -t ~/Downloads",
     );
     expect(activityLine({ kind: "write", summary: "~/a.txt" })).toBe("Wrote ~/a.txt");
+    expect(activityLine({ kind: "run", summary: "docker compose up", outcome: "refused" })).toBe(
+      "Not run: docker compose up",
+    );
   });
 
   it("shows the time for today and the date for earlier", () => {
