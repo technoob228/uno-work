@@ -88,12 +88,12 @@ export function DevOnboardingPanel(props: {
         </div>
         <ol className="mt-1.5 list-decimal space-y-1 pl-4 text-[12px] leading-snug">
           <li>
-            Чат Uno: «What do you mostly do?» → <b>I build software</b> (или своими словами: «I'm a
-            developer», «I code»).
+            Как в проде: Home (домик слева сверху) → чип <b>Move my projects here</b> под полем,
+            рядом с «Add a project». Уже вошёл в Claude Code / Codex — сразу Import.
           </li>
           <li>
-            Две кнопки: <b>Sign in to Claude Code / Codex</b> или{" "}
-            <b>Import projects from my computer</b>.
+            Только в демо: чат Uno, «What do you mostly do?» → <b>I build software</b> (или «I'm a
+            developer») → Sign in to Claude Code / Codex или Import projects from my computer.
           </li>
           <li>
             Sign in: Claude Code → Sign in → Sign in with your account (демо входит само за пару
@@ -121,7 +121,7 @@ export function DevOnboardingPanel(props: {
             Чат Uno
           </Chip>
           <Chip testId="dev-open-home" onClick={() => go("/")}>
-            Home: строка «Move my projects here»
+            Home: чип «Move my projects here»
           </Chip>
           <Chip testId="dev-open-start" onClick={() => go("/setup", { step: "start" })}>
             Три пути

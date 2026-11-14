@@ -211,6 +211,44 @@ describe("Home's first screen after signing in to Claude", () => {
   });
 });
 
+describe("Home's first screen: the pills under the box", () => {
+  it("Move my projects here sits right after Add a project and opens the developer way", async () => {
+    providers.list = [uno];
+    const onUploadProject = vi.fn();
+    const onMoveProjects = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const screen = await render(
+      <QueryClientProvider client={client}>
+        <HomeComposer
+          environmentId={EnvironmentId.make("environment-local")}
+          starters={[{ id: "site", label: "A site for my business", prompt: "Make a site" }]}
+          onStart={vi.fn()}
+          onUploadProject={onUploadProject}
+          onMoveProjects={onMoveProjects}
+          minimal
+        />
+      </QueryClientProvider>,
+    );
+    const row = screen.getByTestId("home-starters");
+    await expect
+      .element(row.getByTestId("home-move-projects"))
+      .toHaveTextContent("Move my projects here");
+    const order = [...row.element().querySelectorAll("button")].map(
+      (button) => button.textContent?.trim() ?? "",
+    );
+    expect(order.indexOf("Move my projects here")).toBe(order.indexOf("Add a project") + 1);
+    await row.getByTestId("home-move-projects").click();
+    expect(onMoveProjects).toHaveBeenCalledTimes(1);
+    expect(onUploadProject).not.toHaveBeenCalled();
+  });
+
+  it("not offered where the screen doesn't pass it", async () => {
+    providers.list = [uno];
+    const screen = await mountFirstScreen();
+    await expect.element(screen.getByTestId("home-move-projects")).not.toBeInTheDocument();
+  });
+});
+
 describe("Home's box and the chat box's shortcuts", () => {
   it("Enter opens the chat with the task, as before", async () => {
     providers.list = [uno];

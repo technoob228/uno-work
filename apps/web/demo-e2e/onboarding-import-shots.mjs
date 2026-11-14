@@ -151,12 +151,28 @@ await run(
   { sizes: [SIZES[0]], panel: true },
 );
 
-// Home's first screen: the third way is a line under the composer.
+// Home's first screen: "Move my projects here" is a pill next to "Add a project".
 await run("01-home", { ...DEV_WORLD }, async ({ page, shot }) => {
   await go(page, "/");
   await id(page, "home-move-projects").waitFor();
   await shot("first-screen");
+  await id(page, "home-move-projects").click();
+  await id(page, "setup-dev-agent-claudeAgent").waitFor();
+  await shot("chip-to-sign-in");
 });
+
+// Claude Code signed in already: the pill goes straight to the import.
+await run(
+  "01-home-signed-in",
+  { ...DEV_WORLD, plans: "full" },
+  async ({ page, shot }) => {
+    await go(page, "/");
+    await id(page, "home-move-projects").click();
+    await id(page, "setup-import-connect").waitFor();
+    await shot("chip-to-import");
+  },
+  { sizes: [SIZES[0]] },
+);
 
 // The chooser: three ways, the developer one picked.
 await run("02-choose", { ...DEV_WORLD }, async ({ page, shot }) => {

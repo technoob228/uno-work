@@ -98,6 +98,7 @@ import {
   useStore,
 } from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
+import { useOpenDevWay } from "../../setup/useOpenDevWay";
 import { AddEnvModal } from "../../AddEnvModal";
 import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
 import { ConnectChoiceDialog } from "./ConnectChoiceDialog";
@@ -338,6 +339,8 @@ export function HomeStart({
       return threads.some((thread) => ids.has(thread.projectId));
     },
   });
+  // "Move my projects here" on the first screen: the developer way (13.11).
+  const openDevWay = useOpenDevWay();
   // A goal-first newcomer gets the goal buttons instead of suggestion chips.
   const goalFirst = goalState(setupProgress).goal !== null;
   const starters = goalFirst
@@ -598,11 +601,8 @@ export function HomeStart({
           onAskUno={(prompt) => void onAskUno(prompt)}
         />
       ) : null;
-    const ownWaysLine = (moveProjects: boolean) => (
-      <p
-        className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 px-1 text-center text-[13px] text-muted-foreground"
-        data-testid="home-own-ways"
-      >
+    const ownAgentLine = (
+      <p className="px-1 text-center text-[13px] text-muted-foreground" data-testid="home-own-ways">
         <button
           type="button"
           onClick={() => setConnectChoice(true)}
@@ -611,26 +611,8 @@ export function HomeStart({
         >
           Connect your AI or other computers →
         </button>
-        {moveProjects ? (
-          <>
-            {/* On a phone the two wrap onto their own lines: no dot left hanging. */}
-            <span aria-hidden className="hidden text-muted-foreground/50 sm:inline">
-              ·
-            </span>
-            {/* Developers (13.11): sign in, import from the laptop, open a chat — /setup's three steps. */}
-            <button
-              type="button"
-              onClick={() => void goTo({ to: "/setup", search: { step: "sign-in" } })}
-              className="hover:text-foreground hover:underline"
-              data-testid="home-move-projects"
-            >
-              Move my projects here →
-            </button>
-          </>
-        ) : null}
       </p>
     );
-    const ownAgentLine = ownWaysLine(false);
     const ownToolsDialog = (
       <>
         <ConnectChoiceDialog
@@ -709,10 +691,11 @@ export function HomeStart({
             placeholder={FIRST_SCREEN_PLACEHOLDER}
             ariaLabel="What do you want to build?"
             onUploadProject={() => openUpload()}
+            // A cloud computer: projects come over from the laptop into it (13.11).
+            {...(isWebApp ? { onMoveProjects: () => void openDevWay() } : {})}
             onDropProject={dropProject}
           />
-          {/* A cloud computer: projects come over from the laptop into it. */}
-          {ownWaysLine(isWebApp)}
+          {ownAgentLine}
           {ownToolsDialog}
         </div>
       );

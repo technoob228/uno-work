@@ -67,3 +67,18 @@ export function devAgentSelection(
   const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
   return model ? { instanceId, model } : null;
 }
+
+/**
+ * Where the developer way starts (Home's "Move my projects here", Misha 13.11):
+ * at its sign-in, or — Claude Code or Codex already signed in with the
+ * person's own plan — at the import, on that agent (the saved pick first).
+ */
+export function devWayStart(
+  providers: ReadonlyArray<ServerProvider>,
+  saved: DevAgentId | null,
+): { readonly step: "sign-in" } | { readonly step: "import"; readonly agent: ProviderAuthDriver } {
+  const usable = (id: DevAgentId | null): id is ProviderAuthDriver =>
+    (id === "claudeAgent" || id === "codex") && devAgentSignedIn(providers, id);
+  const agent = usable(saved) ? saved : DEV_AGENTS.find(usable);
+  return agent ? { step: "import", agent } : { step: "sign-in" };
+}
