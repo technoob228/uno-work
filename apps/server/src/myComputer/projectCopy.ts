@@ -6,8 +6,10 @@
  * tar: macOS, Linux and Windows 10+ all have one) into a file in its temp
  * folder, leaving out what is rebuilt anyway (`node_modules`, virtualenvs,
  * build caches) and never the git history. The file comes over in chunks,
- * is unpacked here, and is removed there. `.env` files are left out: keys go
- * through the vault (the person picks them), never as files.
+ * is unpacked here, and is removed there. `.env` files are left out — every
+ * `.env*`, templates too: keys go through the vault (the person picks them),
+ * never as files. What the repository itself tracks of them is settled from
+ * its own history afterwards (`settleTrackedEnvFiles`).
  *
  * @module myComputer/projectCopy
  */
@@ -190,9 +192,89 @@ export async function copyFolderFromComputer(input: {
     await fsp.mkdir(input.destination, { recursive: true });
     // GNU and BSD tar both refuse members with `..` and drop a leading `/`.
     await runTar(["-xzf", archive, "-C", input.destination]);
+    await settleTrackedEnvFiles(input.destination).catch(() => undefined);
     return { bytes: answer.bytes };
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true }).catch(() => undefined);
     await removeThere();
   }
+}
+
+// ── Tracked `.env*` files after the copy ───────────────────────────────
+
+/** Key-file templates a repository commits (as in the project move's `isCarriedEnvFileName`). */
+const ENV_TEMPLATE = /^\.env\.(example|sample|template|dist)$/;
+const isEnvFileName = (name: string) => name === ".env" || name.startsWith(".env.");
+
+/**
+ * Plumbing only, nothing of the repository's own config runs: no hooks, no
+ * fsmonitor (commands from the copied `.git/config` must not run here).
+ */
+const runGit = (cwd: string, args: ReadonlyArray<string>) =>
+  new Promise<Buffer>((resolve, reject) => {
+    const child = spawn(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-C", cwd, ...args],
+      { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } },
+    );
+    const chunks: Array<Buffer> = [];
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) =>
+      code === 0 ? resolve(Buffer.concat(chunks)) : reject(new Error(`git exited ${code}`)),
+    );
+  });
+
+/**
+ * The copy left every `.env*` file out, so git here sees the ones the
+ * repository tracks as deleted — and an agent's `git add -A` would commit
+ * that. Templates (`.env.example`, `.env.sample`…) are written back from the
+ * repository's own index: the committed text, already here in `.git`, never
+ * the laptop's file. Any other tracked `.env*` is marked skip-worktree: not
+ * "deleted", and a file made here later isn't committed by accident.
+ * Best effort; resolves with what it did.
+ */
+export async function settleTrackedEnvFiles(
+  folder: string,
+): Promise<{ readonly restored: ReadonlyArray<string>; readonly hidden: ReadonlyArray<string> }> {
+  const none = { restored: [], hidden: [] };
+  const isRepo = await fsp
+    .stat(path.join(folder, ".git"))
+    .then(() => true)
+    .catch(() => false);
+  if (!isRepo) return none;
+  const deleted = (await runGit(folder, ["ls-files", "-z", "--deleted"]))
+    .toString("utf8")
+    .split("\0")
+    .filter((entry) => entry.length > 0 && isEnvFileName(path.posix.basename(entry)));
+  if (deleted.length === 0) return none;
+  const root = await fsp.realpath(folder);
+  const restored: Array<string> = [];
+  const hidden: Array<string> = [];
+  for (const entry of new Set(deleted)) {
+    if (!ENV_TEMPLATE.test(path.posix.basename(entry))) {
+      hidden.push(entry);
+      continue;
+    }
+    const target = path.resolve(root, entry);
+    // Inside the copy, through no symlink that leads out of it.
+    const parent = await fsp.realpath(path.dirname(target)).catch(() => null);
+    if (parent === null || (parent !== root && !parent.startsWith(`${root}${path.sep}`))) {
+      hidden.push(entry);
+      continue;
+    }
+    try {
+      const blob = await runGit(folder, ["cat-file", "blob", `:${entry}`]);
+      await fsp.writeFile(path.join(parent, path.basename(target)), blob, { flag: "wx" });
+      restored.push(entry);
+    } catch {
+      hidden.push(entry);
+    }
+  }
+  if (hidden.length > 0) {
+    await runGit(folder, ["update-index", "--skip-worktree", "--", ...hidden]).catch(
+      () => undefined,
+    );
+  }
+  return { restored, hidden };
 }

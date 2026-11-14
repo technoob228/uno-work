@@ -35,6 +35,7 @@ import { useSetupProgress } from "../../setup/useSetupProgress";
 import { HomeGoalButtons, useGoalWatcher } from "./HomeGoals";
 import { HomeNextStepCard, isAgentOnServerPlan, useNextStep } from "./HomeNextStep";
 import { isWebLite } from "../../../lite/webLite";
+import { isWebApp } from "../../../webMode";
 import { SelfUpdateCard } from "../../../selfUpdate/SelfUpdateNotice";
 import { HomeAppWidgetPin, HomeWidgetPin } from "./HomeWidgetPin";
 import { HomeUnoEntry } from "./HomeUnoEntry";
@@ -97,6 +98,7 @@ import {
   useStore,
 } from "../../../store";
 import { useSetupHome, type SetupHome } from "../../setup/useSetupHome";
+import { useOpenDevWay } from "../../setup/useOpenDevWay";
 import { AddEnvModal } from "../../AddEnvModal";
 import { OwnToolsDialog, type OwnToolsTab } from "../../setup/OwnToolsDialog";
 import { ConnectChoiceDialog } from "./ConnectChoiceDialog";
@@ -337,6 +339,8 @@ export function HomeStart({
       return threads.some((thread) => ids.has(thread.projectId));
     },
   });
+  // "Move my projects here" on the first screen: the developer way (13.11).
+  const openDevWay = useOpenDevWay();
   // A goal-first newcomer gets the goal buttons instead of suggestion chips.
   const goalFirst = goalState(setupProgress).goal !== null;
   const starters = goalFirst
@@ -687,6 +691,8 @@ export function HomeStart({
             placeholder={FIRST_SCREEN_PLACEHOLDER}
             ariaLabel="What do you want to build?"
             onUploadProject={() => openUpload()}
+            // A cloud computer: projects come over from the laptop into it (13.11).
+            {...(isWebApp ? { onMoveProjects: () => void openDevWay() } : {})}
             onDropProject={dropProject}
           />
           {ownAgentLine}
@@ -995,7 +1001,7 @@ function SetupDoneBanner({ setup }: { setup: SetupHome }) {
           <button
             type="button"
             className="text-primary hover:underline"
-            onClick={() => void navigate({ to: "/setup", search: { step: "done" } })}
+            onClick={() => void navigate({ to: "/setup", search: { step: setup.finishStep } })}
           >
             Finish {setup.skippedCount} skipped {setup.skippedCount === 1 ? "step" : "steps"}
           </button>

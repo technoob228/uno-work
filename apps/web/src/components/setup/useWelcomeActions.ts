@@ -1,6 +1,7 @@
 /**
  * Leaving the welcome screen: the person picked "just a computer" (the
- * tour) or "a computer with AI" (the guided setup), or skipped it all.
+ * tour), "a computer with AI" (the guided setup) or "move my projects here"
+ * (the developer's three steps), or skipped it all.
  * Completion is recorded on this interface (`onboardingCompleted`, local and
  * immediate — the root guard reads it) and on the machine (`machineOnboarded`
  * + setup progress, so the same computer opened elsewhere goes straight in).
@@ -16,12 +17,12 @@ import { useCallback, useRef, useState } from "react";
 import { useUpdateSettings } from "../../hooks/useSettings";
 import { getServerConfig } from "../../rpc/serverState";
 import { toastManager } from "../ui/toast";
-import { EMPTY_SETUP_PROGRESS, skipRemaining } from "./setupModel";
+import { EMPTY_SETUP_PROGRESS, skipRemaining, withSetupFlow, type SetupFlow } from "./setupModel";
 import { useStartSetupTour } from "./SetupTour";
 import { useSetupNavigation } from "./useSetupNavigation";
 import { useUpdateSetupProgress } from "./useSetupProgress";
 
-export type WelcomeMode = "simple" | "ai";
+export type WelcomeMode = SetupFlow;
 
 function reportSaveFailure(error: unknown) {
   toastManager.add({
@@ -87,10 +88,10 @@ export function useWelcomeActions() {
   const choose = useCallback(
     (mode: WelcomeMode) => {
       leave(
-        (current) => ({ ...current, mode }),
+        (current) => withSetupFlow(current, mode),
         () => {
           if (mode === "simple") startTour("home");
-          else void navigate({ to: "/setup", search: { step: "ai" } });
+          else void navigate({ to: "/setup", search: { step: mode === "dev" ? "sign-in" : "ai" } });
         },
       );
     },

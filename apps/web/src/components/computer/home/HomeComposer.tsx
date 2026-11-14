@@ -20,6 +20,10 @@
  * shows from the start (Misha 28.10: after signing in to Claude the box had
  * "no model, no reasoning" — he couldn't see Claude was there and picked).
  *
+ * "Move my projects here" (13.11, a cloud computer's first screen): the
+ * developer way — sign in to Claude Code / Codex, bring projects and keys from
+ * the laptop (/setup's three steps).
+ *
  * "Show the agent" (Loom Work, 28.10) sits next to "Add a project": the same
  * recording as the chat's Record button. Its card waits in this box (saving,
  * watching, Retry), the words go in once, and on Enter it moves to the new
@@ -46,6 +50,7 @@ import {
   LoaderCircleIcon,
   MicIcon,
   SquareIcon,
+  FolderGit2Icon,
   FolderIcon,
   FolderUpIcon,
   LockIcon,
@@ -246,6 +251,7 @@ export function HomeComposer({
   onStart,
   placeholder = "What should Uno do? For example: build a sales report from the sheets in my cloud",
   onUploadProject,
+  onMoveProjects,
   onDropProject,
   minimal = false,
   ariaLabel = "What should we do?",
@@ -261,6 +267,8 @@ export function HomeComposer({
   placeholder?: string;
   /** The last pill, "I have a project": upload a folder / .zip. */
   onUploadProject?: () => void;
+  /** "Move my projects here", after it: the developer way. */
+  onMoveProjects?: () => void;
   /** Files / a folder dropped on the box. */
   onDropProject?: (data: DataTransfer) => void;
   /** Only the box, the arrow and the pills (a newcomer's first screen; pills centred). */
@@ -858,7 +866,7 @@ export function HomeComposer({
           onPickComputer={pickComputer}
         />
       )}
-      {starters.length > 0 || onUploadProject ? (
+      {starters.length > 0 || onUploadProject || onMoveProjects ? (
         // One row of light pills; on a narrow screen they wrap (no sideways scroll).
         <div
           className={cn("flex flex-wrap gap-2", minimal && "justify-center")}
@@ -897,6 +905,17 @@ export function HomeComposer({
             >
               <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
               Add a project
+            </button>
+          ) : null}
+          {onMoveProjects ? (
+            <button
+              type="button"
+              onClick={onMoveProjects}
+              className={PILL}
+              data-testid="home-move-projects"
+            >
+              <FolderGit2Icon className="size-3.5 shrink-0 text-muted-foreground" />
+              Move my projects here
             </button>
           ) : null}
           {recordingSupported && recordingKey ? (

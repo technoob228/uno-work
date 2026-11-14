@@ -727,6 +727,17 @@ export const UnoSetupProgress = Schema.Struct({
   mode: Schema.NullOr(Schema.Literals(["simple", "ai"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * Which way through the AI setup (13.11). "dev" = "Move my projects here":
+   * sign in to Claude Code / Codex, import projects from the laptop, open a
+   * chat in one (three steps, "Set up N/3"); missing = the eight steps.
+   * Set together with `mode: "ai"`. A plain string, not a new `mode` literal:
+   * an older daemon can't decode a literal it doesn't know, and a settings
+   * file that doesn't decode is replaced by the defaults — a rollback would
+   * wipe the computer's settings (the `UnoPinKind` lesson). An older daemon
+   * drops this key and sees the AI path.
+   */
+  flow: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(64))),
   visited: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   skipped: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Reached the last step (or skipped the whole setup). */

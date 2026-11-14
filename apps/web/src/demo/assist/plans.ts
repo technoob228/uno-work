@@ -51,6 +51,15 @@ const CLAUDE_TRAITS: ModelCapabilities = {
 
 export const DEMO_ACCOUNTS = WORLD.plans === "accounts";
 export const DEMO_PLANS = WORLD.plans === "full" || DEMO_ACCOUNTS;
+/** `plans=signin`: Claude Code and Codex on uno-work, not signed in until the person does. */
+export const DEMO_SIGN_IN = WORLD.plans === "signin";
+/** Which of them the person signed in to (the demo's sign-in finishes by itself). */
+const signedInHere = new Set<string>();
+
+/** Claude Code or Codex runs on the person's own plan on uno-work (Uno's "I build software" card). */
+export function demoOwnAgentSignedIn(): boolean {
+  return DEMO_SIGN_IN ? signedInHere.size > 0 : DEMO_PLANS;
+}
 
 const NOW = Date.now();
 const later = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
@@ -152,6 +161,10 @@ export function pollDemoAuth(jobId: string) {
     };
   }
   const account = secondAccounts.find((entry) => entry.instanceId === job.instanceId);
+  if (DEMO_SIGN_IN && account === undefined && !signedInHere.has(job.driver)) {
+    signedInHere.add(job.driver);
+    return { status: { ...base, state: "succeeded" }, done: true };
+  }
   const done = account !== undefined && !account.signedIn;
   if (account) account.signedIn = true;
   return { status: { ...base, state: "succeeded" }, done };
@@ -309,8 +322,44 @@ export function planLimitsFor(machineKey: string): PlanLimits {
   return { accounts: [] };
 }
 
+/** `plans=signin`: the two agents on uno-work, each signed in once the person did. */
+function signInProvidersFor(machineKey: string, checkedAt: string, version: string) {
+  if (machineKey !== "work") return [];
+  const agent = (driver: "claudeAgent" | "codex") => ({
+    driver,
+    instanceId: driver,
+    displayName: driver === "codex" ? "Codex" : "Claude",
+    enabled: true,
+    installed: true,
+    version,
+    status: "ready",
+    auth: signedInHere.has(driver)
+      ? driver === "codex"
+        ? { status: "authenticated", type: "chatgpt", label: "Plus", email: "misha@getuno.xyz" }
+        : { status: "authenticated", type: "claude.ai", label: "Max 5x", email: "misha@getuno.xyz" }
+      : { status: "unauthenticated" },
+    checkedAt,
+    models:
+      driver === "codex"
+        ? [{ slug: "gpt-5.4", name: "GPT-5.4", isCustom: false, capabilities: null }]
+        : [
+            { slug: "claude-opus-5", name: "Opus 5", isCustom: false, capabilities: CLAUDE_TRAITS },
+            {
+              slug: "claude-sonnet-5",
+              name: "Sonnet 5",
+              isCustom: false,
+              capabilities: CLAUDE_TRAITS,
+            },
+          ],
+    slashCommands: [],
+    skills: [],
+  });
+  return [agent("claudeAgent"), agent("codex")];
+}
+
 /** Claude Code (and Codex on the MacBook) signed in with the person's own accounts. */
 export function planProvidersFor(machineKey: string, checkedAt: string, version: string) {
+  if (DEMO_SIGN_IN) return signInProvidersFor(machineKey, checkedAt, version);
   if (!hasPlans(machineKey)) return [];
   const claude = {
     driver: "claudeAgent",

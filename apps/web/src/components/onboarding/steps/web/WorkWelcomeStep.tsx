@@ -1,17 +1,20 @@
 /**
- * The browser's first screen: this is your computer, and two ways to use
- * it — just a computer (a short tour) or a computer with AI (the guided
- * setup, `/setup`). People who'd rather use their own agent or plain SSH get
- * a door to that too. Every fact on the card comes from the daemon.
+ * "How do you want to use it?": this is your computer, and three ways to use
+ * it — just a computer (a short tour), a computer with AI (the guided setup,
+ * `/setup`), or move my projects here (developers: sign in to Claude Code or
+ * Codex, import projects from the laptop, open a chat in one). People who'd
+ * rather use their own agent or plain SSH get a door to that too. Every fact
+ * on the card comes from the daemon.
  */
-import { LaptopIcon, SparklesIcon } from "lucide-react";
+import { FolderGit2Icon, LaptopIcon, SparklesIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import type { SetupFlow } from "~/components/setup/setupModel";
 import { cn } from "~/lib/utils";
 import { useServerConfig } from "~/rpc/serverState";
 import { describeConnectedMachine } from "./connectedMachine";
 
-export type WelcomeMode = "simple" | "ai";
+export type WelcomeMode = SetupFlow;
 
 function Choice({
   selected,
@@ -20,6 +23,7 @@ function Choice({
   icon,
   title,
   badge,
+  badgeTone = "primary",
   description,
   testId,
 }: {
@@ -29,6 +33,8 @@ function Choice({
   icon: ReactNode;
   title: string;
   badge?: string;
+  /** "Recommended" leads; "For developers" only says who it's for. */
+  badgeTone?: "primary" | "quiet";
   description: string;
   testId: string;
 }) {
@@ -59,7 +65,14 @@ function Choice({
         <span className="flex flex-wrap items-center gap-2 font-medium">
           {title}
           {badge ? (
-            <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+            <span
+              className={cn(
+                "rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                badgeTone === "primary"
+                  ? "bg-primary/10 text-primary"
+                  : "bg-muted text-muted-foreground",
+              )}
+            >
               {badge}
             </span>
           ) : null}
@@ -155,6 +168,17 @@ export function WorkWelcomeStep({
             title="A computer with AI"
             badge="Recommended"
             description="An AI that works in your projects, knows your tools and answers in Telegram or Slack. About 5 minutes."
+          />
+          <Choice
+            testId="welcome-dev"
+            selected={mode === "dev"}
+            onSelect={() => onModeChange("dev")}
+            onConfirm={() => onConfirm("dev")}
+            icon={<FolderGit2Icon className="size-5" />}
+            title="Move my projects here"
+            badge="For developers"
+            badgeTone="quiet"
+            description="Sign in to Claude Code or Codex and bring your projects and keys from your laptop."
           />
         </div>
       </div>

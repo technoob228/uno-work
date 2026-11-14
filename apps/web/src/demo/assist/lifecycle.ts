@@ -22,6 +22,7 @@
  *
  * `?lc=fresh` (default): the MacBook isn't connected yet; `?lc=connected`:
  * it already is a full computer; `?lc=off`: the demo as before.
+ * `?bring=slow`: each project takes ~5 s to come over (the setup's "Copying…").
  */
 import type {
   ComputerPurpose,
@@ -33,7 +34,7 @@ import type {
   ProjectComputer,
   ThreadComputerSource,
 } from "@t3tools/contracts";
-import { WS_METHODS } from "@t3tools/contracts";
+import { ProjectId, WS_METHODS } from "@t3tools/contracts";
 
 import { LC_START } from "../../computersLifecycle/flag";
 import type { LifecycleDemoHooks } from "../../computersLifecycle/backend";
@@ -391,24 +392,56 @@ const FOUND: ReadonlyArray<FoundProject> = [
     fromChats: false,
     synced: false,
   },
+  // Found in the other usual folders (13.11): ~/code, ~/Developer; keys from .env and .env.local.
+  {
+    name: "api",
+    path: `${MAC_HOME}/code/api`,
+    displayPath: "~/code/api",
+    git: true,
+    keys: ["DATABASE_URL", "OPENAI_API_KEY", "SENTRY_DSN"],
+    fromChats: false,
+    synced: false,
+  },
+  {
+    name: "ios-app",
+    path: `${MAC_HOME}/Developer/ios-app`,
+    displayPath: "~/Developer/ios-app",
+    git: true,
+    keys: [],
+    fromChats: false,
+    synced: false,
+  },
 ];
 
+/** Too big to come over (the real limit: 2 GB packed). */
+const TOO_BIG = new Map([
+  [`${MAC_HOME}/Developer/ios-app`, "The project is 2380 MB packed; up to 2 GB come over."],
+]);
+
 const SCAN_MS = 1_200;
-const BRING_MS = 1_800;
+/** One project after another, like the cloud computer copies them. */
+const BRING_MS =
+  typeof location !== "undefined" && new URLSearchParams(location.search).get("bring") === "slow"
+    ? 5_000
+    : 1_800;
 let scanStartedAt: number | null = null;
 let bringing: { startedAt: number; paths: ReadonlyArray<string>; keys: number[] } | null = null;
 const synced = new Set<string>();
 
+const nameOf = (path: string) => path.split("/").pop() ?? path;
+
 function workStatus(): ComputerWorkStatus {
   const scanning = scanStartedAt !== null && Date.now() - scanStartedAt < SCAN_MS;
   const scanned = scanStartedAt !== null && !scanning;
-  const running = bringing !== null && Date.now() - bringing.startedAt < BRING_MS;
-  if (bringing !== null && !running) {
-    for (const path of bringing.paths) {
-      if (!synced.has(path)) {
-        synced.add(path);
-        workProject(path.split("/").pop() ?? path);
-      }
+  const done =
+    bringing === null
+      ? 0
+      : Math.min(bringing.paths.length, Math.floor((Date.now() - bringing.startedAt) / BRING_MS));
+  const running = bringing !== null && done < bringing.paths.length;
+  for (const path of bringing?.paths.slice(0, done) ?? []) {
+    if (!synced.has(path) && !TOO_BIG.has(path)) {
+      synced.add(path);
+      workProject(nameOf(path));
     }
   }
   return {
@@ -427,18 +460,21 @@ function workStatus(): ComputerWorkStatus {
         ? { state: "idle", done: 0, total: 0, message: null, results: [] }
         : {
             state: running ? "running" : "done",
-            done: running ? 0 : bringing.paths.length,
+            done,
             total: bringing.paths.length,
             message: null,
-            results: running
-              ? []
-              : bringing.paths.map((path, index) => ({
-                  path,
-                  name: path.split("/").pop() ?? path,
-                  ok: true,
-                  keysSaved: bringing!.keys[index] ?? 0,
-                  message: null,
-                })),
+            results: bringing.paths.slice(0, done).map((path, index) => {
+              const tooBig = TOO_BIG.get(path);
+              return {
+                path,
+                name: nameOf(path),
+                ok: tooBig === undefined,
+                keysSaved: tooBig ? 0 : (bringing!.keys[index] ?? 0),
+                message: tooBig ?? null,
+                projectId: tooBig ? null : ProjectId.make(`p-work-${nameOf(path)}`),
+                folder: tooBig ? null : `/home/uno/projects/${nameOf(path)}`,
+              };
+            }),
           },
   };
 }
@@ -612,7 +648,9 @@ export function answerLifecycleRpc(machine: DemoMachine, tag: string, body: unkn
         paths: projects.map((project) => project.path),
         keys: projects.map((project) => project.keys.length),
       };
-      setTimeout(() => workStatus(), BRING_MS + 50);
+      for (let index = 1; index <= projects.length; index++) {
+        setTimeout(() => workStatus(), BRING_MS * index + 50);
+      }
       return workStatus();
     }
     case WS_METHODS.computersOpenFolder:

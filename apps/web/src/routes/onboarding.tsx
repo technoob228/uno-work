@@ -17,7 +17,7 @@ import {
   type WelcomeMode,
 } from "~/components/onboarding/steps/web/WorkWelcomeStep";
 import { OwnToolsDialog, type OwnToolsTab } from "~/components/setup/OwnToolsDialog";
-import { skipRemaining } from "~/components/setup/setupModel";
+import { skipRemaining, withSetupFlow } from "~/components/setup/setupModel";
 import { useStartSetupTour } from "~/components/setup/SetupTour";
 import { useUpdateSetupProgress } from "~/components/setup/useSetupProgress";
 import { useCommandPaletteStore } from "~/commandPaletteStore";
@@ -63,9 +63,9 @@ function OnboardingRouteView() {
     setLeaving(true);
     try {
       await markCompleted();
-      await updateSetup((current) => ({ ...current, mode }));
+      await updateSetup((current) => withSetupFlow(current, mode));
       if (mode === "simple") startTour("home");
-      else void navigate({ to: "/setup", search: { step: "ai" } });
+      else void navigate({ to: "/setup", search: { step: mode === "dev" ? "sign-in" : "ai" } });
     } finally {
       setLeaving(false);
     }

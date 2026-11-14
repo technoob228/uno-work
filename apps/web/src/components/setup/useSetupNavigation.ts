@@ -12,12 +12,14 @@ import { nextStepIdForSetupStep } from "../computer/home/agentStart";
 import { nextStepDoneKey } from "../computer/home/nextStep";
 
 import {
+  isDevSetupStep,
+  isLastSetupStep,
   markCompleted,
   markSkipped,
   nextStep,
   skipRemaining,
+  type AnySetupStepId,
   type SetupRouteStep,
-  type SetupStepId,
 } from "./setupModel";
 import { goalState, withAnswer } from "./goals";
 import { useSetupProgress, useUpdateSetupProgress } from "./useSetupProgress";
@@ -42,10 +44,10 @@ export function useSetupNavigation() {
   }, [navigate]);
 
   const completeStep = useCallback(
-    (step: SetupStepId): Promise<void> => {
+    (step: AnySetupStepId): Promise<void> => {
       // Сначала переход, сохранение фоном (perf/ttfa-startup): ждать записи
       // настроек на стартующем демоне — это и были 3 с после «Skip setup».
-      const nextStepId = one ? nextStepIdForSetupStep(step) : null;
+      const nextStepId = one && !isDevSetupStep(step) ? nextStepIdForSetupStep(step) : null;
       if (one) {
         // Done: the card moves on here at once, and the account hears it now —
         // on finishing, not on the click that opened it (fishcode next-step).
@@ -84,13 +86,17 @@ export function useSetupNavigation() {
   );
 
   const skipStep = useCallback(
-    (step: SetupStepId): Promise<void> => {
+    (step: AnySetupStepId): Promise<void> => {
       // On its own: Skip is "not now" — back to Home, the step stays open there.
       if (one) {
         goHome();
         return Promise.resolve();
       }
-      const saved = update((current) => markSkipped(current, step));
+      // Skipping the last step (the developer's first chat) ends the setup too.
+      const saved = update((current) => {
+        const skipped = markSkipped(current, step);
+        return isLastSetupStep(step) ? { ...skipped, finished: true } : skipped;
+      });
       const next = nextStep(step);
       if (next) goToStep(next);
       else goHome();

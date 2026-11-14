@@ -52,7 +52,7 @@ export const FoundProject = Schema.Struct({
   /** For people: "~/projects/landing". */
   displayPath: Schema.String,
   git: Schema.Boolean,
-  /** Names from the folder's `.env`. */
+  /** Names from the folder's `.env` and `.env.local` (never a value). */
   keys: Schema.Array(Schema.String),
   /** A chat found on the computer ran in it. */
   fromChats: Schema.Boolean,
@@ -77,6 +77,14 @@ export const ComputerBringResult = Schema.Struct({
   ok: Schema.Boolean,
   keysSaved: NonNegativeInt,
   message: Schema.NullOr(Schema.String),
+  /**
+   * The Work project it became here, once copied (13.11: setup opens a chat
+   * in it). Set even when `ok` is false for "On all my computers" only — the
+   * folder is there. Older daemons don't send it.
+   */
+  projectId: Schema.optionalKey(Schema.NullOr(ProjectId)),
+  /** The folder here, absolute. Older daemons don't send it. */
+  folder: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type ComputerBringResult = typeof ComputerBringResult.Type;
 

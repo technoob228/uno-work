@@ -14,6 +14,7 @@ import { installPreloadErrorReload } from "./staleBundle";
 import { syncDocumentWindowControlsOverlayClass } from "./lib/windowControlsOverlay";
 import { syncDocumentFullscreenClass } from "./lib/windowFullscreen";
 import { DEMO, DEMO_ASSIST, DEMO_LOOM } from "./demo/demoFlag";
+import { createDemoHashHistory } from "./demo/demoHistory";
 
 // Demo mode (?demo=w0138): computers answered in the page from fixtures,
 // plus the "what to look at" panel and the variant switcher. Loaded only with the parameter.
@@ -39,7 +40,12 @@ if (DEMO) {
 installPreloadErrorReload();
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
-const history = isElectron || DEMO ? createHashHistory() : createBrowserHistory();
+// The demo's route is in the hash too; its page query is the demo's world.
+const history = isElectron
+  ? createHashHistory()
+  : DEMO
+    ? createDemoHashHistory()
+    : createBrowserHistory();
 
 const router = getRouter(history);
 

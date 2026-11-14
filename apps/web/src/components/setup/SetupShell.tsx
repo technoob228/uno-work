@@ -1,17 +1,31 @@
 /**
  * The frame every setup step sits in: the app's own sidebar stays on the
- * left (so "Set up N/8" and the new project are visible while you work),
+ * left (so "Set up N/8" — "N/3" on the developer way — and the new project
+ * are visible while you work),
  * with a header, the step strip, the page and a footer with Back / Skip /
  * the step's main action.
  */
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowRightIcon, CheckIcon, Loader2Icon, SparklesIcon } from "lucide-react";
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  FolderGit2Icon,
+  Loader2Icon,
+  SparklesIcon,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
-import { SETUP_STEPS, SETUP_STEP_LABEL, previousStep, type SetupStepId } from "./setupModel";
+import {
+  flowOfStep,
+  previousStep,
+  setupStepLabel,
+  stepsOfFlow,
+  type AnySetupStepId,
+} from "./setupModel";
 import { useSetupProgress } from "./useSetupProgress";
 import { useSetupNavigation } from "./useSetupNavigation";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
@@ -26,6 +40,7 @@ export interface SetupPrimaryAction {
 export function SetupFrame({
   title,
   icon = true,
+  Icon = SparklesIcon,
   progress,
   headerAction,
   children,
@@ -34,6 +49,8 @@ export function SetupFrame({
   title: string;
   /** The sparkle before the title (the steps have it, the welcome screen doesn't). */
   icon?: boolean;
+  /** Which one: the developer way has its folder. */
+  Icon?: LucideIcon;
   /** 0..1, or null for no bar. */
   progress: number | null;
   headerAction?: ReactNode;
@@ -45,7 +62,7 @@ export function SetupFrame({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">
         <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 sm:px-5">
           <SidebarShowButton />
-          {icon ? <SparklesIcon className="size-4 text-muted-foreground" aria-hidden /> : null}
+          {icon ? <Icon className="size-4 text-muted-foreground" aria-hidden /> : null}
           <span className="truncate text-sm font-medium">{title}</span>
           <div className="ml-auto flex items-center gap-1">{headerAction}</div>
         </header>
@@ -70,10 +87,11 @@ export function SetupFrame({
   );
 }
 
-function StepStrip({ current }: { current: SetupStepId }) {
+function StepStrip({ current }: { current: AnySetupStepId }) {
   const progress = useSetupProgress();
   const { goToStep } = useSetupNavigation();
-  const index = SETUP_STEPS.indexOf(current);
+  const steps = stepsOfFlow(flowOfStep(current));
+  const index = steps.indexOf(current);
   return (
     <>
       <nav
@@ -81,7 +99,7 @@ function StepStrip({ current }: { current: SetupStepId }) {
         className="hidden flex-wrap gap-1 px-5 pt-4 lg:flex"
         data-testid="setup-stepper"
       >
-        {SETUP_STEPS.map((step, k) => {
+        {steps.map((step, k) => {
           const isCurrent = step === current;
           const skipped = progress.skipped.includes(step);
           const done = !isCurrent && !skipped && progress.visited.includes(step);
@@ -111,22 +129,23 @@ function StepStrip({ current }: { current: SetupStepId }) {
               >
                 {done ? <CheckIcon className="size-3" strokeWidth={3} /> : k + 1}
               </span>
-              {SETUP_STEP_LABEL[step]}
+              {setupStepLabel(step)}
             </button>
           );
         })}
       </nav>
       <div className="px-5 pt-4 text-xs text-muted-foreground lg:hidden">
-        Step <b className="text-foreground">{index + 1}</b> of {SETUP_STEPS.length} ·{" "}
-        <b className="text-foreground">{SETUP_STEP_LABEL[current]}</b>
+        Step <b className="text-foreground">{index + 1}</b> of {steps.length} ·{" "}
+        <b className="text-foreground">{setupStepLabel(current)}</b>
       </div>
     </>
   );
 }
 
 /**
- * One step. `primary` is the step's main button; Continue marks the step
- * done, Skip marks it skipped — both move on.
+ * One step of either way (the eight steps, or the developer's three). `primary`
+ * is the step's main button (none while the step itself has nothing to press);
+ * Continue marks the step done, Skip marks it skipped — both move on.
  */
 export function SetupShell({
   step,
@@ -135,28 +154,34 @@ export function SetupShell({
   canSkip = true,
   children,
 }: {
-  step: SetupStepId;
-  primary: SetupPrimaryAction;
+  step: AnySetupStepId;
+  primary?: SetupPrimaryAction | null;
   wide?: boolean;
   canSkip?: boolean;
   children: ReactNode;
 }) {
   const { goToStep, goHome, skipStep, skipAll, one } = useSetupNavigation();
   const navigate = useNavigate();
-  const index = SETUP_STEPS.indexOf(step);
+  const dev = flowOfStep(step) === "dev";
+  const steps = stepsOfFlow(flowOfStep(step));
+  const index = steps.indexOf(step);
+  const last = index === steps.length - 1;
   // On its own (Home's Next step card, `one=1`): no strip, no "Skip setup",
   // no Back into other steps — Home is the way back.
   const back = one ? null : previousStep(step);
+  // The first step goes back to where the way was picked.
+  const firstBack = one || back ? null : dev ? "start" : step === "ai" ? "welcome" : null;
   return (
     <SetupFrame
-      title="Set up your computer"
-      progress={one ? null : (index + 1) / SETUP_STEPS.length}
+      title={dev ? "Move your projects here" : "Set up your computer"}
+      {...(dev ? { Icon: FolderGit2Icon } : {})}
+      progress={one ? null : (index + 1) / steps.length}
       headerAction={
         one ? (
           <Button size="xs" variant="ghost" onClick={goHome}>
             Back to Home
           </Button>
-        ) : step !== "done" ? (
+        ) : !last ? (
           <Button size="xs" variant="ghost" onClick={() => void skipAll()}>
             Skip setup
           </Button>
@@ -168,36 +193,41 @@ export function SetupShell({
             <Button size="sm" variant="ghost" onClick={() => goToStep(back)}>
               Back
             </Button>
-          ) : step === "ai" && !one ? (
+          ) : firstBack ? (
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => void navigate({ to: "/setup", search: { step: "welcome" } })}
+              onClick={() => void navigate({ to: "/setup", search: { step: firstBack } })}
             >
               Back
             </Button>
           ) : null}
           <span className="flex-1" />
-          {step !== "done" ? (
+          {!last ? (
             <span className="hidden text-xs text-muted-foreground sm:inline">
               You can change all of this later
             </span>
           ) : null}
-          {canSkip && step !== "done" ? (
+          {/* The eight steps end on a summary; the developer's last step can wait. */}
+          {canSkip && (!last || dev) ? (
             <Button size="sm" variant="ghost" onClick={() => void skipStep(step)}>
               {one ? "Not now" : "Skip"}
             </Button>
           ) : null}
-          <Button
-            size="sm"
-            onClick={primary.onClick}
-            disabled={primary.disabled === true || primary.pending === true}
-            data-testid="setup-primary"
-          >
-            {primary.pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-            {primary.label}
-            {primary.pending ? null : <ArrowRightIcon className="size-3.5" />}
-          </Button>
+          {primary ? (
+            <Button
+              size="sm"
+              // Wrapped under Back / Skip on a phone: it still sits on the right.
+              className="ml-auto"
+              onClick={primary.onClick}
+              disabled={primary.disabled === true || primary.pending === true}
+              data-testid="setup-primary"
+            >
+              {primary.pending ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
+              {primary.label}
+              {primary.pending ? null : <ArrowRightIcon className="size-3.5" />}
+            </Button>
+          ) : null}
         </>
       }
     >

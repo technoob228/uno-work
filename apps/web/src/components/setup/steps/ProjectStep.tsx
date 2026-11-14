@@ -3,6 +3,10 @@
  * folder in the home folder that becomes a project (`project.create` with
  * `createWorkspaceRootIfMissing`), on the AI picked in step 1. "What kind of
  * work" shapes the questions, the skills on offer and the first tasks.
+ *
+ * Or "Import from my computer" (13.11): the Add computer window's flow inside
+ * the page (`ImportFromComputer`); the first project brought becomes the
+ * setup's project once it is copied, and the steps go on as usual.
  */
 import type { EnvironmentId, ModelSelection } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
@@ -17,7 +21,7 @@ import {
   SparklesIcon,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../../composerDraftStore";
 import { ensureEnvironmentApi } from "../../../environmentApi";
@@ -27,6 +31,10 @@ import { cn } from "../../../lib/utils";
 import { checkNewFolderName } from "../../newProject/newProject.logic";
 import { Input } from "../../ui/input";
 import { useSetupProjectPreview } from "../../sidebar/SidebarEmptyProjects";
+import { BroughtProjectList, useBroughtRows } from "../BroughtProjects";
+import { IMPORTED_PROJECT_KEY, type PickedProject } from "../devSetup";
+import { withAnswer } from "../goals";
+import { ImportFromComputer, useImportFromComputer } from "../ImportFromComputer";
 import { SetupSpotlight } from "../SetupSpotlight";
 import {
   WORK_KINDS,
@@ -100,11 +108,75 @@ export function ProjectStep() {
   );
   const displayName = name.trim() || "my-project";
 
-  // The sidebar shows the project where it will live while it's being named.
+  // ── Import from my computer ──
+  const [source, setSource] = useState<"new" | "import">("new");
+  const importing = source === "import" && !existing;
+  const flow = useImportFromComputer();
+  /** What Bring started: the first one becomes the setup's project once it's here. */
+  const [started, setStarted] = useState<{
+    readonly computerId: string;
+    readonly picks: ReadonlyArray<PickedProject>;
+  } | null>(null);
+  const { rows: broughtRows } = useBroughtRows(started?.computerId ?? null, started?.picks ?? []);
+  const firstBrought = broughtRows[0] ?? null;
+  const adopted = useRef(false);
+  useEffect(() => {
+    if (firstBrought?.state.kind !== "ready" || adopted.current) return;
+    adopted.current = true;
+    const { projectId, folder } = firstBrought.state;
+    void (async () => {
+      await update((current) =>
+        withAnswer(
+          {
+            ...current,
+            project: { id: projectId, path: folder, name: firstBrought.name, kind: "other" },
+          },
+          IMPORTED_PROJECT_KEY,
+          projectId,
+        ),
+      );
+      await completeStep("project");
+    })();
+  }, [completeStep, firstBrought, update]);
+  const bring = async () => {
+    const computerId = flow.computerId;
+    if (computerId === null) return;
+    const begun = await flow.choice.bring();
+    if (!begun) return;
+    if (begun.projects.length === 0) {
+      setError("Pick a project to bring.");
+      return;
+    }
+    adopted.current = false;
+    setStarted({ computerId, picks: begun.projects });
+  };
+  const importPrimary =
+    started !== null
+      ? firstBrought?.state.kind === "failed"
+        ? { label: "Pick again", onClick: () => setStarted(null) }
+        : {
+            label: `Copying ${firstBrought?.name ?? "it"}…`,
+            onClick: () => undefined,
+            pending: true,
+          }
+      : flow.phase === "bring"
+        ? {
+            label:
+              flow.choice.pickedProjects.length === 0
+                ? "Pick a project"
+                : `Bring ${flow.choice.label}`,
+            disabled: flow.choice.pickedProjects.length === 0,
+            pending: flow.choice.busy,
+            onClick: () => void bring(),
+          }
+        : null;
+
+  // The sidebar shows the project where it will live while it's being named
+  // (not while importing: the brought ones show up there themselves).
   const setPreview = useSetupProjectPreview((state) => state.setName);
   useEffect(() => {
-    setPreview(existing ? null : name);
-  }, [existing, name, setPreview]);
+    setPreview(existing || importing ? null : name);
+  }, [existing, importing, name, setPreview]);
   useEffect(() => () => setPreview(null), [setPreview]);
 
   const create = async () => {
@@ -145,19 +217,75 @@ export function ProjectStep() {
   return (
     <SetupShell
       step="project"
-      primary={{
-        label: existing ? "Continue" : "Create project",
-        onClick: () => void create(),
-        disabled: !existing && name.trim().length === 0,
-        pending,
-      }}
+      primary={
+        importing
+          ? importPrimary
+          : {
+              label: existing ? "Continue" : "Create project",
+              onClick: () => void create(),
+              disabled: !existing && name.trim().length === 0,
+              pending,
+            }
+      }
     >
       <SetupSpotlight selector='[data-testid="sidebar-new"]' />
       <SetupHeading
         title="Start your first project"
         lead="A project is a folder for one piece of work. Your AI sees only what’s inside it."
       />
-      <div className="grid gap-8 md:grid-cols-[1fr_280px]">
+      {existing ? null : (
+        <div
+          role="radiogroup"
+          aria-label="New or imported"
+          className="mb-6 inline-flex rounded-xl border border-border p-1"
+          data-testid="setup-project-source"
+        >
+          {(
+            [
+              ["new", "New project"],
+              ["import", "Import from my computer"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={source === id}
+              onClick={() => {
+                setSource(id);
+                setError(null);
+              }}
+              data-testid={`setup-project-source-${id}`}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-sm transition-colors",
+                source === id
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {importing ? (
+        started !== null ? (
+          <div className="flex max-w-xl flex-col gap-3" data-testid="setup-project-copying">
+            <BroughtProjectList rows={broughtRows} shortPath={(path) => tildePath(path, home)} />
+            <p className="text-xs text-muted-foreground">
+              {broughtRows.length > 1
+                ? `${firstBrought?.name} becomes this setup’s project; the others come along.`
+                : "The next steps work in it once it’s here."}
+            </p>
+          </div>
+        ) : (
+          <ImportFromComputer flow={flow} page={false} />
+        )
+      ) : null}
+      {error && importing ? (
+        <p className="mt-3 text-sm text-destructive-foreground">{error}</p>
+      ) : null}
+      <div className={cn("grid gap-8 md:grid-cols-[1fr_280px]", importing && "hidden")}>
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="setup-project-name" className="text-sm font-medium">

@@ -13,7 +13,14 @@ import { create } from "zustand";
 
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import type { HomeStarter } from "../computer/home/homeStarters";
-import { FIRST_TASKS, SETUP_STEPS, parseWorkKind } from "./setupModel";
+import {
+  FIRST_TASKS,
+  parseWorkKind,
+  setupFlowOf,
+  setupSidebarState,
+  stepsOfFlow,
+  type SetupRouteStep,
+} from "./setupModel";
 import { useSetupProgress } from "./useSetupProgress";
 
 export interface SetupFolder {
@@ -48,6 +55,8 @@ export interface SetupHome {
   readonly closeBanner: () => void;
   /** Skipped steps still open. */
   readonly skippedCount: number;
+  /** Where "Finish N skipped steps" goes: the summary, or the developer way's first skipped step. */
+  readonly finishStep: SetupRouteStep;
   /** The project's first tasks, while it has no chats; empty otherwise. */
   readonly starters: ReadonlyArray<HomeStarter>;
   /** The project has no chats yet: Home leads with it. */
@@ -62,7 +71,9 @@ export function useSetupHome(input: {
   const [closed, setClosed] = useLocalStorage(BANNER_KEY, false, Schema.Boolean);
   const aiPath = progress.mode === "ai";
   const project = aiPath && progress.project ? progress.project : null;
-  const skippedCount = SETUP_STEPS.filter((step) => progress.skipped.includes(step)).length;
+  const skippedCount = stepsOfFlow(setupFlowOf(progress)).filter((step) =>
+    progress.skipped.includes(step),
+  ).length;
   const hasChats = project ? input.projectHasChats(project.path) : true;
   const kind = parseWorkKind(project?.kind);
   const starters = useMemo<ReadonlyArray<HomeStarter>>(() => {
@@ -81,6 +92,7 @@ export function useSetupHome(input: {
     banner: aiPath && progress.finished && !progress.dismissed && !closed,
     closeBanner: () => setClosed(true),
     skippedCount,
+    finishStep: setupSidebarState(progress).step,
     starters,
     fresh: project !== null && !hasChats,
   };
