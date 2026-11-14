@@ -177,6 +177,7 @@ export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescrip
       agentThreads: true,
       // The strip above the composer of a chat agents talk in (13.11) and its "Don't let agents write here".
       agentsCloseChat: true,
+      chatHandoff: true,
       threadContinueDirect: true,
       threadContinuePages: true,
       assistantChat: true,
@@ -439,6 +440,13 @@ export interface ChatSpec {
   readonly messages: ReadonlyArray<readonly ["user" | "assistant", string, string?]>;
   /** An agent called the person in (`chat_call_person`), with this reason (Misha 13.11). */
   readonly call?: string;
+  /** A chat with a parent: a short helper the agent started (14.11); else a thread. */
+  readonly kind?: "subagent";
+  /**
+   * Who handles it now, when not the default (an agent for a chat with a
+   * parent, the person for theirs): the person joined it, or handed it off.
+   */
+  readonly handler?: "you" | "agent";
 }
 
 export const CHATS: ChatSpec[] = [
@@ -1188,8 +1196,9 @@ export function buildThread(chat: ChatSpec) {
     // knows today); a helper on another computer is linked by CHAT_META.
     spawnedByThreadId:
       chat.parent && chatById(chat.parent)?.machine === chat.machine ? chat.parent : null,
-    controller: chat.parent ? "agent" : "human",
-    controlChangedAt: null,
+    spawnKind: chat.parent ? (chat.kind ?? "thread") : null,
+    controller: (chat.handler ?? (chat.parent ? "agent" : "you")) === "agent" ? "agent" : "human",
+    controlChangedAt: chat.handler ? ago(chat.minutesAgo + 1) : null,
     assistantRole: chat.role === "assistant" ? "chat" : chat.role === "from-uno" ? "spawned" : null,
     // Who started it (28.10) and an agent's call (13.11), as a daemon of today says.
     startedBy: chat.parent ? (chat.role === "from-uno" ? "assistant" : "agent") : null,

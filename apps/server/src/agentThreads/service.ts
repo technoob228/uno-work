@@ -634,6 +634,11 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const projectId = optionalString(body, "projectId", 500);
         const rawCwd = optionalString(body, "cwd", 4096);
         const taskType = optionalString(body, "taskType", 200);
+        // What the chat is for (Misha 14.11): a short helper or a long work chat.
+        const kind = body.kind === undefined || body.kind === null ? undefined : body.kind;
+        if (kind !== undefined && kind !== "subagent" && kind !== "thread") {
+          return yield* fail(400, "invalid_payload", 'Поле "kind" — "subagent" или "thread".');
+        }
         if (!title.ok || !provider.ok || !model.ok || !projectId.ok || !rawCwd.ok || !taskType.ok) {
           return yield* fail(
             400,
@@ -776,6 +781,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
             branch: null,
             worktreePath: null,
             spawnedByThreadId: caller.id,
+            ...(kind !== undefined ? { spawnKind: kind } : {}),
             createdAt,
           },
           caller.id,
@@ -804,7 +810,13 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
           instanceId: modelSelection.instanceId,
           textPreview: text.value.slice(0, 80),
         });
-        return ok({ threadId, projectId: project.id, title: threadTitle, controller: "agent" });
+        return ok({
+          threadId,
+          projectId: project.id,
+          title: threadTitle,
+          controller: "agent",
+          kind: kind ?? "thread",
+        });
       }),
     );
 
@@ -869,6 +881,7 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
                 provider: child.modelSelection.instanceId,
                 relation: threadRelation(caller, child),
                 spawnedByThreadId: child.spawnedByThreadId ?? null,
+                ...(child.spawnedByThreadId != null ? { kind: child.spawnKind ?? "thread" } : {}),
                 status: deriveAgentThreadStatus(child),
                 controller: threadController(child),
                 agentsClosed: isClosedToAgents(child),

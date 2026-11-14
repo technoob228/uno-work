@@ -656,12 +656,14 @@ export function SidebarDChatsBar(props: {
   onlyMine: boolean;
   onOnlyMineChange: (onlyMine: boolean) => void;
   /**
-   * The chats other chats' agents started (their tasks) in the list too; off —
-   * they live in the Tasks strip of the chat that started them (Misha 13.11).
+   * The chats agents handle, in the list too (Misha 14.11): their threads,
+   * their subagents. Off — behind the "Agents' chats" button under the list.
    * Absent: no switch.
    */
-  showAgentTasks?: boolean;
-  onShowAgentTasksChange?: (show: boolean) => void;
+  inlineAgentThreads?: boolean;
+  onInlineAgentThreadsChange?: (inline: boolean) => void;
+  inlineSubagents?: boolean;
+  onInlineSubagentsChange?: (inline: boolean) => void;
   onClearFilters: () => void;
   onNewChat: (event: ReactMouseEvent) => void;
   /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
@@ -772,13 +774,22 @@ export function SidebarDChatsBar(props: {
             >
               Only mine
             </MenuCheckboxItem>
-            {props.onShowAgentTasksChange ? (
+            {props.onInlineAgentThreadsChange ? (
               <MenuCheckboxItem
-                checked={props.showAgentTasks === true}
-                onCheckedChange={(checked) => props.onShowAgentTasksChange?.(checked)}
-                data-testid="sidebar-d-show-agent-tasks"
+                checked={props.inlineAgentThreads === true}
+                onCheckedChange={(checked) => props.onInlineAgentThreadsChange?.(checked)}
+                data-testid="sidebar-d-inline-agent-threads"
               >
-                Agents' tasks
+                Agents' threads
+              </MenuCheckboxItem>
+            ) : null}
+            {props.onInlineSubagentsChange ? (
+              <MenuCheckboxItem
+                checked={props.inlineSubagents === true}
+                onCheckedChange={(checked) => props.onInlineSubagentsChange?.(checked)}
+                data-testid="sidebar-d-inline-subagents"
+              >
+                Subagents
               </MenuCheckboxItem>
             ) : null}
             <PickSubmenu

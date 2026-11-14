@@ -2788,7 +2788,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_create",
     group: "chats",
     description:
-      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder of this computer's home (a folder that isn't a project yet becomes one); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). For an assistant, the person's routing rows (Source `you`) win over provider unless personAsked; a harness of theirs that isn't ready here fails with harness_not_ready — ask the person in one line, never start it on another model yourself. Returns the threadId (and the computer). A long task (minutes or more, its own context) is what it is for: the chat becomes a task of yours — the person sees it in your chat's Tasks strip, not in their sidebar, and its reports fold into one line in your feed. A short lookup or check: your built-in subagents (e.g. the Task tool), not a chat. A task answers you and never calls the person: you do (chat_call_person, also into the task by threadId).",
+      "Start a new chat with an AI agent and send it a first message — to run a separate task in parallel, in another folder, with another harness, or on another computer of the person's account (computerId). It starts at once; the person sees you created it and can write in it too. cwd puts it in any folder of this computer's home (a folder that isn't a project yet becomes one); provider picks the harness (codex, claudeAgent, opencode, uno, cursor, hermes or an instance id). For an assistant, the person's routing rows (Source `you`) win over provider unless personAsked; a harness of theirs that isn't ready here fails with harness_not_ready — ask the person in one line, never start it on another model yourself. Returns the threadId (and the computer). The chat is yours to run: the person sees it in your chat's Tasks strip, not in their sidebar (they can join it, and it then is theirs), and its reports fold into one line in your feed. kind says what it is for: `thread` (default) — a long work chat (minutes or more, its own context) the person may want to join; `subagent` — a short helper you wait on, e.g. another harness's review or second opinion. A short lookup on your own harness: your built-in subagents (e.g. the Task tool), not a chat. A task answers you and never calls the person: you do (chat_call_person, also into the task by threadId).",
     inputSchema: {
       type: "object",
       properties: {
@@ -2810,6 +2810,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           type: "string",
           description:
             "The routing table row this task is (its Task type), to pick the person's model for it.",
+        },
+        kind: {
+          type: "string",
+          enum: ["thread", "subagent"],
+          description:
+            '"subagent": a short helper you wait on (any harness); "thread" (default): a long work chat the person may join.',
         },
         personAsked: {
           type: "boolean",
@@ -2849,6 +2855,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(str(args, "provider") ? { provider: str(args, "provider") } : {}),
             ...(str(args, "model") ? { model: str(args, "model") } : {}),
             ...(str(args, "taskType") ? { taskType: str(args, "taskType") } : {}),
+            ...(str(args, "kind") ? { kind: str(args, "kind") } : {}),
             ...(args["personAsked"] === true ? { personAsked: true } : {}),
             ...(args["computerId"] !== undefined && args["computerId"] !== null
               ? { computerId: args["computerId"] }

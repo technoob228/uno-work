@@ -365,6 +365,7 @@ function mapThreadShell(
       model: shell.modelSelection.model,
     },
     spawnedByThreadId: thread.spawnedByThreadId ?? null,
+    spawnKind: thread.spawnKind ?? null,
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
@@ -502,6 +503,7 @@ function sidebarThreadSummariesEqual(
     left.modelSelection?.instanceId === right.modelSelection?.instanceId &&
     left.modelSelection?.model === right.modelSelection?.model &&
     (left.spawnedByThreadId ?? null) === (right.spawnedByThreadId ?? null) &&
+    (left.spawnKind ?? null) === (right.spawnKind ?? null) &&
     (left.controller ?? "human") === (right.controller ?? "human") &&
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&

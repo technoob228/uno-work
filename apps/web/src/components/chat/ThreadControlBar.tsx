@@ -3,17 +3,18 @@ import { useNavigate } from "@tanstack/react-router";
 import { BotIcon, LockIcon, UserRoundIcon } from "lucide-react";
 import { memo, useCallback, useState } from "react";
 
-import { resolveThreadControlBarState } from "../../agentThreads.logic";
-import { setThreadAgentsClosed } from "../../agentsAccess";
-import { readEnvironmentApi } from "../../environmentApi";
+import {
+  resolveThreadControlBarState,
+  type ThreadControlBarAction,
+} from "../../agentThreads.logic";
+import { setThreadAgentsClosed, setThreadHandler } from "../../agentsAccess";
 import { useEnvironmentSupportsAgentsCloseChat } from "../../environments/agentsCloseChatSupport";
 import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThreadsSupport";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
-import { cn, newCommandId } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import { selectSidebarThreadSummaryByRef, useStore } from "../../store";
 import { threadOwner } from "../Sidebar.owner";
 import { Button } from "../ui/button";
-import { stackedThreadToast, toastManager } from "../ui/toast";
 
 interface ThreadControlBarProps {
   readonly environmentId: EnvironmentId;
@@ -25,9 +26,10 @@ interface ThreadControlBarProps {
 }
 
 /**
- * Slim strip above the composer: who started / drives a chat another chat's
- * agent created (or, in the person's own chat, that agents talk there now),
- * and the person's "Don't let agents write here" switch. A
+ * Slim strip above the composer: who started a chat another chat's agent
+ * created and who handles it now — Join / Hand to agent (Misha 14.11); a
+ * chat the person handed to its agent, with Join; in the person's own chat,
+ * that agents talk there now; and the "Don't let agents write here" switch. A
  * chat closed to agents shows the strip whoever created it, so the switch is
  * always one click away from where it is visible. The composer stays enabled
  * either way.
@@ -58,37 +60,22 @@ export const ThreadControlBar = memo(function ThreadControlBar({
     agentLed,
   });
 
-  const action = state?.action ?? null;
-  const handleAction = useCallback(async () => {
-    if (!action) return;
-    setPending(true);
-    try {
-      if (action.kind === "agents-access") {
-        await setThreadAgentsClosed({ environmentId, threadId, closed: action.nextClosed });
-        return;
+  const runAction = useCallback(
+    async (action: ThreadControlBarAction) => {
+      setPending(true);
+      try {
+        if (action.kind === "agents-access") {
+          await setThreadAgentsClosed({ environmentId, threadId, closed: action.nextClosed });
+          return;
+        }
+        // Join / Hand to agent (and an older daemon's Take over / Hand back).
+        await setThreadHandler({ environmentId, threadId, controller: action.nextController });
+      } finally {
+        setPending(false);
       }
-      // Older daemon: the old handoff pair.
-      const api = readEnvironmentApi(environmentId);
-      if (!api) return;
-      await api.orchestration.dispatchCommand({
-        type: "thread.control.set",
-        commandId: newCommandId(),
-        threadId,
-        controller: action.nextController,
-        createdAt: new Date().toISOString(),
-      });
-    } catch (error) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: `Could not ${action.label.toLowerCase()}`,
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    } finally {
-      setPending(false);
-    }
-  }, [action, environmentId, threadId]);
+    },
+    [environmentId, threadId],
+  );
 
   const openParent = useCallback(() => {
     if (!spawnedByThreadId) return;
@@ -138,16 +125,35 @@ export const ThreadControlBar = memo(function ThreadControlBar({
         ) : null}
         {state.trailText}
       </span>
-      {action ? (
+      {state.secondaryAction ? (
         <Button
           size="xs"
-          variant={state.closedToAgents ? "outline" : "ghost"}
+          variant="ghost"
           disabled={pending}
-          onClick={() => void handleAction()}
+          onClick={() => {
+            if (state.secondaryAction) void runAction(state.secondaryAction);
+          }}
+          data-testid="thread-control-secondary-action"
+          className="shrink-0 text-muted-foreground"
+        >
+          {state.secondaryAction.label}
+        </Button>
+      ) : null}
+      {state.action ? (
+        <Button
+          size="xs"
+          variant={state.closedToAgents || state.action.kind === "handoff" ? "outline" : "ghost"}
+          disabled={pending}
+          {...(state.action.kind === "handoff" && state.action.hint
+            ? { title: state.action.hint }
+            : {})}
+          onClick={() => {
+            if (state.action) void runAction(state.action);
+          }}
           data-testid="thread-control-action"
           className="shrink-0"
         >
-          {action.label}
+          {state.action.label}
         </Button>
       ) : null}
     </div>

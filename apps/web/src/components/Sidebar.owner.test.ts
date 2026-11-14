@@ -185,6 +185,21 @@ describe("threadOwnerWithStarter (Misha 29.10: assistants' chats under Only mine
     expect(threadOwnerWithStarter({ ...old, controller: "human" as const }, true)).toBe("you");
   });
 
+  it("a chat the person handed to its agent is the agent's until it needs them (14.11)", () => {
+    const handed = agentChat({
+      startedBy: null,
+      spawnedByThreadId: null,
+      controller: "agent",
+      controlChangedAt: at(5),
+      latestPersonMessageAt: at(20),
+    });
+    expect(threadOwner(handed)).toBe("agent");
+    expect(threadOwner({ ...handed, hasPendingApprovals: true })).toBe("you");
+    expect(threadOwner({ ...handed, personCalledAt: at(1) })).toBe("you");
+    // Taken back (Join, or a message there): the person's again.
+    expect(threadOwner({ ...handed, controller: "human" })).toBe("you");
+  });
+
   it("the Uno chat itself is never hidden", () => {
     expect(threadOwnerWithStarter({ ...quiet, assistantRole: "chat" }, true)).toBe("you");
   });

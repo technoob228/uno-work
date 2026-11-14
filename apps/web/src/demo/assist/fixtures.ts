@@ -186,6 +186,7 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
     state: "read",
     role: "helper",
     parent: "w-launch",
+    kind: "subagent",
     messages: [
       ["user", "From the pricing page chat: check every link, the load time on 4G and Lighthouse."],
       [
@@ -221,9 +222,41 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
     state: "failed",
     role: "helper",
     parent: "w-launch",
+    kind: "subagent",
     error: "The image service timed out twice.",
     errorClass: "provider_error",
     messages: [["user", "From the pricing page chat: make the OG image for /pricing, 1200×630."]],
+  },
+  // A short helper on another harness (Misha 14.11: subagents of any harness).
+  {
+    id: "h-copy-review",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Codex review of the pricing copy",
+    minutesAgo: 2,
+    state: "read",
+    role: "helper",
+    parent: "w-launch",
+    kind: "subagent",
+    messages: [
+      ["user", "From the pricing page chat: a second opinion on the headline and the three plans."],
+      ["assistant", "Clear and short. One fix: “per seat” reads better than “per user” on Team."],
+    ],
+  },
+  // A chat of the person's they handed to its agent (Misha 14.11): out of the list.
+  {
+    id: "w-seo-weekly",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Weekly SEO report for the landing",
+    minutesAgo: 30,
+    state: "read",
+    role: "solo",
+    handler: "agent",
+    messages: [
+      ["user", "Every Monday check the landing's search positions and tell me what moved."],
+      ["assistant", "This week: “pricing for small teams” up from 14 to 9; nothing dropped."],
+    ],
   },
   {
     id: "h-copy",
@@ -292,6 +325,7 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
     state: "read",
     role: "helper",
     parent: "w-backup",
+    kind: "subagent",
     messages: [
       [
         "user",

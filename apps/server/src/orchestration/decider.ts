@@ -582,6 +582,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           branch: command.branch,
           worktreePath: command.worktreePath,
           ...(spawnedByThreadId !== undefined ? { spawnedByThreadId } : {}),
+          // What the agent started it for; only a spawned chat has one.
+          ...(spawnedByThreadId !== undefined && command.spawnKind !== undefined
+            ? { spawnKind: command.spawnKind }
+            : {}),
           ...(command.assistantRole !== undefined ? { assistantRole: command.assistantRole } : {}),
           ...(command.source !== undefined ? { source: command.source } : {}),
           createdAt: command.createdAt,
@@ -1207,7 +1211,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      if (thread.spawnedByThreadId == null) {
+      // The person may hand any chat of theirs to its agent and take it back
+      // (Misha 14.11); only a spawned chat has an agent that may release it.
+      if (thread.spawnedByThreadId == null && !isHumanOrigin(origin)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `not_agent_thread: Thread '${command.threadId}' was not spawned by an agent; there is no one to hand control to.`,

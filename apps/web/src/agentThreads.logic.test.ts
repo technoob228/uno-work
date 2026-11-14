@@ -39,15 +39,30 @@ describe("describeAgentSentMessage", () => {
 describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", () => {
   const base = { supportsAgentsAccess: true, agentsClosedAt: null } as const;
 
-  it("shows nothing for an open chat a human created", () => {
+  it("shows nothing for an open chat the person created and handles", () => {
     expect(
       resolveThreadControlBarState({
         ...base,
         spawnedByThreadId: null,
-        controller: "agent",
+        controller: "human",
         parentTitle: "Parent",
       }),
     ).toBeNull();
+  });
+
+  it("offers Join in a chat of the person's they handed to its agent (14.11)", () => {
+    const state = resolveThreadControlBarState({
+      ...base,
+      spawnedByThreadId: null,
+      controller: "agent",
+      parentTitle: null,
+    });
+    expect(state).toMatchObject({
+      controller: "agent",
+      summary: "You handed this chat to its agent · it's out of your sidebar",
+      action: { kind: "handoff", label: "Join", nextController: "human" },
+      secondaryAction: { kind: "agents-access", nextClosed: true },
+    });
   });
 
   it("says agents talk in the person's own chat while one leads it (13.11)", () => {
@@ -77,7 +92,7 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
     ).toBeNull();
   });
 
-  it("offers to close a chat the agent drives, with no Take over", () => {
+  it("offers Join in a chat an agent handles, the switch beside (14.11)", () => {
     const state = resolveThreadControlBarState({
       ...base,
       spawnedByThreadId: "parent-1",
@@ -87,14 +102,19 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
     expect(state).toMatchObject({
       controller: "agent",
       closedToAgents: false,
-      leadText: "An agent from ",
+      leadText: "The agent in ",
       parentLinkText: "“Parent”",
-      trailText: " is driving this chat",
-      action: { kind: "agents-access", label: "Don't let agents write here", nextClosed: true },
+      trailText: " handles this chat",
+      action: { kind: "handoff", label: "Join", nextController: "human" },
+      secondaryAction: {
+        kind: "agents-access",
+        label: "Don't let agents write here",
+        nextClosed: true,
+      },
     });
   });
 
-  it("never offers Hand back to agent for an old chat the person took over", () => {
+  it("offers Hand to agent once the person joined a chat an agent started", () => {
     const state = resolveThreadControlBarState({
       ...base,
       spawnedByThreadId: "parent-1",
@@ -105,10 +125,10 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
       controller: "human",
       leadText: "Started by the agent in ",
       parentLinkText: "“Parent”",
-      action: { kind: "agents-access", nextClosed: true },
+      action: { kind: "handoff", label: "Hand to agent", nextController: "agent" },
+      secondaryAction: { kind: "agents-access", nextClosed: true },
     });
-    expect(state?.summary).toBe("Started by the agent in “Parent”");
-    expect(JSON.stringify(state)).not.toMatch(/Hand back/);
+    expect(state?.summary).toBe("Started by the agent in “Parent” · you're on it");
   });
 
   it("shows a closed chat, whoever created it, with the way to open it again", () => {
@@ -134,6 +154,7 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
     });
     expect(spawned?.summary).toBe("Agents can't write here · started by the agent in “Parent”");
     expect(spawned?.action).toMatchObject({ nextClosed: false });
+    expect(spawned?.secondaryAction).toBeNull();
   });
 
   it("drops the link when the parent is not loaded", () => {
@@ -144,14 +165,14 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
       parentTitle: null,
     });
     expect(agent?.parentLinkText).toBeNull();
-    expect(agent?.summary).toBe("An agent is driving this chat");
+    expect(agent?.summary).toBe("An agent handles this chat");
     const human = resolveThreadControlBarState({
       ...base,
       spawnedByThreadId: "parent-1",
       controller: "human",
       parentTitle: null,
     });
-    expect(human?.trailText).toBe("Started by an agent");
+    expect(human?.trailText).toBe("Started by an agent · you're on it");
   });
 
   it("keeps the old handoff on an older daemon, so no chat stays locked there", () => {

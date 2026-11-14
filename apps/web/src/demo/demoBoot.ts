@@ -791,6 +791,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
     case "thread.delete":
       if (thread) Object.assign(thread, { deletedAt: now });
       break;
+    // Join / Hand to agent (Misha 14.11).
+    case "thread.control.set":
+      if (thread) Object.assign(thread, { controller: command.controller, controlChangedAt: now });
+      break;
     case "thread.approval.respond": {
       const decision = String(command.decision ?? "accept");
       const allowed = !/decline|deny|reject|cancel/i.test(decision);
@@ -844,6 +848,10 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
           : ((command.bootstrap as { createThread?: Record<string, unknown> } | undefined)
               ?.createThread ?? null);
       let target = thread;
+      // The person writing in a chat an agent handles joins it, as the daemon does.
+      if (target && command.type === "thread.turn.start" && target.controller === "agent") {
+        Object.assign(target, { controller: "human", controlChangedAt: now });
+      }
       if (DEMO_ACCOUNTS && target && pendingPlanResume(target.activities as never)) {
         // The person went on themselves: the daemon drops the wait.
         (target.activities as unknown[]).push(planResumeEndedActivity());

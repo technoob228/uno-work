@@ -192,6 +192,22 @@ describe("decider agent-spawned threads: thread.create", () => {
     });
   });
 
+  it("keeps what the agent started the chat for (subagent or thread)", async () => {
+    const { events, readModel } = await decideAndApply(
+      await seedParents(),
+      { ...threadCreate(CHILD_ID, PARENT_ID), spawnKind: "subagent" },
+      agentOrigin(PARENT_ID),
+    );
+    expect(events[0]?.payload).toMatchObject({ spawnKind: "subagent" });
+    expect(threadOf(readModel, CHILD_ID).spawnKind).toBe("subagent");
+    // Without a parent there is no kind: the person's own chat.
+    const own = await decideAndApply(readModel, {
+      ...threadCreate(ThreadId.make("thread-own")),
+      spawnKind: "subagent",
+    });
+    expect(own.events[0]?.payload).not.toHaveProperty("spawnKind");
+  });
+
   it("rejects spawnedByThreadId without an agent origin", async () => {
     const readModel = await seedParents();
     await expect(decide(readModel, threadCreate(CHILD_ID, PARENT_ID))).rejects.toThrow(
@@ -366,10 +382,30 @@ describe("decider agent-spawned threads: thread.turn.start", () => {
 });
 
 describe("decider agent-spawned threads: thread.control.set", () => {
-  it("rejects a thread that was not spawned by an agent", async () => {
-    await expect(decide(await seedChild(), controlSet(PARENT_ID, "agent"))).rejects.toThrow(
-      "not_agent_thread:",
-    );
+  it("lets the person hand a chat of theirs to its agent and take it back (Misha 14.11)", async () => {
+    const handed = await decideAndApply(await seedChild(), controlSet(PARENT_ID, "agent"));
+    expect(handed.events[0]?.payload).toMatchObject({ controller: "agent", reason: "handoff" });
+    expect(threadOf(handed.readModel, PARENT_ID).controller).toBe("agent");
+
+    // Writing there is taking it back.
+    const wrote = await decideAndApply(handed.readModel, turnStart(PARENT_ID));
+    expect(wrote.events[0]?.payload).toMatchObject({
+      controller: "human",
+      reason: "human-message",
+    });
+    expect(threadOf(wrote.readModel, PARENT_ID).controller).toBe("human");
+  });
+
+  it("rejects an agent handing over a chat nobody spawned", async () => {
+    await expect(
+      decide(await seedChild(), controlSet(OTHER_ID, "human"), agentOrigin(PARENT_ID)),
+    ).rejects.toThrow("not_agent_thread:");
+    await expect(
+      decide(await seedChild(), controlSet(PARENT_ID, "agent"), {
+        kind: "manager",
+        tokenId: "token-1",
+      }),
+    ).rejects.toThrow("not_agent_thread:");
   });
 
   it("hands control between the human and the agent", async () => {

@@ -2,15 +2,20 @@ import { ASSISTANT_PROJECT_ID, EnvironmentId, ProjectId, ThreadId } from "@t3too
 import { describe, expect, it } from "vitest";
 
 import {
+  agentChatKind,
+  agentChatsShelfLabel,
   agentTaskDescendants,
   agentTaskReportLabel,
   agentTasksOf,
   agentTasksSummary,
   agentTaskStatus,
   archiveWithTasksPrompt,
+  groupAgentChats,
+  handoffAction,
   isAgentTask,
-  isHiddenAgentTask,
   latestReportIdBySender,
+  sidebarAgentPlacement,
+  threadHandler,
 } from "./agentTasks.logic";
 import type { SidebarThreadSummary } from "./types";
 
@@ -48,6 +53,7 @@ const session = (status: string, orchestrationStatus: string, lastError?: string
   }) as unknown as SidebarThreadSummary["session"];
 
 const parentId = ThreadId.make("coord");
+const HANDED_AT = "2026-11-13T10:10:00.000Z";
 const coordinator = summary("coord");
 // A task of today's daemon: an agent started it, nobody called the person.
 const task = (id: string, overrides: Partial<SidebarThreadSummary> = {}) =>
@@ -107,39 +113,118 @@ describe("isAgentTask", () => {
   });
 });
 
-describe("isHiddenAgentTask", () => {
-  const base = { parent: coordinator, assistantChatId: null, showAgentTasks: false, isOpen: false };
-
-  it("hides a task that does not need the person", () => {
-    expect(isHiddenAgentTask({ ...base, thread: task("a") })).toBe(true);
+describe("who handles a chat (Misha 14.11)", () => {
+  it("an agent while controller says so, else the person", () => {
+    expect(threadHandler(task("a"))).toBe("agent");
+    expect(threadHandler(task("a", { controller: "human" }))).toBe("you");
+    expect(threadHandler(summary("mine"))).toBe("you");
     expect(
-      isHiddenAgentTask({ ...base, thread: task("a", { session: session("running", "running") }) }),
-    ).toBe(true);
+      threadHandler(summary("handed", { controller: "agent", controlChangedAt: HANDED_AT })),
+    ).toBe("agent");
+    // Never handed off: a stray controller on the person's chat is not a handoff.
+    expect(threadHandler(summary("mine", { controller: "agent" }))).toBe("you");
   });
 
-  it("shows it when it calls or asks the person", () => {
+  it("a subagent only when the agent said so; everything else is a thread", () => {
+    expect(agentChatKind(task("a", { spawnKind: "subagent" }))).toBe("subagent");
+    expect(agentChatKind(task("a", { spawnKind: "thread" }))).toBe("thread");
+    expect(agentChatKind(task("a"))).toBe("thread");
+    // The person's own chat handed off is a thread, whatever it says.
+    expect(agentChatKind(summary("mine", { spawnKind: "subagent" }))).toBe("thread");
+  });
+
+  it("offers Join while an agent handles it, Hand to agent while the person does", () => {
+    expect(handoffAction(task("a"))).toMatchObject({ label: "Join", nextController: "human" });
+    expect(handoffAction(task("a", { controller: "human" }))).toMatchObject({
+      label: "Hand to agent",
+      nextController: "agent",
+    });
+    expect(handoffAction(summary("mine"))).toMatchObject({ nextController: "agent" });
+    // Not Uno's chat; not the person's own on a daemon without chatHandoff.
+    expect(handoffAction(summary("uno", { assistantRole: "chat" }))).toBeNull();
+    expect(handoffAction(summary("mine"), { ownChats: false })).toBeNull();
+    expect(handoffAction(task("a", { controller: "human" }), { ownChats: false })).not.toBeNull();
+  });
+});
+
+describe("sidebarAgentPlacement", () => {
+  type PlaceInput = Parameters<typeof sidebarAgentPlacement>[0];
+  const base: Omit<PlaceInput, "thread"> = {
+    parent: coordinator,
+    assistantChatId: null,
+    inline: { threads: false, subagents: false },
+  };
+  const place = (
+    thread: SidebarThreadSummary,
+    overrides: { -readonly [K in keyof Omit<PlaceInput, "thread">]?: PlaceInput[K] } = {},
+  ) => sidebarAgentPlacement({ ...base, ...overrides, thread });
+
+  it("puts a chat an agent handles behind the Agents' chats button", () => {
+    expect(place(task("a"))).toBe("agents");
+    expect(place(task("a", { session: session("running", "running") }))).toBe("agents");
+    expect(place(task("a", { spawnKind: "subagent" }))).toBe("agents");
+    // The person's own chat they handed to its agent: no parent to check.
     expect(
-      isHiddenAgentTask({
-        ...base,
-        thread: task("a", { personCalledAt: "2026-11-13T10:05:00.000Z" }),
+      place(summary("handed", { controller: "agent", controlChangedAt: HANDED_AT }), {
+        parent: undefined,
       }),
-    ).toBe(false);
-    expect(isHiddenAgentTask({ ...base, thread: task("a", { hasPendingApprovals: true }) })).toBe(
-      false,
-    );
+    ).toBe("agents");
   });
 
-  it("shows it with the switch on, while open, or once moved to the sidebar (pinned)", () => {
-    expect(isHiddenAgentTask({ ...base, showAgentTasks: true, thread: task("a") })).toBe(false);
-    expect(isHiddenAgentTask({ ...base, isOpen: true, thread: task("a") })).toBe(false);
+  it("keeps it in the list once the person joined it", () => {
+    expect(place(task("a", { controller: "human" }))).toBe("list");
+    expect(place(summary("mine"))).toBe("list");
+  });
+
+  it("keeps it in the list while it needs the person, or pinned", () => {
+    expect(place(task("a", { personCalledAt: "2026-11-13T10:05:00.000Z" }))).toBe("list");
+    expect(place(task("a", { hasPendingApprovals: true }))).toBe("list");
+    expect(place(task("a", { pinnedAt: "2026-11-13T10:00:00.000Z" }))).toBe("list");
     expect(
-      isHiddenAgentTask({ ...base, thread: task("a", { pinnedAt: "2026-11-13T10:00:00.000Z" }) }),
-    ).toBe(false);
+      place(
+        summary("handed", {
+          controller: "agent",
+          controlChangedAt: HANDED_AT,
+          hasPendingUserInput: true,
+        }),
+        {
+          parent: undefined,
+        },
+      ),
+    ).toBe("list");
   });
 
-  it("never hides the person's own chats or an orphan", () => {
-    expect(isHiddenAgentTask({ ...base, thread: summary("mine") })).toBe(false);
-    expect(isHiddenAgentTask({ ...base, parent: undefined, thread: task("a") })).toBe(false);
+  it("the view menu puts threads and subagents back inline, each on its own", () => {
+    const sub = task("s", { spawnKind: "subagent" });
+    const inlineThreads = { inline: { threads: true, subagents: false } };
+    expect(place(task("t"), inlineThreads)).toBe("list");
+    expect(place(sub, inlineThreads)).toBe("agents");
+    expect(place(sub, { inline: { threads: false, subagents: true } })).toBe("list");
+  });
+
+  it("an orphan, one of Uno's or Uno's own chat stays in the list, as before", () => {
+    expect(place(task("a"), { parent: undefined })).toBe("list");
+    expect(place(task("a"), { assistantChatId: "coord" })).toBe("list");
+    expect(
+      place(summary("uno", { assistantRole: "chat", controller: "agent" }), { parent: undefined }),
+    ).toBe("list");
+  });
+
+  it("groups the button's chats: threads, then subagents, newest first", () => {
+    const groups = groupAgentChats([
+      task("old-thread", { updatedAt: "2026-11-13T09:00:00.000Z" }),
+      task("sub", { spawnKind: "subagent", updatedAt: "2026-11-13T10:00:00.000Z" }),
+      task("new-thread", { updatedAt: "2026-11-13T11:00:00.000Z" }),
+      summary("handed", {
+        controller: "agent",
+        controlChangedAt: HANDED_AT,
+        updatedAt: "2026-11-13T10:30:00.000Z",
+      }),
+    ]);
+    expect(groups.threads.map((chat) => chat.id)).toEqual(["new-thread", "handed", "old-thread"]);
+    expect(groups.subagents.map((chat) => chat.id)).toEqual(["sub"]);
+    expect(agentChatsShelfLabel(4, false)).toBe("Agents' chats (4)");
+    expect(agentChatsShelfLabel(4, true)).toBe("Agents' chats");
   });
 });
 
@@ -158,14 +243,30 @@ describe("agentTasksOf / agentTasksSummary", () => {
       ["working", "working"],
       ["done", "done"],
     ]);
-    expect(agentTasksSummary(rows)).toBe("3 tasks · 1 needs you · 1 working · 1 done");
+    expect(agentTasksSummary(rows)).toBe("3 threads · 1 needs you · 1 working · 1 done");
+  });
+
+  it("threads first, then subagents, with who handles each", () => {
+    const rows = agentTasksOf(parentId, [
+      task("sub-asks", { spawnKind: "subagent", hasPendingUserInput: true }),
+      task("joined", { controller: "human" }),
+      task("thread"),
+    ]);
+    expect(rows.map((row) => [row.task.id, row.kind, row.handler])).toEqual([
+      ["joined", "thread", "you"],
+      ["thread", "thread", "agent"],
+      ["sub-asks", "subagent", "agent"],
+    ]);
+    expect(agentTasksSummary(rows)).toBe("2 threads · 1 subagent · 1 needs you · 2 done");
   });
 
   it("all done reads as such", () => {
     expect(agentTasksSummary(agentTasksOf(parentId, [task("a"), task("b")]))).toBe(
-      "2 tasks · all done",
+      "2 threads · all done",
     );
-    expect(agentTasksSummary(agentTasksOf(parentId, [task("a")]))).toBe("1 task · all done");
+    expect(agentTasksSummary(agentTasksOf(parentId, [task("a", { spawnKind: "subagent" })]))).toBe(
+      "1 subagent · all done",
+    );
   });
 });
 

@@ -258,6 +258,7 @@ describe("agent threads bridge: POST /api/threads", () => {
           projectId: OWN_PROJECT,
           title: "Write tests for billing",
           controller: "agent",
+          kind: "thread",
         },
       );
       assert.strictEqual(dispatched.length, 2);

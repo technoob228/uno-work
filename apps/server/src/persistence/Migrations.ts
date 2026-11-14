@@ -73,6 +73,7 @@ import Migration0057 from "./Migrations/057_ThreadGoals.ts";
 import Migration0058 from "./Migrations/058_DatabaseCompactionState.ts";
 import Migration0059 from "./Migrations/059_ProjectionThreadsSource.ts";
 import Migration0060 from "./Migrations/060_ProjectionComputers.ts";
+import Migration0061 from "./Migrations/061_ThreadSpawnKind.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -147,6 +148,7 @@ export const migrationEntries = [
   [58, "DatabaseCompactionState", Migration0058],
   [59, "ProjectionThreadsSource", Migration0059],
   [60, "ProjectionComputers", Migration0060],
+  [61, "ThreadSpawnKind", Migration0061],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

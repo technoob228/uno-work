@@ -1,23 +1,46 @@
-// Agent tasks (Misha 13.11): the chats a chat's agent started live inside that
-// chat — its "Tasks" strip — instead of the person's sidebar and feed.
-// - A task is a chat whose `spawnedByThreadId` names a live regular chat (not
-//   Uno's: its chats keep their own place under the Uno row).
-// - The sidebar hides tasks unless the person wants them ("Agents' tasks" in
-//   the view menu), one needs the person (a question, an approval, a call, an
-//   answer to their own message), they brought it up (pinned) or it is open.
-// - The coordinator's feed folds a task's report into one line.
-// - Archiving the coordinator archives its tasks (and theirs).
+// Agent tasks (Misha 13.11, v2 14.11): who handles a chat — the person or an
+// agent — and where the chats agents handle live.
+// - Every chat has a handler: the person ("you") or an agent (`controller`
+//   "agent"). A chat another chat's agent started is the agent's until the
+//   person joins it (Join, or simply writes there); the person may hand any
+//   chat of theirs to its agent ("Hand to agent") and join it again.
+// - Two kinds of chats agents start (`spawnKind`, said in chat_create):
+//   subagents — short helpers on any harness — and threads — long work chats
+//   the agent runs, the ones worth joining. A chat the person handed off is a
+//   thread.
+// - The sidebar keeps the agents' chats out of the list, under one
+//   "Agents' chats" button (threads, then subagents); the view menu puts
+//   threads and/or subagents back inline. A chat that needs the person (a
+//   question, an approval, a call) is in the list whoever handles it, and so
+//   is a pinned one.
+// - The chat that started them lists them in its "Tasks" strip, threads and
+//   subagents apart; its feed folds a task's report into one line; archiving
+//   it archives them (and theirs).
 // Pure, so the sidebar, the strip and the feed say the same thing.
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadController, ThreadId } from "@t3tools/contracts";
 
+import { HANDLER_COPY } from "./agentThreads.logic";
 import { isRegularListChat } from "./assistant/assistantChat.logic";
 import { resolveSidebarThreadStatus } from "./components/Sidebar.logic";
-import { isPersonCallPending, threadOwner } from "./components/Sidebar.owner";
+import { isPersonCallPending } from "./components/Sidebar.owner";
 import { threadNeedsUser } from "./components/Sidebar.snooze";
 import type { SidebarThreadSummary } from "./types";
 
-/** The person's "Agents' tasks" switch in the sidebar's view menu (this device). Off by default. */
-export const SIDEBAR_SHOW_AGENT_TASKS_KEY = "uno-work:sidebar:show-agent-tasks";
+/** The view menu's "Agents' threads" switch: in the list, not behind the button (this device). */
+export const SIDEBAR_INLINE_AGENT_THREADS_KEY = "uno-work:sidebar:inline-agent-threads";
+/** The view menu's "Subagents" switch, the same for subagents. */
+export const SIDEBAR_INLINE_SUBAGENTS_KEY = "uno-work:sidebar:inline-subagents";
+
+/** Who handles a chat now: the person, or an agent. */
+export type ThreadHandler = "you" | "agent";
+
+/** What an agents' chat is: a short helper or a long work chat. */
+export type AgentChatKind = "subagent" | "thread";
+
+export const AGENT_CHAT_KIND_LABEL: Readonly<Record<AgentChatKind, string>> = {
+  thread: "Threads",
+  subagent: "Subagents",
+};
 
 export type AgentTaskStatus = "needs-you" | "working" | "waiting" | "error" | "stopped" | "done";
 
@@ -84,21 +107,99 @@ export function isAgentTask(
 }
 
 /**
- * The sidebar hides a task (see the top of the file). `parent` is the chat
- * named by `spawnedByThreadId`, in the same environment.
+ * Who handles it: an agent while `controller` says so — a spawned chat starts
+ * so; the person's own chat only after they handed it off (`controlChangedAt`).
  */
-export function isHiddenAgentTask(input: {
+export function threadHandler(
+  thread: Pick<TaskSummary, "controller" | "spawnedByThreadId" | "controlChangedAt">,
+): ThreadHandler {
+  if (thread.controller !== "agent") return "you";
+  return thread.spawnedByThreadId != null || thread.controlChangedAt != null ? "agent" : "you";
+}
+
+/** A subagent only when the agent that started it said so; anything else is a thread. */
+export function agentChatKind(
+  thread: Pick<TaskSummary, "spawnedByThreadId" | "spawnKind">,
+): AgentChatKind {
+  return thread.spawnedByThreadId != null && thread.spawnKind === "subagent"
+    ? "subagent"
+    : "thread";
+}
+
+export type SidebarAgentPlacement = "list" | "agents";
+
+/**
+ * Where the sidebar shows a chat: in the list, or behind the "Agents' chats"
+ * button (see the top of the file). `parent` is the chat named by
+ * `spawnedByThreadId`, in the same environment; `inline` — the view menu's
+ * switches. A chat whose parent is gone, archived or Uno's keeps its place
+ * in the list, as before.
+ */
+export function sidebarAgentPlacement(input: {
   readonly thread: TaskSummary;
   readonly parent: TaskSummary | undefined;
   readonly assistantChatId: string | null;
-  readonly showAgentTasks: boolean;
-  readonly isOpen: boolean;
-}): boolean {
-  if (input.showAgentTasks || input.isOpen) return false;
-  if (!isAgentTask(input.thread, input.parent, input.assistantChatId)) return false;
-  // "Move to sidebar" pins it: the person's own chat from then on.
-  if (input.thread.pinnedAt !== null) return false;
-  return threadOwner(input.thread) !== "you";
+  readonly inline: { readonly threads: boolean; readonly subagents: boolean };
+}): SidebarAgentPlacement {
+  const { thread } = input;
+  if (threadHandler(thread) === "you") return "list";
+  if (thread.assistantRole === "chat") return "list";
+  if (
+    thread.spawnedByThreadId != null &&
+    !isAgentTask(thread, input.parent, input.assistantChatId)
+  ) {
+    return "list";
+  }
+  if (thread.pinnedAt !== null || agentTaskNeedsPerson(thread)) return "list";
+  const kind = agentChatKind(thread);
+  if (kind === "thread" ? input.inline.threads : input.inline.subagents) return "list";
+  return "agents";
+}
+
+/** The chats behind the "Agents' chats" button: threads, then subagents, newest first. */
+export function groupAgentChats<T extends TaskSummary>(
+  chats: ReadonlyArray<T>,
+): { readonly threads: ReadonlyArray<T>; readonly subagents: ReadonlyArray<T> } {
+  const newest = (left: T, right: T) =>
+    (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt);
+  return {
+    threads: chats.filter((chat) => agentChatKind(chat) === "thread").toSorted(newest),
+    subagents: chats.filter((chat) => agentChatKind(chat) === "subagent").toSorted(newest),
+  };
+}
+
+/** "Agents' chats (5)", folded or not. */
+export function agentChatsShelfLabel(count: number, expanded: boolean): string {
+  return expanded ? "Agents' chats" : `Agents' chats (${count})`;
+}
+
+/**
+ * The handoff a chat offers the person: Join while an agent handles it, Hand
+ * to agent while they do. Not Uno's own chat (it is the assistant's
+ * conversation with them), and a chat of the person's own only where the
+ * daemon lets them hand it off (`ownChats`, the `chatHandoff` capability).
+ */
+export function handoffAction(
+  thread: Pick<
+    TaskSummary,
+    "controller" | "assistantRole" | "spawnedByThreadId" | "controlChangedAt"
+  >,
+  options: { readonly ownChats: boolean } = { ownChats: true },
+): {
+  readonly label: string;
+  readonly hint: string;
+  readonly nextController: ThreadController;
+} | null {
+  if (thread.assistantRole === "chat") return null;
+  if (threadHandler(thread) === "agent") {
+    return { label: HANDLER_COPY.join, hint: HANDLER_COPY.joinHint, nextController: "human" };
+  }
+  if (thread.spawnedByThreadId == null && !options.ownChats) return null;
+  return {
+    label: HANDLER_COPY.handToAgent,
+    hint: HANDLER_COPY.handToAgentHint,
+    nextController: "agent",
+  };
 }
 
 /** The person should look at it: the sidebar shows it, marked. */
@@ -109,9 +210,11 @@ export function agentTaskNeedsPerson(task: TaskSummary): boolean {
 export interface AgentTaskRow {
   readonly task: TaskSummary;
   readonly status: AgentTaskStatus;
+  readonly kind: AgentChatKind;
+  readonly handler: ThreadHandler;
 }
 
-/** A chat's live tasks, most urgent first, then the newest. */
+/** A chat's live tasks: threads, then subagents; in each the most urgent first, then the newest. */
 export function agentTasksOf(
   parentId: ThreadId,
   summaries: Iterable<TaskSummary>,
@@ -119,20 +222,30 @@ export function agentTasksOf(
   const rows: AgentTaskRow[] = [];
   for (const summary of summaries) {
     if (summary.spawnedByThreadId !== parentId || summary.archivedAt !== null) continue;
-    rows.push({ task: summary, status: agentTaskStatus(summary) });
+    rows.push({
+      task: summary,
+      status: agentTaskStatus(summary),
+      kind: agentChatKind(summary),
+      handler: threadHandler(summary),
+    });
   }
   return rows.toSorted(
     (left, right) =>
+      (left.kind === right.kind ? 0 : left.kind === "thread" ? -1 : 1) ||
       STATUS_ORDER.indexOf(left.status) - STATUS_ORDER.indexOf(right.status) ||
       right.task.createdAt.localeCompare(left.task.createdAt),
   );
 }
 
-/** "3 tasks · 1 needs you · 1 working" — the strip folded. */
+/** "2 threads · 1 subagent · 1 needs you · 1 working" — the strip folded. */
 export function agentTasksSummary(rows: ReadonlyArray<AgentTaskRow>): string {
   const counts = new Map<AgentTaskStatus, number>();
   for (const row of rows) counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
-  const parts = [`${rows.length} ${rows.length === 1 ? "task" : "tasks"}`];
+  const threads = rows.filter((row) => row.kind === "thread").length;
+  const subagents = rows.length - threads;
+  const parts: string[] = [];
+  if (threads > 0) parts.push(`${threads} ${threads === 1 ? "thread" : "threads"}`);
+  if (subagents > 0) parts.push(`${subagents} ${subagents === 1 ? "subagent" : "subagents"}`);
   for (const status of STATUS_ORDER) {
     const count = counts.get(status);
     if (count === undefined) continue;

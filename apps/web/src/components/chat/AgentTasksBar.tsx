@@ -1,7 +1,6 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  ArrowUpToLineIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDotIcon,
@@ -9,22 +8,23 @@ import {
   ChevronDownIcon,
   HourglassIcon,
   ListChecksIcon,
-  PinOffIcon,
+  UserRoundIcon,
 } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 
 import {
+  AGENT_CHAT_KIND_LABEL,
   AGENT_TASK_STATUS_LABEL,
   agentTasksOf,
   agentTasksSummary,
+  handoffAction,
   type AgentTaskStatus,
 } from "../../agentTasks.logic";
-import { readEnvironmentApi } from "../../environmentApi";
+import { setThreadHandler } from "../../agentsAccess";
 import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThreadsSupport";
-import { cn, newCommandId } from "../../lib/utils";
+import { cn } from "../../lib/utils";
 import { selectEnvironmentState, useStore } from "../../store";
 import { Spinner } from "../ui/spinner";
-import { stackedThreadToast, toastManager } from "../ui/toast";
 
 function StatusIcon({ status }: { status: AgentTaskStatus }) {
   const className = "size-3.5 shrink-0";
@@ -46,10 +46,10 @@ function StatusIcon({ status }: { status: AgentTaskStatus }) {
 
 /**
  * "Tasks" above the composer of a chat whose agent started other chats
- * (Misha 13.11, after T3's Lineage panel): each task with where it stands,
- * a click opens it, and "Move to sidebar" makes it one of the person's chats
- * (pinned; "Back to tasks" unpins). The tasks themselves stay out of the
- * sidebar until they need the person (agentTasks.logic).
+ * (Misha 13.11, after T3's Lineage panel; v2 14.11): its threads and its
+ * subagents apart, each with where it stands; a click opens it, "Join" makes
+ * it the person's chat (in their sidebar), "Hand to agent" gives it back.
+ * Chats an agent handles stay out of the sidebar's list (agentTasks.logic).
  */
 export const AgentTasksBar = memo(function AgentTasksBar(props: {
   readonly environmentId: EnvironmentId;
@@ -64,6 +64,13 @@ export const AgentTasksBar = memo(function AgentTasksBar(props: {
     () => agentTasksOf(threadId, Object.values(summaries)),
     [summaries, threadId],
   );
+  const groups = useMemo(
+    () =>
+      (["thread", "subagent"] as const)
+        .map((kind) => ({ kind, rows: rows.filter((row) => row.kind === kind) }))
+        .filter((group) => group.rows.length > 0),
+    [rows],
+  );
   const needsYou = rows.some((row) => row.status === "needs-you");
   // Open by itself when a task waits on the person; else one quiet line.
   const [expandedChoice, setExpanded] = useState<boolean | null>(null);
@@ -71,33 +78,6 @@ export const AgentTasksBar = memo(function AgentTasksBar(props: {
   const navigate = useNavigate();
 
   if (!supported || rows.length === 0) return null;
-
-  const setPinned = async (taskId: ThreadId, pinned: boolean) => {
-    const api = readEnvironmentApi(environmentId);
-    if (!api) return;
-    try {
-      await api.orchestration.dispatchCommand({
-        type: "thread.meta.update",
-        commandId: newCommandId(),
-        threadId: taskId,
-        pinnedAt: pinned ? new Date().toISOString() : null,
-      });
-      toastManager.add(
-        stackedThreadToast({
-          type: "success",
-          title: pinned ? "Moved to the sidebar" : "Back in this chat's tasks",
-        }),
-      );
-    } catch (error) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: pinned ? "Could not move the task to the sidebar" : "Could not move the task back",
-          description: error instanceof Error ? error.message : "An error occurred.",
-        }),
-      );
-    }
-  };
 
   return (
     <div
@@ -129,66 +109,83 @@ export const AgentTasksBar = memo(function AgentTasksBar(props: {
         />
       </button>
       {expanded ? (
-        <ul className="max-h-48 overflow-y-auto border-t border-border/60 py-1" role="list">
-          {rows.map(({ task, status }) => {
-            const pinned = task.pinnedAt !== null;
-            return (
-              <li
-                key={task.id}
-                className="group/task flex min-w-0 items-center gap-2 px-2.5 py-0.5"
-                data-testid="agent-task-row"
-                data-status={status}
-              >
-                <StatusIcon status={status} />
-                <button
-                  type="button"
-                  title="Open this task"
-                  onClick={() =>
-                    void navigate({
-                      to: "/$environmentId/$threadId",
-                      params: { environmentId, threadId: task.id },
-                    })
-                  }
-                  className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left text-foreground underline-offset-2 outline-hidden hover:underline focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {task.title}
-                </button>
-                <span
-                  className={cn(
-                    "shrink-0",
-                    status === "needs-you"
-                      ? "font-medium text-warning"
-                      : status === "error"
-                        ? "text-destructive"
-                        : "text-muted-foreground",
-                  )}
-                >
-                  {AGENT_TASK_STATUS_LABEL[status]}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => void setPinned(task.id, !pinned)}
-                  title={
-                    pinned
-                      ? "Back to tasks: out of the sidebar again"
-                      : "Move to sidebar: a chat of yours, pinned on top"
-                  }
-                  aria-label={
-                    pinned ? `Back to tasks: ${task.title}` : `Move to sidebar: ${task.title}`
-                  }
-                  className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-60 outline-hidden group-hover/task:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring [@media(hover:none)]:opacity-100"
-                  data-testid="agent-task-move"
-                >
-                  {pinned ? (
-                    <PinOffIcon aria-hidden className="size-3" />
-                  ) : (
-                    <ArrowUpToLineIcon aria-hidden className="size-3" />
-                  )}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="max-h-56 overflow-y-auto border-t border-border/60 py-1">
+          {groups.map((group) => (
+            <section key={group.kind} data-testid={`agent-tasks-group-${group.kind}`}>
+              {/* The two kinds apart (Misha 14.11); one kind needs no heading. */}
+              {groups.length > 1 ? (
+                <h3 className="px-2.5 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">
+                  {AGENT_CHAT_KIND_LABEL[group.kind]}
+                </h3>
+              ) : null}
+              <ul role="list">
+                {group.rows.map(({ task, status, handler }) => {
+                  const handoff = handoffAction(task);
+                  return (
+                    <li
+                      key={task.id}
+                      className="group/task flex min-w-0 items-center gap-2 px-2.5 py-0.5"
+                      data-testid="agent-task-row"
+                      data-status={status}
+                      data-handler={handler}
+                    >
+                      <StatusIcon status={status} />
+                      <button
+                        type="button"
+                        title="Open this chat"
+                        onClick={() =>
+                          void navigate({
+                            to: "/$environmentId/$threadId",
+                            params: { environmentId, threadId: task.id },
+                          })
+                        }
+                        className="min-w-0 flex-1 cursor-pointer truncate rounded-sm text-left text-foreground underline-offset-2 outline-hidden hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+                      >
+                        {task.title}
+                      </button>
+                      {handler === "you" ? (
+                        <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+                          <UserRoundIcon aria-hidden className="size-3" />
+                          You're on it
+                        </span>
+                      ) : null}
+                      <span
+                        className={cn(
+                          "shrink-0",
+                          status === "needs-you"
+                            ? "font-medium text-warning"
+                            : status === "error"
+                              ? "text-destructive"
+                              : "text-muted-foreground",
+                        )}
+                      >
+                        {AGENT_TASK_STATUS_LABEL[status]}
+                      </span>
+                      {handoff ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void setThreadHandler({
+                              environmentId,
+                              threadId: task.id,
+                              controller: handoff.nextController,
+                            })
+                          }
+                          title={handoff.hint}
+                          aria-label={`${handoff.label}: ${task.title}`}
+                          className="shrink-0 cursor-pointer rounded-sm px-1 text-muted-foreground opacity-70 outline-hidden group-hover/task:opacity-100 hover:bg-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring [@media(hover:none)]:opacity-100"
+                          data-testid="agent-task-handoff"
+                        >
+                          {handoff.label}
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </div>
       ) : null}
     </div>
   );

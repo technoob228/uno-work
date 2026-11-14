@@ -15,6 +15,7 @@ import {
   RuntimeMode,
   ThreadAssistantRole,
   ThreadController,
+  ThreadSpawnKind,
   ThreadId,
   ThreadPullRequest,
   ThreadStartedBy,
@@ -59,6 +60,8 @@ export const ProjectionThread = Schema.Struct({
   // absent spawnedByThreadId/controlChangedAt persist as NULL, absent
   // controller as NULL (read back as "human").
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  // What the agent started it for (migration 061, see ThreadSpawnKind).
+  spawnKind: Schema.optional(Schema.NullOr(ThreadSpawnKind)),
   controller: Schema.optional(Schema.NullOr(ThreadController)),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // "Don't let agents write here" (migration 049). Optional for the same

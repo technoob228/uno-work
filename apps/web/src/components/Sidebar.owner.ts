@@ -14,6 +14,8 @@
 //   that answer.
 // Otherwise it is the agent's. Opening a chat does not hand it back, like
 // "Your turn": one accidental click should not hide it.
+// A chat the person handed to its agent (Hand to agent, 14.11) is the
+// agent's, except while it needs them.
 import { isLatestTurnSettled } from "../session-logic";
 import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
@@ -35,6 +37,7 @@ export type ThreadOwnerInput = Pick<
       | "spawnedByThreadId"
       | "assistantRole"
       | "controller"
+      | "controlChangedAt"
       | "startedBy"
       | "latestPersonMessageAt"
       | "personCalledAt"
@@ -143,7 +146,14 @@ export function threadOwnerWithStarter(
 }
 
 export function threadOwner(thread: ThreadOwnerInput): ThreadOwner {
-  if (!isAgentStartedChat(thread)) return isWaitingOnAgents(thread) ? "agent" : "you";
+  if (!isAgentStartedChat(thread)) {
+    // The person handed it to its agent (Misha 14.11): the agent's until it
+    // needs them or they take it back (writing there does).
+    if (thread.controller === "agent" && thread.controlChangedAt != null) {
+      return threadNeedsUser(thread) || isPersonCallPending(thread) ? "you" : "agent";
+    }
+    return isWaitingOnAgents(thread) ? "agent" : "you";
+  }
   if (threadNeedsUser(thread)) return "you";
   // A server from before 28.10 knows neither the person's messages nor calls:
   // a chat stays the agent's until the person writes in it.

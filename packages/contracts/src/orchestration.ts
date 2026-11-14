@@ -404,6 +404,17 @@ export const ThreadStartedBy = Schema.Literals(["agent", "assistant", "app"]);
 export type ThreadStartedBy = typeof ThreadStartedBy.Type;
 
 /**
+ * What a chat another chat's agent started is for (Misha 14.11), said by that
+ * agent in `chat_create`:
+ * - `subagent` — a short helper on any harness (a lookup, a review, a second
+ *   opinion): the agent waits for its answer and moves on;
+ * - `thread`   — a long work chat the agent runs, one the person may join.
+ * Absent / null: `thread` (and every chat the person started).
+ */
+export const ThreadSpawnKind = Schema.Literals(["subagent", "thread"]);
+export type ThreadSpawnKind = typeof ThreadSpawnKind.Type;
+
+/**
  * Who a chat answers to right now, for the sidebar's "Mine" filter (Misha
  * 28.10). Fields on the thread and its shell, all optional so older servers
  * decode:
@@ -683,6 +694,8 @@ export const OrchestrationThread = Schema.Struct({
   // The thread whose agent created this one (bridge `POST /api/threads`);
   // null for threads a human (or the manager) created. Immutable.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  // See ThreadSpawnKind. Immutable, like spawnedByThreadId.
+  spawnKind: Schema.optional(Schema.NullOr(ThreadSpawnKind)),
   // See ThreadController. Absent means "human".
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
@@ -776,6 +789,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   readStateUpdatedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.spawnedByThreadId / controller.
   spawnedByThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  spawnKind: Schema.optional(Schema.NullOr(ThreadSpawnKind)),
   controller: Schema.optional(ThreadController),
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.agentsClosedAt.
@@ -926,6 +940,8 @@ const ThreadCreateCommand = Schema.Struct({
   // Only honored with an `agent` origin whose threadId matches; the decider
   // rejects a mismatch so a client cannot fake agent parentage.
   spawnedByThreadId: Schema.optional(ThreadId),
+  // See ThreadSpawnKind. Only with spawnedByThreadId (ignored otherwise).
+  spawnKind: Schema.optional(ThreadSpawnKind),
   // See ThreadAssistantRole. Only the daemon itself may set it (the decider
   // rejects it from a person's command): `spawned` needs a manager origin,
   // `chat` needs an assistant / system origin and no other assistant chat.
@@ -1065,10 +1081,10 @@ const ThreadReadCommand = Schema.Struct({
   readAt: IsoDateTime,
 });
 
-// Handoff between the human and the spawning agent. A human may set either
-// value; an agent (origin kind "agent") may only release control to "human".
-// The app no longer offers "Hand back to agent" (0.0.115): the command stays
-// for the agents' `/release` and for older clients.
+// Handoff between the person and an agent (Misha 14.11): who handles the chat.
+// The person may set either value on any chat — take over a chat an agent
+// runs, or hand one of theirs to its agent (it leaves their sidebar); an
+// agent (origin kind "agent") may only release a chat it spawned to "human".
 const ThreadControlSetCommand = Schema.Struct({
   type: Schema.Literal("thread.control.set"),
   commandId: CommandId,
@@ -1508,6 +1524,8 @@ export const ThreadCreatedPayload = Schema.Struct({
   // Present only for agent-spawned threads; such threads start with
   // controller "agent".
   spawnedByThreadId: Schema.optional(ThreadId),
+  // See ThreadSpawnKind; absent: a thread.
+  spawnKind: Schema.optional(ThreadSpawnKind),
   // See ThreadAssistantRole; absent for regular chats.
   assistantRole: Schema.optional(ThreadAssistantRole),
   // See ThreadSource; absent for chats that started in Uno Work.

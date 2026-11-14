@@ -44,11 +44,27 @@ export const AGENTS_ACCESS_COPY = {
   failed: "Could not change who can write here",
 } as const;
 
+/** The handoff, one wording for the strip, the bar above the composer and the menu. */
+export const HANDLER_COPY = {
+  join: "Join",
+  joinHint: "Join: it becomes your chat, in your sidebar",
+  handToAgent: "Hand to agent",
+  handToAgentHint: "Hand to the agent: it leaves your sidebar, under Agents' chats",
+  joinedToast: "You're on this chat now: it's in your sidebar",
+  handedToast: "Handed to the agent: it's under Agents' chats in the sidebar",
+  failed: "Could not change who handles this chat",
+} as const;
+
 export type ThreadControlBarAction =
   /** Toggle "Don't let agents write here" (thread.meta.update agentsClosedAt). */
   | { readonly kind: "agents-access"; readonly label: string; readonly nextClosed: boolean }
-  /** Older daemons (no `agentsCloseChat`): the old handoff, so no chat stays locked. */
-  | { readonly kind: "handoff"; readonly label: string; readonly nextController: ThreadController };
+  /** Who handles the chat (thread.control.set): Join / Hand to agent (14.11), or an older daemon's pair. */
+  | {
+      readonly kind: "handoff";
+      readonly label: string;
+      readonly nextController: ThreadController;
+      readonly hint?: string;
+    };
 
 export interface ThreadControlBarState {
   readonly controller: ThreadController;
@@ -63,6 +79,8 @@ export interface ThreadControlBarState {
   readonly summary: string;
   /** null: nothing to do from the bar. */
   readonly action: ThreadControlBarAction | null;
+  /** A quieter second button ("Don't let agents write here" next to Join / Hand to agent). */
+  readonly secondaryAction: ThreadControlBarAction | null;
 }
 
 function sentence(
@@ -78,17 +96,30 @@ function sentence(
   };
 }
 
+const JOIN_ACTION = {
+  kind: "handoff",
+  label: HANDLER_COPY.join,
+  hint: HANDLER_COPY.joinHint,
+  nextController: "human",
+} as const;
+const HAND_TO_AGENT_ACTION = {
+  kind: "handoff",
+  label: HANDLER_COPY.handToAgent,
+  hint: HANDLER_COPY.handToAgentHint,
+  nextController: "agent",
+} as const;
+
 /**
- * The slim strip above the composer (0.0.115):
+ * The slim strip above the composer (0.0.115, handler 14.11):
  * - a chat the person closed to agents — any chat — says so and offers
  *   "Let agents write here";
- * - a chat another chat's agent started says who started it / drives it and
- *   offers "Don't let agents write here" (a human message already takes it
- *   over; there is no "Hand back to agent" any more — agents may write into
- *   any free chat unless it is closed);
+ * - a chat another chat's agent started says who started it and who handles
+ *   it: an agent ("Join") or the person ("Hand to agent"), with "Don't let
+ *   agents write here" beside;
+ * - a chat the person handed to its agent says so and offers "Join";
  * - a chat the person started where agents talk now (`agentLed`, see
  *   Sidebar.owner: the last word is another chat's agent's and nobody
- *   called the person) says so, with the same switch (Misha 13.11);
+ *   called the person) says so, with the switch (Misha 13.11);
  * - any other chat: no strip (null).
  * `supportsAgentsAccess` false (an older daemon): the old take-over /
  * hand-back pair, which is the only way such a daemon unlocks a chat.
@@ -126,6 +157,7 @@ export function resolveThreadControlBarState(input: {
           : sentence("", null, `${AGENTS_ACCESS_COPY.closedStatus} · started by an agent`)
         : sentence("", null, AGENTS_ACCESS_COPY.closedStatus)),
       action: { kind: "agents-access", label: AGENTS_ACCESS_COPY.open, nextClosed: false },
+      secondaryAction: null,
     };
   }
   const closeAction = {
@@ -134,6 +166,15 @@ export function resolveThreadControlBarState(input: {
     nextClosed: true,
   } as const;
   if (!spawned) {
+    if (controller === "agent") {
+      return {
+        controller,
+        closedToAgents,
+        ...sentence("", null, "You handed this chat to its agent · it's out of your sidebar"),
+        action: JOIN_ACTION,
+        secondaryAction: closeAction,
+      };
+    }
     if (input.agentLed !== true) return null;
     return {
       controller: "agent",
@@ -144,6 +185,7 @@ export function resolveThreadControlBarState(input: {
         "Agents are talking here · you'll see Ready or Needs you when it's your turn",
       ),
       action: closeAction,
+      secondaryAction: null,
     };
   }
 
@@ -152,18 +194,20 @@ export function resolveThreadControlBarState(input: {
       controller,
       closedToAgents,
       ...(parentLinkText
-        ? sentence("An agent from ", parentLinkText, " is driving this chat")
-        : sentence("", null, "An agent is driving this chat")),
-      action: closeAction,
+        ? sentence("The agent in ", parentLinkText, " handles this chat")
+        : sentence("", null, "An agent handles this chat")),
+      action: JOIN_ACTION,
+      secondaryAction: closeAction,
     };
   }
   return {
     controller,
     closedToAgents,
     ...(parentLinkText
-      ? sentence("Started by the agent in ", parentLinkText, "")
-      : sentence("", null, "Started by an agent")),
-    action: closeAction,
+      ? sentence("Started by the agent in ", parentLinkText, " · you're on it")
+      : sentence("", null, "Started by an agent · you're on it")),
+    action: HAND_TO_AGENT_ACTION,
+    secondaryAction: closeAction,
   };
 }
 
@@ -179,6 +223,7 @@ function resolveLegacyControlBarState(
         ? sentence("An agent from ", parentLinkText, " is driving this chat")
         : sentence("", null, "An agent is driving this chat")),
       action: { kind: "handoff", label: "Take over", nextController: "human" },
+      secondaryAction: null,
     };
   }
   return {
@@ -188,5 +233,6 @@ function resolveLegacyControlBarState(
       ? sentence("You're in control · started by the agent in ", parentLinkText, "")
       : sentence("", null, "You're in control · started by an agent")),
     action: { kind: "handoff", label: "Hand back to agent", nextController: "agent" },
+    secondaryAction: null,
   };
 }

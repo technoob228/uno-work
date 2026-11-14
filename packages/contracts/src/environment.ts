@@ -35,6 +35,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       agents write here", 0.0.115) and no longer locks agents out of a chat
       the person wrote in. Clients hide the switch when absent. */
   agentsCloseChat: Schema.optionalKey(Schema.Boolean),
+  /** Server lets the person hand any chat of theirs to its agent
+      (thread.control.set on a chat nobody spawned, Misha 14.11) and keeps
+      `spawnKind` (subagent / thread). Absent: only spawned chats can be joined. */
+  chatHandoff: Schema.optionalKey(Schema.Boolean),
   /** Server projects who a chat answers to (28.10): `startedBy`,
       `latestPersonMessageAt` and the agents' person calls
       (`thread.person.call` / `.release`, bridge `/call-person`,
