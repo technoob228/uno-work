@@ -871,6 +871,26 @@ export interface BranchNamingOptions {
 export const DEFAULT_BRANCH_NAME_PREFIX = "t3code";
 
 /**
+ * The model set Uno applied by itself on this computer (T41 v4, Misha 14.11:
+ * "apply the suggested set when the first subscription is connected, but
+ * never over a choice the person made"). Each role holds what Uno set; a
+ * role left out was the person's own and is never touched. `sources`: the
+ * plans connected then (`uno`, `claude`, `codex`) — once one of the
+ * person's own plans was there, later changes wait for "Use these".
+ */
+export const ModelRolesPreset = Schema.Struct({
+  sources: Schema.Array(Schema.String),
+  /** Default model; null: Uno left it on Auto. */
+  complex: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  /** The "Simple tasks" row of the assistants' ROUTING.md. */
+  simple: Schema.optionalKey(ModelSelection),
+  /** The assistant's own replies. */
+  replies: Schema.optionalKey(Schema.Struct({ provider: Schema.String, model: Schema.String })),
+  appliedAt: Schema.String,
+});
+export type ModelRolesPreset = typeof ModelRolesPreset.Type;
+
+/**
  * The settings a person can set for one project (Settings → the "Applying
  * settings for" sentence). Same names as the computer-wide settings, so one
  * lookup answers both. Saved on each computer, by that computer's project id.
@@ -994,6 +1014,9 @@ export const ServerSettings = Schema.Struct({
   harnessUnoCreditsMigrated: Schema.Record(Schema.String, Schema.Boolean).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  // The model set Uno applied by itself for the plans connected here (T41
+  // v4, Misha 14.11). Absent: never applied. See ModelRolesPreset.
+  modelRolesPreset: Schema.optionalKey(ModelRolesPreset),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
@@ -1158,6 +1181,8 @@ export const ServerSettingsPatch = Schema.Struct({
   multipleAccounts: Schema.optionalKey(Schema.Boolean),
   harnessUnoCredits: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
   harnessUnoCreditsMigrated: Schema.optionalKey(Schema.Record(Schema.String, Schema.Boolean)),
+  // Replaced whole (see applyServerSettingsPatch).
+  modelRolesPreset: Schema.optionalKey(ModelRolesPreset),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(
     Schema.Struct({

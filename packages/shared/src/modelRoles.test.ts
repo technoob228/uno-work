@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { RoutingRule } from "./assistantMemory.ts";
 import {
   detectPlanSources,
+  planAutoRoles,
   quickModel,
   sameSelection,
   simpleTaskRule,
@@ -194,5 +195,145 @@ describe("Simple tasks: the row of ROUTING.md", () => {
   it("sameSelection ignores options", () => {
     expect(sameSelection(sel("codex", "a"), { ...sel("codex", "a") })).toBe(true);
     expect(sameSelection(sel("codex", "a"), null)).toBe(false);
+  });
+});
+
+describe("planAutoRoles: Uno applies its set by itself, never over the person's choice", () => {
+  const now = "2026-11-14T03:00:00.000Z";
+  const untouched = {
+    complex: null,
+    simple: { selection: sel("claudeAgent", "claude-sonnet-5-5"), mine: false },
+    replies: { provider: "uno", model: "uno/smart" },
+  } as const;
+  const unoOnly = suggestRoles({ providers: [uno], isReady: ready, unoReplies: true });
+  const both = suggestRoles({ providers: [uno, codex, claude], isReady: ready, unoReplies: true });
+
+  it("only Uno AI: Smart / Fast without pressing a button", () => {
+    const plan = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: untouched,
+      now,
+    });
+    expect(plan?.complex).toEqual(sel("uno", "uno/uno/smart"));
+    expect(plan?.simple).toEqual(sel("uno", "uno/uno/fast"));
+    expect(plan?.replies).toEqual({ provider: "uno", model: "uno/fast" });
+    expect(plan?.preset).toEqual({
+      sources: ["uno"],
+      complex: sel("uno", "uno/uno/smart"),
+      simple: sel("uno", "uno/uno/fast"),
+      replies: { provider: "uno", model: "uno/fast" },
+      appliedAt: now,
+    });
+  });
+
+  it("the person's own choices are kept, the untouched roles still get the set", () => {
+    const plan = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: {
+        complex: sel("claudeAgent", "claude-opus-5-5"),
+        simple: { selection: sel("claudeAgent", "claude-sonnet-5-5"), mine: true },
+        replies: { provider: "claude", model: "claude-opus-5-5" },
+      },
+      now,
+    });
+    expect(plan).not.toBeNull();
+    expect(plan).not.toHaveProperty("complex");
+    expect(plan).not.toHaveProperty("simple");
+    expect(plan).not.toHaveProperty("replies");
+    // Remembered as the person's: a later plan won't take them either.
+    expect(plan?.preset).toEqual({ sources: ["uno"], appliedAt: now });
+  });
+
+  it("the first own plan: Uno's earlier set moves on, back to Auto (Opus 5.5)", () => {
+    const first = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: untouched,
+      now,
+    })!;
+    const plan = planAutoRoles({
+      roles: both,
+      autoComplex: sel("claudeAgent", "claude-opus-5-5"),
+      preset: first.preset,
+      current: {
+        complex: first.complex!,
+        simple: { selection: first.simple!, mine: true },
+        replies: first.replies!,
+      },
+      now,
+    });
+    expect(plan?.complex).toBeNull();
+    expect(plan?.simple).toEqual(sel("codex", "gpt-5.6-luna"));
+    expect(plan).not.toHaveProperty("replies"); // already Uno Fast
+    expect(plan?.preset.sources).toEqual(["claude", "codex", "uno"]);
+  });
+
+  it("a role the person changed after Uno's set stays theirs when the plan comes", () => {
+    const first = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: untouched,
+      now,
+    })!;
+    const plan = planAutoRoles({
+      roles: both,
+      autoComplex: sel("claudeAgent", "claude-opus-5-5"),
+      preset: first.preset,
+      current: {
+        complex: sel("uno", "uno/uno/fast"), // picked by hand
+        simple: { selection: sel("uno", "uno/uno/smart"), mine: true }, // picked by hand
+        replies: { provider: "uno", model: "uno/smart" }, // picked by hand
+      },
+      now,
+    });
+    expect(plan).not.toHaveProperty("complex");
+    expect(plan).not.toHaveProperty("simple");
+    expect(plan).not.toHaveProperty("replies");
+  });
+
+  it("after the first own plan: nothing by itself, changes wait for Use these", () => {
+    const withPlan = planAutoRoles({
+      roles: both,
+      autoComplex: sel("claudeAgent", "claude-opus-5-5"),
+      preset: null,
+      current: untouched,
+      now,
+    })!;
+    expect(withPlan.complex).toBeUndefined(); // Auto already gives Opus 5.5
+    expect(withPlan.simple).toEqual(sel("codex", "gpt-5.6-luna"));
+    expect(
+      planAutoRoles({
+        roles: both,
+        autoComplex: null,
+        preset: withPlan.preset,
+        current: untouched,
+        now,
+      }),
+    ).toBeNull();
+    // Still only Uno AI and a set applied: nothing again.
+    const first = planAutoRoles({ roles: unoOnly, autoComplex: null, preset: null, current: untouched, now })!;
+    expect(
+      planAutoRoles({ roles: unoOnly, autoComplex: null, preset: first.preset, current: untouched, now }),
+    ).toBeNull();
+  });
+
+  it("not known yet (no ROUTING.md, no assistant AI): those roles are left alone", () => {
+    const plan = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: { complex: null },
+      now,
+    });
+    expect(plan?.complex).toEqual(sel("uno", "uno/uno/smart"));
+    expect(plan).not.toHaveProperty("simple");
+    expect(plan).not.toHaveProperty("replies");
+    expect(plan?.preset).not.toHaveProperty("simple");
   });
 });

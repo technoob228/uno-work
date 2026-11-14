@@ -104,6 +104,7 @@ export function applyServerSettingsPatch(
     ...(patch.pins !== undefined ? { pins: patch.pins } : {}),
     ...(patch.setup !== undefined ? { setup: patch.setup } : {}),
     ...(patch.mcpServers !== undefined ? { mcpServers: patch.mcpServers } : {}),
+    ...(patch.modelRolesPreset !== undefined ? { modelRolesPreset: patch.modelRolesPreset } : {}),
     // A new model must not keep the previous model's options.
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }
