@@ -1,11 +1,15 @@
-import type { AuthSessionId } from "@t3tools/contracts";
+import type { AuthSessionId, EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import type { ServerClientSessionRecord } from "../../environments/primary/auth";
 import {
   buildPhonePairUrl,
   classifyPhoneHostReach,
+  dedupePhoneComputerSources,
   describePhoneSession,
+  orderPhoneComputers,
+  type PhoneComputerSource,
+  resolvePhoneComputer,
   formatCountdown,
   formatPhoneCode,
   isPhoneSession,
@@ -118,5 +122,111 @@ describe("isPhoneSession", () => {
       "iOS",
     );
     expect(describePhoneSession(session())).toBe("Phone");
+  });
+});
+
+const isProxy = (url: string) => /(^|\.)app\.uno4\.work$/.test(new URL(url).hostname);
+const env = (id: string) => id as EnvironmentId;
+
+describe("workspace computers for the phone", () => {
+  const mac: PhoneComputerSource = {
+    environmentId: env("mac"),
+    label: "Mikhail's MacBook Air",
+    isPrimary: true,
+    unoBoxId: null,
+    httpBaseUrl: "http://127.0.0.1:3773",
+    boxDirectOrigin: null,
+  };
+  const cloud: PhoneComputerSource = {
+    environmentId: env("cloud"),
+    label: "uno-work",
+    isPrimary: false,
+    unoBoxId: 395,
+    httpBaseUrl: "https://main-abc.app.uno4.dev",
+    boxDirectOrigin: "https://main-abc.app.uno4.dev",
+  };
+
+  it("never hands a phone the desktop's loopback address", () => {
+    const resolved = resolvePhoneComputer(mac, isProxy);
+    expect(resolved.phoneBaseUrl).toBeNull();
+    expect(resolved.reach).toBe("unreachable");
+  });
+
+  it("offers the desktop's LAN address only when the daemon really listens there", () => {
+    const resolved = resolvePhoneComputer(
+      {
+        ...mac,
+        advertisedEndpoints: [
+          { httpBaseUrl: "http://127.0.0.1:3773", reachability: "loopback", status: "available" },
+          { httpBaseUrl: "http://192.168.1.44:3773", reachability: "lan", status: "available" },
+        ],
+      },
+      isProxy,
+    );
+    expect(resolved).toMatchObject({ phoneBaseUrl: "http://192.168.1.44:3773", reach: "private" });
+  });
+
+  it("skips endpoints the desktop marks unavailable and prefers a public one", () => {
+    const resolved = resolvePhoneComputer(
+      {
+        ...mac,
+        advertisedEndpoints: [
+          { httpBaseUrl: "http://192.168.1.44:3773", reachability: "lan", status: "available" },
+          { httpBaseUrl: "https://mac.example.com", reachability: "public", status: "available" },
+          { httpBaseUrl: "http://10.0.0.9:3773", reachability: "lan", status: "unavailable" },
+        ],
+      },
+      isProxy,
+    );
+    expect(resolved.phoneBaseUrl).toBe("https://mac.example.com");
+  });
+
+  it("uses the box's own address, not the sign-in proxy it was opened through", () => {
+    const resolved = resolvePhoneComputer(
+      { ...cloud, isPrimary: true, httpBaseUrl: "https://app.uno4.work" },
+      isProxy,
+    );
+    expect(resolved).toMatchObject({
+      phoneBaseUrl: "https://main-abc.app.uno4.dev",
+      reach: "public",
+    });
+  });
+
+  it("puts the cloud computer first and unreachable ones last", () => {
+    const lanServer: PhoneComputerSource = {
+      environmentId: env("lan"),
+      label: "attic",
+      isPrimary: false,
+      unoBoxId: null,
+      httpBaseUrl: "http://192.168.1.50:3773",
+      boxDirectOrigin: null,
+    };
+    const vps: PhoneComputerSource = {
+      environmentId: env("vps"),
+      label: "a-vps",
+      isPrimary: false,
+      unoBoxId: null,
+      httpBaseUrl: "https://vps.example.com",
+      boxDirectOrigin: null,
+    };
+    const ordered = orderPhoneComputers(
+      [mac, lanServer, vps, cloud].map((source) => resolvePhoneComputer(source, isProxy)),
+    );
+    expect(ordered.map((computer) => computer.label)).toEqual([
+      "uno-work",
+      "a-vps",
+      "attic",
+      "Mikhail's MacBook Air",
+    ]);
+  });
+
+  it("lists a box once when it is both the primary and a saved connection", () => {
+    const deduped = dedupePhoneComputerSources([
+      { ...cloud, environmentId: env("primary-box"), isPrimary: true },
+      cloud,
+      mac,
+      mac,
+    ]);
+    expect(deduped.map((source) => source.environmentId)).toEqual(["primary-box", "mac"]);
   });
 });
