@@ -56,7 +56,7 @@ const nameArg = {
 };
 
 export const SPARK_LIMITS_LINE =
-  "Inside: env.KV (get/put/delete/list/incr, shared by the account's apps), fetch to public addresses (stream: true streams it to the client, up to 120 s), variables and secrets, a model without a key (env.AI.chat, paid from the account's AI balance), timers and cron (env.TIMERS: Spark calls the app later or on a schedule; Free 10 per app, at most one call a minute). Not there: files, SQL databases, packages. Limits: Free 3 apps (paid plans 20), a few ms of CPU per call, on Free a call ends after 30 s (spark_list shows the exact limits), about 600 requests a minute per account.";
+  "Inside: env.KV (get/put/delete/list/incr, shared by the account's apps), fetch to public addresses (stream: true streams it to the client, up to 120 s), variables and secrets, a model without a key (env.AI.chat, paid from the account's AI balance), timers and cron (env.TIMERS: Spark calls the app later or on a schedule; Free 10 per app, at most one call a minute). Not there: files, SQL databases, packages. Limits: Free 3 apps (paid plans 20), CPU per call Free 10 ms, Small 50 ms, Plus/Pro/Max 1 s (paid plans: a monthly CPU pool, then Pay as you go if on), a call ends after 30 s on Free and 300 s on paid plans (spark_list shows the exact limits), requests a second per account Free 5, Small 10, Plus 25, Pro 100, Max 300, short bursts up to twice that.";
 
 const sparkUnavailable = (kit: SparkToolKit) => kit.fail(SPARK_NOT_LINKED_MESSAGE);
 
@@ -103,7 +103,7 @@ export function sparkReplyMessage(
     return "This is too big for Spark: it takes a small program. Leave out data and packages.";
   }
   if (reply.status === 429 || reply.sparkError === "rate_limited") {
-    return "Spark is rate limiting this account (about 600 requests a minute on Free). Wait a minute and try again.";
+    return "Spark is rate limiting this account (too many requests or deploys at once; on Free an account gets 5 requests a second). Wait a minute and try again.";
   }
   return `Spark couldn't ${input.what}: ${[code, detail].filter(Boolean).join(" — ") || `HTTP ${reply.status}`}.`;
 }
@@ -160,7 +160,7 @@ export function sparkTools(kit: SparkToolKit): ReadonlyArray<UnoWorkTool> {
       description:
         "Put one JavaScript or Python file (or a small folder with an entry file) on Uno Spark: it answers HTTPS at https://<name>.spark.uno4.me/ right away — no server, free, nothing to keep running. Use it for webhooks, Telegram bots, small JSON APIs and form handlers; a frontend goes on Sites (site_publish). JS: `export default { async fetch(request, env) { return Response.json({...}) } }`; Python: `import spark` + `def fetch(request, env): return spark.Response.json({...})`. " +
         SPARK_LIMITS_LINE +
-        " Anything that needs more (jobs longer than 30 s, a SQL database, packages) is not Spark: read uno_guide spark first if unsure. Redeploying the same name makes a new version. `env` sets plain variables (replaces all; never tokens); `secrets` hands a value from the project's .env to Spark for the listed hosts only — you never see it, and it never goes into the result. Runs without asking, like a site; spark_delete takes it down.",
+        " Anything that needs more (jobs longer than 30 s on Free or 300 s on paid plans, a SQL database, packages) is not Spark: read uno_guide spark first if unsure. Redeploying the same name makes a new version. `env` sets plain variables (replaces all; never tokens); `secrets` hands a value from the project's .env to Spark for the listed hosts only — you never see it, and it never goes into the result. Runs without asking, like a site; spark_delete takes it down.",
       inputSchema: {
         type: "object",
         properties: {
