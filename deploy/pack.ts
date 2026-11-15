@@ -100,7 +100,9 @@ function packPrebuiltNodePty(): string | null {
     try {
       execFileSync("npx", ["--yes", "node-gyp", "rebuild"], { cwd: ptyDir, stdio: "inherit" });
     } catch (cause) {
-      console.log(`[pack] node-pty: couldn't build ${built} (${String(cause)}), machines compile it`);
+      console.log(
+        `[pack] node-pty: couldn't build ${built} (${String(cause)}), machines compile it`,
+      );
     }
   }
   if (!existsSync(built)) {

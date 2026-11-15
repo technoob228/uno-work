@@ -6,6 +6,21 @@
 
 - All of `bun fmt`, `bun lint`, and `bun typecheck` must pass before considering tasks completed.
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
+- `bun lint` fails on any new oxlint warning. Existing warnings are recorded per rule and file in `scripts/lint-baseline.json`; fix the code it points at. The record shrinks by itself when you fix old ones: commit it.
+
+## Rules live in checks
+
+A rule that a machine can check is a check, not a line in this file. When an agent is corrected for the same mistake twice, add the check where it already runs before a release (a lint rule, a type, a test, a script in `bun lint`) with an error that names what to do instead, then add a row here.
+
+| Rule                                           | Enforced by                                      |
+| ---------------------------------------------- | ------------------------------------------------ |
+| No new lint warnings                           | `scripts/lint-ratchet.mjs` in `bun lint`         |
+| No colored side stripe                         | `scripts/check-no-side-stripe.mjs` in `bun lint` |
+| Types hold, no barrel imports in `apps/server` | `bun typecheck`                                  |
+
+## UI rules
+
+- **Never** put a colored stripe on the side of a card, callout, toast, message or active row (`border-left: 3px solid …` on a rounded box, `box-shadow: inset 2px 0 0`, `border-l-4`, a pseudo-element bar) — the clearest tell of vibe-coded UI (Misha, 10.11.2026). Use background, weight, an icon, or a full border. `bun lint` enforces it (`scripts/check-no-side-stripe.mjs`). Quotes go in a `<blockquote>`, which is allowed; connector lines and chart ticks are marked `/* side-stripe-ok: reason */`.
 
 ## Desktop Dev Startup
 
