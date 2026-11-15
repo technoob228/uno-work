@@ -10,8 +10,9 @@
 //   border-left / border-right / border-inline-start|end толщиной от 1.5px,
 //   box-shadow: inset Npx 0 0 (N >= 2) — та же полоса тенью,
 //   Tailwind: border-l-2/4/8/[..], border-s-*, border-r-*, border-e-*, shadow-[inset_..].
-// Не ловит (это не полоса): галочки (блок с transform: rotate),
-// линии-связки и засечки графиков — их помечают комментарием в том же
+// Не ловит (это не полоса): галочки (блок с transform: rotate) и цитаты
+// (<blockquote> или селектор blockquote). Линии-связки и засечки графиков
+// помечают комментарием в том же
 // CSS-блоке: /* side-stripe-ok: причина */ (или в той же строке разметки).
 //
 //   node scripts/check-no-side-stripe.mjs [папка ...]   (по умолчанию — .)
@@ -53,6 +54,7 @@ const TW_RULES = [
   /(?:^|[\s"'`])(?:[a-z-]+:)*shadow-\[inset_/,
 ];
 const OK = /side-stripe-ok/;
+const QUOTE = /\bblockquote\b/;
 
 function blockAround(text, idx) {
   const open = text.lastIndexOf("{", idx);
@@ -82,6 +84,7 @@ for (const root of roots) {
       const at = offset;
       offset += line.length + 1;
       if (OK.test(line)) return;
+      if (QUOTE.test(line) || QUOTE.test(lines[i - 1] ?? "")) return;
       const css = CSS_RULES.some((r) => r.test(line));
       const tw = /\.(svelte|html|tsx|jsx|ts|vue)$/.test(file) && TW_RULES.some((r) => r.test(line));
       if (!css && !tw) return;
@@ -99,7 +102,7 @@ if (bad.length) {
     "!! Цветная полоса сбоку запрещена (решение Миши 10.11): выделяйте фоном, весом, иконкой или рамкой целиком.",
   );
   console.error(
-    "   Если это не полоса, а связка/засечка графика/цитата — пометьте /* side-stripe-ok: причина */.",
+    "   Цитату верстайте тегом <blockquote>: он разрешён. Связку или засечку графика пометьте /* side-stripe-ok: причина */.",
   );
   for (const b of bad) console.error("   " + b);
   process.exit(1);
