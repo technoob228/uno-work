@@ -1867,7 +1867,7 @@ export async function projectHistory(input, ctx) {
         at: new Date(Number(time) * 1000).toISOString(),
         ...who,
         mine: me !== null && who.person === me,
-        note: subject.startsWith("Saved on ") ? null : subject || null,
+        note: /^Saved on /.test(subject) ? null : subject || null,
         files: changed.slice(0, MAX_VERSION_FILES),
         moreFiles: Math.max(0, changed.length - MAX_VERSION_FILES),
       };

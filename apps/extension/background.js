@@ -60,7 +60,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 /** The tab commands act on: the most recently shared one that still exists. */
 async function resolveTargetTab() {
   const ids = await readManagedTabIds();
-  for (const tabId of [...ids].toReversed()) {
+  for (const tabId of [...ids].reverse()) {
     try {
       return await chrome.tabs.get(tabId);
     } catch {
