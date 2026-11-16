@@ -209,11 +209,11 @@ async function phone(threadId) {
 }
 
 const median = (values) => {
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = [...values].toSorted((a, b) => a - b);
   return sorted.length ? sorted[Math.floor((sorted.length - 1) / 2)] : null;
 };
 const p95 = (values) => {
-  const sorted = [...values].sort((a, b) => a - b);
+  const sorted = [...values].toSorted((a, b) => a - b);
   return sorted.length
     ? sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)]
     : null;
@@ -290,7 +290,7 @@ async function measure(label, idsFile, out) {
 
   const clicks = [];
   // Newest first, like a person going down the list.
-  for (const id of [...ids].reverse()) {
+  for (const id of [...ids].toReversed()) {
     const result = await page.evaluate(async (threadId) => {
       const rowOf = () =>
         document

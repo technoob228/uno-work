@@ -14,7 +14,6 @@
  */
 import {
   type OrchestrationEvent,
-  type OrchestrationThread,
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   ProjectId,

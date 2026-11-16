@@ -61,7 +61,7 @@ function readMeasuredHeights(value: unknown) {
       : [],
   );
   return heights.length === value.length
-    ? [...heights].sort((left, right) => left[0] - right[0])
+    ? [...heights].toSorted((left, right) => left[0] - right[0])
     : undefined;
 }
 

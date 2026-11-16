@@ -273,7 +273,7 @@ export function createBringWork(deps: BringWorkDeps) {
       const parsed = JSON.parse(
         await fsp.readFile(recordFile(computerId), "utf8"),
       ) as Partial<BroughtRecord>;
-      return { folders: { ...(parsed.folders ?? {}) } };
+      return { folders: { ...parsed.folders } };
     } catch {
       return { folders: {} };
     }

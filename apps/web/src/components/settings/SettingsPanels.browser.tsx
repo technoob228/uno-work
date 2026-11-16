@@ -35,7 +35,6 @@ import { ConnectionsSettings } from "./ConnectionsSettings";
 import { EnvironmentGeneralSettings } from "./EnvironmentGeneralSettings";
 import { SettingsScopeProvider } from "./SettingsScopeContext";
 import { EnvironmentProvidersPanel } from "./EnvironmentProvidersPanel";
-import { GeneralSettingsPanel } from "./SettingsPanels";
 import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
 const authAccessHarness = vi.hoisted(() => {

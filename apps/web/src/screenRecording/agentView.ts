@@ -221,7 +221,7 @@ export function normalizeTimeline(raw: unknown): TimelineEntry[] {
     const text = (key: string) => (typeof record[key] === "string" ? String(record[key]) : "");
     out.push({ t, say: text("say"), see: text("see"), do: text("do") });
   }
-  return out.sort((a, b) => a.t - b.t).slice(0, 400);
+  return out.toSorted((a, b) => a.t - b.t).slice(0, 400);
 }
 
 /**
@@ -279,7 +279,7 @@ export function selectKeyFrames<T extends KeyFrameCandidate>(
 ): T[] {
   const limit = Math.max(0, Math.min(KEY_FRAMES_MAX, Math.floor(budget)));
   if (limit === 0) return [];
-  const byPriority = [...candidates].sort(
+  const byPriority = [...candidates].toSorted(
     (a, b) => PRIORITY[b.reason] - PRIORITY[a.reason] || a.t - b.t,
   );
   const kept: T[] = [];
@@ -287,13 +287,13 @@ export function selectKeyFrames<T extends KeyFrameCandidate>(
     if (kept.some((other) => Math.abs(other.t - candidate.t) < SAME_MOMENT_MS)) continue;
     kept.push(candidate);
   }
-  if (kept.length <= limit) return kept.sort((a, b) => a.t - b.t);
+  if (kept.length <= limit) return kept.toSorted((a, b) => a.t - b.t);
   // Over budget: take each priority level whole while it fits; the level
   // that doesn't fit is thinned evenly over time.
   const chosen: T[] = [];
-  const levels = [...new Set(kept.map((c) => PRIORITY[c.reason]))].sort((a, b) => b - a);
+  const levels = [...new Set(kept.map((c) => PRIORITY[c.reason]))].toSorted((a, b) => b - a);
   for (const level of levels) {
-    const items = kept.filter((c) => PRIORITY[c.reason] === level).sort((a, b) => a.t - b.t);
+    const items = kept.filter((c) => PRIORITY[c.reason] === level).toSorted((a, b) => a.t - b.t);
     const room = limit - chosen.length;
     if (room <= 0) break;
     if (items.length <= room) {
@@ -306,7 +306,7 @@ export function selectKeyFrames<T extends KeyFrameCandidate>(
       if (item && !chosen.includes(item)) chosen.push(item);
     }
   }
-  return chosen.sort((a, b) => a.t - b.t);
+  return chosen.toSorted((a, b) => a.t - b.t);
 }
 
 /** Attachment names carry the moment: `recording-frame 0m12.4s click.jpg`. */

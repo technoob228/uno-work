@@ -20,7 +20,6 @@ import { useEnvironmentSupportsAssistantSandbox } from "../../environments/assis
 import { useMachineRows } from "../../hooks/useMachineRows";
 import { cn } from "../../lib/utils";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
-import { Button } from "../ui/button";
 
 import { MODE_COPY, type AssistantMode } from "./PersonaMode";
 import { OwnComputerSetup } from "./OwnComputerSetup";

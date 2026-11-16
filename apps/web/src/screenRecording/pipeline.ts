@@ -390,7 +390,7 @@ export async function pickKeyFrames(
       frame =
         item.liveFrames
           .filter((live) => Math.abs(live.t - candidate.t) < 1500 && !used.has(live))
-          .sort((a, b) => Math.abs(a.t - candidate.t) - Math.abs(b.t - candidate.t))[0] ?? null;
+          .toSorted((a, b) => Math.abs(a.t - candidate.t) - Math.abs(b.t - candidate.t))[0] ?? null;
     }
     if (frame && !used.has(frame)) {
       used.add(frame);

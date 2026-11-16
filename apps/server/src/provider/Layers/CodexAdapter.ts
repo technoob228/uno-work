@@ -1388,8 +1388,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
         const sessionCwd = input.cwd ?? process.cwd();
         const sessionEnvironment = {
-          ...(options?.environment ?? {}),
-          ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: sessionCwd }) ?? {}),
+          ...options?.environment,
+          ...options?.bridgeEnvironment?.({ threadId: input.threadId, cwd: sessionCwd }),
         };
         // This chat's MCP servers (built-in uno-work + the owner's own); codex
         // reads the uno-work token from UNO_WORK_BRIDGE_TOKEN in the session env.

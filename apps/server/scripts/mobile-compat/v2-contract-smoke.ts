@@ -30,11 +30,9 @@ import {
   AuthWebSocketTicketResult,
   ExecutionEnvironmentDescriptor,
   OrchestrationV2ShellSnapshot,
-  WS_METHODS,
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Socket from "effect/socket/Socket";

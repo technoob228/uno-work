@@ -412,7 +412,7 @@ class AgentViewTracker {
   async finish(): Promise<void> {
     this.unsubscribe?.();
     this.unsubscribe = null;
-    await Promise.all([...this.encoding]);
+    await Promise.all(this.encoding);
     this.frames.sort((a, b) => a.t - b.t);
   }
 

@@ -1151,7 +1151,7 @@ export function buildThread(chat: ChatSpec) {
       updatedAt: index === 0 ? created : at,
     };
   });
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+  const lastAssistant = [...messages].toReversed().find((message) => message.role === "assistant");
   const turnStartedAt = running ? ago(chat.runningFor ?? chat.minutesAgo + 3) : created;
   return {
     id: chat.id,
@@ -1271,10 +1271,10 @@ function pendingOf(thread: WireThread) {
     if (activity.kind.endsWith(".requested")) open.set(requestId, activity.kind);
     if (activity.kind.endsWith(".resolved")) open.delete(requestId);
   }
-  const kinds = [...open.values()];
+  const kinds = new Set([...open.values()]);
   return {
-    approvals: kinds.includes("approval.requested"),
-    input: kinds.includes("user-input.requested"),
+    approvals: kinds.has("approval.requested"),
+    input: kinds.has("user-input.requested"),
   };
 }
 

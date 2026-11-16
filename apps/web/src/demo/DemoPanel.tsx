@@ -5,7 +5,7 @@
  * the person works with the app. Only in the demo (main.tsx loads it).
  */
 import type { EnvironmentId } from "@t3tools/contracts";
-import { ChevronDownIcon, ChevronUpIcon, EyeIcon } from "lucide-react";
+import { ChevronDownIcon, EyeIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";

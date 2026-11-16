@@ -16,6 +16,7 @@ A rule that a machine can check is a check, not a line in this file. When an age
 | ---------------------------------------------- | ------------------------------------------------ |
 | No new lint warnings                           | `scripts/lint-ratchet.mjs` in `bun lint`         |
 | No colored side stripe                         | `scripts/check-no-side-stripe.mjs` in `bun lint` |
+| No new file over 2000 lines                    | `max-lines` in `.oxlintrc.json`, via the ratchet |
 | Types hold, no barrel imports in `apps/server` | `bun typecheck`                                  |
 
 ## UI rules

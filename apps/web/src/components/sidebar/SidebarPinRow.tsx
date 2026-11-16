@@ -24,7 +24,6 @@ import {
   PlanLimitsWidget,
   SitesWidget,
 } from "../computer/home/HomeWidgetBodies";
-import { HOME_WIDGETS } from "../computer/home/HomeWidgets";
 import { isPinnableHomeWidget, type PinnableHomeWidgetId } from "../computer/home/homeModel";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { useSidebar } from "../ui/sidebar";

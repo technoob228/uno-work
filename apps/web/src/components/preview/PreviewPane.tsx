@@ -99,12 +99,7 @@ import {
   shellEventToPanelEvent,
 } from "./panelBridge";
 import { usePluginPanelSignedUrl } from "./pluginPanelUrl";
-import {
-  PluginPanelChat,
-  PluginPanelSplit,
-  usePluginPanels,
-  type PluginPanelDescriptor,
-} from "./PluginPanelChat";
+import { PluginPanelChat, PluginPanelSplit, usePluginPanels } from "./PluginPanelChat";
 import { AppFrame } from "../apps/AppFrame";
 import { ComputerAppFrame } from "../apps/ComputerAppFrame";
 import { useIsNotetakerAddress } from "../apps/appConnectBridge";

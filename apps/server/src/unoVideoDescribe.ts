@@ -47,7 +47,7 @@ export function parseTimeline(raw: unknown): UnoDescribeVideoTimelineEntry[] {
     if (!entry.say && !entry.see && !entry.do) continue;
     out.push(entry);
   }
-  return out.sort((a, b) => a.t - b.t).slice(0, 400);
+  return out.toSorted((a, b) => a.t - b.t).slice(0, 400);
 }
 
 /** `{"speech","visual","timeline"?}` of `/video/describe`; null when it says nothing at all. */

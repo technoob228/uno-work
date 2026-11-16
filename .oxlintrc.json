@@ -20,6 +20,18 @@
   "rules": {
     "react-in-jsx-scope": "off",
     "eslint/no-shadow": "off",
-    "eslint/no-await-in-loop": "off"
-  }
+    "eslint/no-await-in-loop": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "oxc/no-map-spread": "off",
+    "eslint/max-lines": ["warn", { "max": 2000 }]
+  },
+  "overrides": [
+    {
+      "files": ["packages/app-sdk/**", "apps/extension/**"],
+      "rules": {
+        "unicorn/no-array-sort": "off",
+        "unicorn/no-array-reverse": "off"
+      }
+    }
+  ]
 }

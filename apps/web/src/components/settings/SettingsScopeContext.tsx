@@ -45,7 +45,9 @@ function useResolvedSettingsScope(rawSearch: SettingsScopeSearch) {
   // One computer: "all of them" and "this one" are the same choice.
   const search: SettingsScopeSearch =
     singleComputer && rawSearch.machine === environments[0]?.environmentId
-      ? { ...(rawSearch.project ? { project: rawSearch.project } : {}) }
+      ? rawSearch.project
+        ? { project: rawSearch.project }
+        : {}
       : rawSearch;
   const scope = resolveSettingsScope(search, groups, environments);
   const selected = selectScopedSettingsEnvironments(scope, environments, primaryEnvironmentId);

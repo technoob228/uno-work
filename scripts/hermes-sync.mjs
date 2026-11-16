@@ -100,7 +100,7 @@ export OPENAI_API_KEY=${unoApiKey || "SET_UNO_KEY_IN_APP_SETTINGS"}
 export OPENAI_BASE_URL=https://api.getuno.xyz/v1
 export STT_OPENAI_BASE_URL=https://api.getuno.xyz/v1
 export HERMES_INFERENCE_MODEL=\${HERMES_INFERENCE_MODEL:-anthropic/claude-haiku-4.5}
-exec hermes --provider openai-api -m "\$HERMES_INFERENCE_MODEL" "$@"
+exec hermes --provider openai-api -m "$HERMES_INFERENCE_MODEL" "$@"
 `,
   { mode: 0o700 },
 );

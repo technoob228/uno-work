@@ -53,12 +53,8 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderUpIcon,
-  LockIcon,
-  LockOpenIcon,
   PaperclipIcon,
-  PenLineIcon,
   XIcon,
-  type LucideIcon,
 } from "lucide-react";
 import { type ClipboardEvent, useEffect, useMemo, useRef, useState } from "react";
 

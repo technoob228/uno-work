@@ -61,7 +61,7 @@ export async function grabFramesFromBlob(
     const context = canvas.getContext("2d");
     if (!context) return [];
     const end = Number.isFinite(video.duration) ? video.duration : Infinity;
-    for (const t of [...timesMs].sort((a, b) => a - b)) {
+    for (const t of [...timesMs].toSorted((a, b) => a - b)) {
       const seconds = Math.max(0, Math.min(t / 1000, end - 0.05));
       if (!(await seek(video, seconds))) continue;
       if (video.readyState < 2) await once(video, ["loadeddata", "canplay"], 1500);

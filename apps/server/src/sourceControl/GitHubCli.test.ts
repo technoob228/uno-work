@@ -1,7 +1,7 @@
 import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { VcsProcessExitError, type VcsError } from "@t3tools/contracts";
+import { VcsProcessExitError } from "@t3tools/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as GitHubCli from "./GitHubCli.ts";

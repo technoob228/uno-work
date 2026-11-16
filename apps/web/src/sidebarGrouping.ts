@@ -81,7 +81,7 @@ export function sortMachineEnvironmentIds(input: {
         rank.set(environmentId, index);
       }
     });
-    return [...input.environmentIds].sort((left, right) => {
+    return [...input.environmentIds].toSorted((left, right) => {
       const leftRank = rank.get(left) ?? Number.POSITIVE_INFINITY;
       const rightRank = rank.get(right) ?? Number.POSITIVE_INFINITY;
       if (leftRank !== rightRank) {
@@ -92,7 +92,7 @@ export function sortMachineEnvironmentIds(input: {
   }
 
   if (input.sortOrder === "name") {
-    return [...input.environmentIds].sort((left, right) => {
+    return [...input.environmentIds].toSorted((left, right) => {
       const leftLabel = input.resolveLabel(left) ?? left;
       const rightLabel = input.resolveLabel(right) ?? right;
       const byLabel = leftLabel.localeCompare(rightLabel);
@@ -100,7 +100,7 @@ export function sortMachineEnvironmentIds(input: {
     });
   }
 
-  return [...input.environmentIds].sort((left, right) => {
+  return [...input.environmentIds].toSorted((left, right) => {
     const leftAt = input.resolveLastActivityAt(left);
     const rightAt = input.resolveLastActivityAt(right);
     if (leftAt !== rightAt) {
@@ -219,7 +219,7 @@ export function partitionThreadsByEnvironment(input: {
     }
   });
   return [...grouped.entries()]
-    .sort(([left], [right]) => {
+    .toSorted(([left], [right]) => {
       const leftRank = rank.get(left) ?? Number.POSITIVE_INFINITY;
       const rightRank = rank.get(right) ?? Number.POSITIVE_INFINITY;
       if (leftRank !== rightRank) {

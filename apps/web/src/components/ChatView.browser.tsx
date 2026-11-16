@@ -2063,14 +2063,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => document.querySelector<HTMLElement>("header"),
         "Unable to find the chat header.",
       );
-      // Toasts of the test environment sit over the header in the shots.
-      const hideToasts = () => {
-        for (const element of Array.from(document.body.querySelectorAll<HTMLElement>("*"))) {
-          if (getComputedStyle(element).position === "fixed" && !element.contains(header)) {
-            element.style.visibility = "hidden";
-          }
-        }
-      };
       // The window narrows, then the right panel opens and takes its share.
       const sizes = [
         { width: 1_400, panel: false },
@@ -2107,12 +2099,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
           },
           { timeout: 4_000, interval: 32 },
         );
-        await new Promise((resolve) => setTimeout(resolve, 150));
-        hideToasts();
-        await page.screenshot({
-          path: `/tmp/uno-header-shots/w${width}${panel ? "-panel" : ""}.png`,
-          element: header,
-        });
         // What folded is one click away in "⋯".
         const more = header.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]');
         if (more) foldedSomething = true;

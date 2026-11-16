@@ -41,7 +41,7 @@ const MANIFEST_FILES = new Set([
   "Pipfile",
 ]);
 const ENV_EXAMPLE_FILES = new Set([".env.example", ".env.sample", ".env.template", "env.example"]);
-const SOURCE_DIRS = ["src", "app", "bot"];
+const SOURCE_DIRS = new Set(["src", "app", "bot"]);
 const SKIP_DIRS = new Set(["node_modules", ".git", ".venv", "venv", "__pycache__", "dist"]);
 
 const MAX_FILES = 60;
@@ -122,7 +122,7 @@ async function collect(dir: string, depth: number, out: string[]): Promise<void>
     } else if (
       entry.isDirectory() &&
       depth === 0 &&
-      SOURCE_DIRS.includes(entry.name) &&
+      SOURCE_DIRS.has(entry.name) &&
       !SKIP_DIRS.has(entry.name)
     ) {
       await collect(full, depth + 1, out);
