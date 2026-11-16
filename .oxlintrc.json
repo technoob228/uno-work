@@ -24,5 +24,14 @@
     "unicorn/consistent-function-scoping": "off",
     "oxc/no-map-spread": "off",
     "eslint/max-lines": ["warn", { "max": 2000 }]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["packages/app-sdk/**", "apps/extension/**"],
+      "rules": {
+        "unicorn/no-array-sort": "off",
+        "unicorn/no-array-reverse": "off"
+      }
+    }
+  ]
 }
