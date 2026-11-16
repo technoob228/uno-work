@@ -86,6 +86,11 @@ import {
   validateManifest,
 } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
+import { REPORT_APP_ID_MAX } from "../economy/economyReport.ts";
+import type {
+  MachineAppAccess,
+  MachineAppAccessInput,
+} from "../machineApps/MachineAppsService.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
@@ -354,6 +359,10 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
     readonly action: (
       input: UnoMachineAppActionInput,
     ) => Effect.Effect<UnoMachineApps, { readonly message: string }>;
+    /** Share an own app with people (app_share / app_unshare). Absent: not on this build. */
+    readonly access?: (
+      input: MachineAppAccessInput,
+    ) => Effect.Effect<MachineAppAccess, { readonly message: string }>;
   };
   readonly resources: Effect.Effect<UnoComputerResources>;
   /** What fills the home disk and the caches that can be emptied (Computer → Disk). */
@@ -1050,6 +1059,69 @@ const appAction = (
   });
 
 const appIdLabel = (args: Record<string, unknown>) => str(args, "appId") ?? "an app";
+
+const APP_SHARE_UNAVAILABLE =
+  "Sharing apps needs a newer Uno Work. Tell the person; meanwhile app_show_on_internet gives a public address if the app has its own login.";
+
+const shareView = (a: MachineAppAccess) => ({
+  app: { id: a.appId, name: a.name, port: a.port },
+  url: a.url,
+  access: a.access,
+  sharedWith: a.people.map((p) => p.email || p.username),
+  ...(a.note ? { note: a.note } : {}),
+  ...(a.url === null && a.access !== ""
+    ? { urlNote: "The https address is coming up; it works within a minute. Check again with app_share without email." }
+    : {}),
+});
+
+/**
+ * The id Uno knows the app by: the one the minute report sends
+ * (economy/economyReport.ts — a manifest's own id, else the scan's key, ≤ 64).
+ */
+export const reportedAppId = (id: string): string =>
+  (id.startsWith("manifest:") ? id.slice("manifest:".length) : id).slice(0, REPORT_APP_ID_MAX);
+
+/** app_share / app_unshare: the control plane's list of people for one app. */
+const appAccessTool = (
+  deps: UnoWorkToolDeps,
+  args: Record<string, unknown>,
+  op: "share" | "unshare",
+) =>
+  Effect.gen(function* () {
+    const access = deps.machineApps.access;
+    if (!access) return yield* toolError(APP_SHARE_UNAVAILABLE);
+    const app = yield* findApp(deps, str(args, "appId") ?? "");
+    if (app.port === null) {
+      return yield* toolError(`${app.name} has no web port, so there is no page to share.`);
+    }
+    const appId = reportedAppId(app.id);
+    const email = (str(args, "email") ?? "").trim();
+    if (op === "share" && email === "") {
+      return shareView(yield* asToolError(access({ appId, op: "list" })));
+    }
+    if (op === "share") {
+      return {
+        ok: true,
+        ...shareView(yield* asToolError(access({ appId, op: "share", login: email }))),
+      };
+    }
+    const current = yield* asToolError(access({ appId, op: "list" }));
+    const wanted = email.toLowerCase();
+    const person = current.people.find(
+      (p) => p.email.toLowerCase() === wanted || p.username.toLowerCase() === wanted,
+    );
+    if (!person) {
+      return yield* toolError(
+        `${app.name} isn't shared with ${email}. Shared with: ${
+          current.people.map((p) => p.email || p.username).join(", ") || "nobody"
+        }.`,
+      );
+    }
+    return {
+      ok: true,
+      ...shareView(yield* asToolError(access({ appId, op: "unshare", userId: person.userId }))),
+    };
+  });
 
 const MANIFEST_ID_PATTERN = "^[a-z0-9][a-z0-9_-]{0,63}$";
 
@@ -1907,7 +1979,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_show_on_internet",
     group: "computer",
     description:
-      'The explicit outside mode: give a running web app a PUBLIC address, no sign-in, for other people, another device or a webhook (the "Show on the internet" button). It answers on http://<computer>:<port>/ at once and on https://<app>-<computer>.app.uno4.dev within a minute; once that is ready `onInternet.url` is the https one in apps_list. Webhooks such as Telegram need the https address. Only when the person asks for a public link. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. The app must listen on 0.0.0.0, not only 127.0.0.1.',
+      'The explicit outside mode: give a running web app a PUBLIC address, no Uno sign-in, for anyone, another device or a webhook (the "Show on the internet" button). It answers on https://<app>-<computer>.app.uno4.dev within a minute (and on http://<computer>:<port>/ at once); once that is ready `onInternet.url` is the https one in apps_list — a permanent address, give that one. Webhooks such as Telegram need the https address. For a teammate or a few named people use app_share instead: same address, they sign in with their Uno account. Never to "open it for me" / "in my browser": open_in_panel with appId does that, inside their Uno Work, and its result has a link for them. Anyone with the address can reach it — the person always approves this; only for apps with their own login or meant to be public. Never put an app online any other way (cloudflared, ngrok, localtunnel or other tunnels): their addresses change and bypass Uno. The app must listen on 0.0.0.0, not only 127.0.0.1.',
     inputSchema: {
       type: "object",
       properties: { appId: appIdArg },
@@ -1917,8 +1989,51 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "sensitive",
     approvalTitle: (args) => `Show ${appIdLabel(args)} on the internet`,
     approvalDetail: () =>
-      "Anyone with the address will be able to open it — no sign-in, and the connection isn't encrypted.",
+      "Anyone with the address will be able to open it, without signing in to Uno. Only the app's own login (if it has one) protects it.",
     run: (deps, args) => appAction(deps, args, "publish"),
+  },
+  {
+    name: "app_share",
+    group: "computer",
+    description:
+      "Let a teammate (or a few named people) open a web app of this computer: give their email (their Uno account). They open its https address https://<app>-<computer>.app.uno4.dev and sign in with Uno; nobody else gets in. If the app had no address, a private one opens (no port to the internet). The way to \"give Andrey/Misha access\", a team dashboard, an admin panel — not app_show_on_internet, not a tunnel, not Uno Sites (they only serve static files, a login or /api would break). Without email: who it is shared with and the address. They need an Uno account; if there is none, say so and ask them to sign up at console.uno.place.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        appId: appIdArg,
+        email: {
+          type: "string",
+          maxLength: 254,
+          description:
+            "Email (or Uno login) of the person to share with. Omit to see who has access.",
+        },
+      },
+      required: ["appId"],
+      additionalProperties: false,
+    },
+    level: (args) => (str(args, "email") ? "sensitive" : "safe"),
+    approvalTitle: (args) => `Share ${appIdLabel(args)} with ${str(args, "email") ?? "someone"}`,
+    approvalDetail: () =>
+      "They will open it at its https address and sign in with their own Uno account. Nobody else gets in; you can stop sharing any time.",
+    run: (deps, args) => appAccessTool(deps, args, "share"),
+  },
+  {
+    name: "app_unshare",
+    group: "computer",
+    description:
+      "Stop sharing a web app of this computer with a person (their email, as app_share lists it). Their access ends within a minute; the app and its address stay.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        appId: appIdArg,
+        email: { type: "string", maxLength: 254, description: "Their email or Uno login." },
+      },
+      required: ["appId", "email"],
+      additionalProperties: false,
+    },
+    level: "change",
+    approvalTitle: (args) => `Stop sharing ${appIdLabel(args)} with ${str(args, "email") ?? "someone"}`,
+    run: (deps, args) => appAccessTool(deps, args, "unshare"),
   },
   {
     name: "app_hide_from_internet",
@@ -5121,6 +5236,8 @@ const WORKER_TOOLS: ReadonlySet<string> = new Set([
   "app_register",
   "app_remove",
   "app_show_on_internet",
+  "app_share",
+  "app_unshare",
   "app_hide_from_internet",
   "app_add_widget",
   "spark_deploy",

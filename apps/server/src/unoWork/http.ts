@@ -770,7 +770,11 @@ const makeDeps = (input: {
             }),
           }
         : {}),
-      machineApps: { list: machineApps.list, action: machineApps.action },
+      machineApps: {
+        list: machineApps.list,
+        action: machineApps.action,
+        access: machineApps.access,
+      },
       resources: computerResources.snapshot,
       disk: {
         usage: computerResources.diskUsage({}),
