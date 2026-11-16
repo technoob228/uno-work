@@ -52,7 +52,7 @@ export function withCurrentChoice(
 ): ReadonlyArray<number | null> {
   if (choices.includes(current)) return choices;
   const days = [...choices, current].filter((choice): choice is number => choice !== null);
-  return [...days.sort((a, b) => a - b), null];
+  return [...days.toSorted((a, b) => a - b), null];
 }
 
 export function encodeDayChoice(days: number | null): string {

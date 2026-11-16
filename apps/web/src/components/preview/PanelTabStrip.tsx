@@ -350,7 +350,6 @@ export function PanelTabStrip({
       measureEdges();
     });
     return () => window.cancelAnimationFrame(frame);
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- measureEdges is stable in effect
   }, [dragging, emptyLeft, emptyRight]);
   /** Dragging near an edge of a row that scrolls: scroll it, like Chrome's tab strip. */
   const scrollWhileDragging = (event: React.DragEvent) => {

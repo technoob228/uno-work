@@ -21,11 +21,9 @@ import {
   MyComputerError,
   type MyComputerStatus,
 } from "@t3tools/contracts";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect } from "effect";
 
-import { ServerConfig } from "../config.ts";
-import { MyComputerService } from "../myComputer/MyComputerService.ts";
-import { lifecycleOverride, makePurposeStore, type PurposeStore } from "./purposeStore.ts";
+import { type PurposeStore } from "./purposeStore.ts";
 
 export interface ComputersLifecycleShape {
   readonly state: Effect.Effect<ComputersState, MyComputerError>;

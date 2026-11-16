@@ -219,7 +219,7 @@ describe("buildSidebarMachineGroups", () => {
     });
 
     expect(groups.map((group) => group.environmentId)).toContain(prod1);
-    expect(groups.flatMap((group) => group.threads.map((thread) => thread.id)).sort()).toEqual([
+    expect(groups.flatMap((group) => group.threads.map((thread) => thread.id)).toSorted()).toEqual([
       "t-laptop",
       "t-prod-1",
       "t-prod-1-backend",

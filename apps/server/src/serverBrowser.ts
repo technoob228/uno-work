@@ -1120,7 +1120,7 @@ export const makeServerBrowser = Effect.gen(function* () {
     Effect.gen(function* () {
       if (!setup || setup.current().status === "ready") return null;
       const started = yield* Effect.promise(() =>
-        setup.ensure({ ...(context ? { context } : {}) }).catch(
+        setup.ensure(context ? { context } : {}).catch(
           (cause: unknown): BrowserLiveSetup => ({
             ...setup.current(),
             status: "failed",

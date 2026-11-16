@@ -250,7 +250,7 @@ function readQuiz(raw: Record<string, unknown>): PersonCardQuiz {
     return compact<PersonCardQuizQuestion>({
       question: text(question.question, `${where}.question`, L.question, true),
       options,
-      correct: [...new Set(correct)].sort((left, right) => left - right),
+      correct: [...new Set(correct)].toSorted((left, right) => left - right),
       explanation: text(question.explanation, `${where}.explanation`, L.explanation),
     });
   });

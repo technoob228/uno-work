@@ -1155,7 +1155,6 @@ function OpenCommandPaletteDialog() {
     });
     // pushPaletteView is a plain function re-created per render; the intent
     // request is what should trigger this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearOpenIntent, openIntent, projectThreadItems]);
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];

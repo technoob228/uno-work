@@ -520,8 +520,8 @@ export function makeCursorAdapter(
             : cursorSettings;
 
           const sessionEnvironment = {
-            ...(options?.environment ?? {}),
-            ...(options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }) ?? {}),
+            ...options?.environment,
+            ...options?.bridgeEnvironment?.({ threadId: input.threadId, cwd }),
           };
           // This chat's MCP servers (built-in uno-work + the owner's own);
           // cursor-agent advertises mcpCapabilities.http.

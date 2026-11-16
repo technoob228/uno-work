@@ -170,11 +170,8 @@ export function consoleProjectVault(input: ConsoleAccess): ProjectVault {
     list: async (project) => secretsFrom((await call("GET", base(project))).json),
     reveal: async (project, names) =>
       valuesFrom(
-        (
-          await call("POST", `${base(project)}/reveal`, {
-            ...(names && names.length > 0 ? { names } : {}),
-          })
-        ).json,
+        (await call("POST", `${base(project)}/reveal`, names && names.length > 0 ? { names } : {}))
+          .json,
       ),
     set: async (project, name, value) => {
       const { json } = await call("PUT", `${base(project)}/${encodeURIComponent(name)}`, { value });
@@ -237,9 +234,11 @@ export function consoleProjectTeams(input: ConsoleAccess): ProjectTeams {
       reveal: async (_project, names) =>
         valuesFrom(
           (
-            await call("POST", `${root}/${teamId}/secrets/reveal`, {
-              ...(names && names.length > 0 ? { names } : {}),
-            })
+            await call(
+              "POST",
+              `${root}/${teamId}/secrets/reveal`,
+              names && names.length > 0 ? { names } : {},
+            )
           ).json,
         ),
     }),

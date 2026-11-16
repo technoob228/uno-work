@@ -4,12 +4,7 @@
  * computer's programs — plus the daemon's Uno AI spend ledger and its reading
  * of the person's own Claude / ChatGPT plan limits.
  */
-import type {
-  EnvironmentId,
-  PlanLimitsAccount,
-  PlanLimitsWindow,
-  UnoMachineApp,
-} from "@t3tools/contracts";
+import type { EnvironmentId, UnoMachineApp } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
@@ -22,7 +17,6 @@ import {
 import { useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { ClaudeAI, OpenAI } from "../../Icons";
 import { openInNewTab } from "../../../navigation/useOpenApp";
 import { CloudUsageBar, formatQuota } from "../../files/CloudBrowser";
 import { cloudStateQueryOptions, filesListQueryOptions } from "../../files/filesApi";

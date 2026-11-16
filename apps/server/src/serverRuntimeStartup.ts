@@ -1,11 +1,9 @@
 import {
   CommandId,
-  DEFAULT_MODEL,
   isAssistantProjectId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   type ModelSelection,
   ProjectId,
-  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import {

@@ -72,7 +72,6 @@ import {
 import type { ConnectorOutgoingFile } from "../manager/connectorOutgoingFiles.ts";
 import {
   buildReportPage,
-  isReportSlug,
   isReportSource,
   newReportPassword,
   pickReportSlug,

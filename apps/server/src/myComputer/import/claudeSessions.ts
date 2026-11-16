@@ -160,7 +160,7 @@ function currentBranch(rows: ReadonlyArray<Row>): ReadonlyArray<Row> {
     if (next === undefined) return linear();
     current = next;
   }
-  return chain.reverse().filter((row) => row["type"] === "user" || row["type"] === "assistant");
+  return chain.toReversed().filter((row) => row["type"] === "user" || row["type"] === "assistant");
 }
 
 /** The conversation as a person saw it: their words and the assistant's text. */

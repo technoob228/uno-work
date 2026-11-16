@@ -284,7 +284,7 @@ export function collectTelegramMedia(
     // largest one.
     const best = [...message.photo]
       .filter((size) => size.file_id !== undefined)
-      .sort((a, b) => (a.width ?? 0) - (b.width ?? 0))
+      .toSorted((a, b) => (a.width ?? 0) - (b.width ?? 0))
       .at(-1);
     if (best?.file_id !== undefined) {
       media.push({

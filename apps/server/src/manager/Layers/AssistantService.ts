@@ -1012,7 +1012,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
           .readDirectory(assistantsBaseDir)
           .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
         const adopted: ProjectId[] = [];
-        for (const entry of [...entries].filter((name) => !name.startsWith(".")).sort()) {
+        for (const entry of [...entries].filter((name) => !name.startsWith(".")).toSorted()) {
           const dir = path.join(assistantsBaseDir, entry);
           const info = yield* fs.stat(dir).pipe(Effect.orElseSucceed(() => null));
           if (info === null || info.type !== "Directory") continue;

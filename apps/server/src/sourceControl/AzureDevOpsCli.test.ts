@@ -2,7 +2,6 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it, afterEach, describe, expect, vi } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Option } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import type { VcsError } from "@t3tools/contracts";
 
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";

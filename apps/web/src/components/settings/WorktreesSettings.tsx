@@ -8,7 +8,7 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import { BranchNamingMode, type EnvironmentId } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { selectSidebarThreadsForEnvironment, useStore } from "../../store";

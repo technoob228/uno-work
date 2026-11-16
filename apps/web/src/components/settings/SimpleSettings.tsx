@@ -20,7 +20,6 @@ import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
   type EnvironmentId,
-  type ModelSelection,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime";
@@ -34,7 +33,6 @@ import { setDevMode, useDevMode } from "../../devMode";
 import { isElectron } from "../../env";
 import {
   refreshEnvironmentProviders,
-  useEnvironmentProviders,
   useEnvironmentSettings,
   useUpdateEnvironmentSettings,
 } from "../../environments/settings/serverSettings";
@@ -42,7 +40,6 @@ import { resolveFeatureFlag } from "../../featureFlags";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useFeatureFlagOverrides } from "../../hooks/useFeatureFlags";
 import { useMachineRows } from "../../hooks/useMachineRows";
-import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { setAssistantDefaultModel } from "../../lib/managerApi";
 import { selectProjectByRef, useStore } from "../../store";
 import { isWebApp } from "../../webMode";
@@ -67,7 +64,6 @@ import { unoCreditsAllowed, unoCreditsHarnessLabel } from "../chat/unoCreditsCho
 import { SlackBrandMark, TelegramMark } from "../setup/brandMarks";
 import { Button } from "../ui/button";
 import { QRCodeSvg } from "../ui/qr-code";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { AiProviderKeysSection } from "./AiProviderKeysSection";

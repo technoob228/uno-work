@@ -4,7 +4,6 @@ import {
   ArrowUpDownIcon,
   BotIcon,
   ChevronRightIcon,
-  CloudIcon,
   CloudOffIcon,
   FolderPlusIcon,
   PinIcon,

@@ -627,7 +627,7 @@ export const makeWorktreeCleanup = Effect.fn("makeWorktreeCleanup")(function* (
         startedAt: new Date(startedAt).toISOString(),
         finishedAt: new Date(now()).toISOString(),
         lowDisk: rules.lowDisk,
-        entries: [...entries].sort((a, b) => rank(a) - rank(b)).slice(0, REPORT_ENTRY_LIMIT),
+        entries: [...entries].toSorted((a, b) => rank(a) - rank(b)).slice(0, REPORT_ENTRY_LIMIT),
         counts,
         omittedCount: Math.max(0, entries.length - REPORT_ENTRY_LIMIT),
         bytesFreed,
