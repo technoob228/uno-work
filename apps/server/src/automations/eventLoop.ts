@@ -362,7 +362,8 @@ export const makeAutomationEventLoop = (deps: AutomationEventLoopDeps) =>
         if (isOutsideRun(event)) {
           yield* report(event, {
             state: "failed",
-            reason: "A webhook or a form runs in a chat: pick one for this automation.",
+            reason:
+              "A webhook, a form or a pull request runs in a chat: pick one for this automation.",
           });
           return "no_assistant" as const;
         }

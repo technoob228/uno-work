@@ -13,9 +13,14 @@
  *   4. run `uno-connect pair --code C --api API` — the helper claims the code,
  *      saves its config and sets up its own autostart.
  *
- * Only https addresses on Uno's hosts are trusted for the script, the console
- * and the download. The helper's token stays in its own config: this module
- * reads only `computerId` and `name` from it.
+ * Only https addresses on Uno's own fixed hosts are trusted for the script,
+ * the console and the download — an exact allowlist, not a domain suffix:
+ * accounts get their own address under uno4.work (`<label>.uno4.work`) and
+ * apps their own under uno4.dev (`<slug>.app.uno4.dev`), and whoever runs
+ * that account or app controls what that address serves. A suffix match
+ * would trust those too, letting a customer's own page pass for Uno's
+ * install script, API or download. The helper's token stays in its own
+ * config: this module reads only `computerId` and `name` from it.
  */
 import * as Crypto from "node:crypto";
 import * as Path from "node:path";
@@ -26,12 +31,26 @@ import type {
   DesktopConnectHelperState,
 } from "@t3tools/contracts";
 
-const TRUSTED_HOST = /(^|\.)(uno4\.work|getuno\.xyz|uno4\.dev|uno\.place)$/i;
+/** Uno's own hosts for the install script, the console and the download — never a customer's. */
+const TRUSTED_HOSTS: ReadonlySet<string> = new Set([
+  "getuno.xyz",
+  "api.getuno.xyz",
+  "uno4.work",
+  "app.uno4.work",
+  "uno4.dev",
+  "console.uno4.dev",
+  "uno.place",
+  "console.uno.place",
+]);
 
 export function isTrustedUnoUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && TRUSTED_HOST.test(url.hostname) && url.username === "";
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      TRUSTED_HOSTS.has(url.hostname.toLowerCase())
+    );
   } catch {
     return false;
   }

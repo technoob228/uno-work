@@ -163,9 +163,13 @@ describe("helpers", () => {
   it("knows Uno's hosts", () => {
     expect(isTrustedUnoUrl("https://app.uno4.work/c/X")).toBe(true);
     expect(isTrustedUnoUrl("https://getuno.xyz")).toBe(true);
+    expect(isTrustedUnoUrl("https://console.uno4.dev")).toBe(true);
     expect(isTrustedUnoUrl("https://getuno.xyz.evil.com")).toBe(false);
     expect(isTrustedUnoUrl("https://user@getuno.xyz")).toBe(false);
     expect(isTrustedUnoUrl("http://getuno.xyz")).toBe(false);
+    // A customer's own address under the same domain: not Uno's to trust.
+    expect(isTrustedUnoUrl("https://someones-account.uno4.work")).toBe(false);
+    expect(isTrustedUnoUrl("https://their-app.app.uno4.dev")).toBe(false);
   });
 
   it("parses the script, the sums and the platform", () => {
