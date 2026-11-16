@@ -87,10 +87,7 @@ import {
 } from "../machineApps/appManifest.ts";
 import { displayManifestDir } from "../machineApps/manifestDir.ts";
 import { REPORT_APP_ID_MAX } from "../economy/economyReport.ts";
-import type {
-  MachineAppAccess,
-  MachineAppAccessInput,
-} from "../machineApps/MachineAppsService.ts";
+import type { MachineAppAccess, MachineAppAccessInput } from "../machineApps/MachineAppsService.ts";
 import { computerSleepInfo } from "../workspaceRegistry/unoComputerEconomy.ts";
 import { formatBytes } from "../computerResources/ComputerResourcesService.ts";
 import { diskUsedPct, resourceWarnings } from "../computerResources/resourceWarnings.ts";
@@ -1070,7 +1067,10 @@ const shareView = (a: MachineAppAccess) => ({
   sharedWith: a.people.map((p) => p.email || p.username),
   ...(a.note ? { note: a.note } : {}),
   ...(a.url === null && a.access !== ""
-    ? { urlNote: "The https address is coming up; it works within a minute. Check again with app_share without email." }
+    ? {
+        urlNote:
+          "The https address is coming up; it works within a minute. Check again with app_share without email.",
+      }
     : {}),
 });
 
@@ -1996,7 +1996,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "app_share",
     group: "computer",
     description:
-      "Let a teammate (or a few named people) open a web app of this computer: give their email (their Uno account). They open its https address https://<app>-<computer>.app.uno4.dev and sign in with Uno; nobody else gets in. If the app had no address, a private one opens (no port to the internet). The way to \"give Andrey/Misha access\", a team dashboard, an admin panel — not app_show_on_internet, not a tunnel, not Uno Sites (they only serve static files, a login or /api would break). Without email: who it is shared with and the address. They need an Uno account; if there is none, say so and ask them to sign up at console.uno.place.",
+      'Let a teammate (or a few named people) open a web app of this computer: give their email (their Uno account). They open its https address https://<app>-<computer>.app.uno4.dev and sign in with Uno; nobody else gets in. If the app had no address, a private one opens (no port to the internet). The way to "give Andrey/Misha access", a team dashboard, an admin panel — not app_show_on_internet, not a tunnel, not Uno Sites (they only serve static files, a login or /api would break). Without email: who it is shared with and the address. They need an Uno account; if there is none, say so and ask them to sign up at console.uno.place.',
     inputSchema: {
       type: "object",
       properties: {
@@ -2032,7 +2032,8 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       additionalProperties: false,
     },
     level: "change",
-    approvalTitle: (args) => `Stop sharing ${appIdLabel(args)} with ${str(args, "email") ?? "someone"}`,
+    approvalTitle: (args) =>
+      `Stop sharing ${appIdLabel(args)} with ${str(args, "email") ?? "someone"}`,
     run: (deps, args) => appAccessTool(deps, args, "unshare"),
   },
   {
