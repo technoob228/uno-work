@@ -2,9 +2,9 @@
   "eslint(max-lines)": {
     "apps/desktop/src/main.ts": 1,
     "apps/server/src/git/GitManager.test.ts": 1,
-    "apps/server/src/manager/http.ts": 1,
     "apps/server/src/manager/Layers/AssistantService.ts": 1,
     "apps/server/src/manager/Layers/TelegramConnector.ts": 1,
+    "apps/server/src/manager/http.ts": 1,
     "apps/server/src/myComputer/trust/tiers.ts": 1,
     "apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts": 1,
     "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts": 1,
@@ -18,15 +18,15 @@
     "apps/server/src/unoWork/tools.ts": 1,
     "apps/server/src/vcs/GitVcsDriverCore.ts": 1,
     "apps/server/src/ws.ts": 1,
-    "apps/web/src/components/chat/ChatComposer.tsx": 1,
     "apps/web/src/components/ChatView.browser.tsx": 1,
     "apps/web/src/components/ChatView.tsx": 1,
     "apps/web/src/components/CommandPalette.tsx": 1,
     "apps/web/src/components/LegacySidebar.tsx": 1,
+    "apps/web/src/components/Sidebar.tsx": 1,
+    "apps/web/src/components/chat/ChatComposer.tsx": 1,
     "apps/web/src/components/newProject/NewProjectDialog.tsx": 1,
     "apps/web/src/components/preview/PreviewPane.tsx": 1,
     "apps/web/src/components/settings/ConnectionsSettings.tsx": 1,
-    "apps/web/src/components/Sidebar.tsx": 1,
     "apps/web/src/composerDraftStore.ts": 1,
     "apps/web/src/environments/runtime/service.ts": 1,
     "apps/web/src/session-logic.test.ts": 1,
@@ -62,8 +62,8 @@
     "apps/server/src/agentThreads/service.test.ts": 4,
     "apps/server/src/assistants/schedules.test.ts": 1,
     "apps/server/src/manager/telegramTranscription.test.ts": 1,
-    "apps/server/src/orchestration/decider.assistantChat.test.ts": 1,
     "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts": 4,
+    "apps/server/src/orchestration/decider.assistantChat.test.ts": 1,
     "apps/server/src/threadPullRequests/ThreadPullRequestService.test.ts": 3,
     "apps/server/src/unoWork/tools.test.ts": 1
   },
@@ -75,9 +75,9 @@
     "apps/server/src/ws.ts": 1,
     "apps/web/demo-e2e/computers-shots.mjs": 1,
     "apps/web/demo-e2e/loom/flows/loom.flow.mjs": 1,
-    "apps/web/src/components/assistants/AssistantProfileSimple.tsx": 1,
     "apps/web/src/components/LegacySidebar.tsx": 3,
     "apps/web/src/components/MoveProjectToBoxDialog.tsx": 1,
+    "apps/web/src/components/assistants/AssistantProfileSimple.tsx": 1,
     "packages/shared/src/personCardWidget.test.ts": 1
   },
   "eslint(preserve-caught-error)": {
@@ -97,8 +97,8 @@
   },
   "eslint-plugin-react(no-array-index-key)": {
     "apps/web/src/components/computer/home/ComputersOverview.tsx": 1,
-    "apps/web/src/components/files/openers/officeOpeners.tsx": 6,
     "apps/web/src/components/files/openers/SheetGrid.tsx": 2,
+    "apps/web/src/components/files/openers/officeOpeners.tsx": 6,
     "apps/web/src/components/files/openers/sheetOpeners.tsx": 1,
     "apps/web/src/components/preview/FileBrowser.tsx": 1,
     "apps/web/src/components/preview/TableEditor.tsx": 3,
@@ -106,9 +106,9 @@
     "apps/web/src/components/setup/steps/InstructionsStep.tsx": 5
   },
   "eslint-plugin-react-hooks(exhaustive-deps)": {
+    "apps/web/src/components/ChatView.tsx": 11,
     "apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx": 1,
     "apps/web/src/components/chat/ProviderModelPicker.tsx": 1,
-    "apps/web/src/components/ChatView.tsx": 11,
     "apps/web/src/components/preview/FileBrowser.tsx": 1,
     "apps/web/src/components/settings/BrowserSettingsPanel.tsx": 1,
     "apps/web/src/components/setup/steps/ConnectorsStep.tsx": 1,
@@ -142,6 +142,9 @@
     "apps/web/src/demo/threadSearchDemo.ts": 1,
     "apps/web/src/firstProject.ts": 1,
     "apps/web/src/projectUploadPickers.ts": 1,
+    "packages/app-sdk/src/uno-sync.mjs": 1
+  },
+  "eslint-plugin-unicorn(prefer-string-starts-ends-with)": {
     "packages/app-sdk/src/uno-sync.mjs": 1
   },
   "eslint-plugin-unicorn(require-post-message-target-origin)": {
