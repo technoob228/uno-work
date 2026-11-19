@@ -479,6 +479,8 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
    * opened it here (workAddress.ts); null — not known yet. Links to apps.
    */
   readonly workAddress?: () => string | null;
+  /** This computer's environment id, so a link to its app opens it here and not on another computer. */
+  readonly environmentId?: () => string | null;
   /** Uno Work is open on the person's screen right now (a panel can show things). */
   readonly personWindowOpen?: Effect.Effect<boolean>;
   /** Tests: how long open_in_panel waits for a just-registered app to start. */
@@ -1266,7 +1268,7 @@ const manifestOpenPath = (deps: UnoWorkToolDeps, app: UnoMachineApp) =>
 function appLinkFor(deps: UnoWorkToolDeps, app: Pick<UnoMachineApp, "id">): string | null {
   if (!deps.hostedMachine) return null;
   const address = deps.workAddress?.() ?? null;
-  return address ? workAppLink(address, app.id) : null;
+  return address ? workAppLink(address, app.id, deps.environmentId?.() ?? null) : null;
 }
 
 /** What to tell the person when their Uno Work isn't open to show the app. */

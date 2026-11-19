@@ -44,5 +44,9 @@ describe("the person's Uno Work address (P16)", () => {
     expect(workAppLink("https://3csvnrcm77.uno4.work", "manifest:plan-limits")).toBe(
       "https://3csvnrcm77.uno4.work/app?app=manifest%3Aplan-limits",
     );
+    // With the computer: the window opens the app on it, not on whichever is active.
+    expect(workAppLink("https://3csvnrcm77.uno4.work", "manifest:csdk-live", "env-395")).toBe(
+      "https://3csvnrcm77.uno4.work/app?app=manifest%3Acsdk-live&env=env-395",
+    );
   });
 });

@@ -58,7 +58,17 @@ export function resetWorkAddressForTests(): void {
   rememberedHost = null;
 }
 
-/** A link that opens an app of this computer inside the person's Uno Work. */
-export function workAppLink(workAddress: string, appId: string): string {
-  return `${workAddress}${WORK_APP_LINK_PATH}?app=${encodeURIComponent(appId)}`;
+/**
+ * A link that opens an app of this computer inside the person's Uno Work.
+ * `environmentId` names this computer: the same app id can be on several of
+ * the person's computers, and without it the window opened the one on
+ * whichever computer it had active (an old copy, or "not on this computer").
+ */
+export function workAppLink(
+  workAddress: string,
+  appId: string,
+  environmentId?: string | null,
+): string {
+  const env = environmentId ? `&env=${encodeURIComponent(environmentId)}` : "";
+  return `${workAddress}${WORK_APP_LINK_PATH}?app=${encodeURIComponent(appId)}${env}`;
 }

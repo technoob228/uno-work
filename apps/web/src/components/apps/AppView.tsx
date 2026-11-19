@@ -16,6 +16,7 @@
  * from its port's address (ComputerAppFrame, P16 28.10 — never the agent's
  * browser by itself). Its settings are the ⚙ in the bar.
  */
+import type { EnvironmentId } from "@t3tools/contracts";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import {
   ExternalLinkIcon,
@@ -51,14 +52,35 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { AppFrame } from "./AppFrame";
 import { ComputerAppFrame } from "./ComputerAppFrame";
 import { appHost, belongsToComputer } from "./appAddress";
+import { useWorkspaceComputers } from "./useWorkspaceComputers";
+import { placeApp, type AppInstance } from "./workspaceApps";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
 
 const routeApi = getRouteApi("/_chat/app");
 
 export function AppView() {
   const search = routeApi.useSearch();
-  const { tiles, loading } = useProgramTiles();
-  const machine = useActiveMachine();
+  const active = useActiveMachine();
+  // One big computer: the app opens on whichever computer it is, not only the active one.
+  const workspace = useWorkspaceComputers();
+  const placement = useMemo(
+    () =>
+      placeApp({
+        key: search.app,
+        url: search.url,
+        explicit: search.env as EnvironmentId | undefined,
+        active: active.environmentId,
+        computers: workspace.computers,
+      }),
+    [active.environmentId, search.app, search.env, search.url, workspace.computers],
+  );
+  const environmentId = placement.environmentId;
+  const here =
+    placement.instances[0]?.environmentId === environmentId ? placement.instances[0] : null;
+  const elsewhere = placement.instances.filter((entry) => entry.environmentId !== environmentId);
+  const programTiles = useProgramTiles(environmentId);
+  const { tiles } = programTiles;
+  const loading = programTiles.loading || workspace.loading;
   const navigate = useNavigate();
   const startingId = useStartingAppId();
   // Opened by its tile: the address comes from the app once it runs.
@@ -68,7 +90,7 @@ export function AppView() {
   const running = byKey?.status === "running";
   const localUrl = byKey && running && !byKey.openUrl ? computerLocalUrl(byKey) : null;
   const url = search.url ?? (running ? (byKey?.openUrl ?? localUrl) : null) ?? null;
-  const onComputer = url !== null && url === localUrl && machine.environmentId !== null;
+  const onComputer = url !== null && url === localUrl && environmentId !== null;
   const name = search.name?.trim() || byKey?.name || (url ? appHost(url) : "App");
   const { pins, isPinned, toggle } = usePins();
   const { openBeside, openInNewTab } = useOpenApp();
@@ -100,14 +122,14 @@ export function AppView() {
   useEffect(() => () => setFullscreen(false), [setFullscreen]);
 
   const pinned = url ? isPinned("app", url) : false;
-  const app = url ? { url, name, icon } : null;
+  const app = url ? { url, name, icon, ...(onComputer ? { environmentId } : {}) } : null;
 
   const openSettings = byKey
     ? () => void navigate({ to: "/computer", search: { app: byKey.key } })
     : null;
   // Not running and it can start here: the window starts it, once, and says "Starting…".
   const queryClient = useQueryClient();
-  const start = useMutation(machineAppActionMutationOptions(machine.environmentId, queryClient));
+  const start = useMutation(machineAppActionMutationOptions(environmentId, queryClient));
   const startedFor = useRef<string | null>(null);
   const machineApp = byKey?.machineApp ?? null;
   const canStartHere =
@@ -143,9 +165,9 @@ export function AppView() {
   const signInDeployment =
     store?.sso && store.deploymentId !== null && known && !onComputer ? store.deploymentId : null;
   const signInLink = useQuery({
-    queryKey: ["uno-app-sign-in-link", machine.environmentId, signInDeployment, url],
-    queryFn: () => appSignInApi(machine.environmentId, null).openLink(signInDeployment!),
-    enabled: signInDeployment !== null && machine.environmentId !== null,
+    queryKey: ["uno-app-sign-in-link", environmentId, signInDeployment, url],
+    queryFn: () => appSignInApi(environmentId, null).openLink(signInDeployment!),
+    enabled: signInDeployment !== null && environmentId !== null,
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 0,
     retry: false,
@@ -162,8 +184,16 @@ export function AppView() {
         <Spinner className="size-5 text-muted-foreground" />
       </div>
     ) : search.app && !byKey ? (
-      <Notice title="This app isn't on this computer">
-        Pick an app in the sidebar or on your Home screen.
+      <Notice
+        title={
+          elsewhere.length > 0
+            ? "It isn't on that computer right now"
+            : "This app isn't on any of your computers that are on"
+        }
+      >
+        {elsewhere.length > 0
+          ? `It is on ${elsewhere.map((entry) => entry.label).join(", ")}: pick it under the name above.`
+          : "Pick an app in the sidebar or on your Home screen."}
       </Notice>
     ) : byKey && starting ? (
       <div className="flex h-full items-center justify-center" data-testid="app-starting">
@@ -197,9 +227,9 @@ export function AppView() {
           </div>
         ) : null}
       </Notice>
-    ) : onComputer && url && machine.environmentId ? (
+    ) : onComputer && url && environmentId ? (
       <ComputerAppFrame
-        environmentId={machine.environmentId}
+        environmentId={environmentId}
         url={url}
         name={name}
         icon={icon}
@@ -298,9 +328,20 @@ export function AppView() {
             <div className="truncate text-sm font-medium text-foreground">{name}</div>
             {url ? (
               <div className="truncate font-mono text-[11px] text-muted-foreground max-sm:hidden">
-                {onComputer ? `${appHost(url)} · on the computer` : appHost(url)}
+                {onComputer
+                  ? `${appHost(url)} · on ${here?.label ?? "the computer"}`
+                  : appHost(url)}
               </div>
             ) : null}
+            <AlsoOn
+              instances={elsewhere}
+              onPick={(instance) =>
+                void navigate({
+                  to: "/app",
+                  search: { ...search, env: instance.environmentId },
+                })
+              }
+            />
           </div>
           {openSettings && !(app && known) ? (
             <BarButton label="Settings" onClick={openSettings}>
@@ -352,6 +393,34 @@ export function AppView() {
         <div className="relative min-h-0 flex-1">{frame}</div>
       </div>
     </SidebarInset>
+  );
+}
+
+/** "Also on Mac": the same app on the person's other computers, one click to switch. */
+function AlsoOn({
+  instances,
+  onPick,
+}: {
+  instances: ReadonlyArray<AppInstance>;
+  onPick: (instance: AppInstance) => void;
+}) {
+  const reachable = instances.filter((entry) => entry.online);
+  if (reachable.length === 0) return null;
+  return (
+    <div className="flex items-center gap-1 truncate text-[11px] text-muted-foreground [-webkit-app-region:no-drag]">
+      <span>Also on</span>
+      {reachable.map((instance) => (
+        <button
+          key={instance.environmentId}
+          type="button"
+          onClick={() => onPick(instance)}
+          className="cursor-pointer rounded px-1 font-medium text-foreground underline-offset-2 hover:underline"
+          title={instance.running ? `Running on ${instance.label}` : `Stopped on ${instance.label}`}
+        >
+          {instance.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

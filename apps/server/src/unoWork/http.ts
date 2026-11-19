@@ -63,6 +63,7 @@ import { ServerBrowser } from "../serverBrowser.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../config.ts";
+import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { assistantsMvpEnabled } from "../assistants/assistantsFeature.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { ThreadPullRequests } from "../threadPullRequests/ThreadPullRequestService.ts";
@@ -330,6 +331,7 @@ const makeDeps = (input: {
     const unoComputer = yield* UnoComputerService;
     const serverSettings = yield* ServerSettingsService;
     const serverConfig = yield* ServerConfig;
+    const environmentId = yield* (yield* ServerEnvironment).getEnvironmentId;
     const connectors = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const worktreeCleanup = Option.getOrNull(yield* Effect.serviceOption(WorktreeCleanup));
     const connectorRows = Option.getOrNull(yield* Effect.serviceOption(ManagerConnectorRepository));
@@ -871,6 +873,7 @@ const makeDeps = (input: {
         }),
       hostedMachine: serverConfig.mode === "web",
       workAddress: currentWorkAddress,
+      environmentId: () => environmentId,
       personWindowOpen: browserBridge.hasSubscribers,
       account: {
         cloudState: unoCloud.getState(),

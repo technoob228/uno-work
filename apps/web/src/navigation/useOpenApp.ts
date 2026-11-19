@@ -8,6 +8,7 @@
  *   - `openInNewTab` → a browser tab, for apps that refuse to be framed or
  *                    can't keep you signed in inside Uno.
  */
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useMatch, useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 
@@ -28,6 +29,11 @@ export interface AppTarget {
   readonly url: string;
   readonly name: string;
   readonly icon?: string | null;
+  /**
+   * The computer whose `localhost` the address is. A panel shows localhost
+   * from its chat's computer, so the app goes beside a chat of this one.
+   */
+  readonly environmentId?: EnvironmentId | null;
 }
 
 /**
@@ -98,14 +104,19 @@ function useOpenAppInApp() {
     (app: AppTarget) => {
       setAppFullscreen(false);
       const file = makeAppFile(app);
-      if (inChat || !machine.environmentId) {
+      const home = app.environmentId ?? null;
+      if (inChat) {
+        // A chat's panel shows its own computer's localhost: another computer's app gets its window.
+        if (home === null || home === inChat.params.environmentId) preview.openAppTab(file);
+        else void navigate({ to: "/app", search: { url: app.url, name: app.name, env: home } });
+        return;
+      }
+      const environmentId = home ?? machine.environmentId;
+      if (!environmentId) {
         preview.openAppTab(file);
         return;
       }
-      const threads = selectSidebarThreadsForEnvironment(
-        useStore.getState(),
-        machine.environmentId,
-      );
+      const threads = selectSidebarThreadsForEnvironment(useStore.getState(), environmentId);
       const last = pickThreadForEnvironmentSwitch(
         threads,
         useUiStateStore.getState().threadLastVisitedAtById,
@@ -118,7 +129,7 @@ function useOpenAppInApp() {
       preview.queueAppTab(file, last.id);
       void navigate({
         to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams({ environmentId: machine.environmentId, threadId: last.id }),
+        params: buildThreadRouteParams({ environmentId, threadId: last.id }),
       });
     },
     [inChat, machine.environmentId, navigate, preview, setAppFullscreen, sortOrder],
