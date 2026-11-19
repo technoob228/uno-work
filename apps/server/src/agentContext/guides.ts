@@ -105,7 +105,7 @@ Check \`computer_status\` before installs, builds, test runs, docker images, dat
  */
 const SPARK_GUIDE = `## Spark: code without a server (free)
 
-One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\` — no server, nothing to keep running, free on every plan. \`spark_deploy\` puts it there (a file, or a small folder with \`entry\`) and returns the address; deploying the same name again makes a new version. \`spark_logs\` shows what it printed and a line per request, \`spark_list\` the apps and the account's limits, \`spark_delete\` removes one (the person approves).
+One JavaScript or Python file answers HTTPS at \`https://<name>.spark.uno4.me/\` — no server, nothing to keep running, free on every plan. \`spark_deploy\` puts it there (a file, or a small folder with \`entry\`) and returns the address; deploying the same name again makes a new version. \`spark_logs\` shows what it printed and a line per request, \`spark_list\` the apps and the account's limits, \`spark_delete\` removes one (the person approves). Spark keeps the last few versions of each app (usually 5): \`spark_versions\` lists them and \`spark_rollback\` puts an earlier one's code back in seconds, as a new version (only the code: KV, variables, secrets and timers stay as they are now; undo by rolling back again).
 
 ### When Spark, when not
 - **Fits:** a webhook, a Telegram bot, a small JSON API, a form handler, glue between services, a job on a schedule — anything that answers a request with a little work.

@@ -154,7 +154,7 @@ export function sparkTokenErrorMessage(status: number, text: string): string {
 }
 
 export interface SparkRequest {
-  readonly method: "GET" | "PUT" | "DELETE";
+  readonly method: "GET" | "PUT" | "POST" | "DELETE";
   /** `/apps/<name>…` — relative to the gateway base (`…/v1`). */
   readonly path: string;
   /** Raw body (code, a .tar.gz) … */

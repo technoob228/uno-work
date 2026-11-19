@@ -13,7 +13,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - Repeating work ("every day at 9"): `automation_create` (never cron), `automations_list`, `automation_update`, `automation_delete`, `automation_run_now`
 - The person: `show_card` (choice, quiz, report: how you ask and show results), `notify` (Inbox), `messenger_send` (their Telegram/Slack; `widget`: a mini app in the message), `open_in_panel` (app, URL or file, right panel), `html_render` (a page in the chat), `support_draft` (letter to support), `browser_command`, `request_secret`, `image_generate`; their assistant: `assistant_connect`, `assistant_groups` (who it answers in Telegram groups), `assistant_move` (to another computer)
 - Sites: `site_publish` (folder or HTML file → public site), `site_unpublish`, `sites_list`, `site_set_password`, `site_open_link`, `site_forms_get`, `site_forms_set` (answers go to email or a chat); `report_publish` (Markdown/HTML file → private link)
-- Spark: `spark_deploy`, `spark_logs`, `spark_list`, `spark_delete`: one JS/Python file → `https://<name>.spark.uno4.me`, free, no server: `uno_guide("spark")`
+- Spark: `spark_deploy`, `spark_logs`, `spark_list`, `spark_delete`, `spark_versions`, `spark_rollback`: one JS/Python file → `https://<name>.spark.uno4.me`, free, no server: `uno_guide("spark")`
 - Databases (Postgres): `db_create`, `db_list`, `db_connection` (puts DATABASE_URL in `.env`, never in the chat)
 - Bots/APIs for others: small ones on Spark first; else `app_deploy` if `app_servers_list` says `enabled: true`, else run them here as an app; `app_server_logs`
 - Your own mailbox (`mail_address`): `mail_list`, `mail_read`, `mail_attachment_save`, `mail_send`: sign-ups, codes; the person's mail only via the Gmail connector

@@ -837,6 +837,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     (c) => named("Read the Spark log of", text(c.args, "name"), "Read the Spark app's log"),
     "Couldn't read the Spark app's log",
   ],
+  spark_versions: [
+    "Looking at the Spark app's versions…",
+    (c) => named("Read the versions of", text(c.args, "name"), "Read the Spark app's versions"),
+    "Couldn't read the Spark app's versions",
+  ],
+  spark_rollback: [
+    "Putting an earlier version back on Spark…",
+    (c) => named("Rolled back", text(c.args, "name"), "Put an earlier version back on Spark"),
+    "The earlier version didn't go back on Spark",
+  ],
   spark_delete: [
     "Deleting the Spark app…",
     (c) => named("Deleted Spark app", text(c.args, "name"), "Deleted the Spark app"),
