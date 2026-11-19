@@ -216,27 +216,58 @@ export interface ScannedApp extends Omit<
   readonly manifest: AppManifest | null;
 }
 
+/** Backoff state `pickAutostartApps` keeps per manifest id across background passes. */
+export interface AutostartRetry {
+  readonly attempts: number;
+  readonly nextAttemptAt: number;
+}
+
+/** A crash loop is retried at most this rarely, once backed off all the way. */
+export const AUTOSTART_RETRY_CAP_MS = 5 * 60 * 1000;
+
+function nextRetryDelayMs(attempts: number): number {
+  return Math.min(AUTOSTART_RETRY_CAP_MS, 20_000 * 2 ** (attempts - 1));
+}
+
 /**
- * Registered apps that should start on their own, from one scan.
+ * Registered apps that should start on their own, from one scan: at the
+ * daemon's start (cold boot), as soon as one is registered, and again
+ * whenever one that was running crashes on its own.
  *
- * `seen` holds the manifest ids already looked at: every app present at the
- * daemon's start (autostart on boot) and every app registered since (autostart
- * as soon as it appears in ~/.uno/apps). An app is picked once — the first time
- * it is seen — so one the person stopped later is left stopped.
+ * `manuallyStopped` holds the manifest ids the person stopped on purpose
+ * (set by the `stop` action, cleared by `start`) — those are left alone no
+ * matter how long they sit stopped. Everything else gets retried with
+ * backoff via `retry`, which this function mutates in place: a fresh
+ * attempt counts up the delay before the next one (capped at
+ * {@link AUTOSTART_RETRY_CAP_MS}), and a scan that finds the app running
+ * again clears its entry, so the next crash starts backing off from zero.
  */
 export function pickAutostartApps(
   apps: ReadonlyArray<ScannedApp>,
-  seen: Set<string>,
+  state: {
+    readonly manuallyStopped: ReadonlySet<string>;
+    readonly retry: Map<string, AutostartRetry>;
+  },
+  now: number = Date.now(),
 ): ScannedApp[] {
   const picked: ScannedApp[] = [];
   for (const app of apps) {
     if (app.source !== "manifest" || !app.manifest) continue;
-    if (seen.has(app.manifest.id)) continue;
-    seen.add(app.manifest.id);
+    const id = app.manifest.id;
+    if (app.status === "running") {
+      // Healthy again (or never crashed): forget any past failures.
+      state.retry.delete(id);
+      continue;
+    }
     if (!app.manifest.autostart || !app.manifest.command) continue;
     // "stopped" is only known for an app with a port or one the daemon can
     // see its processes of (markedPids); "unknown" is never started twice.
     if (app.status !== "stopped") continue;
+    if (state.manuallyStopped.has(id)) continue;
+    const entry = state.retry.get(id);
+    if (entry && now < entry.nextAttemptAt) continue;
+    const attempts = (entry?.attempts ?? 0) + 1;
+    state.retry.set(id, { attempts, nextAttemptAt: now + nextRetryDelayMs(attempts) });
     picked.push(app);
   }
   return picked;

@@ -82,6 +82,7 @@ import {
   publicationFor,
   readSystemd,
   scanMachineApps,
+  type AutostartRetry,
   type CommandResult,
   type HttpProbe,
   type MachineProbe,
@@ -924,6 +925,15 @@ export const makeMachineAppsService = (
       ...(await readManifestDir({ manifestDir, home })).manifests,
     ];
 
+    /**
+     * Manifest ids the person stopped on purpose (the `stop` action below) —
+     * autostart leaves these alone until `start` clears them again. Apps
+     * that stop on their own (a crash) are never added here, so
+     * `pickAutostartApps` keeps retrying them with backoff.
+     */
+    const manuallyStopped = new Set<string>();
+    const autostartRetry = new Map<string, AutostartRetry>();
+
     /** Waits a little for the change to show, so the answer is not stale. */
     const settle = async (appId: string, done: (app: ScannedApp | undefined) => boolean) => {
       for (let i = 0; i < 12; i++) {
@@ -963,10 +973,15 @@ export const makeMachineAppsService = (
           try: async () => {
             switch (input.action) {
               case "start":
+                if (app.manifest) {
+                  manuallyStopped.delete(app.manifest.id);
+                  autostartRetry.delete(app.manifest.id);
+                }
                 await startApp(app);
                 await settle(app.id, (a) => a?.status === "running");
                 return;
               case "stop":
+                if (app.manifest) manuallyStopped.add(app.manifest.id);
                 await stopApp(app);
                 await settle(app.id, (a) => a === undefined || a.status !== "running");
                 return;
@@ -1067,15 +1082,17 @@ export const makeMachineAppsService = (
 
     /**
      * Apps registered with a command and a port come back when the computer
-     * does (a cold boot, a wake from an archived snapshot): once, at start.
-     * An app registered later (the agent just wrote its manifest) starts on the
-     * next background pass, without anyone pressing Start. Each app is started
-     * on its own at most once per daemon run — see pickAutostartApps.
+     * does (a cold boot, a wake from an archived snapshot), as soon as one
+     * is registered, and again — with backoff — if a running one crashes on
+     * its own. One the person stopped on purpose stays stopped; see
+     * `manuallyStopped` and `pickAutostartApps`.
      */
-    const autostartSeen = new Set<string>();
     const autostart = Effect.promise(async () => {
       const scanned = await scan(true);
-      for (const app of pickAutostartApps(scanned.apps, autostartSeen)) {
+      for (const app of pickAutostartApps(scanned.apps, {
+        manuallyStopped,
+        retry: autostartRetry,
+      })) {
         if (!app.manifest) continue;
         try {
           startManifestCommand(app.manifest, manifestDir, home);
