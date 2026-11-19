@@ -42,6 +42,7 @@ import { MachineErrorNotice } from "./machines/MachineErrorNotice";
 import { getPairingTokenFromUrl } from "../pairingUrl";
 import type { CreateUnoBoxResult } from "../unoBoxCreation";
 import { CreateUnoBoxSection } from "./CreateUnoBoxSection";
+import { PerformanceBadge } from "./machines/MachineClass";
 import type { SavedEnvironmentRecord } from "../environments/runtime";
 import {
   addSavedEnvironment,
@@ -867,6 +868,7 @@ const UnoBoxRow = memo(function UnoBoxRow({
             >
               {describeBoxStatus(box.status)}
             </Badge>
+            <PerformanceBadge machineClass={box.machineClass} />
             {isCurrent ? (
               <span className="shrink-0 text-[10px] text-primary">You're using it now</span>
             ) : isConnected ? (

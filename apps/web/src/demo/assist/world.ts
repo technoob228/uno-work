@@ -67,6 +67,17 @@ export interface AssistWorld {
   readonly fleet?: "off" | "on";
   /** The console's "Connect my computer" for this account (a flag there). */
   readonly pair?: "off" | "on";
+  /**
+   * Machine class (19.11), `GET /api/v1/account/machine-class` and the launch:
+   * `off` — the console doesn't offer it (no choice, as before); `max` — Max,
+   * new computers Performance, uno-work is one; `plus` — Standard only,
+   * Performance asked anyway → 403 PERFORMANCE_REQUIRES_MAX; `busy` — Max,
+   * Performance full, the computer is made Standard with `class_notice`;
+   * `full` — Max, Performance full → 503 PERFORMANCE_NO_CAPACITY; `lapsed` —
+   * the form read Max with Standard as the account's pick, the plan went down
+   * before Create: Performance picked → 403 PERFORMANCE_REQUIRES_MAX.
+   */
+  readonly perf?: "off" | "max" | "plus" | "busy" | "full" | "lapsed";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -154,6 +165,10 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     plans: take("plans", ["none", "full", "accounts", "signin"] as const) ?? start.plans ?? "none",
     fleet: take("fleet", ["off", "on"] as const) ?? start.fleet ?? "off",
     pair: take("pair", ["off", "on"] as const) ?? start.pair ?? "off",
+    perf:
+      take("perf", ["off", "max", "plus", "busy", "full", "lapsed"] as const) ??
+      start.perf ??
+      "off",
   };
   return touched ? next : null;
 }

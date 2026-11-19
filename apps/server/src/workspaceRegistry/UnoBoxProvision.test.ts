@@ -183,6 +183,34 @@ describe("runUnoBoxProvisionJob", () => {
     });
   });
 
+  it("sends the machine class only when asked, and carries class_notice to the end", async () => {
+    const plain = makeHarness();
+    await runUnoBoxProvisionJob(INPUT, plain.deps);
+    expect(vi.mocked(plain.client.launchImage).mock.calls[0]?.[1]).not.toHaveProperty("class");
+
+    const harness = makeHarness({
+      launchImage: vi.fn(async () =>
+        rawBox({
+          class: "standard",
+          class_notice: "performance full",
+          requested_class: "performance",
+        }),
+      ),
+    });
+    const result = await runUnoBoxProvisionJob(
+      { ...INPUT, machineClass: "performance" },
+      harness.deps,
+    );
+    expect(vi.mocked(harness.client.launchImage).mock.calls[0]?.[1]).toMatchObject({
+      class: "performance",
+    });
+    expect(result.state).toBe("ready");
+    expect(result.classNotice).toBe("performance full");
+    // The launch answer's class is on the box as soon as it exists.
+    expect(harness.statuses.find((status) => status.box)?.box?.machineClass).toBe("standard");
+    expect(harness.statuses.filter((status) => status.box).every((s) => s.classNotice)).toBe(true);
+  });
+
   it("honours explicit size and image overrides", async () => {
     const harness = makeHarness();
     await runUnoBoxProvisionJob(

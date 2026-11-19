@@ -12,12 +12,24 @@
  * trying", retries on its own, and offers "Try again now". The box is already
  * on the account list (and billed) at that point, and the list is refreshed as
  * soon as the box appears so it shows up in My machines right away.
+ *
+ * Machine class (19.11): when the console offers the choice, Performance or
+ * Standard, preselected to the account's own; `class` goes only when changed.
  */
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, UnoMachineClass } from "@t3tools/contracts";
 import { RefreshCwIcon, ServerIcon } from "lucide-react";
 import { useState } from "react";
 
+import {
+  SEE_MAX_TEXT,
+  machineClassErrorCode,
+  machineClassToSend,
+  machineClassUpgradeUrl,
+  shownMachineClass,
+} from "../account/machineClass";
+import { useMachineClassSettings } from "../account/useMachineClass";
 import { cn } from "../lib/utils";
+import { openInNewTab } from "../navigation/useOpenApp";
 import { describeMachineError } from "../machineErrors";
 import {
   UNO_BOX_CREATE_STAGES,
@@ -27,6 +39,7 @@ import {
   type CreateUnoBoxResult,
   type UnoBoxSizePreset,
 } from "../unoBoxCreation";
+import { MachineClassPicker } from "./machines/MachineClass";
 import { MachineErrorNotice } from "./machines/MachineErrorNotice";
 import { MachineProgressSteps } from "./machines/MachineProgressSteps";
 import { Button } from "./ui/button";
@@ -57,6 +70,14 @@ export function CreateUnoBoxSection({
   const [preset, setPreset] = useState<UnoBoxSizePreset>("medium");
   const flow = useCreateUnoBoxFlow(environmentId, onCreated);
   const { stage, error, stillStarting, retrying, isPending } = flow;
+  const classSettings = useMachineClassSettings();
+  const [pickedClass, setPickedClass] = useState<UnoMachineClass | null>(null);
+  const shownClass = classSettings ? shownMachineClass(pickedClass, classSettings) : null;
+  const classError = error ? machineClassErrorCode(error) : null;
+  const pickClass = (next: UnoMachineClass) => {
+    setPickedClass(next);
+    if (classError) flow.clearError();
+  };
   const normalizedName = normalizeUnoBoxName(name);
   const canSubmit =
     !disabled &&
@@ -67,7 +88,8 @@ export function CreateUnoBoxSection({
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
-    await flow.submit({ name: normalizedName, preset });
+    const machineClass = machineClassToSend(pickedClass, classSettings);
+    await flow.submit({ name: normalizedName, preset, ...(machineClass ? { machineClass } : {}) });
   };
 
   const stepStage = stage === "retrying" ? "connecting" : stage;
@@ -128,6 +150,15 @@ export function CreateUnoBoxSection({
         )}
       </div>
 
+      {classSettings && shownClass ? (
+        <MachineClassPicker
+          settings={classSettings}
+          value={shownClass}
+          onChange={pickClass}
+          disabled={disabled || isPending}
+        />
+      ) : null}
+
       {stepStage ? (
         <MachineProgressSteps
           steps={UNO_BOX_CREATE_STAGES}
@@ -162,7 +193,39 @@ export function CreateUnoBoxSection({
         />
       ) : null}
 
-      {error ? <MachineErrorNotice error={error} /> : null}
+      {error ? (
+        <MachineErrorNotice
+          error={error}
+          {...(classError
+            ? {
+                tone: "warning" as const,
+                action: (
+                  <>
+                    {classSettings && shownClass === "performance" ? (
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => pickClass("standard")}
+                        data-testid="machine-class-use-standard"
+                      >
+                        Use Standard
+                      </Button>
+                    ) : null}
+                    {classError === "PERFORMANCE_REQUIRES_MAX" ? (
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        onClick={() => openInNewTab(machineClassUpgradeUrl(error))}
+                      >
+                        {SEE_MAX_TEXT}
+                      </Button>
+                    ) : null}
+                  </>
+                ),
+              }
+            : {})}
+        />
+      ) : null}
 
       <Button
         size="sm"

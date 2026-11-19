@@ -12,7 +12,12 @@
  * empty, never as a crash) and free of React, so they are unit-tested
  * against recorded payloads.
  */
-import { ControlPlaneHttpError, controlPlaneErrorStatus } from "@t3tools/shared/unoCloud";
+import type { UnoMachineClass } from "@t3tools/contracts";
+import {
+  ControlPlaneHttpError,
+  controlPlaneErrorStatus,
+  parseUnoMachineClass,
+} from "@t3tools/shared/unoCloud";
 
 import { parsePeakExceeded } from "./alwaysOn";
 import { AccountHttpError, accountRequest } from "./unoAccount";
@@ -78,6 +83,8 @@ export interface AccountComputer {
    * (`run_on_boosts`, plans "always on"). False on older consoles.
    */
   readonly runOnBoosts: boolean;
+  /** Console `class` (19.11); null on older consoles (read as Standard). */
+  readonly machineClass: UnoMachineClass | null;
 }
 
 export function parseAccountComputer(raw: unknown): AccountComputer | null {
@@ -109,6 +116,7 @@ export function parseAccountComputer(raw: unknown): AccountComputer | null {
     url: strOrNull(r["url"]),
     restart: parseComputerRestart(r["restart"]),
     runOnBoosts: r["run_on_boosts"] === true,
+    machineClass: parseUnoMachineClass(r["class"]),
   };
 }
 

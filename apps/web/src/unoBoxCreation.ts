@@ -10,6 +10,7 @@ import {
   type EnvironmentId,
   type UnoBoxCreateJobState,
   type UnoBoxCreateJobStatus,
+  type UnoMachineClass,
 } from "@t3tools/contracts";
 
 import { ensureEnvironmentApi } from "./environmentApi";
@@ -194,6 +195,8 @@ export interface CreateUnoBoxInput {
    * Uno Work's 4 GB floor) instead of the console's assistant default.
    */
   readonly explicitSize?: boolean;
+  /** Sent only when the person changed it from the account's effective class. */
+  readonly machineClass?: UnoMachineClass;
   readonly onStatus?: (status: UnoBoxCreateJobStatus) => void;
   readonly onStage?: (stage: UnoBoxCreateStage) => void;
   readonly signal?: AbortSignal;
@@ -235,6 +238,7 @@ export async function createUnoBoxAndConnect(
     ...(input.computerRole ? { computerRole: input.computerRole } : {}),
     purpose: "work",
     ...(input.assistant ? { assistant: input.assistant } : {}),
+    ...(input.machineClass ? { machineClass: input.machineClass } : {}),
   });
 
   const status = await waitForUnoBoxCreateJob(

@@ -24,6 +24,7 @@ import { openInstallDocs } from "../onboarding/harnessInstallLinks";
 import { ROLE_LABEL } from "../../account/computerRoles";
 import { cn } from "../../lib/utils";
 import { isWebLite, liteEmptyComputersCopy } from "../../lite/webLite";
+import { PerformanceBadge } from "../machines/MachineClass";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import {
@@ -319,6 +320,7 @@ function ComputerRow({
       <span className="w-32 shrink-0 truncate font-medium sm:w-40" title={entry.name}>
         {entry.name}
       </span>
+      <PerformanceBadge machineClass={entry.box?.machineClass} />
       {entry.box && boostsComputerTag(entry.box, subscription?.boosts) === "on-boosts" ? (
         <span
           className="shrink-0 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning-foreground"

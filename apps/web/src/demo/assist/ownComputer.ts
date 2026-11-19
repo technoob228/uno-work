@@ -11,6 +11,9 @@
  *   free — the plan's computers go up to 2 GB: the wizard shows "Needs an
  *          upgrade" before the button, and a launch anyway answers
  *          409 SHAPE_TOO_LARGE as the console does.
+ *
+ * Machine class (`perf=`, world.ts): the account's class and what a launch
+ * with or without `class` answers.
  */
 import { HttpResponse, http, type HttpHandler } from "msw";
 
@@ -22,6 +25,7 @@ interface OwnBox {
   readonly name: string;
   status: "provisioning" | "running";
   readonly createdAt: string;
+  readonly machineClass: "standard" | "performance" | null;
 }
 
 let own: OwnBox | null = null;
@@ -47,6 +51,29 @@ function wireOwn(box: OwnBox) {
     url: `https://${MACHINES.own.host}`,
     work_machine: true,
     computer_role: "assistant",
+    ...(box.machineClass ? { class: box.machineClass } : {}),
+  };
+}
+
+/** `perf=` worlds where the plan is Max. */
+const PERF_MAX: ReadonlySet<string> = new Set(["max", "busy", "full"]);
+
+/** The class the console lists the account's own computers with (null: no field). */
+export function demoMachineClass(): "standard" | "performance" | null {
+  const perf = WORLD.perf ?? "off";
+  if (perf === "off") return null;
+  return PERF_MAX.has(perf) ? "performance" : "standard";
+}
+
+function machineClassSettings() {
+  const lapsed = WORLD.perf === "lapsed";
+  const max = PERF_MAX.has(WORLD.perf ?? "off");
+  return {
+    enabled: true,
+    default: lapsed ? "standard" : "",
+    effective: max ? "performance" : "standard",
+    performance_included: max || lapsed,
+    classes: ["standard", "performance"],
   };
 }
 
@@ -122,23 +149,64 @@ export function ownComputerHandlers(): HttpHandler[] {
     http.get("*/_account/api/v1/work/image", () =>
       HttpResponse.json({ image_id: 258, name: "uno-work", state: "ready" }),
     ),
+    http.get("*/_account/api/v1/account/machine-class", () =>
+      (WORLD.perf ?? "off") === "off"
+        ? HttpResponse.json({ error: "NOT_FOUND" }, { status: 404 })
+        : HttpResponse.json(machineClassSettings()),
+    ),
     http.post("*/_account/api/v1/images/:id/launch", async ({ request }) => {
       if (WORLD.tier !== "plus") {
         return HttpResponse.json({ error: "SHAPE_TOO_LARGE" }, { status: 409 });
       }
       if (own) return HttpResponse.json({ error: "ASSISTANT_LIMIT" }, { status: 409 });
-      const body = (await request.json().catch(() => ({}))) as { name?: string };
+      const body = (await request.json().catch(() => ({}))) as { name?: string; class?: string };
+      const perf = WORLD.perf ?? "off";
+      const wantsPerformance =
+        body.class === "performance" || (body.class === undefined && PERF_MAX.has(perf));
+      if ((perf === "plus" || perf === "lapsed") && body.class === "performance") {
+        return HttpResponse.json(
+          {
+            error: "PERFORMANCE_REQUIRES_MAX",
+            detail: "Performance machines come with the Max plan.",
+            upgrade_url: "https://console.uno.place/billing",
+          },
+          { status: 403 },
+        );
+      }
+      if (perf === "full" && wantsPerformance) {
+        return HttpResponse.json(
+          {
+            error: "PERFORMANCE_NO_CAPACITY",
+            detail: "No Performance machine is free right now.",
+          },
+          { status: 503 },
+        );
+      }
+      const overflow = perf === "busy" && wantsPerformance;
       own = {
         id: MACHINES.own.boxId!,
         name: body.name || "assistant-computer",
         status: "provisioning",
         createdAt: new Date().toISOString(),
+        machineClass:
+          perf === "off" ? null : wantsPerformance && !overflow ? "performance" : "standard",
       };
       const made = own;
       setTimeout(() => {
         made.status = "running";
       }, 1_000);
-      return HttpResponse.json(wireOwn(made), { status: 201 });
+      return HttpResponse.json(
+        {
+          ...wireOwn(made),
+          ...(overflow
+            ? {
+                class_notice: "Performance was full; this machine is standard.",
+                requested_class: "performance",
+              }
+            : {}),
+        },
+        { status: 201 },
+      );
     }),
     http.get("*/_account/api/v1/boxes/:id", ({ params }) =>
       isOwn(params.id) ? HttpResponse.json(wireOwn(own!)) : undefined,
