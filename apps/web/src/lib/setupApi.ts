@@ -13,6 +13,7 @@ import {
   accountRequest,
   accountTransport,
 } from "~/account/unoAccount";
+import { demoDesktop } from "~/demo/demoFlag";
 import { readPrimaryEnvironmentDescriptor } from "~/environments/primary";
 import { EnvironmentHttpError, environmentFetchJson } from "~/environments/http/target";
 
@@ -356,7 +357,8 @@ function takesDeviceSlackPath(error: unknown, environmentId: EnvironmentId): boo
     error instanceof EnvironmentHttpError &&
     error.status === 409 &&
     error.message.includes("not_cloud_computer") &&
-    accountTransport() === "desktop" &&
+    // The demo's "desktop app" switch (?demo=assist&platform=desktop) has no desktop bridge.
+    (accountTransport() === "desktop" || demoDesktop()) &&
     readPrimaryEnvironmentDescriptor()?.environmentId === environmentId
   );
 }

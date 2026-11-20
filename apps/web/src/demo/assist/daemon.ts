@@ -162,11 +162,15 @@ function summaryOf(machine: DemoMachine, record: AssistantRecord): ManagerAssist
       shared: true,
     },
     slack: {
-      configured: false,
-      enabled: false,
-      allowedChannelIds: [],
-      botUserId: null,
-      botUserName: null,
+      configured: slackInstalled && record.persona.projectId === ASSISTANT_PROJECT_ID,
+      enabled: slackInstalled && record.persona.projectId === ASSISTANT_PROJECT_ID,
+      allowedChannelIds: slackInstalled
+        ? slackChannels
+            .filter((channel) => channel.owner === record.persona.projectId)
+            .map((channel) => channel.id)
+        : [],
+      botUserId: slackInstalled ? "U0UNOBOT" : null,
+      botUserName: slackInstalled ? SLACK_BOT : null,
       lastError: null,
       defaultModelSelection: null,
       addressing: DEFAULT_CONNECTOR_ADDRESSING,
@@ -261,6 +265,7 @@ export function startDaemons(input: { readonly world: AssistWorld }) {
   for (const key of Object.keys(MACHINES) as MachineKey[]) {
     for (const persona of assistantsOn(key, world)) addRecord(key, persona);
   }
+  resetSlack();
   resetAutomations({ world });
 }
 
@@ -490,6 +495,165 @@ const slugOf = (name: string) =>
 async function bodyOf(request: Request): Promise<Record<string, unknown>> {
   return ((await request.json().catch(() => null)) as Record<string, unknown> | null) ?? {};
 }
+
+// ── Slack: Uno's app ("Add to Slack"), one workspace — Acme ─────────────
+//
+// What a cloud computer's daemon answers (`/api/manager/assistant/slack/*`)
+// and, for the desktop app on the Mac (`platform=desktop`), what the console
+// answers the signed-in person (`/_account/api/v1/work/slack/device*`): the
+// real card (setupApi.ts, deviceSlack.ts) takes its desktop path on the
+// daemon's 409 `not_cloud_computer`. Two computers of this account and a
+// second Uno account share the workspace (console 257).
+
+const SLACK_TEAM = "Acme";
+const SLACK_BOT = "uno";
+const SLACK_QUEUE_TTL_HOURS = 24;
+/** Allow in the fake Slack window takes ~2 s; the install lands just before it closes. */
+const SLACK_INSTALL_MS = 1800;
+
+interface DemoSlackChannel {
+  readonly id: string;
+  readonly name: string;
+  readonly isPrivate: boolean;
+  readonly isMember: boolean;
+  /** The assistant (project id) that answers there on this computer. */
+  owner: string | null;
+  /** Taken by the account's other computer, or by another Uno account. */
+  routedAway: "computer" | "account" | null;
+}
+
+const freshSlackChannels = (): DemoSlackChannel[] => [
+  {
+    id: "C01GENERAL",
+    name: "general",
+    isPrivate: false,
+    isMember: true,
+    owner: ASSISTANT_PROJECT_ID,
+    routedAway: null,
+  },
+  {
+    id: "C02PRODUCT",
+    name: "product",
+    isPrivate: false,
+    isMember: true,
+    owner: null,
+    routedAway: "computer",
+  },
+  {
+    id: "C03LAUNCH",
+    name: "launch-q1",
+    isPrivate: false,
+    isMember: true,
+    owner: null,
+    routedAway: null,
+  },
+  {
+    id: "C04PARTNER",
+    name: "acme-partners",
+    isPrivate: false,
+    isMember: true,
+    owner: null,
+    routedAway: "account",
+  },
+  {
+    id: "C05RANDOM",
+    name: "random",
+    isPrivate: false,
+    isMember: true,
+    owner: null,
+    routedAway: null,
+  },
+  {
+    id: "G06DESIGN",
+    name: "design-private",
+    isPrivate: true,
+    isMember: false,
+    owner: null,
+    routedAway: null,
+  },
+];
+
+let slackInstalled = false;
+let slackInstallingSince: number | null = null;
+/** "Answer them here" on the Mac: its direct messages go to the desktop, not uno-work. */
+let slackDesktopDefault = false;
+let slackChannels: DemoSlackChannel[] = freshSlackChannels();
+
+function resetSlack() {
+  slackInstalled = world.slack === "installed";
+  slackInstallingSince = null;
+  slackDesktopDefault = false;
+  slackChannels = freshSlackChannels();
+}
+
+/** The fake Slack window said Allow: installed once its ~2 s are over. */
+function slackSettle() {
+  if (slackInstallingSince !== null && Date.now() - slackInstallingSince >= SLACK_INSTALL_MS) {
+    slackInstalled = true;
+    slackInstallingSince = null;
+  }
+}
+
+/** The desktop app on the Mac: the primary computer is this laptop, not a cloud computer. */
+const slackOnDesktop = (machine: DemoMachine) =>
+  world.platform === "desktop" && machine.key === "work";
+
+function slackRouting(machine: DemoMachine) {
+  const desktop = slackOnDesktop(machine);
+  const cloud = {
+    name: MACHINES.work.label,
+    kind: "cloud" as const,
+    isDefault: !slackDesktopDefault,
+  };
+  const mac = {
+    name: MACHINES.mac.label,
+    kind: "desktop" as const,
+    isDefault: slackDesktopDefault,
+  };
+  return {
+    computers: [
+      { ...cloud, isThis: !desktop },
+      { ...mac, isThis: desktop },
+    ],
+    isDefault: desktop ? slackDesktopDefault : !slackDesktopDefault,
+    defaultChosen: slackDesktopDefault,
+    shared: true,
+    signedAs: "Misha's assistant",
+  };
+}
+
+function slackInstallState(machine: DemoMachine) {
+  slackSettle();
+  const available = world.slack !== "unavailable";
+  return {
+    available,
+    installed: slackInstalled,
+    teamName: slackInstalled ? SLACK_TEAM : null,
+    botUserName: slackInstalled ? SLACK_BOT : null,
+    connected: slackInstalled,
+    ...(slackInstalled ? { routing: slackRouting(machine) } : {}),
+  };
+}
+
+/** The relay token the desktop's server holds (deviceSlack.ts step 3). */
+let slackRelayHeld = false;
+
+function resetSlackInstall() {
+  slackInstalled = false;
+  slackInstallingSince = null;
+  slackRelayHeld = false;
+  slackDesktopDefault = false;
+  slackChannels = freshSlackChannels();
+}
+
+const slackNotCloud = () =>
+  HttpResponse.json(
+    { error: "not_cloud_computer", message: "Uno's Slack app answers cloud computers." },
+    { status: 409 },
+  );
+
+const slackAuthorizeUrl = () =>
+  `${location.origin}${import.meta.env.BASE_URL}demo-oauth/?provider=slack`;
 
 export interface DaemonHooks {
   readonly machineForHost: (host: string) => DemoMachine;
@@ -744,6 +908,86 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
     http.post("*/api/manager/assistant/telegram/test", () =>
       json({ results: [{ chatId: "100200300", ok: true, error: null }] }),
     ),
+    // Uno's Slack app. The desktop app gets 409 not_cloud_computer and goes
+    // through the console as the signed-in person (accountHandlers below).
+    http.get("*/api/manager/assistant/slack/install", ({ request }) => {
+      const machine = machineOf(request);
+      if (slackOnDesktop(machine)) return slackNotCloud();
+      return json(slackInstallState(machine));
+    }),
+    http.post("*/api/manager/assistant/slack/install", ({ request }) => {
+      const machine = machineOf(request);
+      if (slackOnDesktop(machine)) return slackNotCloud();
+      if (world.slack === "unavailable") return json({ available: false, authorizeUrl: null });
+      slackInstallingSince = Date.now();
+      return json({ available: true, authorizeUrl: slackAuthorizeUrl() });
+    }),
+    http.delete("*/api/manager/assistant/slack/install", ({ request }) => {
+      if (slackOnDesktop(machineOf(request))) return slackNotCloud();
+      resetSlackInstall();
+      return json({ ok: true });
+    }),
+    // The desktop's local server: stores what the console said (deviceSlack.ts).
+    http.post("*/api/manager/assistant/slack/device", async ({ request }) => {
+      const machine = machineOf(request);
+      const body = (await request.json()) as { installed?: boolean; relayToken?: string };
+      const installed = body.installed === true;
+      return json({
+        available: world.slack !== "unavailable",
+        installed,
+        teamName: installed ? SLACK_TEAM : null,
+        botUserName: installed ? SLACK_BOT : null,
+        connected: installed,
+        installerDmReady: installed,
+        needsRelay: installed && !slackRelayHeld && body.relayToken === undefined,
+        ...(installed ? { routing: slackRouting(machine) } : {}),
+      });
+    }),
+    http.delete("*/api/manager/assistant/slack/device", () => {
+      slackRelayHeld = false;
+      return json({ ok: true });
+    }),
+    http.post("*/api/manager/assistant/slack/default", async ({ request }) => {
+      const machine = machineOf(request);
+      const body = (await request.json()) as { isDefault?: boolean };
+      // Only the Mac takes the default from uno-work; uno-work by the rule otherwise.
+      slackDesktopDefault = slackOnDesktop(machine)
+        ? body.isDefault === true
+        : body.isDefault !== true;
+      return json(slackRouting(machine));
+    }),
+    http.get("*/api/manager/assistant/slack/channels", () =>
+      json({
+        channels: slackChannels.map((channel) => ({
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.isPrivate,
+          isMember: channel.isMember,
+          assistantProjectId: channel.owner,
+          routedAway: channel.routedAway,
+        })),
+      }),
+    ),
+    http.post("*/api/manager/assistant/slack/channels", async ({ request }) => {
+      const body = (await request.json()) as { projectId?: string; channelIds?: string[] };
+      const projectId = body.projectId ?? ASSISTANT_PROJECT_ID;
+      const picked = new Set(body.channelIds ?? []);
+      for (const channel of slackChannels) {
+        if (picked.has(channel.id)) {
+          // Another Uno account's channel stays there; the other computer's moves here.
+          if (channel.routedAway === "account") continue;
+          channel.owner = projectId;
+          channel.routedAway = null;
+        } else if (channel.owner === projectId) {
+          channel.owner = null;
+        }
+      }
+      return json({
+        allowedChannelIds: slackChannels
+          .filter((channel) => channel.owner === projectId)
+          .map((channel) => channel.id),
+      });
+    }),
     http.get("*/api/manager/assistant/mail", () =>
       json({
         address: null,
@@ -909,6 +1153,37 @@ export function accountHandlers(): HttpHandler[] {
         features: world.assistants === "off" ? [] : ["assistants_mvp"],
       }),
     ),
+    // The console's Slack for the desktop app (deviceSlack.ts), as the signed-in person.
+    http.get("*/_account/api/v1/work/slack/device", () => {
+      if (world.slack === "signin")
+        return HttpResponse.json({ error: "unauthorized" }, { status: 401 });
+      slackSettle();
+      return HttpResponse.json({
+        available: world.slack !== "unavailable",
+        installed: slackInstalled,
+        team_name: slackInstalled ? SLACK_TEAM : null,
+        bot_user_name: slackInstalled ? SLACK_BOT : null,
+        installer_user_id: slackInstalled ? "U0MISHA" : null,
+        relay_fingerprint: slackRelayHeld ? "relay-demo" : null,
+        queue_ttl_hours: SLACK_QUEUE_TTL_HOURS,
+      });
+    }),
+    http.post("*/_account/api/v1/work/slack/device/install", () => {
+      if (world.slack === "signin")
+        return HttpResponse.json({ error: "unauthorized" }, { status: 401 });
+      if (world.slack === "unavailable")
+        return HttpResponse.json({ error: "SLACK_APP_NOT_CONFIGURED" }, { status: 503 });
+      slackInstallingSince = Date.now();
+      return HttpResponse.json({ authorize_url: slackAuthorizeUrl() });
+    }),
+    http.post("*/_account/api/v1/work/slack/device/relay", () => {
+      slackRelayHeld = true;
+      return HttpResponse.json({ relay_token: "slr_demo" });
+    }),
+    http.delete("*/_account/api/v1/work/slack/device", () => {
+      resetSlackInstall();
+      return HttpResponse.json({ ok: true });
+    }),
     http.get("*/_account/api/v1/boxes", () => HttpResponse.json({ boxes: boxes() })),
     http.get("*/_account/api/v1/boxes/:id", ({ params }) => {
       const found = boxes().find((item) => String(item.id) === String(params.id));

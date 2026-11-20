@@ -67,6 +67,12 @@ export interface AssistWorld {
   readonly fleet?: "off" | "on";
   /** The console's "Connect my computer" for this account (a flag there). */
   readonly pair?: "off" | "on";
+  /**
+   * Uno's Slack app (20.11): `available` — "Add to Slack"; `installed` —
+   * already in the Acme workspace; `unavailable` — not set up on the console
+   * (your own Slack app only); `signin` — the desktop app isn't signed in with Uno.
+   */
+  readonly slack?: "available" | "installed" | "unavailable" | "signin";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -154,6 +160,10 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     plans: take("plans", ["none", "full", "accounts", "signin"] as const) ?? start.plans ?? "none",
     fleet: take("fleet", ["off", "on"] as const) ?? start.fleet ?? "off",
     pair: take("pair", ["off", "on"] as const) ?? start.pair ?? "off",
+    slack:
+      take("slack", ["available", "installed", "unavailable", "signin"] as const) ??
+      start.slack ??
+      "available",
   };
   return touched ? next : null;
 }
