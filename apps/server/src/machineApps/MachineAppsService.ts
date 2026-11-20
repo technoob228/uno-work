@@ -110,11 +110,88 @@ const AUTOSTART_DELAY = Duration.seconds(3);
 export const PUBLISH_NOT_A_COMPUTER =
   "Only an Uno computer can show programs on the internet — this machine runs Uno Work on its own hardware.";
 
+/** Who an own app of this computer is shared with (fishcode own_app_access.go). */
+export interface MachineAppAccess {
+  readonly appId: string;
+  readonly name: string;
+  readonly port: number;
+  /** https address; null while it has none or it is still coming up (up to a minute). */
+  readonly url: string | null;
+  /** owner = Uno sign-in (owner + people), public = everyone, allowlist = listed IPs, "" = no address. */
+  readonly access: string;
+  readonly note: string;
+  readonly people: ReadonlyArray<{
+    readonly userId: number;
+    readonly username: string;
+    readonly email: string;
+  }>;
+}
+
+export type MachineAppAccessInput =
+  | { readonly appId: string; readonly op: "list" }
+  | { readonly appId: string; readonly op: "share"; readonly login: string }
+  | { readonly appId: string; readonly op: "unshare"; readonly userId: number };
+
+/** The control plane's answer to /work-apps/{id}/access, or null when it isn't one. */
+export const parseMachineAppAccess = (raw: unknown): MachineAppAccess | null => {
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r["app_id"] !== "string" || typeof r["port"] !== "number") return null;
+  const people = Array.isArray(r["people"]) ? r["people"] : [];
+  return {
+    appId: r["app_id"],
+    name: typeof r["name"] === "string" ? r["name"] : r["app_id"],
+    port: r["port"],
+    url: typeof r["url"] === "string" && r["url"].startsWith("https://") ? r["url"] : null,
+    access: typeof r["access"] === "string" ? r["access"] : "",
+    note: typeof r["note"] === "string" ? r["note"] : "",
+    people: people.flatMap((p) => {
+      if (typeof p !== "object" || p === null) return [];
+      const e = p as Record<string, unknown>;
+      return typeof e["user_id"] === "number"
+        ? [
+            {
+              userId: e["user_id"],
+              username: typeof e["username"] === "string" ? e["username"] : "",
+              email: typeof e["email"] === "string" ? e["email"] : "",
+            },
+          ]
+        : [];
+    }),
+  };
+};
+
+/**
+ * What the person reads when sharing failed: the control plane's `detail`
+ * (it is written for people: "There's no Uno account with this email…"),
+ * else the usual wording. The body may be cut at 200 characters, so the
+ * detail is read with a pattern, not JSON.parse.
+ */
+export const machineAppAccessError = (cause: unknown): string => {
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  const detail = /"detail"\s*:\s*"((?:[^"\\]|\\.)*)/.exec(raw)?.[1];
+  if (detail && detail.length > 0) return detail.replace(/\\(.)/g, "$1");
+  if (controlPlaneErrorStatus(cause) === 404) {
+    return "Uno doesn't know this app yet. Wait a minute after it starts (the computer reports its apps every minute), then try again.";
+  }
+  if (controlPlaneErrorStatus(cause) === 501) {
+    return "Uno can't share apps of this computer yet.";
+  }
+  return humanizeControlPlaneError(cause);
+};
+
 export interface MachineAppsServiceShape {
   readonly list: Effect.Effect<UnoMachineApps>;
   readonly action: (
     input: UnoMachineAppActionInput,
   ) => Effect.Effect<UnoMachineApps, UnoCloudFetchError>;
+  /**
+   * Who an app is shared with, share it with a person (their Uno account),
+   * stop sharing. They open its https address and sign in with Uno.
+   */
+  readonly access: (
+    input: MachineAppAccessInput,
+  ) => Effect.Effect<MachineAppAccess, UnoCloudFetchError>;
   readonly localMetrics: Effect.Effect<UnoComputerLocalMetrics>;
   /**
    * The last scan with what the daemon keeps for itself (listener pids,
@@ -1100,6 +1177,37 @@ export const makeMachineAppsService = (
       );
     }
 
+    const access: MachineAppsServiceShape["access"] = (input) =>
+      Effect.gen(function* () {
+        const { boxId, apiKey } = yield* readCloud;
+        if (boxId === null) {
+          return yield* new UnoCloudFetchError({ message: PUBLISH_NOT_A_COMPUTER });
+        }
+        if (apiKey.length === 0) {
+          return yield* new UnoCloudFetchError({ message: NOT_LINKED_MESSAGE });
+        }
+        const base = `/api/v1/boxes/${boxId}/work-apps/${encodeURIComponent(input.appId)}/access`;
+        const raw = yield* Effect.tryPromise({
+          try: () =>
+            input.op === "share"
+              ? fetchJson(apiKey, base, {
+                  method: "POST",
+                  body: JSON.stringify({ login: input.login }),
+                })
+              : input.op === "unshare"
+                ? fetchJson(apiKey, `${base}/${input.userId}`, { method: "DELETE" })
+                : fetchJson(apiKey, base),
+          catch: (cause) => new UnoCloudFetchError({ message: machineAppAccessError(cause) }),
+        });
+        const parsed = parseMachineAppAccess(raw);
+        if (!parsed) {
+          return yield* new UnoCloudFetchError({ message: "Uno answered with an error." });
+        }
+        // The share may have opened a private address: the next list should see it.
+        if (input.op === "share") cloudCache = null;
+        return parsed;
+      });
+
     const scanned: MachineAppsServiceShape["scanned"] = Effect.promise(() => scan()).pipe(
       Effect.map((result) => result.apps),
     );
@@ -1108,7 +1216,14 @@ export const makeMachineAppsService = (
       () => lastScan?.apps ?? null,
     );
 
-    return { list, action, localMetrics, scanned, lastScanned } satisfies MachineAppsServiceShape;
+    return {
+      list,
+      action,
+      access,
+      localMetrics,
+      scanned,
+      lastScanned,
+    } satisfies MachineAppsServiceShape;
   });
 
 export const MachineAppsServiceLive = Layer.effect(MachineAppsService, makeMachineAppsService());

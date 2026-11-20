@@ -294,6 +294,7 @@ const OUTWARD_TOOLS: Readonly<Record<string, AsksFirstCategory>> = {
   site_forms_set: "sites",
   app_deploy: "internet",
   app_show_on_internet: "internet",
+  app_share: "share",
   spark_deploy: "internet",
   file_share_link: "share",
   drive_share_link: "share",

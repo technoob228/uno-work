@@ -476,6 +476,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
       ),
     "The app wasn't opened to the internet",
   ],
+  app_share: [
+    "Sharing the app…",
+    (c) => named("Shared", appName(c), "Shared the app"),
+    "The app wasn't shared",
+  ],
+  app_unshare: [
+    "Stopping sharing the app…",
+    (c) => named("Stopped sharing", appName(c), "Stopped sharing the app"),
+    "Couldn't stop sharing the app",
+  ],
   app_hide_from_internet: [
     "Closing the app from the internet…",
     (c) => named("Closed from the internet:", appName(c), "Closed the app from the internet"),
