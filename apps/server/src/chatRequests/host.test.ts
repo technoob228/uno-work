@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -43,7 +51,7 @@ const request = (id: string, over: Partial<ChatRequestFile> = {}): ChatRequestFi
   ...over,
 });
 
-function setup(options: { own?: boolean } = {}) {
+function setup(options: { own?: boolean; allow?: boolean } = {}) {
   let now = T0;
   const created: Array<{
     input: ManagerRemoteChatCreateInput;
@@ -80,7 +88,12 @@ function setup(options: { own?: boolean } = {}) {
     },
   });
   const effect = <A, E>(value: Effect.Effect<A, E>) => Effect.runPromise(value);
-  const built = effect(host);
+  // Off by default: the person turned it on (the off case is its own test).
+  const built = effect(host).then(async (shape) => {
+    if (options.allow !== false && options.own !== false)
+      await effect(shape.setAllowed({ allow: true }));
+    return shape;
+  });
   const drop = (file: ChatRequestFile | string, name?: string) => {
     const dir = path.join(home, ".uno-work", "chat-requests", "in");
     mkdirSync(dir, { recursive: true });
@@ -89,6 +102,18 @@ function setup(options: { own?: boolean } = {}) {
       path.join(dir, `${id}.json`),
       typeof file === "string" ? file : JSON.stringify(file),
     );
+  };
+  /** Start / Decline pressed in Telegram, as the cloud side writes it; landed `writtenAt`. */
+  const press = (id: string, decision: "start" | "decline", writtenAt = now) => {
+    const dir = path.join(home, ".uno-work", "chat-requests", "decisions");
+    mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.json`);
+    writeFileSync(
+      file,
+      JSON.stringify({ v: 1, id, decision, via: "telegram", at: new Date(now).toISOString() }),
+    );
+    utimesSync(file, writtenAt / 1000, writtenAt / 1000);
+    return file;
   };
   const answer = (id: string) =>
     JSON.parse(
@@ -100,6 +125,7 @@ function setup(options: { own?: boolean } = {}) {
     built,
     effect,
     drop,
+    press,
     answer,
     hostState,
     created,
@@ -197,7 +223,7 @@ describe("the person's computer", () => {
     t.drop(request("cr_3", { createdAt: new Date(T0 + CHAT_REQUEST_WAIT_MS).toISOString() }));
     await t.effect(host.tick);
     expect(t.answer("cr_3")).toMatchObject({ status: "refused" });
-    expect(t.answer("cr_3").reason).toContain("turned off");
+    expect(t.answer("cr_3").reason).toContain("Settings → Computer");
     expect(t.created).toHaveLength(0);
   });
 
@@ -218,5 +244,99 @@ describe("the person's computer", () => {
     await t.effect(host.tick);
     expect(existsSync(path.join(host.paths.incoming, "cr_1.json"))).toBe(true);
     expect(existsSync(path.join(home, ".uno-work", "chat-requests", "state.json"))).toBe(false);
+  });
+
+  it("off by default: a request is refused at once with where to turn it on", async () => {
+    const t = setup({ allow: false });
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    expect(t.answer("cr_1")).toMatchObject({ status: "refused" });
+    expect(t.answer("cr_1").reason).toContain("Settings → Computer");
+    expect(t.hostState().allow).toBe(false);
+    expect((await t.effect(host.state)).allow).toBe(false);
+  });
+});
+
+describe("Start / Decline pressed in the person's Telegram", () => {
+  it("Start from Telegram starts the chat here like the app's button, and says so", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    const file = t.press("cr_1", "start");
+    await t.effect(host.tick);
+    expect(existsSync(file)).toBe(false);
+    expect(t.created).toHaveLength(1);
+    expect(t.created[0]!.guardedBefore).toBe(true);
+    expect(t.answer("cr_1")).toMatchObject({ status: "started", decidedVia: "telegram" });
+    const state = await t.effect(host.state);
+    expect(state.requests[0]).toMatchObject({ status: "started", decidedVia: "telegram" });
+  });
+
+  it("the first decision wins: Decline here, then Start from Telegram does nothing", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    await t.effect(host.decide({ id: "cr_1", decision: "decline" }));
+    t.press("cr_1", "start");
+    await t.effect(host.tick);
+    expect(t.created).toHaveLength(0);
+    expect(t.answer("cr_1")).toMatchObject({ status: "declined", decidedVia: "here" });
+    const journal = readFileSync(storePaths(stateDir).journal, "utf8");
+    expect(journal).toContain('"event":"telegram-dropped"');
+    expect(journal).toContain("already declined");
+  });
+
+  it("…and Start from Telegram first: Start here then says it is already started", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    t.press("cr_1", "start");
+    await t.effect(host.tick);
+    await expect(t.effect(host.decide({ id: "cr_1", decision: "start" }))).rejects.toMatchObject({
+      message: "That request is already started.",
+    });
+    expect(t.created).toHaveLength(1);
+  });
+
+  it("a press that landed while Uno Work was closed here is dropped, never run late", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    const file = t.press("cr_1", "start", T0 - 3 * 60 * 1000);
+    await t.effect(host.tick);
+    expect(existsSync(file)).toBe(false);
+    expect(t.created).toHaveLength(0);
+    expect(t.answer("cr_1")).toMatchObject({ status: "waiting" });
+  });
+
+  it("turned off here: a press from Telegram can't start anything", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    await t.effect(host.setAllowed({ allow: false }));
+    t.press("cr_1", "start");
+    await t.effect(host.tick);
+    expect(t.created).toHaveLength(0);
+    expect(t.answer("cr_1")).toMatchObject({ status: "refused" });
+  });
+
+  it("Decline from Telegram", async () => {
+    const t = setup();
+    const host = await t.built;
+    t.drop(request("cr_1"));
+    await t.effect(host.tick);
+    t.press("cr_1", "decline");
+    await t.effect(host.tick);
+    expect(t.answer("cr_1")).toMatchObject({
+      status: "declined",
+      decidedVia: "telegram",
+      reason: "The person declined it (in Telegram).",
+    });
   });
 });

@@ -7,6 +7,8 @@
  *   rewrites the message ("✔ <label>", no buttons) and spends the group;
  * - anyone else's press is refused and changes nothing;
  * - Allow on an approval request resolves it (`thread.approval.respond`);
+ * - Start on a cloud chat's request goes to the computer that decides; offline
+ *   keeps the buttons, decided rewrites the message;
  * - the owner's reply to a chat's message goes back to that chat;
  * - the poller asks for `callback_query` updates.
  */
@@ -30,6 +32,8 @@ import { ManagerConnectorRepository } from "../persistence/Services/ManagerConne
 import { ProjectionPendingApprovalRepository } from "../persistence/Services/ProjectionPendingApprovals.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { CONTROL_PLANE_URL_OVERRIDE_ENV } from "../workspaceRegistry/unoCloudParse.ts";
+import { chatRequestButtons, setChatRequestDecider } from "../chatRequests/messenger.ts";
+import type { MessengerDecision, OutRecord } from "../chatRequests/outgoing.ts";
 import { approvalButtons, chatHeaderLine, replyButtons } from "./connectorButtons.ts";
 import { ManagerTelegramService, ManagerTelegramServiceLive } from "./Layers/TelegramConnector.ts";
 
@@ -359,5 +363,89 @@ it.live("the owner's reply to a chat's message goes back to that chat", () =>
     expect(yield* waitUntil(() => turnTexts().length > 0)).toBe(true);
     expect(turnTexts()[0]?.threadId).toBe(WORK);
     expect(turnTexts()[0]?.text).toContain("example.org");
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+const macRecord = (over: Partial<OutRecord> = {}) =>
+  ({
+    id: "cr_1",
+    computerId: "c1",
+    computerName: "Misha's MacBook",
+    threadId: WORK,
+    status: "waiting",
+    reason: null,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    deliveredAt: null,
+    updatedAt: new Date().toISOString(),
+    request: {} as OutRecord["request"],
+    thread: null,
+    told: null,
+    ...over,
+  }) as OutRecord;
+
+it.live(
+  "Start on a chat request: offline keeps the buttons, then decided rewrites the message",
+  () =>
+    Effect.gen(function* () {
+      yield* saveRow;
+      const decisions: Array<string> = [];
+      let next: MessengerDecision = { kind: "offline", record: macRecord() };
+      setChatRequestDecider(async (input) => {
+        decisions.push(`${input.requestId}:${input.decision}`);
+        return next;
+      });
+      const telegram = yield* ManagerTelegramService;
+      yield* telegram.sendRich({
+        projectId,
+        chatId: String(CHAT),
+        text: "💬 Bakery site\nwants to start a chat on Misha's MacBook: `Check the form`",
+        buttons: chatRequestButtons("cr_1", "en"),
+        threadId: WORK,
+      });
+      const keyboard = sentKeyboard()!;
+      expect(keyboard.inline_keyboard[0]!.map((button) => button.text)).toEqual([
+        "▶ Start",
+        "✖ Decline",
+      ]);
+      const start = keyboard.inline_keyboard[0]![0]!.callback_data;
+      const messageId = nextMessageId;
+
+      queued.push(press(start, messageId));
+      expect(yield* waitUntil(() => callsTo("answerCallbackQuery").length > 0)).toBe(true);
+      expect(String(callsTo("answerCallbackQuery")[0]?.body.text)).toContain(
+        "Misha's MacBook is offline",
+      );
+      expect(callsTo("editMessageText")).toEqual([]);
+
+      // Pressed again once it is back, but the Mac decided first: "already decided".
+      next = { kind: "decided", record: macRecord({ status: "declined", decidedVia: "here" }) };
+      queued.push(press(start, messageId));
+      expect(yield* waitUntil(() => callsTo("answerCallbackQuery").length > 1)).toBe(true);
+      expect(decisions).toEqual(["cr_1:start", "cr_1:start"]);
+      expect(String(callsTo("answerCallbackQuery")[1]?.body.text)).toContain("Already decided");
+      expect(yield* waitUntil(() => callsTo("editMessageText").length > 0)).toBe(true);
+      const edit = callsTo("editMessageText")[0];
+      expect(String(edit?.body.text)).toContain("✖ Declined on Misha's MacBook");
+      expect(edit?.body.reply_markup).toEqual({ inline_keyboard: [] });
+      setChatRequestDecider(null);
+    }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live('a chat request decided elsewhere: the message says how, not just "answered"', () =>
+  Effect.gen(function* () {
+    yield* saveRow;
+    const telegram = yield* ManagerTelegramService;
+    yield* telegram.sendRich({
+      projectId,
+      chatId: String(CHAT),
+      text: "💬 Bakery site\nwants to start a chat on Misha's MacBook",
+      buttons: chatRequestButtons("cr_2", "en"),
+      threadId: WORK,
+    });
+    yield* telegram.retireRequestButtons("cr_2", () => "✔ Started on Misha's MacBook");
+    const edit = callsTo("editMessageText")[0];
+    expect(String(edit?.body.text)).toContain("✔ Started on Misha's MacBook");
+    expect(edit?.body.reply_markup).toEqual({ inline_keyboard: [] });
   }).pipe(Effect.provide(connectorLayer)),
 );

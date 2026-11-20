@@ -7,7 +7,8 @@
  *
  * `window.__chatRequestsDemo.hold()` takes the waiting ones away and
  * `.arrive()` brings them back one by one (a request coming in, for the
- * walkthrough).
+ * walkthrough); `.fresh()` is the first open after the update: switched off
+ * (the default) and nothing asked yet.
  */
 import { WS_METHODS } from "@t3tools/contracts";
 
@@ -28,6 +29,7 @@ interface DemoRequest {
   gist: string;
   brief: string;
   reason: string | null;
+  decidedVia?: "here" | "telegram";
   threadId: string | null;
   threadState: string | null;
 }
@@ -109,6 +111,7 @@ const requests: DemoRequest[] = [
     reason: null,
     threadId: "m-deck",
     threadState: "done",
+    decidedVia: "telegram",
   },
   {
     id: "cr-downloads",
@@ -169,6 +172,11 @@ export function installChatRequestsDemo(environmentId: string): void {
       for (let i = requests.length - 1; i >= 0; i -= 1) {
         if (requests[i]!.status === "waiting") held.unshift(...requests.splice(i, 1));
       }
+    },
+    fresh() {
+      allow = false;
+      requests.length = 0;
+      held.length = 0;
     },
     arrive() {
       const next = held.shift();

@@ -11,6 +11,8 @@
 //   node demo-e2e/chat-requests-shots.mjs <out-dir>            # after-*, walk-*
 //   node demo-e2e/chat-requests-shots.mjs <out-dir> --before   # before-* (a base build:
 //                                                              # DEMO_DIST=<its dist-demo>)
+//   node demo-e2e/chat-requests-shots.mjs <out-dir> --fresh    # after-settings-default-off:
+//                                                              # first open, off by default
 // Browser: harness.mjs (DEMO_CHROME=<chromium> on a Linux box).
 import { mkdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,6 +21,7 @@ import { dismissBanners, launch, serve } from "./harness.mjs";
 
 const out = process.argv[2] ?? "demo-e2e/shots/chat-requests";
 const before = process.argv.includes("--before");
+const fresh = process.argv.includes("--fresh");
 const MAX_BYTES = 400 * 1024;
 mkdirSync(out, { recursive: true });
 
@@ -148,7 +151,18 @@ async function waitForPoll() {
 
 await open();
 
-if (before) {
+if (fresh) {
+  // The first open after the update: off by default, nothing asked yet.
+  await page.evaluate(() => window.__chatRequestsDemo.fresh());
+  await settingsForMac();
+  await page
+    .getByTestId("chat-requests-allow")
+    .evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await page.waitForTimeout(800);
+  const checked = await page.getByTestId("chat-requests-allow").getAttribute("aria-checked");
+  say(`switch on first open: aria-checked=${checked}`);
+  await shot("after-settings-default-off");
+} else if (before) {
   // The base version: Needs you and Settings → Computer, no chat requests.
   await page.getByTestId("sidebar-needs-you").first().waitFor({ timeout: 15_000 });
   await openNeedsYou();
@@ -250,4 +264,7 @@ if (before) {
 await browser.close();
 server.close();
 // Keep the log next to the shots.
-writeFileSync(join(out, before ? "before-log.txt" : "after-log.txt"), `${log.join("\n")}\n`);
+writeFileSync(
+  join(out, fresh ? "fresh-log.txt" : before ? "before-log.txt" : "after-log.txt"),
+  `${log.join("\n")}\n`,
+);

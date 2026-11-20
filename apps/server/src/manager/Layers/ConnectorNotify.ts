@@ -524,8 +524,8 @@ const makeConnectorNotifyService = Effect.gen(function* () {
       ),
     );
 
-  const retireButtons: ConnectorNotifyServiceShape["retireButtons"] = (requestId) =>
-    telegram.retireRequestButtons(requestId);
+  const retireButtons: ConnectorNotifyServiceShape["retireButtons"] = (requestId, line) =>
+    telegram.retireRequestButtons(requestId, line);
 
   return {
     resolveChats,

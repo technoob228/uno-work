@@ -84,7 +84,8 @@ export function startChatTools(kit: StartChatToolKit): ReadonlyArray<UnoWorkTool
       group: "my-computer",
       description: [
         "Ask to start a chat on the person's own computer (their laptop, not this cloud computer), for work that has to happen there: their local apps, files, browser, devices.",
-        "The person sees the request in Uno Work there (Needs you and the sidebar) with Start and Decline, and can read the whole brief. Nothing starts until they press Start; a request waits 2 hours at most; at most 2 at once per computer.",
+        "The person sees the request in Uno Work there (Needs you and the sidebar) and in their Telegram, with Start and Decline, and can read the whole brief. Nothing starts until they press Start; a request waits 2 hours at most; at most 2 at once per computer.",
+        "Off by default: until the person turns it on in Uno Work on that computer (Settings → Computer), requests are refused at once; then don't ask again, tell them where to turn it on if it matters.",
         "Start opens an ordinary Claude Code chat there with `brief` as its first message. That chat can't ssh to other machines, deploy, push, use sudo, install or read secrets: keep such steps for this chat or the person.",
         "The answer (started, declined, expired, refused) and then that chat's answers come back into this chat as notes from Uno Work — don't poll; end your turn or go on with other work. `my_computer_chat_request` reads a request's state when you need it.",
       ].join(" "),

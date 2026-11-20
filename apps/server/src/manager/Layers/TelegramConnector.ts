@@ -211,6 +211,7 @@ import * as OwnBotRelay from "../ownBotRelay.ts";
 import { readWorkMachineIdentity } from "../workConsole.ts";
 import { longPollSignal } from "../../economy/wakeSignal.ts";
 import { BrowserBridge } from "../../browserBridge.ts";
+import { answerChatRequestPress } from "../../chatRequests/messenger.ts";
 import type { PersonCard } from "@t3tools/shared/personCard";
 import { renderPersonCardWidget } from "@t3tools/shared/personCardWidget";
 import {
@@ -344,7 +345,11 @@ export interface ManagerTelegramServiceShape {
    * An approval request was answered (in the app, with /approve, by a
    * timeout): its buttons in Telegram go, the message says so.
    */
-  readonly retireRequestButtons: (requestId: string) => Effect.Effect<void>;
+  /** `line`: the message's last line (default "Already answered"). */
+  readonly retireRequestButtons: (
+    requestId: string,
+    line?: (language: ReplyLanguage) => string,
+  ) => Effect.Effect<void>;
   /**
    * Issue the one-time code the app shows as the bot's deep link
    * (telegramPairing.ts). A new code replaces the previous one. On a relay
@@ -1876,6 +1881,17 @@ const makeTelegramConnector = Effect.gen(function* () {
           );
           return;
         }
+        case "chat-request": {
+          // That computer decides (chatRequests/messenger.ts); offline: the buttons stay.
+          const lang = group.language ?? language;
+          const reply = yield* Effect.promise(() => answerChatRequestPress(action, lang));
+          yield* answerCallback(config.botToken, query.id, reply.toast);
+          if (reply.finalLine === null) {
+            const kept = { ...group, messageId: group.messageId ?? message.message_id ?? null };
+            yield* updateButtons((state) => addButtonGroup(state, kept, Date.now()));
+          } else yield* finish(reply.finalLine);
+          return;
+        }
         case "tool-approval": {
           const answered =
             browserBridge === null
@@ -2930,7 +2946,10 @@ const makeTelegramConnector = Effect.gen(function* () {
     ),
   );
 
-  const retireRequestButtons: ManagerTelegramServiceShape["retireRequestButtons"] = (requestId) =>
+  const retireRequestButtons: ManagerTelegramServiceShape["retireRequestButtons"] = (
+    requestId,
+    line,
+  ) =>
     Effect.gen(function* () {
       const groups = groupsForRequest(yield* Ref.get(buttonsRef), requestId);
       if (groups.length === 0) return;
@@ -2940,7 +2959,12 @@ const makeTelegramConnector = Effect.gen(function* () {
       for (const group of groups) {
         const botToken = yield* botTokenOf(ProjectId.make(group.connectorProjectId));
         if (botToken === null) continue;
-        yield* finishButtonMessage(botToken, group, answeredElsewhereLine(group.language ?? "en"));
+        const language = group.language ?? "en";
+        yield* finishButtonMessage(
+          botToken,
+          group,
+          line?.(language) ?? answeredElsewhereLine(language),
+        );
       }
     }).pipe(
       Effect.catchCause((cause) =>

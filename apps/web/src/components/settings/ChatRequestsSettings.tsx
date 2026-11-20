@@ -1,8 +1,9 @@
 /**
  * Settings → Computer → "Chats from the cloud" (only on the person's own
  * computer): the switch that lets a chat on a cloud computer ask to start a
- * chat here, and the journal of the last requests — what was asked, by
- * which chat, and what became of it (started ones open their chat).
+ * chat here (off until the person turns it on, Misha 20.11), and the
+ * journal of the last requests — what was asked, by which chat, and what
+ * became of it (started ones open their chat).
  */
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { type ChatRequestView, type EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -54,13 +55,13 @@ export function ChatRequestsSettingsSection(props: {
     <SettingsSection title="Chats from the cloud">
       <SettingsRow
         title="Allow cloud chats to ask to start chats here"
-        description="A chat on your cloud computer can ask to start a chat on this computer. Nothing starts until you press Start. Turned off, such requests are refused at once."
+        description="A chat on your cloud computer can ask to start a chat on this computer. Nothing starts until you press Start, here or in your Telegram if it's connected to Uno Work. Off by default."
         status={
           !state
             ? null
             : state.allow
               ? `Requests wait up to 2 hours. At most ${state.limit} at once: ${state.active} now.`
-              : "Off. New requests are refused at once; the cloud chat is told why."
+              : "Off. Requests are refused at once, and the cloud chat is told it can be turned on here."
         }
         control={
           <Switch
@@ -117,6 +118,7 @@ function JournalRow(props: { request: ChatRequestView; hostId: EnvironmentId }) 
         </span>
         <span className="truncate text-[11px] text-muted-foreground/80">
           From “{fromTitle(request)}” on {computerName(request)}
+          {request.decidedVia === "telegram" ? " · answered in Telegram" : ""}
           {request.reason && (request.status === "expired" || request.status === "refused")
             ? ` · ${request.reason}`
             : ""}

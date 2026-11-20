@@ -74,6 +74,15 @@ export type ConnectorButtonAction =
   /** A Uno Work tool approval (the card, `personApproval.ts`). */
   | { readonly kind: "tool-approval"; readonly requestId: string; readonly approved: boolean }
   /**
+   * A cloud chat asks to start a chat on the person's computer
+   * (chatRequests/messenger.ts): that computer decides, like its own button.
+   */
+  | {
+      readonly kind: "chat-request";
+      readonly requestId: string;
+      readonly decision: "start" | "decline";
+    }
+  /**
    * An option of a card's choice with `multiple` (`show_card`): a press picks
    * or unpicks it (the group stays); `value` is what it sends once picked.
    */
@@ -488,7 +497,9 @@ export const groupsForRequest = (
       .flat()
       .some(
         (button) =>
-          (button.action.kind === "approval" || button.action.kind === "tool-approval") &&
+          (button.action.kind === "approval" ||
+            button.action.kind === "tool-approval" ||
+            button.action.kind === "chat-request") &&
           button.action.requestId === requestId,
       ),
   );

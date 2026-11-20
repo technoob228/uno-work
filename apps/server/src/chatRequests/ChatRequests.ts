@@ -16,7 +16,9 @@
  *
  * On a cloud computer, the sending side (outgoing.ts) runs the
  * `my_computer_start_chat` tool's requests through the tunnel and tells the
- * chat that asked how they went.
+ * chat that asked how they went; once a request waits there, the person's
+ * Telegram gets it too with Start / Decline (messenger.ts), and a press
+ * there is decided on that computer like its own button.
  *
  * @module chatRequests/ChatRequests
  */
@@ -39,6 +41,9 @@ import { Context, Effect, Layer, Option, Schedule } from "effect";
 import packageJson from "../../package.json" with { type: "json" };
 import { ServerConfig } from "../config.ts";
 import { readWorkMachineIdentity } from "../manager/workConsole.ts";
+import { pickPersonChats } from "../manager/connectorNotify.ts";
+import { detectReplyLanguage } from "../manager/connectorReplyText.ts";
+import { ConnectorNotifyService } from "../manager/Services/ConnectorNotify.ts";
 import { MyComputerService } from "../myComputer/MyComputerService.ts";
 import { MyComputerFailure } from "../myComputer/myComputerCore.ts";
 import { systemCommandOrigin } from "../orchestration/commandOrigin.ts";
@@ -49,7 +54,19 @@ import { ServerSettingsService } from "../serverSettings.ts";
 import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
 import { makeChatRequestsHost } from "./host.ts";
-import { makeOutgoing, type Outgoing } from "./outgoing.ts";
+import {
+  chatRequestButtons,
+  chatRequestMessageText,
+  chatRequestSettledLine,
+  setChatRequestDecider,
+} from "./messenger.ts";
+import {
+  makeOutgoing,
+  PICKUP_GRACE_MS,
+  type Outgoing,
+  type OutgoingMessenger,
+  type OutRecord,
+} from "./outgoing.ts";
 import { ensureSpool } from "./spool.ts";
 
 const COMPONENT = "chat-requests";
@@ -85,6 +102,7 @@ export const ChatRequestsLive = Layer.effect(
     const host = yield* makeHost;
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     const cloud = Option.getOrNull(yield* Effect.serviceOption(UnoCloudService));
+    const notify = Option.getOrNull(yield* Effect.serviceOption(ConnectorNotifyService));
     // A laptop or desktop: the person's own computer, where requests arrive.
     const isOwnComputerNow = settings.getSettings.pipe(
       Effect.map((value) => readWorkMachineIdentity(value.uno) === null),
@@ -137,6 +155,49 @@ export const ChatRequestsLive = Layer.effect(
         );
         return "told" as const;
       });
+
+    // The person's Telegram: the request with Start / Decline, only where
+    // Telegram is linked (Misha: "Telegram: only needs-you and approvals").
+    const languageOf = (record: OutRecord) =>
+      detectReplyLanguage(`${record.request.title}\n${record.request.gist}`, null);
+    const announce = (record: OutRecord) =>
+      Effect.gen(function* () {
+        if (notify === null) return;
+        const threadId = ThreadId.make(record.threadId);
+        const shell = Option.getOrNull(yield* projections.getThreadShellById(threadId));
+        const chats = pickPersonChats(
+          yield* notify.resolveChats({
+            threadId,
+            projectId: shell?.projectId ?? null,
+            includeAssistantFallback: true,
+          }),
+        );
+        if (!chats.some((chat) => chat.kind === "telegram")) return;
+        const language = languageOf(record);
+        const now = Date.now();
+        yield* notify.sendToPerson({
+          threadId,
+          text: chatRequestMessageText(record, language, now),
+          textWithoutButtons: chatRequestMessageText(record, language, now, false),
+          buttons: chatRequestButtons(record.id, language),
+          // Past its 2 h and the pickup grace: the last line still finds the message.
+          buttonsTtlMs: Math.max(60_000, Date.parse(record.expiresAt) - now) + 2 * PICKUP_GRACE_MS,
+          language,
+          approval: true,
+        });
+      });
+    const messenger: OutgoingMessenger | undefined =
+      notify === null
+        ? undefined
+        : {
+            announce: (record) => runFork(announce(record).pipe(Effect.ignoreCause({ log: true }))),
+            settle: (record) =>
+              runFork(
+                notify.retireButtons(record.id, (language) =>
+                  chatRequestSettledLine(record, language),
+                ),
+              ),
+          };
 
     const outgoing: Outgoing | null =
       myComputer === null
@@ -192,7 +253,12 @@ export const ChatRequestsLive = Layer.effect(
                   Effect.orElseSucceed(() => null),
                 ),
               ),
+            messenger,
           });
+    if (outgoing !== null) {
+      setChatRequestDecider(outgoing.decideFromMessenger);
+      yield* Effect.addFinalizer(() => Effect.sync(() => setChatRequestDecider(null)));
+    }
 
     // ── Loops ───────────────────────────────────────────────────────────
     const quietly =
@@ -210,17 +276,21 @@ export const ChatRequestsLive = Layer.effect(
       ),
     );
     // A new request shows within a moment, not at the next round.
-    let watcher: FSWatcher | null = null;
-    yield* Effect.addFinalizer(() => Effect.sync(() => watcher?.close()));
+    // So does a Start pressed in the person's Telegram (`decisions/`).
+    const watchers: Array<FSWatcher> = [];
+    yield* Effect.addFinalizer(() => Effect.sync(() => watchers.forEach((entry) => entry.close())));
     if (yield* isOwnComputerNow) {
       yield* io(() => ensureSpool(hostSide.paths)).pipe(Effect.ignoreCause({ log: false }));
-      try {
-        watcher = watch(hostSide.paths.incoming, () => {
-          void Effect.runPromise(hostSide.tick.pipe(quietly("chat requests: host round")));
-        });
-        watcher.on("error", () => watcher?.close());
-      } catch {
-        watcher = null;
+      for (const dir of [hostSide.paths.incoming, hostSide.paths.decisions]) {
+        try {
+          const watcher = watch(dir, () => {
+            void Effect.runPromise(hostSide.tick.pipe(quietly("chat requests: host round")));
+          });
+          watcher.on("error", () => watcher.close());
+          watchers.push(watcher);
+        } catch {
+          // The 5-second round still picks it up.
+        }
       }
     }
     if (outgoing !== null) {

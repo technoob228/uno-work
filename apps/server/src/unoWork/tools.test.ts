@@ -3540,6 +3540,7 @@ describe("my_computer_start_chat", () => {
     ask: () => Promise.resolve({ requestId: "cr_1", status: "waiting" as const, message: "ok" }),
     lookup: () => Promise.resolve([]),
     tick: () => Promise.resolve(),
+    decideFromMessenger: () => Promise.resolve({ kind: "gone" as const }),
     readStore: () => Promise.resolve([]),
   };
 

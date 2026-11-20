@@ -10,7 +10,14 @@
  *   soon as it is back, within its 2 h;
  * - turned off there, or 2 at once there already: refused at once, from the
  *   `state.json` Uno Work there keeps;
- * - Uno Work there predates this (no `state.json`): refused with that reason.
+ * - Uno Work there predates this (no `state.json`): refused with that reason;
+ * - once it waits there, the person's Telegram gets it too, with Start and
+ *   Decline (`messenger`, chatRequests/messenger.ts). A press here is written
+ *   into that computer's `decisions/` and applied there like its own button
+ *   (`decideFromMessenger`): one place decides, the first press wins. That
+ *   computer offline, or Uno Work closed there: the press is not kept, the
+ *   person hears so and the request goes on waiting. Once it is decided
+ *   anywhere, the Telegram message says how and loses its buttons.
  *
  * I/O comes in as functions (the tunnel, the store, the chat); tests fake them.
  *
@@ -25,7 +32,9 @@ import {
   CHAT_REQUESTS_DIR,
   CHAT_REQUESTS_STATE_FRESH_MS,
   ChatRequestAnswer,
+  type ChatRequestDecidedVia,
   type ChatRequestFile,
+  type ChatRequestRemoteDecision,
   type ChatRequestStatus,
   type ChatRequestThread,
   ChatRequestsHostState,
@@ -33,6 +42,8 @@ import {
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { Schema } from "effect";
+
+import { REASONS } from "./hostLogic.ts";
 
 /** How long after its 2 h a request nobody picked up there is given up on here. */
 export const PICKUP_GRACE_MS = 10 * 60 * 1000;
@@ -57,7 +68,33 @@ export interface OutRecord {
   readonly thread: ChatRequestThread | null;
   /** What the asking chat was told last (`tellKey`). */
   readonly told: string | null;
+  /** Started / declined: where the person pressed (from the answer there). */
+  readonly decidedVia?: ChatRequestDecidedVia;
+  /** The person's Telegram got it with Start / Decline. */
+  readonly announced?: boolean;
+  /** …and that message says how it ended. */
+  readonly retired?: boolean;
 }
+
+/** The person's Telegram: the request with Start / Decline, and how it ended. */
+export interface OutgoingMessenger {
+  /** It waits there now: the message with the buttons (nothing when no Telegram is linked). */
+  readonly announce: (record: OutRecord) => Promise<void>;
+  /** Decided, expired or refused: the message says so and loses its buttons. */
+  readonly settle: (record: OutRecord) => Promise<void>;
+}
+
+/** What a press of Start / Decline in Telegram came to. */
+export type MessengerDecision =
+  | { readonly kind: "gone" }
+  /** Decided already (there, or by an earlier press), or it ended. */
+  | { readonly kind: "decided"; readonly record: OutRecord }
+  /** That computer is offline: nothing is kept, the request goes on waiting. */
+  | { readonly kind: "offline"; readonly record: OutRecord }
+  /** Online, but Uno Work isn't open there: the same. */
+  | { readonly kind: "closed"; readonly record: OutRecord }
+  /** Written there; Uno Work there applies it in a moment. */
+  | { readonly kind: "sent"; readonly record: OutRecord };
 
 export interface OutgoingDeps {
   readonly stateDir: string;
@@ -74,6 +111,10 @@ export interface OutgoingDeps {
   readonly ownBoxId: () => Promise<number | null>;
   readonly nowMs?: () => number;
   readonly newId?: () => string;
+  /** The person's Telegram; absent: Uno Work only. */
+  readonly messenger?: OutgoingMessenger | undefined;
+  /** After a press from Telegram: when to read the answer there again (tests: none). */
+  readonly followUpDelaysMs?: ReadonlyArray<number>;
 }
 
 export interface AskInput {
@@ -117,7 +158,10 @@ export const remotePaths = {
   state: `${CHAT_REQUESTS_DIR}/state.json`,
   request: (id: string) => `${CHAT_REQUESTS_DIR}/in/${id}.json`,
   answer: (id: string) => `${CHAT_REQUESTS_DIR}/out/${id}.json`,
+  decision: (id: string) => `${CHAT_REQUESTS_DIR}/decisions/${id}.json`,
 };
+
+const FOLLOW_UP_DELAYS_MS: ReadonlyArray<number> = [1_500, 3_000, 5_000, 10_000];
 
 const FINAL: ReadonlySet<ChatRequestStatus> = new Set(["declined", "expired", "refused"]);
 const TURN_END: ReadonlySet<string> = new Set(["done", "failed", "waiting-for-you", "stopped"]);
@@ -257,6 +301,30 @@ export function makeOutgoing(deps: OutgoingDeps) {
   });
 
   /**
+   * The person's Telegram follows the record: the message once it waits
+   * there, its last line once it doesn't. Sent in the background: a slow
+   * Telegram never holds the queue.
+   */
+  const withMessenger = (record: OutRecord): OutRecord => {
+    const messenger = deps.messenger;
+    if (messenger === undefined) return record;
+    if (record.status === "waiting" && record.announced !== true) {
+      void messenger.announce(record).catch(() => undefined);
+      return { ...record, announced: true };
+    }
+    if (
+      record.status !== "waiting" &&
+      record.status !== "queued" &&
+      record.announced === true &&
+      record.retired !== true
+    ) {
+      void messenger.settle(record).catch(() => undefined);
+      return { ...record, retired: true };
+    }
+    return record;
+  };
+
+  /**
    * Deliver one request to its computer, which is online: refused at once by
    * what Uno Work there says, else written into its `in/`.
    */
@@ -267,13 +335,7 @@ export function makeOutgoing(deps: OutgoingDeps) {
     if (hostState._tag === "None") {
       return settle(record, "refused", OUT_REASONS.oldApp(record.computerName));
     }
-    if (!hostState.value.allow) {
-      return settle(
-        record,
-        "refused",
-        "The person turned off chat requests on that computer (Settings → Computer). Don't ask again; tell them if it matters.",
-      );
-    }
+    if (!hostState.value.allow) return settle(record, "refused", REASONS.off);
     if (hostState.value.active >= hostState.value.limit) {
       return settle(
         record,
@@ -347,7 +409,7 @@ export function makeOutgoing(deps: OutgoingDeps) {
         // Refused at once is said in the tool's answer, not again as a note.
         told: null,
       };
-      if (input.computer.online) record = await deliver(record);
+      if (input.computer.online) record = withMessenger(await deliver(record));
       if (record.status === "refused") record = { ...record, told: "refused" };
       await writeStore(deps.stateDir, [record, ...(await readStore(deps.stateDir))]);
       await deps
@@ -390,6 +452,7 @@ export function makeOutgoing(deps: OutgoingDeps) {
       reason: value.reason,
       updatedAt: value.updatedAt,
       thread: value.thread,
+      ...(value.decidedVia ? { decidedVia: value.decidedVia } : {}),
     };
   };
 
@@ -433,6 +496,7 @@ export function makeOutgoing(deps: OutgoingDeps) {
         } catch {
           // Unreachable for now: next round.
         }
+        current = withMessenger(current);
         const key = tellKey(current);
         if (key !== null && key !== current.told) {
           const told = await deps
@@ -457,7 +521,8 @@ export function makeOutgoing(deps: OutgoingDeps) {
       const fresh: Array<OutRecord> = [];
       for (const record of records) {
         if (record.status === "waiting" || record.status === "started") {
-          const polled = await poll(record).catch(() => record);
+          const read = await poll(record).catch(() => record);
+          const polled = read === record ? record : withMessenger(read);
           if (polled !== record) await update(record.id, () => polled);
           fresh.push(polled);
         } else {
@@ -467,7 +532,114 @@ export function makeOutgoing(deps: OutgoingDeps) {
       return fresh.map(viewForAgent);
     });
 
-  return { ask, tick, lookup, readStore: () => readStore(deps.stateDir) };
+  /** Read the answer there once more; the record as it is now (null: gone). */
+  const refresh = (id: string) =>
+    serial(async () => {
+      const record = (await readStore(deps.stateDir)).find((entry) => entry.id === id) ?? null;
+      if (record === null || record.status !== "waiting") return record;
+      const read = await poll(record).catch(() => record);
+      if (read === record) return record;
+      const next = withMessenger(read);
+      await update(id, () => next);
+      return next;
+    });
+
+  /** After a press: the answer there shows within seconds; Telegram hears it then. */
+  const followUp = (id: string) => {
+    const delays = deps.followUpDelaysMs ?? FOLLOW_UP_DELAYS_MS;
+    void (async () => {
+      for (const delay of delays) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        const record = await refresh(id).catch(() => null);
+        if (record === null || record.status !== "waiting") return;
+      }
+    })();
+  };
+
+  /**
+   * Start / Decline pressed in the person's Telegram. That computer decides
+   * (its own checks, the first decision wins): here the press is only
+   * written into its `decisions/`, and only while it is online with Uno Work
+   * open — a press is never kept to run later.
+   */
+  const decideFromMessenger = (input: {
+    readonly requestId: string;
+    readonly decision: "start" | "decline";
+  }): Promise<MessengerDecision> =>
+    serial(async (): Promise<MessengerDecision> => {
+      const now = nowMs();
+      const found = (await readStore(deps.stateDir)).find((entry) => entry.id === input.requestId);
+      if (found === undefined) return { kind: "gone" };
+      let record = found;
+      const save = async (next: OutRecord) => {
+        // The press is answered by its own message: no second edit from the loop.
+        const settled = next.status !== "waiting" && next.status !== "queued";
+        const kept = settled ? { ...next, retired: true } : next;
+        await update(kept.id, () => kept);
+        return kept;
+      };
+      if (record.status !== "waiting" && record.status !== "queued") {
+        return { kind: "decided", record: await save(record) };
+      }
+      if (ms(record.expiresAt) <= now) {
+        const expired = settle(record, "expired", OUT_REASONS.neverPicked(record.computerName));
+        return { kind: "decided", record: await save(expired) };
+      }
+      if (record.status === "queued") return { kind: "offline", record };
+      const computers = await deps.computers().catch(() => null);
+      const online = (computers ?? []).some(
+        (computer) => computer.id === record.computerId && computer.online,
+      );
+      if (!online) return { kind: "offline", record };
+      try {
+        const polled = await poll(record);
+        if (polled.status !== "waiting") {
+          return { kind: "decided", record: await save(polled) };
+        }
+        record = polled;
+        const hostState = decodeHostState(
+          parseJson(await deps.read(record.computerId, remotePaths.state)),
+        );
+        if (
+          hostState._tag === "None" ||
+          ms(hostState.value.seenAt) + CHAT_REQUESTS_STATE_FRESH_MS < now
+        ) {
+          return { kind: "closed", record };
+        }
+        const decision: ChatRequestRemoteDecision = {
+          v: 1,
+          id: record.id,
+          decision: input.decision,
+          via: "telegram",
+          at: new Date(now).toISOString(),
+        };
+        await deps.write(
+          record.computerId,
+          remotePaths.decision(record.id),
+          JSON.stringify(decision, null, 2),
+        );
+      } catch {
+        // It went offline between the checks.
+        return { kind: "offline", record };
+      }
+      await deps
+        .note(
+          record.computerId,
+          `${input.decision === "start" ? "Start" : "Decline"} pressed in Telegram: ${record.request.title}`,
+          record.threadId,
+        )
+        .catch(() => undefined);
+      followUp(record.id);
+      return { kind: "sent", record };
+    });
+
+  return {
+    ask,
+    tick,
+    lookup,
+    decideFromMessenger,
+    readStore: () => readStore(deps.stateDir),
+  };
 }
 
 export type Outgoing = ReturnType<typeof makeOutgoing>;

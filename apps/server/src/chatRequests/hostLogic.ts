@@ -18,7 +18,9 @@ import {
   CHAT_REQUEST_WAIT_MS,
   CHAT_REQUESTS_AT_ONCE,
   ChatRequestFile,
+  ChatRequestRemoteDecision,
   type ChatRequestAnswer,
+  type ChatRequestDecidedVia,
   type ChatRequestFrom,
   type ChatRequestStatus,
   type ChatRequestsHostState,
@@ -62,23 +64,33 @@ export interface HostRecord {
   readonly threadState: string | null;
   readonly lastMessage: string | null;
   readonly threadUpdatedAt: string | null;
+  /** Started / declined: pressed here or in the person's Telegram (absent: here). */
+  readonly decidedVia?: ChatRequestDecidedVia;
 }
 
 export interface HostStore {
   readonly v: 1;
-  /** The person's switch (Settings → Computer). */
+  /** The person's switch (Settings → Computer). Off until they turn it on. */
   readonly allow: boolean;
+  /** When the person last flipped it: an `allow` without it is the old default, so off. */
+  readonly allowSetAt?: string;
   readonly records: ReadonlyArray<HostRecord>;
   /** Chats started this way: held to the rules for good (CommandGuardPolicy). */
   readonly guarded: ReadonlyArray<string>;
 }
 
 /**
- * On by default: nothing starts without the person's Start, it only works
- * once they connected this computer to their cloud themselves, and 2 at once
- * at most.
+ * Off by default (Misha 20.11: "по умолчанию выключено, Миша включит у
+ * себя"): requests are refused at once, with where to turn it on, until the
+ * person turns it on in Settings → Computer here.
  */
-export const EMPTY_HOST_STORE: HostStore = { v: 1, allow: true, records: [], guarded: [] };
+export const EMPTY_HOST_STORE: HostStore = { v: 1, allow: false, records: [], guarded: [] };
+
+/**
+ * A Start / Decline from the person's Telegram older than this when Uno Work
+ * here reads it (it was closed): dropped, never run late.
+ */
+export const REMOTE_DECISION_FRESH_MS = 2 * 60 * 1000;
 
 const iso = (ms: number) => new Date(ms).toISOString();
 const ms = (value: string) => {
@@ -87,7 +99,7 @@ const ms = (value: string) => {
 };
 
 export const REASONS = {
-  off: "The person turned off chat requests on that computer (Settings → Computer). Don't ask again; tell them if it matters.",
+  off: "Chat requests are off on that computer: they are off until the person turns them on in Uno Work there (Settings → Computer → Chats from the cloud). Don't ask again; if it matters, tell the person in one line where to turn it on.",
   busy: `${CHAT_REQUESTS_AT_ONCE} requests are already waiting or working on that computer. Try again when one of them is done.`,
   harness:
     "Only Claude Code chats can be started there for now (they are held to the rules there). Leave provider out, or use claudeAgent.",
@@ -96,6 +108,7 @@ export const REASONS = {
   declined: "The person declined it.",
   turnedOff: "The person turned off chat requests on that computer while it was waiting.",
   duplicate: "A request with this id was already there.",
+  declinedInTelegram: "The person declined it (in Telegram).",
 } as const;
 
 const decodeFile = Schema.decodeUnknownExit(ChatRequestFile);
@@ -273,7 +286,7 @@ export function setAllow(
   allow: boolean,
   nowMs: number,
 ): { readonly store: HostStore; readonly changed: ReadonlyArray<HostRecord> } {
-  let next: HostStore = { ...store, allow };
+  let next: HostStore = { ...store, allow, allowSetAt: iso(nowMs) };
   const changed: Array<HostRecord> = [];
   if (!allow) {
     for (const entry of store.records) {
@@ -306,10 +319,23 @@ export function checkDecidable(store: HostStore, id: string, nowMs: number): Dec
   return { ok: true, record: entry };
 }
 
-export function declined(store: HostStore, id: string, nowMs: number) {
+export function declined(
+  store: HostStore,
+  id: string,
+  nowMs: number,
+  via: ChatRequestDecidedVia = "here",
+) {
   const entry = store.records.find((candidate) => candidate.id === id);
   if (entry === undefined) return { store, record: null };
-  const next = finish(entry, "declined", REASONS.declined, nowMs);
+  const next: HostRecord = {
+    ...finish(
+      entry,
+      "declined",
+      via === "telegram" ? REASONS.declinedInTelegram : REASONS.declined,
+      nowMs,
+    ),
+    decidedVia: via,
+  };
   return { store: replace(store, next), record: next };
 }
 
@@ -319,11 +345,13 @@ export function started(
   id: string,
   thread: { readonly threadId: string; readonly title: string },
   nowMs: number,
+  via: ChatRequestDecidedVia = "here",
 ) {
   const entry = store.records.find((candidate) => candidate.id === id);
   if (entry === undefined) return { store, record: null };
   const next: HostRecord = {
     ...finish(entry, "started", null, nowMs),
+    decidedVia: via,
     threadId: thread.threadId,
     threadTitle: thread.title,
     threadUpdatedAt: iso(nowMs),
@@ -404,6 +432,7 @@ export function answerOf(entry: HostRecord): ChatRequestAnswer {
     reason: entry.reason,
     updatedAt: entry.updatedAt,
     decidedAt: entry.decidedAt,
+    ...(entry.decidedVia ? { decidedVia: entry.decidedVia } : {}),
     thread:
       entry.threadId === null
         ? null
@@ -431,6 +460,7 @@ export function viewOf(entry: HostRecord): ChatRequestView {
     gist: entry.gist,
     brief: entry.brief,
     reason: entry.reason,
+    ...(entry.decidedVia ? { decidedVia: entry.decidedVia } : {}),
     threadId: entry.threadId,
     threadState: entry.threadState,
   };
@@ -493,5 +523,26 @@ export function parseHostStore(raw: unknown): HostStore {
   const guarded = Array.isArray(value["guarded"])
     ? (value["guarded"] as Array<unknown>).filter((id): id is string => typeof id === "string")
     : [];
-  return { v: 1, allow: value["allow"] !== false, records, guarded };
+  // On only when the person turned it on: a store from before 0.0.190
+  // carries the old default (`allow: true` with no `allowSetAt`), so it is off.
+  const allowSetAt = typeof value["allowSetAt"] === "string" ? value["allowSetAt"] : null;
+  return {
+    v: 1,
+    allow: value["allow"] === true && allowSetAt !== null,
+    ...(allowSetAt !== null ? { allowSetAt } : {}),
+    records,
+    guarded,
+  };
+}
+
+const decodeRemoteDecision = Schema.decodeUnknownOption(ChatRequestRemoteDecision);
+
+/** A `decisions/<id>.json` as read: the decision, or null when it isn't one. */
+export function parseRemoteDecision(
+  raw: unknown,
+  fileId: string,
+): ChatRequestRemoteDecision | null {
+  const decoded = decodeRemoteDecision(raw);
+  if (decoded._tag === "None" || decoded.value.id !== fileId) return null;
+  return decoded.value;
 }
