@@ -285,6 +285,25 @@ function stripNullDefaults(value: typeof Schema.Json.Type): typeof Schema.Json.T
   ) as typeof Schema.Json.Type;
 }
 
+/**
+ * Enums codex keeps growing between releases while UPSTREAM_REF stays put.
+ * The installed CLI updates itself, so a closed enum here turns its next new
+ * value into a failed decode: 20.11 codex 0.167.2 added "audio" to
+ * `inputModalities`, `model/list` stopped decoding and Work told signed-in
+ * people "Sign in needed". These definitions decode as plain strings.
+ */
+const OPEN_STRING_ENUMS: ReadonlyArray<string> = ["V2ModelListResponse__InputModality"];
+
+function openStringEnum(name: string, value: typeof Schema.Json.Type): typeof Schema.Json.Type {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || !("enum" in value)) {
+    throw new Error(
+      `Open enum ${name} is no longer an enum upstream: drop it from OPEN_STRING_ENUMS`,
+    );
+  }
+  const { enum: _closedValues, ...rest } = value as Record<string, typeof Schema.Json.Type>;
+  return { ...rest, type: "string" };
+}
+
 function toPascalCaseMethod(method: string) {
   return method
     .split("/")
@@ -594,6 +613,14 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
     if (!(name in aggregateSchemas)) {
       aggregateSchemas[name] = stripNullDefaults(normalizeNullableTypes(schema));
     }
+  }
+
+  for (const name of OPEN_STRING_ENUMS) {
+    const schema = aggregateSchemas[name];
+    if (schema === undefined) {
+      throw new Error(`Open enum ${name} is missing upstream: drop it from OPEN_STRING_ENUMS`);
+    }
+    aggregateSchemas[name] = openStringEnum(name, schema);
   }
 
   const generator = makeJsonSchemaGenerator();

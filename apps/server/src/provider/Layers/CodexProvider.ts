@@ -319,12 +319,31 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     } satisfies CodexAppServerProviderSnapshot;
   }
 
+  // The account is known by now. A model or skill list we cannot read (a newer
+  // codex adds a field value our schema lacks: 20.11 codex 0.167.2 sent
+  // `inputModalities: ["text","image","audio"]`) must not throw that away: the
+  // whole probe used to fail and a signed-in person saw "Sign in needed".
   const [skillsResponse, models] = yield* Effect.all(
     [
-      client.request("skills/list", {
-        cwds: [input.cwd],
-      }),
-      requestAllCodexModels(client),
+      client
+        .request("skills/list", {
+          cwds: [input.cwd],
+        })
+        .pipe(
+          Effect.map((response): CodexSchema.V2SkillsListResponse | null => response),
+          Effect.catch((error) =>
+            Effect.logWarning("codex probe: skills/list unreadable", { error: error.message }).pipe(
+              Effect.as(null),
+            ),
+          ),
+        ),
+      requestAllCodexModels(client).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("codex probe: model/list unreadable", { error: error.message }).pipe(
+            Effect.as([] as ServerProviderModel[]),
+          ),
+        ),
+      ),
     ],
     { concurrency: "unbounded" },
   );
@@ -334,7 +353,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
     authMethod,
     version,
     models: appendCustomCodexModels(models, input.customModels ?? []),
-    skills: parseCodexSkillsListResponse(skillsResponse, input.cwd),
+    skills: skillsResponse ? parseCodexSkillsListResponse(skillsResponse, input.cwd) : [],
   } satisfies CodexAppServerProviderSnapshot;
 }, scopedSafeTeardown("codex-probe"));
 

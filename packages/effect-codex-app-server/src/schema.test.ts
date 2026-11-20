@@ -31,4 +31,28 @@ describe("effect-codex-app-server schema", () => {
     const result = Schema.decodeUnknownResult(CodexSchema.V2ModelListResponse)(payload);
     assert.isTrue(Result.isSuccess(result));
   });
+
+  // 20.11: codex 0.167.2 advertises "audio" (and later CLIs may add more);
+  // the closed "text" | "image" union failed the whole probe and showed
+  // signed-in people "Sign in needed".
+  it("decodes model/list payloads with input modalities beyond text and image", () => {
+    const payload = {
+      data: [
+        {
+          id: "gpt-6",
+          model: "gpt-6",
+          displayName: "GPT-6",
+          description: "",
+          hidden: false,
+          isDefault: true,
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "" }],
+          inputModalities: ["text", "image", "audio"],
+        },
+      ],
+    };
+
+    const result = Schema.decodeUnknownResult(CodexSchema.V2ModelListResponse)(payload);
+    assert.isTrue(Result.isSuccess(result));
+  });
 });

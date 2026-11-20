@@ -4404,8 +4404,8 @@ export const V2McpServerStatusUpdatedNotification__McpServerStartupState = Schem
   "cancelled",
 ]);
 
-export type V2ModelListResponse__InputModality = "text" | "image";
-export const V2ModelListResponse__InputModality = Schema.Literals(["text", "image"]).annotate({
+export type V2ModelListResponse__InputModality = string;
+export const V2ModelListResponse__InputModality = Schema.String.annotate({
   description: "Canonical user-input modality tags advertised by a model.",
 });
 
