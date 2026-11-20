@@ -16,11 +16,12 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { accountRequest, accountTransport } from "../../../account/unoAccount";
 import { useComposerDraftStore } from "../../../composerDraftStore";
 import { usePrimaryEnvironmentId } from "../../../environments/primary";
-import { useSettings } from "../../../hooks/useSettings";
+import { useSettings, useUpdateSettings } from "../../../hooks/useSettings";
 import { cn } from "../../../lib/utils";
 import { resolveAppModelSelectionForInstance } from "../../../modelSelection";
 import { pickUsableDefaultModelSelection } from "../../../providerModels";
 import { useServerProviders } from "../../../rpc/serverState";
+import { autoNewChatSelection } from "../../computer/home/homeStartModel";
 import { HarnessSignInPanel } from "../../harness/HarnessSignInDialog";
 import { OpenCodeKeyForm } from "../../harness/OpenCodeKeyForm";
 import {
@@ -126,6 +127,7 @@ export function AiStep() {
   const { completeStep } = useSetupNavigation();
   const stickyActive = useComposerDraftStore((store) => store.stickyActiveProvider);
   const setSticky = useComposerDraftStore((store) => store.setStickyModelSelection);
+  const { updateSettings } = useUpdateSettings();
 
   const initial = (AI_ROWS.find((row) => row.id === stickyActive)?.id ?? "uno") as AiId;
   const [picked, setPicked] = useState<AiId>(initial);
@@ -175,12 +177,19 @@ export function AiStep() {
             ),
           )
         : null;
-    if (builtIn) {
-      setSticky(builtIn);
-    } else {
-      const instanceId = ProviderInstanceId.make(picked);
-      const model = resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
-      if (model) setSticky({ instanceId, model });
+    const instanceId = ProviderInstanceId.make(picked);
+    const model = builtIn
+      ? null
+      : resolveAppModelSelectionForInstance(instanceId, settings, providers, null);
+    const selection = builtIn ?? (model ? { instanceId, model } : null);
+    if (selection) {
+      setSticky(selection);
+      // Auto (Settings → AI "Default model", 13.11 v2) would start new chats
+      // on another plan of theirs signed in here: the pick becomes the default.
+      const auto = autoNewChatSelection(providers);
+      if (auto && auto.instanceId !== selection.instanceId && !settings.newChatModelSelection) {
+        void updateSettings({ newChatModelSelection: selection });
+      }
     }
     void completeStep("ai");
   };

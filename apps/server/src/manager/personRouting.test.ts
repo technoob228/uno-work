@@ -1,8 +1,21 @@
 import { ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { LEGACY_NO_CLAUDE_NOTE, ROUTING_TEMPLATE, upgradeRoutingNotes } from "./routingTemplate.ts";
-import { applyPersonRoute, selectionNotReadyMessage } from "./personRouting.ts";
+import {
+  LEGACY_NO_CLAUDE_NOTE,
+  PERSON_FIRST_NOTE,
+  PERSON_FIRST_NOTE_1029,
+  ROUTING_TEMPLATE,
+  upgradeRoutingNotes,
+} from "./routingTemplate.ts";
+import {
+  applyPersonRoute,
+  applyTableRoute,
+  defaultModelChoice,
+  isReadyForChat,
+  selectionNotReadyMessage,
+  strongestReadyModelSelection,
+} from "./personRouting.ts";
 
 const provider = (
   driver: string,
@@ -136,6 +149,97 @@ describe("selectionNotReadyMessage (any chat an assistant starts)", () => {
   });
 });
 
+describe("applyTableRoute (a default / learned row)", () => {
+  const hardBugs = {
+    harness: "claudeAgent",
+    model: "claude-opus-5-5",
+    thinking: "max" as const,
+    taskType: "Hard bugs",
+  };
+
+  it("its harness ready here: used as the row says", () => {
+    expect(
+      applyTableRoute({
+        route: hardBugs,
+        providers: [provider("claudeAgent", {}, ["claude-opus-5-5"])],
+      }),
+    ).toEqual({
+      instanceId: "claudeAgent",
+      model: "claude-opus-5-5",
+      options: [{ id: "effort", value: "max" }],
+    });
+  });
+
+  it("not ready (or Uno credits not allowed): no error, the next step decides", () => {
+    expect(
+      applyTableRoute({
+        route: hardBugs,
+        providers: [provider("claudeAgent", { auth: { status: "unauthenticated" } })],
+      }),
+    ).toBeNull();
+    expect(
+      applyTableRoute({
+        route: hardBugs,
+        providers: [
+          provider("claudeAgent", { auth: { status: "authenticated", type: "unoAi" } }, [
+            "claude-opus-5-5",
+          ]),
+        ],
+      }),
+    ).toBeNull();
+    expect(applyTableRoute({ route: null, providers: [provider("claudeAgent")] })).toBeNull();
+  });
+});
+
+describe("strongestReadyModelSelection (replaces the account's onboarding AI)", () => {
+  it("account 2709: Codex listing Luna first runs on Terra, Claude ready wins over both", () => {
+    const codex = provider("codex", {}, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
+    expect(strongestReadyModelSelection([codex])).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.6-terra",
+    });
+    expect(
+      strongestReadyModelSelection([codex, provider("claudeAgent", {}, ["claude-opus-5-5"])]),
+    ).toEqual({ instanceId: "claudeAgent", model: "claude-opus-5-5" });
+  });
+
+  it("12.11: Codex installed but nobody signed in is not ready, Auto never picks it", () => {
+    const terra = ["gpt-5.6-luna", "gpt-5.6-terra"];
+    // No ChatGPT account: the CLI says "ready" with auth "unknown"…
+    const noAccount = provider("codex", { auth: { status: "unknown" } }, terra);
+    // …or "error" + "unauthenticated" when it asks for `codex login`.
+    const loggedOut = provider(
+      "codex",
+      { status: "error", auth: { status: "unauthenticated" }, message: "Run `codex login`" },
+      terra,
+    );
+    for (const codex of [noAccount, loggedOut]) {
+      expect(isReadyForChat(codex)).toBe(false);
+      expect(strongestReadyModelSelection([codex])).toBeNull();
+      expect(strongestReadyModelSelection([codex, provider("uno", {}, ["uno/smart"])])).toBeNull();
+      expect(
+        selectionNotReadyMessage({ instanceId: codex.instanceId, model: "gpt-5.6-terra" }, [codex]),
+      ).toContain("Codex is not signed in");
+    }
+    // Signed in with an API key: ready.
+    const apiKey = provider("codex", { auth: { status: "authenticated", type: "apiKey" } }, terra);
+    expect(strongestReadyModelSelection([apiKey])?.model).toBe("gpt-5.6-terra");
+  });
+
+  it("Claude on Uno credits counts only when allowed here", () => {
+    const claudeOnUno = provider(
+      "claudeAgent",
+      { auth: { status: "authenticated", type: "unoAi" } },
+      ["claude-opus-5-5"],
+    );
+    expect(strongestReadyModelSelection([claudeOnUno])).toBeNull();
+    expect(strongestReadyModelSelection([claudeOnUno], { claudeAgent: true })).toEqual({
+      instanceId: "claudeAgent",
+      model: "claude-opus-5-5",
+    });
+  });
+});
+
 describe("ROUTING notes upgrade", () => {
   it("the shipped template has no silent Smart fallback", () => {
     expect(ROUTING_TEMPLATE).not.toContain(LEGACY_NO_CLAUDE_NOTE);
@@ -143,13 +247,46 @@ describe("ROUTING notes upgrade", () => {
   });
 
   it("an untouched old note is replaced, an edited file is left alone", () => {
-    const old = ROUTING_TEMPLATE.replace(
-      /- The person's word wins[\s\S]*?say which model in your one line\.\n/,
-      `${LEGACY_NO_CLAUDE_NOTE}\n`,
-    );
+    const old = ROUTING_TEMPLATE.replace(PERSON_FIRST_NOTE, LEGACY_NO_CLAUDE_NOTE);
     expect(old).toContain(LEGACY_NO_CLAUDE_NOTE);
     expect(upgradeRoutingNotes(old)).toBe(ROUTING_TEMPLATE);
     expect(upgradeRoutingNotes(ROUTING_TEMPLATE)).toBeNull();
     expect(upgradeRoutingNotes(old.replace("uno/uno/smart", "uno/uno/max"))).toBeNull();
+  });
+
+  it("the 29.10 note (Smart for a default row not ready) becomes the strongest-ready one", () => {
+    const old1029 = ROUTING_TEMPLATE.replace(PERSON_FIRST_NOTE, PERSON_FIRST_NOTE_1029);
+    expect(old1029).toContain("uno/uno/smart");
+    expect(upgradeRoutingNotes(old1029)).toBe(ROUTING_TEMPLATE);
+    expect(ROUTING_TEMPLATE).not.toContain("uno/uno/smart");
+  });
+});
+
+describe('defaultModelChoice (Settings → AI "Default model", 13.11 v2)', () => {
+  const terra = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+  const codex = provider("codex", {}, ["gpt-5.6-luna", "gpt-5.6-terra"]);
+
+  it("is the person's pick when its harness is ready and lists the model", () => {
+    expect(defaultModelChoice(terra, [codex])).toEqual(terra);
+  });
+
+  it("Auto (null), a harness not ready or a model gone: null, so Auto decides", () => {
+    expect(defaultModelChoice(null, [codex])).toBeNull();
+    expect(
+      defaultModelChoice(terra, [provider("codex", { auth: { status: "unauthenticated" } })]),
+    ).toBeNull();
+    expect(defaultModelChoice(terra, [provider("codex", {}, ["gpt-5.6-luna"])])).toBeNull();
+    expect(defaultModelChoice(terra, [])).toBeNull();
+  });
+
+  it("Claude Code on Uno credits only when they're allowed here", () => {
+    const opus = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" };
+    const onCredits = provider(
+      "claudeAgent",
+      { auth: { status: "authenticated", type: "unoAi" } },
+      ["claude-opus-5-5"],
+    );
+    expect(defaultModelChoice(opus, [onCredits])).toBeNull();
+    expect(defaultModelChoice(opus, [onCredits], { claudeAgent: true })).toEqual(opus);
   });
 });

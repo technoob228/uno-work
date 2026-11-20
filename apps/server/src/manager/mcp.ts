@@ -327,7 +327,7 @@ export const MANAGER_MCP_TOOLS: ReadonlyArray<ToolDefinition> = [
         modelSelection: {
           type: "object",
           description:
-            "Optional {instanceId, model}. The person's routing rows (Source `you` in ROUTING.md) win over it unless personAsked; without either it runs on the person's default AI, else the project's model. A harness their rows name that isn't ready here fails with a line to ask them — never start it on another model yourself.",
+            "Optional {instanceId, model}. The person's routing rows (Source `you` in ROUTING.md) win over it unless personAsked; without either it runs on the table's own row for the task type when that harness is ready here, else on the strongest ready model (Claude Opus → Codex GPT-5.6 Terra / Sol / GPT-5.5 → Uno AI premium), else the project's model. A harness their rows name that isn't ready here fails with a line to ask them — never start it on another model yourself.",
           properties: { instanceId: { type: "string" }, model: { type: "string" } },
           required: ["instanceId", "model"],
         },

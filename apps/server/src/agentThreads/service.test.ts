@@ -6,6 +6,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThread,
   type OrchestrationThreadShell,
+  type ModelSelection,
   type ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -14,12 +15,17 @@ import {
 } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option } from "effect";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as nodePath from "node:path";
 import { describe } from "vitest";
 
 import type { AssistantAccessView } from "../assistants/assistantAccess.ts";
 import type { BridgeAuthorization } from "../browserBridge.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import type { OrchestrationDispatchError } from "../orchestration/Errors.ts";
+import { strongestReadyModelSelection } from "../manager/personRouting.ts";
+import { ROUTING_TEMPLATE } from "../manager/routingTemplate.ts";
 import { AGENTS_CLOSED_MESSAGE, HUMAN_ACTIVE_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
 import {
   type AgentThreadsRemoteDeps,
@@ -131,6 +137,9 @@ function makeFixture(options?: {
   /** Thread every project inherits its modes from (default: none). */
   readonly inheritModesFrom?: ThreadId;
   readonly remote?: AgentThreadsRemoteDeps;
+  readonly providers?: ReadonlyArray<ServerProvider>;
+  readonly personalDefault?: Effect.Effect<ModelSelection | null>;
+  readonly defaultModelSelection?: ModelSelection | null;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -211,7 +220,11 @@ function makeFixture(options?: {
               ),
           }
         : {}),
-    getProviders: Effect.succeed(providers),
+    getProviders: Effect.succeed(options?.providers ?? providers),
+    ...(options?.personalDefault ? { personalDefault: options.personalDefault } : {}),
+    ...(options?.defaultModelSelection !== undefined
+      ? { getDefaultModelSelection: Effect.succeed(options.defaultModelSelection) }
+      : {}),
     ...(options?.remote ? { remote: options.remote } : {}),
     pollIntervalMs: 1_000,
     nowMs: () => clock,
@@ -1138,6 +1151,200 @@ describe("agent threads bridge: the assistant's project scope (0.0.85)", () => {
       const { handlers } = makeFixture({ scope: "own-project", assistantAllowlist: "all" });
       const list = yield* handlers.listThreads(scoped(), { scope: "all" });
       assert.strictEqual(list.status, 403);
+    }),
+  );
+});
+
+/** The model the first dispatched command (thread.create) carries. */
+const startedOn = (dispatched: Fixture["dispatched"]) =>
+  (dispatched[0]?.command as { modelSelection?: unknown } | undefined)?.modelSelection;
+
+describe("agent threads bridge: which model an assistant's chat runs on (13.11)", () => {
+  const ASSISTANT_HOME = "assistant-home" as ProjectId;
+  const harness = (
+    driver: string,
+    slugs: ReadonlyArray<string>,
+    auth: ServerProvider["auth"] = { status: "authenticated" },
+  ): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(driver),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: "1",
+    status: "ready",
+    auth,
+    checkedAt: T0,
+    models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    slashCommands: [],
+    skills: [],
+  });
+  // Account 2709: Codex lists Luna first and no gpt-5.4.
+  const codex = harness("codex", ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]);
+  const claude = harness("claudeAgent", ["claude-sonnet-5-5", "claude-opus-5-5"]);
+  const claudeSignedOut = harness("claudeAgent", ["claude-opus-5-5"], {
+    status: "unauthenticated",
+  });
+
+  const fixture = (
+    list: ReadonlyArray<ServerProvider>,
+    defaultModelSelection: ModelSelection | null = null,
+  ) => {
+    const root = fs.mkdtempSync(nodePath.join(os.tmpdir(), "routing-"));
+    fs.writeFileSync(nodePath.join(root, "ROUTING.md"), ROUTING_TEMPLATE);
+    return makeFixture({
+      scope: "own-project",
+      assistantAllowlist: "all",
+      providers: list,
+      defaultModelSelection,
+      personalDefault: Effect.succeed(strongestReadyModelSelection(list)),
+      projects: [projectShell(ASSISTANT_HOME, { workspaceRoot: root }), projectShell(OWN_PROJECT)],
+      threads: [threadShell(CALLER, { projectId: ASSISTANT_HOME })],
+    });
+  };
+
+  it.effect("a default row whose harness is ready decides the task type", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codex, claude]);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+        taskType: "Hard bugs, architecture",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "claudeAgent",
+        model: "claude-opus-5-5",
+        options: [{ id: "effort", value: "max" }],
+      });
+    }),
+  );
+
+  it.effect("default row not ready, nothing named: the strongest ready, never Luna", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codex, claudeSignedOut]);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+        taskType: "Hard bugs, architecture",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "codex",
+        model: "gpt-5.6-terra",
+      });
+    }),
+  );
+
+  it.effect("the person's Default model (Settings → AI) beats the table's starting rows", () =>
+    Effect.gen(function* () {
+      const terra = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+      const { handlers, dispatched } = fixture([codex, claude], terra);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+        taskType: "Hard bugs, architecture",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), terra);
+    }),
+  );
+
+  it.effect("a Default model that can't run here now: Auto decides, the chat still starts", () =>
+    Effect.gen(function* () {
+      const opus = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" };
+      const { handlers, dispatched } = fixture([codex, claudeSignedOut], opus);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "codex",
+        model: "gpt-5.6-terra",
+      });
+    }),
+  );
+
+  it.effect("Codex named without a model: its strongest, not the first listed", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codex, claude]);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        projectId: OWN_PROJECT,
+        provider: "codex",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "codex",
+        model: "gpt-5.6-terra",
+      });
+    }),
+  );
+});
+
+describe("agent threads bridge: a chat nobody chose a model for (12.11)", () => {
+  const harness = (
+    driver: string,
+    slugs: ReadonlyArray<string>,
+    auth: ServerProvider["auth"],
+  ): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(driver),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: "1",
+    status: "ready",
+    auth,
+    checkedAt: T0,
+    models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    slashCommands: [],
+    skills: [],
+  });
+  // Codex installed, no ChatGPT account: the CLI answers "ready", auth "unknown".
+  const codexNoAccount = harness("codex", ["gpt-5.6-luna", "gpt-5.6-terra"], {
+    status: "unknown",
+  });
+  const claude = harness("claudeAgent", ["claude-opus-5-5"], { status: "authenticated" });
+  const onCodex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+  const fixture = (list: ReadonlyArray<ServerProvider>) =>
+    makeFixture({
+      providers: list,
+      personalDefault: Effect.succeed(strongestReadyModelSelection(list)),
+      threads: [threadShell(CALLER, { modelSelection: onCodex })],
+    });
+
+  it.effect("no provider, its default on Codex nobody signed in to: Auto, not Codex", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount, claude]);
+      const created = yield* handlers.createThread(scoped(), { text: "Fix the crash" });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), {
+        instanceId: "claudeAgent",
+        model: "claude-opus-5-5",
+      });
+    }),
+  );
+
+  it.effect("nothing ready here: not started (409), instead of a chat that hangs", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount]);
+      const created = yield* handlers.createThread(scoped(), { text: "Fix the crash" });
+      assert.strictEqual(created.status, 409);
+      assert.strictEqual(body(created).error, "harness_not_ready");
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("Codex asked for by name stays the caller's choice", () =>
+    Effect.gen(function* () {
+      const { handlers, dispatched } = fixture([codexNoAccount, claude]);
+      const created = yield* handlers.createThread(scoped(), {
+        text: "Fix the crash",
+        provider: "codex",
+        model: "gpt-5.6-terra",
+      });
+      assert.strictEqual(created.status, 200);
+      assert.deepStrictEqual(startedOn(dispatched), onCodex);
     }),
   );
 });

@@ -1,12 +1,13 @@
 /**
  * The model Home's composer starts a chat on, before the person picks one:
- * exactly what "New chat" would give now — the person's "New chats start on"
- * (Settings → AI) when it can run here, else the model last picked in any
- * chat composer (the draft store's sticky pick) when that harness is still
- * there, else Claude Code when the person's Claude plan is signed in here,
- * else the machine's usable default (the Uno gateway on a fresh Work box). A
- * harness not signed in on this computer is skipped: a new chat on it opens
- * straight into "Sign in to Codex" (Misha 18.10, uno-product).
+ * exactly what "New chat" would give now — Settings → AI "Default model"
+ * when it is set and can run here; on Auto, the strongest model on the
+ * person's own Claude or ChatGPT plan signed in here (13.11 v2); with no plan
+ * of theirs, as before: the model last picked in any chat composer (the draft
+ * store's sticky pick) when that harness is still there, else the machine's
+ * usable default (the Uno gateway on a fresh Work box). A harness not signed
+ * in on this computer is skipped: a new chat on it opens straight into "Sign
+ * in to Codex" (Misha 18.10, uno-product).
  */
 import type {
   ModelSelection,
@@ -17,6 +18,7 @@ import type {
 import { UNO_SMART_GATEWAY_MODEL } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { resolveSelectableModel } from "@t3tools/shared/model";
+import { strongestReadySelection } from "@t3tools/shared/modelStrength";
 
 import {
   getAppModelOptionsForInstance,
@@ -78,6 +80,29 @@ export function newChatModelSelection(input: {
     if (usable) return usable;
   }
   return null;
+}
+
+/**
+ * Settings → AI "Default model" on Auto (13.11 v2): the strongest model on
+ * the person's own plan signed in here — Claude Opus on their Claude plan,
+ * else GPT-5.6 Terra (Sol, 5.5, 5.4) on their ChatGPT plan; the same order
+ * the server uses for the assistant's work (shared/modelStrength.ts). It
+ * beats the model last picked in a chat: a pick in a chat is that chat's
+ * own. Null when no plan of theirs is signed in here (Uno AI only): new
+ * chats then start as before — premium Uno AI is never a new chat's default.
+ */
+export function autoNewChatSelection(
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection | null {
+  const strongest = strongestReadySelection(
+    providers,
+    (provider) =>
+      provider.enabled &&
+      signedInWithOwnAccount(provider) &&
+      provider.auth.type !== undefined &&
+      provider.auth.type !== "apiKey",
+  );
+  return strongest !== null && strongest.tier !== "uno-premium" ? strongest.selection : null;
 }
 
 /** OpenCode's Smart: the gateway's `uno/smart` under OpenCode's `uno` provider. */
@@ -175,6 +200,18 @@ export function homeStartModelSelection(input: {
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
+  // OpenCode picked before Work: the person's own word, kept first.
+  const openCodeFirst = input.ownAgent?.openCodeFirst
+    ? ownAgentStartSelection({
+        picked: input.ownAgent.picked,
+        providers: input.providers,
+        settings: input.settings,
+        openCodeFirst: true,
+      })
+    : null;
+  if (openCodeFirst) return openCodeFirst;
+  const auto = autoNewChatSelection(input.providers);
+  if (auto) return auto;
   const active = input.stickyActiveProvider;
   if (active) {
     const sticky = input.stickyModelSelectionByProvider[active];
@@ -232,6 +269,17 @@ export function newThreadStartSelection(input: {
 }): ModelSelection | null {
   const chosen = newChatModelSelection(input);
   if (chosen) return chosen;
+  if (input.ownAgent?.openCodeFirst && input.stickyActiveProvider === null) {
+    const openCode = ownAgentStartSelection({
+      picked: input.ownAgent.picked,
+      providers: input.providers,
+      settings: input.settings,
+      openCodeFirst: true,
+    });
+    if (openCode) return openCode;
+  }
+  const auto = autoNewChatSelection(input.providers);
+  if (auto) return auto;
   if (input.ownAgent && input.stickyActiveProvider === null) {
     const ownAgent = ownAgentStartSelection({
       picked: input.ownAgent.picked,

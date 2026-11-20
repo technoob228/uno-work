@@ -585,9 +585,11 @@ export function buildClaudeModelList(input: {
   for (const model of CLAUDE_FALLBACK_MODELS) {
     const fromCli = listed.get(model.slug);
     if (!fromCli && !meetsMinimumVersion(model.slug, input.version)) continue;
-    models.push(
-      fromCli && fromCli.aliases.length > 0 ? { ...model, aliases: fromCli.aliases } : model,
-    );
+    models.push({
+      ...model,
+      ...(fromCli && fromCli.aliases.length > 0 ? { aliases: fromCli.aliases } : {}),
+      ...(fromCli?.isCliDefault ? { isDefault: true } : {}),
+    });
   }
   for (const fromCli of listed.values()) {
     if (FALLBACK_BY_SLUG.has(fromCli.slug)) continue;
@@ -597,6 +599,7 @@ export function buildClaudeModelList(input: {
       isCustom: false,
       capabilities: capabilitiesForListedModel(fromCli),
       ...(fromCli.aliases.length > 0 ? { aliases: fromCli.aliases } : {}),
+      ...(fromCli.isCliDefault ? { isDefault: true } : {}),
     });
   }
 

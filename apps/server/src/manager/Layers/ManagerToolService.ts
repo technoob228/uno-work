@@ -49,7 +49,13 @@ import {
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 import { ManagerApprovalService } from "../Services/ManagerApprovalService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
-import { applyPersonRoute, readPersonRoute, selectionNotReadyMessage } from "../personRouting.ts";
+import {
+  applyPersonRoute,
+  applyTableRoute,
+  defaultModelChoice,
+  readRoutingRoutes,
+  selectionNotReadyMessage,
+} from "../personRouting.ts";
 import { wrapUntrustedContent } from "../../untrustedContent.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { checkTargetComputer, ownBoxIdFromSettings } from "../../assistants/targetComputer.ts";
@@ -243,33 +249,42 @@ const makeManagerToolService = Effect.gen(function* () {
         .getProjectShellById(assistantProjectId)
         .pipe(Effect.orElseSucceed(() => Option.none()));
       if (Option.isNone(assistantProject)) return requested;
-      const route = yield* Effect.promise(() =>
-        readPersonRoute(assistantProject.value.workspaceRoot, input.taskType),
+      const routes = yield* Effect.promise(() =>
+        readRoutingRoutes(assistantProject.value.workspaceRoot, input.taskType),
       );
+      const providers = yield* providerRegistry.getProviders;
+      const settings =
+        settingsService === null
+          ? null
+          : yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
+      const harnessUnoCredits = settings?.harnessUnoCredits ?? {};
       const routed = applyPersonRoute({
-        route,
+        route: routes.person,
         requested,
         personAsked: input.personAsked === true,
-        providers: yield* providerRegistry.getProviders,
+        providers,
       });
       if (routed.kind === "not-ready") {
         return yield* new ManagerInvalidRequestError({ detail: routed.message });
       }
-      const selection = routed.kind === "selection" ? routed.selection : requested;
+      // Nothing named: the person's Default model (Settings → AI) when its
+      // harness is ready here, then the table's own row; still null → the
+      // strongest ready model (ManagerApprovalService) — the app's "Auto".
+      const selection =
+        routed.kind === "selection"
+          ? routed.selection
+          : (requested ??
+            defaultModelChoice(
+              settings?.defaultModelSelection ?? null,
+              providers,
+              harnessUnoCredits,
+            ) ??
+            applyTableRoute({ route: routes.table, providers, harnessUnoCredits }));
       // Not started on a harness that can't take it here: the model asks.
       const notReady =
         selection === null
           ? null
-          : selectionNotReadyMessage(
-              selection,
-              yield* providerRegistry.getProviders,
-              settingsService === null
-                ? {}
-                : yield* settingsService.getSettings.pipe(
-                    Effect.map((settings) => settings.harnessUnoCredits),
-                    Effect.orElseSucceed(() => ({})),
-                  ),
-            );
+          : selectionNotReadyMessage(selection, providers, harnessUnoCredits);
       if (notReady !== null) return yield* new ManagerInvalidRequestError({ detail: notReady });
       return selection;
     });

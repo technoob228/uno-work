@@ -151,6 +151,7 @@ function parseCodexModelListResponse(
     name: toDisplayName(model),
     isCustom: false,
     capabilities: mapCodexModelCapabilities(model),
+    ...(model.isDefault ? { isDefault: true } : {}),
   }));
 }
 

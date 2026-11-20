@@ -1,5 +1,5 @@
 /**
- * What a new chat starts with: model, access and where it works. Each row
+ * What a new chat starts with: model (the "Default model"), access and where it works. Each row
  * follows the scope sentence, so the same rows serve Settings → AI, a
  * computer's General page and each project's settings.
  *
@@ -10,6 +10,7 @@ import {
   type EnvironmentId,
   type ModelSelection,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import type { ReactNode } from "react";
@@ -24,7 +25,7 @@ import {
 } from "../../plainLanguage";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { useHomeModelPicker } from "../computer/home/HomeComposer";
-import { newChatModelSelection } from "../computer/home/homeStartModel";
+import { autoNewChatSelection, newChatModelSelection } from "../computer/home/homeStartModel";
 import { Explain } from "../Explain";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
@@ -42,16 +43,18 @@ const MIXED_VALUE = "mixed";
 
 const MIXED_LABEL = "Different on each";
 
-/**
- * "New chats start on" (Misha 15.10: "I must be the one who chooses"). Unset —
- * the model last picked in any chat, as before. Set — every new chat in this
- * scope starts on it; a pick inside a chat changes only that chat.
- */
-export function NewChatModelRow({
-  environmentId,
-}: {
-  readonly environmentId: EnvironmentId | null;
-}) {
+/** "Claude Opus 5.5": the model's short name as its harness lists it. */
+export function modelSelectionLabel(
+  providers: ReadonlyArray<ServerProvider>,
+  selection: ModelSelection,
+): string {
+  const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
+  const model = provider?.models.find((entry) => entry.slug === selection.model);
+  return model?.shortName ?? model?.name ?? selection.model;
+}
+
+/** What "Default model" uses here: the scope's choice, Auto, and the select's labels. */
+function useDefaultModelState(environmentId: EnvironmentId | null) {
   const { scope, target, singleComputer } = useSettingsScope();
   const pickerEnvironmentId = target?.environmentId ?? environmentId;
   const picker = useHomeModelPicker(pickerEnvironmentId);
@@ -68,86 +71,135 @@ export function NewChatModelRow({
       projectChoice: effective,
     }) !== null;
   const isProject = scope.kind === "project";
+  const auto = autoNewChatSelection(providers);
+  const autoLabel = auto ? `Auto · ${modelSelectionLabel(providers, auto)}` : "Auto";
   const inheritLabel = isProject
     ? "Same as the computer"
-    : scope.kind === "environment"
+    : scope.kind === "environment" && !singleComputer
       ? "Same as all computers"
-      : "The last one I picked";
-  const shown = effective ?? picker.selection;
+      : autoLabel;
+  const shown = effective ?? auto ?? picker.selection;
+  return {
+    scope,
+    isProject,
+    pickerEnvironmentId,
+    picker,
+    providers,
+    effective,
+    mixed,
+    setHere,
+    usable,
+    auto,
+    inheritLabel,
+    shown,
+    save,
+  };
+}
+
+export type DefaultModelState = ReturnType<typeof useDefaultModelState>;
+export { useDefaultModelState };
+
+/** Auto / "A model I choose" + the model: the control of "Default model" (complex work). */
+export function DefaultModelControl({ state }: { readonly state: DefaultModelState }) {
+  const { mixed, setHere, shown, inheritLabel, effective, picker, pickerEnvironmentId, save } =
+    state;
+  if (!shown) {
+    return <span className="text-xs text-muted-foreground">No AI on this computer yet</span>;
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+      <Select
+        value={mixed ? MIXED_VALUE : setHere ? NEW_CHAT_START_FIXED : NEW_CHAT_START_INHERIT}
+        onValueChange={(value) => {
+          if (value === NEW_CHAT_START_INHERIT) save(null);
+          // Starts on what Auto gives now; the effort stays the chat's.
+          else if (value === NEW_CHAT_START_FIXED && (!setHere || mixed) && shown) {
+            save({ instanceId: shown.instanceId, model: shown.model });
+          }
+        }}
+      >
+        <SelectTrigger
+          className="w-full sm:w-56"
+          aria-label="Default model"
+          data-testid="settings-new-chat-start"
+        >
+          <SelectValue>
+            {mixed ? MIXED_LABEL : setHere ? "A model I choose" : inheritLabel}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectPopup align="end" alignItemWithTrigger={false}>
+          <SelectItem hideIndicator value={NEW_CHAT_START_INHERIT}>
+            {inheritLabel}
+          </SelectItem>
+          <SelectItem hideIndicator value={NEW_CHAT_START_FIXED}>
+            A model I choose
+          </SelectItem>
+        </SelectPopup>
+      </Select>
+      {setHere && effective ? (
+        <ProviderModelPicker
+          compact
+          activeInstanceId={effective.instanceId}
+          model={effective.model}
+          lockedProvider={null}
+          instanceEntries={picker.instanceEntries}
+          environmentId={pickerEnvironmentId}
+          modelOptionsByInstance={picker.modelOptionsByInstance}
+          onInstanceModelChange={(instanceId, model) => save({ instanceId, model })}
+          triggerVariant="outline"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** "Not available on this computer now…" when the chosen model can't run here. */
+export function defaultModelStatus(state: DefaultModelState): string | null {
+  return state.effective && !state.usable
+    ? "Not available on this computer now, so Auto is used here until it is."
+    : null;
+}
+
+/**
+ * "Default model" (13.11 v2, Misha: one setting, not five). The model new
+ * chats, the assistant and the chats it starts, and automations run on; a
+ * pick inside a chat changes only that chat. Auto (unset) — the model the
+ * person's own Claude or ChatGPT CLI recommends here (the app,
+ * `autoNewChatSelection`; the server, personRouting.ts), else Uno AI.
+ *
+ * Same storage as the old "New chats start on" (Misha 15.10): the app's
+ * `newChatModelSelection` and each computer's `defaultModelSelection`, which
+ * the server reads for the assistant's work. This plain row serves a
+ * computer's and a project's settings; Settings → AI shows it by role
+ * (DefaultModelRoles.tsx).
+ */
+export function NewChatModelRow({
+  environmentId,
+}: {
+  readonly environmentId: EnvironmentId | null;
+}) {
+  const state = useDefaultModelState(environmentId);
+  const { setHere, isProject, effective, providers, mixed, scope, save } = state;
   const description: ReactNode = setHere
     ? isProject
-      ? "New chats in this project start on this model. Picking another one inside a chat changes only that chat."
-      : "Every new chat starts on this model. Picking another one inside a chat changes only that chat."
+      ? "New chats in this project and the work your assistant does in it run on this model. Switching the model inside a chat changes only that chat."
+      : "New chats, your assistant and the chats it starts, and automations run on this model. Switching the model inside a chat changes only that chat."
     : effective
-      ? `Inherited: ${effective.model}.`
-      : singleComputer || scope.kind === "all"
-        ? "The model you picked last, in any chat. Or choose one that every new chat starts on."
-        : "The model you picked last, in any chat. Or choose one here.";
+      ? `Inherited: ${modelSelectionLabel(providers, effective)}.`
+      : "New chats, your assistant and the chats it starts, and automations run on it. Auto takes the model your own Claude or ChatGPT recommends; without one, Uno AI. Switching the model inside a chat changes only that chat.";
   return (
     <SettingsRow
-      title="New chats start on"
+      title="Default model"
       description={description}
       settingKeys={["defaultModelSelection"]}
       mixed={mixed}
-      status={
-        effective && !usable
-          ? "Not available on this computer now, so new chats start on the last one you picked."
-          : null
-      }
+      status={defaultModelStatus(state)}
       resetAction={
         !isProject && scope.kind === "environment" && setHere ? (
-          <SettingResetButton label="the model for new chats" onClick={() => save(null)} />
+          <SettingResetButton label="the default model" onClick={() => save(null)} />
         ) : null
       }
-      control={
-        shown ? (
-          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            <Select
-              value={mixed ? MIXED_VALUE : setHere ? NEW_CHAT_START_FIXED : NEW_CHAT_START_INHERIT}
-              onValueChange={(value) => {
-                if (value === NEW_CHAT_START_INHERIT) save(null);
-                // Starts on what a new chat gets now; the effort stays the chat's.
-                else if (value === NEW_CHAT_START_FIXED && (!setHere || mixed) && shown) {
-                  save({ instanceId: shown.instanceId, model: shown.model });
-                }
-              }}
-            >
-              <SelectTrigger
-                className="w-full sm:w-48"
-                aria-label="New chats start on"
-                data-testid="settings-new-chat-start"
-              >
-                <SelectValue>
-                  {mixed ? MIXED_LABEL : setHere ? "Always this model" : inheritLabel}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value={NEW_CHAT_START_INHERIT}>
-                  {inheritLabel}
-                </SelectItem>
-                <SelectItem hideIndicator value={NEW_CHAT_START_FIXED}>
-                  Always this model
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-            {setHere && effective ? (
-              <ProviderModelPicker
-                compact
-                activeInstanceId={effective.instanceId}
-                model={effective.model}
-                lockedProvider={null}
-                instanceEntries={picker.instanceEntries}
-                environmentId={pickerEnvironmentId}
-                modelOptionsByInstance={picker.modelOptionsByInstance}
-                onInstanceModelChange={(instanceId, model) => save({ instanceId, model })}
-                triggerVariant="outline"
-              />
-            ) : null}
-          </div>
-        ) : (
-          <span className="text-xs text-muted-foreground">No AI on this computer yet</span>
-        )
-      }
+      control={<DefaultModelControl state={state} />}
     />
   );
 }

@@ -12,6 +12,7 @@ import {
   type ClientSettingsPatch,
   ClientSettingsSchema,
   type EnvironmentId,
+  type ModelSelection,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
@@ -203,30 +204,39 @@ function skippedComputers(
 }
 
 /**
- * "All computers" for the new-chat model is the app's own setting, and it
- * clears what a computer has set for itself: all means all. Everything else
- * goes to each computer.
+ * "All computers" for the new-chat model is the app's own setting, and every
+ * computer it can reach gets the same value: all means all. The computer's
+ * copy is what its server reads for the assistant's work (Settings → AI
+ * "Default model", 13.11 v2); one asleep now keeps its value until it is set
+ * again. Everything else goes to each computer.
  */
 function moveAllComputersModel(
   scope: ResolvedSettingsScope,
   patch: ScopedSettingsPatch,
-): { readonly patch: ScopedSettingsPatch; readonly clearComputerModel: boolean } {
+): {
+  readonly patch: ScopedSettingsPatch;
+  /** The value each reachable computer gets; undefined = not this patch. */
+  readonly computerModel: ModelSelection | null | undefined;
+} {
   if (scope.kind !== "all" || !("defaultModelSelection" in patch)) {
-    return { patch, clearComputerModel: false };
+    return { patch, computerModel: undefined };
   }
   const { defaultModelSelection, ...rest } = patch;
   return {
     patch: { ...rest, newChatModelSelection: defaultModelSelection ?? null },
-    clearComputerModel: true,
+    computerModel: defaultModelSelection ?? null,
   };
 }
+
+const sameModel = (a: ModelSelection | null | undefined, b: ModelSelection | null | undefined) =>
+  JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 export function planScopedSettingsPatch(
   scope: ResolvedSettingsScope,
   environments: readonly ScopedSettingsEnvironment[],
   rawPatch: ScopedSettingsPatch,
 ): ScopedSettingsPlan {
-  const { patch, clearComputerModel } = moveAllComputersModel(scope, rawPatch);
+  const { patch, computerModel } = moveAllComputersModel(scope, rawPatch);
   const clientPatch = Object.fromEntries(
     Object.entries(patch).filter(([key]) => CLIENT_KEYS.has(key) && !SERVER_KEYS.has(key)),
   ) as ClientSettingsPatch;
@@ -246,8 +256,8 @@ export function planScopedSettingsPatch(
       if (!previous) return [];
       const next: ServerSettingsPatch = {
         ...serverPatch,
-        ...(clearComputerModel && previous.defaultModelSelection !== null
-          ? { defaultModelSelection: null }
+        ...(computerModel !== undefined && !sameModel(previous.defaultModelSelection, computerModel)
+          ? { defaultModelSelection: computerModel }
           : {}),
       };
       return Object.keys(next).length === 0

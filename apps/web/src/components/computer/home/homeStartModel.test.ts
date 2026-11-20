@@ -3,6 +3,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { describe, expect, it } from "vitest";
 
 import {
+  autoNewChatSelection,
   claudePlanStartSelection,
   homeStartModelSelection,
   newChatModelSelection,
@@ -296,10 +297,21 @@ describe("Home for someone who came for their own agent (goal own_agent)", () =>
     );
   });
 
-  it("a pick made in a chat still wins", () => {
+  it("a pick made in a chat stays that chat's: Auto starts on their own plan (13.11 v2)", () => {
     expect(
       start(
         [hermes, opencode, claudeOwn],
+        { picked: null },
+        {
+          instanceId: "hermes",
+          model: "uno/fast",
+        },
+      ),
+    ).toEqual({ instanceId: "claudeAgent", model: "claude-opus-4-7" });
+    // No plan of theirs here: the last pick, as before.
+    expect(
+      start(
+        [hermes, opencode, claudeOnUnoAi],
         { picked: null },
         {
           instanceId: "hermes",
@@ -459,12 +471,28 @@ describe("Claude plan signed in here → new chats on Claude, none → Uno · Sm
     }
   });
 
-  it("a model the person picked in a chat still wins", () => {
-    expect(home([hermes, uno, claudePlan], "hermes")).toEqual({
+  it("Auto: the strongest on their plan beats the model last picked in a chat (13.11 v2)", () => {
+    const opus = { instanceId: "claudeAgent", model: "claude-opus-5-5" };
+    expect(home([hermes, uno, claudePlan], "hermes")).toEqual(opus);
+    expect(newChat([hermes, uno, claudePlan], "hermes")).toEqual(opus);
+    // On Uno AI only, the last pick still decides.
+    expect(home([hermes, uno, claudeOnUnoAi], "hermes")).toEqual({
       instanceId: "hermes",
       model: "uno/fast",
     });
-    expect(newChat([hermes, uno, claudePlan], "hermes")).toBeNull();
+    expect(newChat([hermes, uno, claudeOnUnoAi], "hermes")).toBeNull();
+  });
+
+  it("Auto on a ChatGPT plan: GPT-5.6 Terra, never Luna", () => {
+    const codexPlan = {
+      ...provider({ provider: "codex", models: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"] }),
+      auth: { status: "authenticated", type: "chatgpt", label: "ChatGPT Plus" },
+    } as ServerProvider;
+    expect(autoNewChatSelection([uno, claudeOut, codexPlan])).toEqual({
+      instanceId: "codex",
+      model: "gpt-5.6-terra",
+    });
+    expect(autoNewChatSelection([uno, claudeApiKey])).toBeNull();
   });
 
   it("'New chats start on' still wins", () => {

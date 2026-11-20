@@ -60,9 +60,10 @@ export interface AssistWorld {
    * `accounts` — the same, and the daemon's newer side: the stopped chat waits
    * for the reset, Settings can add a second account on uno-work; `signin`
    * (13.11, "Move my projects here") — Claude Code and Codex installed on
-   * uno-work but not signed in yet: a sign-in finishes by itself in a moment.
+   * uno-work but not signed in yet: a sign-in finishes by itself in a moment;
+   * `both` — Claude and ChatGPT on uno-work; `codex` — only ChatGPT (T41 v4, 14.11).
    */
-  readonly plans?: "none" | "full" | "accounts" | "signin";
+  readonly plans?: "none" | "full" | "accounts" | "signin" | "both" | "codex";
   /** Five more cloud computers, asleep: an account with many (Misha's own, 01.11). */
   readonly fleet?: "off" | "on";
   /** The console's "Connect my computer" for this account (a flag there). */
@@ -162,7 +163,10 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
     automations: take("automations", ["none", "some"] as const) ?? start.automations,
     gh: take("gh", ["ok", "norepo", "noperm", "off"] as const) ?? start.gh,
     assistants: take("assistants", ["on", "off"] as const) ?? start.assistants ?? "on",
-    plans: take("plans", ["none", "full", "accounts", "signin"] as const) ?? start.plans ?? "none",
+    plans:
+      take("plans", ["none", "full", "accounts", "signin", "both", "codex"] as const) ??
+      start.plans ??
+      "none",
     fleet: take("fleet", ["off", "on"] as const) ?? start.fleet ?? "off",
     pair: take("pair", ["off", "on"] as const) ?? start.pair ?? "off",
     perf:

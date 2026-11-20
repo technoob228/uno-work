@@ -64,6 +64,13 @@ export const ServerProviderModel = Schema.Struct({
    * means by it (resolveSelectableModel). Absent from older servers.
    */
   aliases: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  /**
+   * The harness's own recommended model for this sign-in — Claude Code's
+   * "Default (recommended)", Codex's `isDefault` (14.11, Misha: which model
+   * is the strongest comes from the CLI, not a list in Uno Work). Absent from
+   * older servers and harnesses that don't say.
+   */
+  isDefault: Schema.optional(Schema.Boolean),
 });
 export type ServerProviderModel = typeof ServerProviderModel.Type;
 

@@ -1,9 +1,12 @@
 /**
  * The account's default AI (console `GET /auth/me` `default_ai`, picked in
- * onboarding) as this machine knows it — for the chats the Uno assistant
- * starts (0.0.84): they run on the person's own AI, falling back to the
- * target project's default when that AI isn't usable here (not installed,
- * not signed in).
+ * onboarding) as this machine knows it.
+ *
+ * 0.0.84 – 0.0.188 the chats the Uno assistant starts with no model named
+ * ran on it. 13.11: an account that picked Codex had them run on GPT-5.6
+ * Luna (Codex's first listed model). They now run on the strongest ready
+ * model here ({@link strongestReadyModelSelection}: Claude Opus → Codex's
+ * strong models → Uno AI premium); the value is kept for what else reads it.
  *
  * The value comes from the account: the daemon reads `/auth/me` itself when
  * it holds an account key (a laptop), and clients push what they read with
@@ -13,16 +16,14 @@
  * @module manager/Layers/AccountDefaultAi
  */
 import type { ModelSelection } from "@t3tools/contracts";
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { harnessForAccountDefaultAi } from "@t3tools/shared/assistantLlm";
 import { Context, Effect, FileSystem, Layer, Path, Ref } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { isUsableForDefault, resolveModel } from "../../provider/autoBootstrapModelSelection.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { fetchControlPlaneJson } from "../../unoBoxIdentity.ts";
 import { isGatewayScopedKey } from "../../unoGatewayKey.ts";
+import { strongestReadyModelSelection } from "../personRouting.ts";
 
 export interface ManagerAccountDefaultAiShape {
   readonly get: () => Effect.Effect<string | null>;
@@ -30,7 +31,7 @@ export interface ManagerAccountDefaultAiShape {
   readonly set: (value: string | null) => Effect.Effect<void>;
   /** Read `/auth/me` with the machine's account key, when it has one. */
   readonly refreshFromAccount: () => Effect.Effect<void>;
-  /** What a chat the assistant starts runs on; null = use the project's default. */
+  /** What a chat the assistant starts runs on when no row decided: the strongest ready model; null = the project's default. */
   readonly spawnModelSelection: () => Effect.Effect<ModelSelection | null>;
 }
 
@@ -40,19 +41,6 @@ export class ManagerAccountDefaultAi extends Context.Service<
 >()("t3/manager/AccountDefaultAi") {}
 
 const FILE_NAME = "account-default-ai.json";
-
-/** The account value → a selection this machine can run, or null. */
-export function spawnSelectionForDefaultAi(
-  value: string | null,
-  providers: Parameters<typeof isUsableForDefault>[0][],
-): ModelSelection | null {
-  const instance = harnessForAccountDefaultAi(value);
-  if (instance === null) return null;
-  const provider = providers.find((entry) => entry.instanceId === instance);
-  if (provider === undefined || !isUsableForDefault(provider)) return null;
-  const model = resolveModel(provider);
-  return model === null ? null : { instanceId: ProviderInstanceId.make(instance), model };
-}
 
 export const ManagerAccountDefaultAiLive = Layer.effect(
   ManagerAccountDefaultAi,
@@ -109,7 +97,11 @@ export const ManagerAccountDefaultAiLive = Layer.effect(
     const spawnModelSelection: ManagerAccountDefaultAiShape["spawnModelSelection"] = () =>
       Effect.gen(function* () {
         const providers = yield* providerRegistry.getProviders;
-        return spawnSelectionForDefaultAi(yield* Ref.get(current), [...providers]);
+        const harnessUnoCredits = yield* settings.getSettings.pipe(
+          Effect.map((value) => value.harnessUnoCredits),
+          Effect.orElseSucceed(() => ({})),
+        );
+        return strongestReadyModelSelection(providers, harnessUnoCredits);
       });
 
     return {

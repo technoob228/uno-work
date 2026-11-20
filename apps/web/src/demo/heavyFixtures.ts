@@ -161,7 +161,7 @@ const UNO = ProviderInstanceId.make("uno");
 const MODEL = { instanceId: UNO, model: "uno/smart" } as const;
 const CLAUDE_MODEL = {
   instanceId: ProviderInstanceId.make("claudeAgent"),
-  model: "claude-sonnet-5",
+  model: "claude-sonnet-5-5",
 } as const;
 
 export function descriptorFor(machine: DemoMachine): ExecutionEnvironmentDescriptor {

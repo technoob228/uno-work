@@ -212,6 +212,15 @@ describe("the Claude model list follows the installed CLI", () => {
     expect(list.upgradeMessage).toBeUndefined();
   });
 
+  it('marks the CLI\'s "Default (recommended)" — the strongest pick comes from the CLI (14.11)', () => {
+    const list = buildClaudeModelList({ version: "2.1.321", cliModels: CLI_2_1_321_API_KEY });
+    expect(list.models.filter((model) => model.isDefault).map((model) => model.slug)).toEqual([
+      "claude-opus-5-5",
+    ]);
+    const silent = buildClaudeModelList({ version: "2.1.321", cliModels: undefined });
+    expect(silent.models.some((model) => model.isDefault)).toBe(false);
+  });
+
   it("keeps the older models with an API key or on Uno AI, where the CLI lists only aliases", () => {
     const list = buildClaudeModelList({ version: "2.1.321", cliModels: CLI_2_1_321_API_KEY });
     for (const slug of [

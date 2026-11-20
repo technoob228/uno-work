@@ -23,7 +23,9 @@ import {
   type AssistantChatSummary,
   type AssistantEditableFileName,
   type EnvironmentId,
+  type ModelSelection,
 } from "@t3tools/contracts";
+import { simpleTaskRule, withSimpleTask } from "@t3tools/shared/modelRoles";
 import {
   merge3,
   splitAgentsProfile,
@@ -48,9 +50,9 @@ import {
   type RoutingRule,
   type RoutingThinking,
 } from "@t3tools/shared/assistantMemory";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { LoaderCircleIcon, XIcon } from "lucide-react";
+import { FileTextIcon, LoaderCircleIcon, TableIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { waitForThreadInStore } from "../../assistant/useAssistantChat";
@@ -70,6 +72,7 @@ import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { Block } from "./AssistantBits";
 import {
+  appliedPersonRules,
   chatCostText,
   chatTokensNote,
   choiceValue,
@@ -118,7 +121,7 @@ function SavedHint({ at }: { at: number }) {
 }
 
 /** One assistant file: its content, and a save that keeps crossing writes. */
-function useAssistantFile(
+export function useAssistantFile(
   environmentId: EnvironmentId,
   projectId: string,
   name: AssistantEditableFileName,
@@ -724,6 +727,20 @@ export function ModelsBlock({
   return <AwakeModels name={name} environmentId={environmentId} projectId={projectId} />;
 }
 
+/** ROUTING.md with what its editors need: the rules, the model choices, a save. */
+export function useRouting(environmentId: EnvironmentId, projectId: string, name: string) {
+  const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
+  const providers = useEnvironmentProviders(environmentId);
+  const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
+  const content = routing.file.data ?? "";
+  const parsed = useMemo(() => parseRouting(content), [content]);
+  const saveRules = (rules: ReadonlyArray<RoutingRule>) =>
+    void routing.save(writeRouting(content, rules), content);
+  return { routing, providers, choices, content, parsed, saveRules };
+}
+
+export type Routing = ReturnType<typeof useRouting>;
+
 function AwakeModels({
   name,
   environmentId,
@@ -733,22 +750,32 @@ function AwakeModels({
   environmentId: EnvironmentId;
   projectId: string;
 }) {
-  const routing = useAssistantFile(environmentId, projectId, "ROUTING.md");
-  const providers = useEnvironmentProviders(environmentId);
-  const choices = useMemo(() => modelChoices(providers, name), [providers, name]);
-  const [newTask, setNewTask] = useState("");
-  const content = routing.file.data ?? "";
-  const parsed = useMemo(() => parseRouting(content), [content]);
-  const proposals = useMemo(() => parseProposals(content), [content]);
+  const routing = useRouting(environmentId, projectId, name);
+  return (
+    <Block
+      title="Models"
+      action={<SavedHint at={routing.routing.savedAt} />}
+      testId="assistant-models"
+    >
+      <p className="pb-2 text-sm text-muted-foreground">
+        Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper
+        model keeps doing the job.
+      </p>
+      <RoutingTable name={name} routing={routing} />
+    </Block>
+  );
+}
 
-  const saveRules = (rules: ReadonlyArray<RoutingRule>) =>
-    void routing.save(writeRouting(content, rules), content);
+function RoutingTable({ name, routing: r }: { name: string; routing: Routing }) {
+  const { routing, choices, content, parsed, saveRules } = r;
+  const [newTask, setNewTask] = useState("");
+  const proposals = useMemo(() => parseProposals(content), [content]);
   const updateRule = (index: number, patch: Partial<RoutingRule>) =>
     saveRules(
       parsed.rules.map((rule, at) => (at === index ? { ...rule, ...patch, source: "you" } : rule)),
     );
 
-  const body = routing.file.isLoading ? (
+  return routing.file.isLoading ? (
     <p className="py-1 text-sm text-muted-foreground">Loading…</p>
   ) : routing.file.isError ? (
     <p className="py-1 text-sm text-muted-foreground">
@@ -843,15 +870,174 @@ function AwakeModels({
       ) : null}
     </>
   );
+}
 
-  return (
-    <Block title="Models" action={<SavedHint at={routing.savedAt} />} testId="assistant-models">
-      <p className="pb-2 text-sm text-muted-foreground">
-        Which AI {name} uses for which task. {name} tunes the rows you didn't set when a cheaper
-        model keeps doing the job.
+// ── By kind of task (13.11 v2) ───────────────────────────────────────
+
+/**
+ * Settings → AI → "Simple tasks" (14.11): the "Simple tasks" row of each
+ * assistant's ROUTING.md on this computer, set as the person's own row.
+ */
+export async function saveSimpleTaskRow(input: {
+  readonly environmentId: EnvironmentId;
+  readonly projectIds: ReadonlyArray<string>;
+  readonly selection: Pick<ModelSelection, "instanceId" | "model">;
+  readonly queryClient: QueryClient;
+  /**
+   * Uno applying its set by itself (useAutoModelRoles): an assistant whose
+   * row the person set is skipped — unless it is still this, what Uno set.
+   */
+  readonly auto?: { readonly unoSet: Pick<ModelSelection, "instanceId" | "model"> | null };
+}): Promise<void> {
+  for (const projectId of input.projectIds) {
+    const target = { environmentId: input.environmentId, projectId, name: "ROUTING.md" as const };
+    const base = (await readAssistantFile(target)).content ?? "";
+    const rules = parseRouting(base).rules;
+    if (input.auto) {
+      if (base.trim() === "") continue; // no assistant set up here yet
+      const row = simpleTaskRule(rules);
+      if (row?.source === "you") {
+        const unoSet = input.auto.unoSet;
+        if (!unoSet || row.harness !== unoSet.instanceId || row.model !== unoSet.model) continue;
+      }
+    }
+    const next = writeRouting(
+      base,
+      withSimpleTask(
+        rules,
+        input.selection,
+        input.auto ? "Uno's set for your plans" : "Settings → AI → Simple tasks",
+      ),
+    );
+    if (next !== base) await writeAssistantFile({ ...target, content: next, base });
+    await input.queryClient.invalidateQueries({
+      queryKey: ["uno-assistant-file", input.environmentId, projectId, "ROUTING.md"],
+    });
+  }
+}
+
+/**
+ * "Your rules from ROUTING.md · applied": the person's own rows and whether
+ * each can start here (Misha 14.11: rules edited in the file must show up in
+ * the interface as applied). `compact`: one line, for the top of Settings → AI.
+ */
+export function AppliedRules({
+  name,
+  routing,
+  compact = false,
+}: {
+  name: string;
+  routing: Routing;
+  compact?: boolean;
+}) {
+  const applied = useMemo(
+    () => appliedPersonRules(routing.parsed.rules, routing.choices),
+    [routing.parsed.rules, routing.choices],
+  );
+  if (applied.length === 0) return null;
+  const title = (
+    <span className="font-medium text-foreground">
+      Your rules from ROUTING.md · <span className="text-success-foreground">applied</span>
+    </span>
+  );
+  if (compact) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="routing-applied-rules-line">
+        {title}
+        {": "}
+        {applied.map((rule, index) => (
+          <span key={rule.taskType}>
+            {index > 0 ? "; " : null}
+            <span className="text-foreground">{rule.taskType}</span> → {rule.model}
+            {rule.notReady ? (
+              <span className="text-warning-foreground"> ({rule.notReady})</span>
+            ) : null}
+          </span>
+        ))}
       </p>
-      {body}
-    </Block>
+    );
+  }
+  return (
+    <div
+      className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs"
+      data-testid="routing-applied-rules"
+    >
+      <p>{title}</p>
+      <p className="text-muted-foreground">
+        {name} starts these kinds of task on your pick, before the default model:
+      </p>
+      <ul className="mt-1 flex flex-col gap-0.5">
+        {applied.map((rule) => (
+          <li key={rule.taskType} className="flex flex-wrap gap-x-1.5">
+            <span className="text-foreground">{rule.taskType}</span>
+            <span className="text-muted-foreground">→ {rule.model}</span>
+            {rule.notReady ? (
+              <span className="text-warning-foreground">
+                · {rule.notReady} — {name} asks you first
+              </span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * An assistant's rows by kind of task (its ROUTING.md), folded inside
+ * Settings → AI → "Default model": a row the person set beats the default
+ * model for that kind of task; the table's own rows ("Starting point",
+ * "Learned") apply only on Auto (personRouting.ts).
+ */
+export function KindOfTaskTable({
+  name,
+  environmentId,
+  projectId = ASSISTANT_PROJECT_ID,
+}: {
+  name: string;
+  environmentId: EnvironmentId;
+  projectId?: string;
+}) {
+  const routing = useRouting(environmentId, projectId, name);
+  // The table, or ROUTING.md itself as text (Misha 13.11: "editable with
+  // buttons and in the file itself"): the same file, saved on blur.
+  const [asFile, setAsFile] = useState(false);
+  const file = routing.routing.file;
+  return (
+    <div className="flex flex-col gap-1" data-testid="settings-kind-of-task">
+      <div className="flex items-center justify-end gap-2">
+        <SavedHint at={routing.routing.savedAt} />
+        <Button
+          size="xs"
+          variant="ghost"
+          onClick={() => setAsFile((value) => !value)}
+          disabled={file.isLoading || file.isError}
+          data-testid="assistant-models-file-toggle"
+        >
+          {asFile ? <TableIcon /> : <FileTextIcon />}
+          {asFile ? "Table" : "Edit file"}
+        </Button>
+      </div>
+      <AppliedRules name={name} routing={routing} />
+      {asFile ? (
+        <div className="flex flex-col gap-2" data-testid="assistant-models-file">
+          <p className="text-xs text-muted-foreground">
+            This is ROUTING.md, the file {name} reads before it starts a chat. A row with{" "}
+            <code>you</code> in the Source column is your rule: chats for that kind of task start on
+            it, and {name} never changes it. Saved when you click outside the text.
+          </p>
+          <TextFile
+            file={routing.routing}
+            placeholder=""
+            testId="assistant-models-file-text"
+            rows={16}
+            mono
+          />
+        </div>
+      ) : (
+        <RoutingTable name={name} routing={routing} />
+      )}
+    </div>
   );
 }
 
