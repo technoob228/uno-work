@@ -61,7 +61,12 @@ describe("Uno Work environment brief", () => {
     // reconciliation came as bullets in Telegram instead of a card).
     // ~70 for long documents in parts (12.11: a 30k-token gdrive_create call
     // stalled the stream again and again; content_file / gdrive_append).
-    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2500);
+    // ~60 for `app_share` / `app_unshare` and "no tunnels" (PR #9, 16.11: a
+    // teammate gets an app through Uno, not cloudflared); ~10 for
+    // `spark_versions` / `spark_rollback` (19.11); ~25 for
+    // `my_computer_start_chat` / `my_computer_chat_request` (T50, 20.11: off by
+    // default, the details are uno_guide("my-computer")).
+    expect(buildUnoWorkBrief().length / 4).toBeLessThan(2600);
   });
 
   it("the agent's own mailbox: for sign-ups and its own letters, the person's mail via Gmail", () => {
