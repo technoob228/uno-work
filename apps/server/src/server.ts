@@ -128,6 +128,8 @@ import { ChatImportServiceLive } from "./myComputer/import/ChatImportService.ts"
 import { MyComputerServiceLive } from "./myComputer/MyComputerService.ts";
 import { ComputersLifecycleLive } from "./myComputer/ComputersLifecycleLive.ts";
 import { ComputerWorkspacePolicyLive } from "./myComputer/ComputerWorkspaces.ts";
+import { ChatRequestsLive } from "./chatRequests/ChatRequests.ts";
+import { CommandGuardPolicyLive } from "./chatRequests/commandGuardPolicy.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
@@ -372,6 +374,9 @@ const ProviderLayerLive = ProviderServiceBudgetedLive.pipe(
   // A chat whose project is on the person's computer runs its harness here
   // with the workspace_* tools there, or is refused (computers lifecycle).
   Layer.provideMerge(ComputerWorkspacePolicyLive.pipe(Layer.provide(MyComputerServiceLive))),
+  // A chat started here at a cloud chat's request is held to the rules of
+  // this computer by its harness, or not run (chatRequests/).
+  Layer.provideMerge(CommandGuardPolicyLive),
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 );
@@ -538,6 +543,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       // Computers lifecycle (computers/): what each own computer is for, its work.
       Layer.mergeAll(
         ChatImportServiceLive,
+        // A cloud chat asks to start a chat on the person's computer: the
+        // request folder there, Start / Decline here (chatRequests/).
+        ChatRequestsLive,
         // computers lifecycle: the backend's live layer (CONTRACT.md §2, §7):
         // purposes at the console, open a folder there, continue in the
         // cloud, bring work over (myComputer/ComputersLifecycleLive.ts).

@@ -91,6 +91,8 @@ import { assistantPresetAllows, presetAsksFirst } from "@t3tools/shared/assistan
 import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { makeCancellableCalls } from "../myComputer/cancelCalls.ts";
 import { MyComputerService } from "../myComputer/MyComputerService.ts";
+import { ChatRequests } from "../chatRequests/ChatRequests.ts";
+import { CommandGuardPolicy } from "../provider/Services/CommandGuardPolicy.ts";
 import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
 import { WORKSPACE_TOOL_NAMES, type ComputerWaitMark } from "../myComputer/workspaceTools.ts";
 import {
@@ -462,6 +464,8 @@ const makeDeps = (input: {
     const automations = Option.getOrNull(yield* Effect.serviceOption(AutomationsService));
     const outsideThreads = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+    const guardPolicy = Option.getOrNull(yield* Effect.serviceOption(CommandGuardPolicy));
+    const chatRequests = Option.getOrNull(yield* Effect.serviceOption(ChatRequests));
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     // The calling chat's project on the person's computer (workspace tools), once per call.
     const computerWorkspaceOf = myComputer
@@ -648,6 +652,10 @@ const makeDeps = (input: {
       ),
       // A stranger's text is in this chat: everything but a few reads asks.
       ...(outsideThreads ? { outsideText: outsideThreads.has(input.threadId) } : {}),
+      // Started here at a cloud chat's request: a few tools only (chatRequests/).
+      ...(guardPolicy ? { guardedChat: guardPolicy.isGuarded(input.threadId) } : {}),
+      ...(chatRequests?.outgoing ? { chatRequestsOut: chatRequests.outgoing } : {}),
+      callerAssistantName: callerAssistant.pipe(Effect.map((owner) => owner?.title ?? null)),
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
         Effect.map((owner) =>

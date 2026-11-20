@@ -54,6 +54,12 @@ import type {
   MyComputerTrustState,
 } from "./myComputer.ts";
 import type {
+  ChatRequestDecideInput,
+  ChatRequestDecideResult,
+  ChatRequestsSetAllowedInput,
+  ChatRequestsState,
+} from "./chatRequests.ts";
+import type {
   ComputerInput,
   ComputersBringWorkInput,
   ComputersContinueInCloudInput,
@@ -1143,6 +1149,12 @@ export interface EnvironmentApi {
     /** Stop every agent call on the person's computers and disconnect them. */
     stopAll: () => Promise<MyComputerStopAllResult>;
     resume: () => Promise<MyComputerTrustState>;
+  };
+  /** A cloud chat asks to start a chat on this computer (chatRequests.ts). */
+  chatRequests: {
+    state: () => Promise<ChatRequestsState>;
+    decide: (input: ChatRequestDecideInput) => Promise<ChatRequestDecideResult>;
+    setAllowed: (input: ChatRequestsSetAllowedInput) => Promise<ChatRequestsState>;
   };
   /** Computers lifecycle (computers.ts): what each own computer is for, its work, chats on it. */
   computers: {

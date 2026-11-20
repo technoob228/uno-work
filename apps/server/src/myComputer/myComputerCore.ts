@@ -143,6 +143,8 @@ export interface WriteInput {
   readonly append?: boolean | undefined;
   readonly mkdirs?: boolean | undefined;
   readonly threadId?: string | undefined;
+  /** See ExecInput.quiet. */
+  readonly quiet?: boolean | undefined;
 }
 
 export interface ListInput {
@@ -222,7 +224,7 @@ export interface MyComputerCore {
   /** One journal line for a batch of `quiet` calls. */
   readonly note: (
     computerId: string,
-    kind: "run" | "read" | "write" | "list",
+    kind: "run" | "read" | "write" | "list" | "chat",
     summary: string,
     threadId?: string,
   ) => Promise<void>;
@@ -240,7 +242,7 @@ export interface MyComputerCore {
   /** A call the trust gate refused: one journal line, nothing runs. */
   readonly refused: (input: {
     readonly computerId: string;
-    readonly kind: "run" | "read" | "write" | "list";
+    readonly kind: "run" | "read" | "write" | "list" | "chat";
     readonly summary: string;
     readonly threadId?: string | undefined;
     readonly threadTitle?: string | undefined;
@@ -704,7 +706,7 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
   /** The journal line before the action; its id, for how it ended. */
   const record = (
     computerId: string,
-    kind: "run" | "read" | "write" | "list",
+    kind: "run" | "read" | "write" | "list" | "chat",
     summary: string,
     threadId: string | undefined,
     trust?: CallTrust,
@@ -1085,16 +1087,18 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
             );
           }
           const channel = await channelFor(input.computerId);
-          line(
-            input.computerId,
-            await record(
+          if (input.quiet !== true) {
+            line(
               input.computerId,
-              "write",
-              `${input.path} (${input.data.length} bytes)`,
-              input.threadId,
-              input.trust,
-            ),
-          );
+              await record(
+                input.computerId,
+                "write",
+                `${input.path} (${input.data.length} bytes)`,
+                input.threadId,
+                input.trust,
+              ),
+            );
+          }
           let sent = 0;
           do {
             const chunk = input.data.subarray(sent, sent + MAX_DATA_CHUNK_BYTES);

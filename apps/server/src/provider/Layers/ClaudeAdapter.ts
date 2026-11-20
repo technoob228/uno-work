@@ -10,6 +10,7 @@ import * as nodePath from "node:path";
 
 import {
   type CanUseTool,
+  type HookCallback,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -100,6 +101,7 @@ import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { describeClaudeSystemMessage } from "./claudeSystemNotices.ts";
 import { claudeWorkspaceOptions, joinNotes } from "../../myComputer/computerWorkspaceHarness.ts";
+import { claudeGuardHook, makeCommandGuard } from "../../chatRequests/commandGuard.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -3012,7 +3014,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         bridgeEnvironment: sessionBridgeEnvironment,
         custom: options?.customMcpServers?.({
           threadId: input.threadId,
-          sandboxed: input.harnessSandbox !== undefined,
+          // A chat started at a cloud chat's request gets none either.
+          sandboxed: input.harnessSandbox !== undefined || input.commandGuard !== undefined,
         }),
       });
       // Entries reference the token and addresses as ${VAR} (they end up in
@@ -3056,6 +3059,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { disallowedTools: workspace.disallowedTools, toolAliases: workspace.toolAliases }
           : {}),
         canUseTool,
+        // Held to the rules of this computer (chatRequests/commandGuard.ts):
+        // a hook, so it holds in Full access too, where canUseTool isn't asked.
+        ...(input.commandGuard
+          ? {
+              hooks: {
+                PreToolUse: [
+                  {
+                    hooks: [claudeGuardHook(makeCommandGuard(input.commandGuard)) as HookCallback],
+                  },
+                ],
+              },
+            }
+          : {}),
         env: {
           ...claudeEnvironment,
           ...sessionBridgeEnvironment,
@@ -3107,6 +3123,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.extra_args_json": JSON.stringify(extraArgs),
         "claude.query.path_to_executable": claudeBinaryPath,
         "claude.query.sandboxed": sandboxSpec !== undefined,
+        "claude.query.command_guard": input.commandGuard !== undefined,
       });
 
       const queryRuntime = yield* Effect.try({
@@ -3439,6 +3456,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       sessionModelSwitch: "in-session",
       harnessSandbox: true,
       computerWorkspace: true,
+      commandGuard: true,
     },
     startSession,
     sendTurn,

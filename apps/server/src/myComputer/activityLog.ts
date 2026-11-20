@@ -32,7 +32,7 @@ export const ACTIVITY_DEFAULT_LIMIT = 50;
 /** Trim once the file is past this: ~500 long lines. */
 const TRIM_ABOVE_BYTES = 256 * 1024;
 
-const KINDS: ReadonlySet<string> = new Set(["run", "read", "write", "list"]);
+const KINDS: ReadonlySet<string> = new Set(["run", "read", "write", "list", "chat"]);
 
 const TIERS: ReadonlySet<string> = new Set(["free", "chat", "ask", "always", "blocked"]);
 const OUTCOMES: ReadonlySet<string> = new Set(["ran", "failed", "stopped", "refused"]);

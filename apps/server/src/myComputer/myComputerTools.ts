@@ -33,6 +33,7 @@ import type { MyComputerShape } from "./MyComputerService.ts";
 import { MAX_FILE_BYTES, MyComputerFailure, pickComputer } from "./myComputerCore.ts";
 import { OUTPUT_LIMIT_BYTES } from "./outputCollector.ts";
 import { computerTrustGate } from "./trust/gate.ts";
+import { START_CHAT_TOOL_NAMES, startChatTools } from "../chatRequests/startChatTools.ts";
 import type { TrustOperation } from "./trust/judge.ts";
 
 type Deps = UnoWorkToolDeps;
@@ -43,6 +44,7 @@ export const MY_COMPUTER_TOOL_NAMES: ReadonlySet<string> = new Set([
   "my_computer_read_file",
   "my_computer_write_file",
   "my_computer_list_files",
+  ...START_CHAT_TOOL_NAMES,
 ]);
 
 /** What the tools need from tools.ts (passed in: no runtime import cycle). */
@@ -534,5 +536,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
           };
         }),
     },
+    // A chat there, at this chat's request, once the person presses Start (chatRequests/).
+    ...startChatTools({ target: (deps, args) => target(deps, args), fail: kit.fail }),
   ];
 }

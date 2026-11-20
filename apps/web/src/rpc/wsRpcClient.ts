@@ -310,6 +310,12 @@ export interface WsRpcClient {
     readonly stopAll: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerStopAll>;
     readonly resume: RpcUnaryNoArgMethod<typeof WS_METHODS.myComputerResume>;
   };
+  /** A cloud chat asks to start a chat on this computer (contracts chatRequests.ts). */
+  readonly chatRequests: {
+    readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.chatRequestsState>;
+    readonly decide: RpcUnaryMethod<typeof WS_METHODS.chatRequestsDecide>;
+    readonly setAllowed: RpcUnaryMethod<typeof WS_METHODS.chatRequestsSetAllowed>;
+  };
   /** Computers lifecycle (contracts computers.ts). */
   readonly computers: {
     readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.computersState>;
@@ -841,6 +847,13 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.myComputerRevokeGrant](input)),
       stopAll: () => transport.request((client) => client[WS_METHODS.myComputerStopAll]({})),
       resume: () => transport.request((client) => client[WS_METHODS.myComputerResume]({})),
+    },
+    chatRequests: {
+      state: () => transport.request((client) => client[WS_METHODS.chatRequestsState]({})),
+      decide: (input) =>
+        transport.request((client) => client[WS_METHODS.chatRequestsDecide](input)),
+      setAllowed: (input) =>
+        transport.request((client) => client[WS_METHODS.chatRequestsSetAllowed](input)),
     },
     computers: {
       state: () => transport.request((client) => client[WS_METHODS.computersState]({})),
