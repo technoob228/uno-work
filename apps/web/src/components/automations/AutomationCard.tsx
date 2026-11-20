@@ -11,6 +11,7 @@ import {
   type ThreadId,
   automationExecutorOf,
   describeAutomationTrigger,
+  isChatOnlyTrigger,
   isOutsideTrigger,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -45,7 +46,15 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
 import { toastManager } from "../ui/toast";
 import { getAutomationHook, rotateAutomationHook } from "../../lib/automationsApi";
-import { type RunTone, askLine, executorLabel, runLine, statusProblem } from "./automations.logic";
+import {
+  PR_NEEDS_CHAT,
+  type RunTone,
+  askLine,
+  executorLabel,
+  prOnAssistant,
+  runLine,
+  statusProblem,
+} from "./automations.logic";
 import { useAutomationActions, useAutomationRuns } from "./useAutomations";
 
 const TRIGGER_ICON = {
@@ -462,7 +471,17 @@ export function AutomationCard(props: {
             computer={props.computer}
           />
         ) : null}
-        {isOutsideTrigger(automation.trigger) ? (
+        {prOnAssistant(automation) ? (
+          <p
+            className="flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300"
+            data-testid="automation-pr-needs-chat"
+          >
+            <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              It won't run here. {PR_NEEDS_CHAT} Pick a chat for it: Edit, on the Automations page.
+            </span>
+          </p>
+        ) : isChatOnlyTrigger(automation.trigger) ? (
           <p className="text-xs text-muted-foreground" data-testid="automation-ask-line">
             {askLine(automation.trigger.ask !== false)}
           </p>

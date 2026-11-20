@@ -66,6 +66,7 @@ import {
   isRepoName,
   modeLine,
   normalizeRepo,
+  PR_NEEDS_CHAT,
   suggestionsFor,
   triggerOf,
 } from "./automations.logic";
@@ -450,12 +451,72 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
   };
   const formEvent = draft.when === "event" && draft.source === "form";
   const outsideEvent = formEvent || (draft.when === "event" && draft.source === "webhook");
+  // A pull request runs in a chat too (20.11): its author wrote its text.
+  const prEvent = draft.when === "event" && draft.source === "github";
+  const chatOnly = outsideEvent || prEvent;
   const problem =
     inChat && draft.when === "event" && draft.source === "call"
       ? "After a call is for an assistant."
-      : outsideEvent && (!inChat || executor === null)
+      : chatOnly && (!inChat || executor === null)
         ? "Pick a chat for it."
         : draftProblem(draft);
+  // The chats it can go to, when the dialog wasn't opened from one: a new
+  // one, or one set up on an assistant before 20.11 that moves to a chat.
+  const canPickChat = props.chat == null && (!editing || editingExecutor?.kind === "assistant");
+  // An edit stays on its computer: the console keeps it there.
+  const pickableChats = editing
+    ? chatChoices.filter((item) => item.environmentId === props.automationEnvironmentId)
+    : chatChoices;
+  const chatPicker = canPickChat ? (
+    <select
+      value={pickedChatKey}
+      onChange={(event) => {
+        setPickedChatKey(event.target.value);
+        setWho(THIS_CHAT);
+        setFailure(null);
+      }}
+      className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
+      aria-label="Chat"
+      data-testid="automation-chat-pick"
+    >
+      <option value="">Pick a chat…</option>
+      {pickableChats.map((item) => (
+        <option
+          key={`${item.environmentId}:${item.threadId}`}
+          value={`${item.environmentId}:${item.threadId}`}
+        >
+          {item.title} · {item.computer}
+        </option>
+      ))}
+    </select>
+  ) : null;
+  const askToggle =
+    chatOnly && inChat ? (
+      <label
+        className="flex cursor-pointer items-start gap-2 pl-1 text-xs text-muted-foreground"
+        data-testid="automation-ask"
+      >
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={draft.ask}
+          onChange={(event) => set({ ask: event.target.checked })}
+          data-testid="automation-ask-toggle"
+        />
+        {prEvent ? (
+          <span>
+            <span className="text-foreground">Ask me first</span> — whoever opens a pull request
+            writes its title and description, so the agent changes nothing without your Allow. Turn
+            it off only where just you and your team open pull requests.
+          </span>
+        ) : (
+          <span>
+            <span className="text-foreground">Ask me first</span> — the text comes from outside, so
+            the agent changes nothing without your Allow.
+          </span>
+        )}
+      </label>
+    ) : null;
   const listed = useAutomationsOn(environmentId);
   // Webhooks and forms show only where the console has them on, or when
   // this one already is one.
@@ -481,6 +542,11 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
         : executor
           ? await actions.create({ name, instruction, trigger, executor })
           : await actions.create({ assistant: choice!.projectId, name, instruction, trigger });
+      // An older console keeps no `ask` on a pull request: it still asks.
+      const askKept =
+        trigger.kind !== "github.pull_request" ||
+        trigger.ask !== false ||
+        (saved.trigger.kind === "github.pull_request" && saved.trigger.ask === false);
       toastManager.add({
         type: "success",
         title: editing
@@ -490,7 +556,9 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
             : executor
               ? "A new chat will do it"
               : `${choice!.name} will do it`,
-        description: `${name} · ${triggerLabel(saved, trigger)}`,
+        description: askKept
+          ? `${name} · ${triggerLabel(saved, trigger)}`
+          : `${name} · it still asks you first: Uno's side doesn't know this switch yet.`,
       });
       props.onSaved?.(saved, environmentId);
       props.onClose();
@@ -700,6 +768,23 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                   />
                 </div>
               ) : null}
+              {prEvent && !inChat ? (
+                <div
+                  className="flex flex-col gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-800 dark:text-amber-300"
+                  data-testid="automation-pr-needs-chat"
+                >
+                  <span>
+                    {PR_NEEDS_CHAT}{" "}
+                    {chatPicker !== null && pickableChats.length > 0
+                      ? "Pick the chat that should review it:"
+                      : "Set it up from the chat that should review it: the clock at the top of the chat."}
+                  </span>
+                  {pickableChats.length > 0 ? chatPicker : null}
+                </div>
+              ) : prEvent && pickedChatKey !== "" ? (
+                <div className="pl-1">{chatPicker}</div>
+              ) : null}
+              {prEvent ? askToggle : null}
               {inChat ? null : (
                 <SourceRow
                   on={draft.source === "call"}
@@ -749,49 +834,10 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
                           data-testid="automation-site"
                         />
                       ) : null}
-                      {!editing && !props.chat ? (
-                        <select
-                          value={pickedChatKey}
-                          onChange={(event) => {
-                            setPickedChatKey(event.target.value);
-                            setWho(THIS_CHAT);
-                            setFailure(null);
-                          }}
-                          className="h-8 w-full rounded-lg border border-input bg-background px-2 text-sm"
-                          aria-label="Chat"
-                          data-testid="automation-chat-pick"
-                        >
-                          <option value="">Pick a chat…</option>
-                          {chatChoices.map((item) => (
-                            <option
-                              key={`${item.environmentId}:${item.threadId}`}
-                              value={`${item.environmentId}:${item.threadId}`}
-                            >
-                              {item.title} · {item.computer}
-                            </option>
-                          ))}
-                        </select>
-                      ) : null}
+                      {editing ? null : chatPicker}
                     </div>
                   ) : null}
-                  {outsideEvent && inChat ? (
-                    <label
-                      className="flex cursor-pointer items-start gap-2 pl-1 text-xs text-muted-foreground"
-                      data-testid="automation-ask"
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={draft.ask}
-                        onChange={(event) => set({ ask: event.target.checked })}
-                        data-testid="automation-ask-toggle"
-                      />
-                      <span>
-                        <span className="text-foreground">Ask me first</span> — the text comes from
-                        outside, so the agent changes nothing without your Allow.
-                      </span>
-                    </label>
-                  ) : null}
+                  {outsideEvent ? askToggle : null}
                   {draft.when === "event" && draft.source === "webhook" ? (
                     <label
                       className="flex cursor-pointer items-start gap-2 pl-1 text-xs text-muted-foreground"
@@ -874,13 +920,13 @@ function AutomationDialogBody(props: Parameters<typeof AutomationDialog>[0]) {
             data-testid="automation-mode-line"
           >
             <MessageSquareIcon className="size-3.5 text-amber-500" />
-            {outsideEvent
+            {chatOnly
               ? askLine(draft.ask)
               : who === THIS_CHAT
                 ? "Runs in this chat, with what it already knows, in the chat's own mode"
                 : "Opens a new chat in the project each time, set up like this one"}
           </p>
-        ) : choice && !outsideEvent ? (
+        ) : choice && !chatOnly ? (
           <p
             className="flex items-center gap-1.5 text-xs text-muted-foreground"
             data-testid="automation-mode-line"

@@ -129,12 +129,16 @@ export const flows = [
       await page.getByTestId("automation-repo").fill("getuno");
       await page.getByTestId("automation-repo-option-getuno/api").click();
       await page.getByTestId("automation-suggestion").filter({ hasText: "Review the PR" }).click();
-      await page
-        .getByTestId("automation-mode-line")
-        .filter({ hasText: "Bolt comments on its own" })
-        .waitFor();
       if (await page.getByTestId("automation-repo-unseen").count()) {
         throw new Error("a visible repo was flagged as unseen");
+      }
+    });
+    // 20.11: a pull request runs in a chat; on an assistant it's said at once.
+    await step("on Bolt it's refused before Create, and says where it goes", async () => {
+      await page.getByTestId("automation-pr-needs-chat").waitFor();
+      await seeText(page, "the clock at the top of the chat");
+      if (!(await page.getByTestId("automation-save").isDisabled())) {
+        throw new Error("Create is open for a pull request on an assistant");
       }
     });
     await shot("dialog-pr");
@@ -146,13 +150,43 @@ export const flows = [
       await page.getByTestId("automation-calls-off").waitFor();
       await shot("calls-hint");
       await page.getByTestId("automation-source-github").click();
-      await page.getByTestId("automation-repo").fill("getuno/api");
     });
-    await step("Create → the card on Bolt's page", async () => {
+    await step("the one set up on Bolt before says it won't run there", async () => {
+      await page.keyboard.press("Escape");
+      await page.getByTestId("automation-dialog").waitFor({ state: "detached", timeout: 10_000 });
+      await card(page, "Review PRs in getuno/web")
+        .getByTestId("automation-pr-needs-chat")
+        .waitFor();
+    });
+    await shot("card-needs-chat");
+    await step("Automations → New → a pull request → pick a chat → Ask me first", async () => {
+      await openAutomations(page);
+      await page.getByTestId("automations-new").click();
+      await page.getByTestId("automation-when-event").click();
+      await page.getByTestId("automation-source-github").click();
+      await page.getByTestId("automation-pr-needs-chat").waitFor();
+      const pick = page.getByTestId("automation-chat-pick");
+      const value = await pick.evaluate((element) => element.options[1]?.value ?? "");
+      if (!value) throw new Error("no chat to pick");
+      await pick.selectOption(value);
+      await page.getByTestId("automation-repo").fill("getuno/api");
+      await page.getByTestId("automation-suggestion").filter({ hasText: "Review the PR" }).click();
+      const toggle = page.getByTestId("automation-ask-toggle");
+      if (!(await toggle.isChecked())) throw new Error("Ask me first is off by default");
+      await page.getByTestId("automation-mode-line").filter({ hasText: "Ask mode" }).waitFor();
+      await toggle.uncheck();
+      await page
+        .getByTestId("automation-mode-line")
+        .filter({ hasText: "without asking" })
+        .waitFor();
+    });
+    await shot("dialog-pr-chat");
+    await step("Create → the card in Chats says it works without asking", async () => {
       await page.getByTestId("automation-save").click();
       await page.getByTestId("automation-dialog").waitFor({ state: "detached", timeout: 10_000 });
       await card(page, "Review PRs in getuno/api")
-        .getByText("When a pull request opens or updates in getuno/api")
+        .getByTestId("automation-ask-line")
+        .filter({ hasText: "without asking" })
         .waitFor();
     });
     await shot("created");

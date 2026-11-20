@@ -19,6 +19,7 @@ import {
   createdTell,
   defaultAutomationName,
   makeAutomationsService,
+  PR_ON_ASSISTANT,
   type AutomationsServiceShape,
 } from "./AutomationsService.ts";
 
@@ -141,7 +142,8 @@ describe("automation_* for an assistant", () => {
       service.toolCreate(caller("assistant:assistant-home"), {
         assistant: "assistant-bob",
         instruction: "Review the PR and leave a comment. Be kind.",
-        trigger: { kind: "github.pull_request", repo: "getuno/x" },
+        // Not a pull request: an assistant can't take one (its own test below).
+        trigger: { kind: "schedule", cron: "0 9 * * 1-5", timezone: "UTC", label: "Weekdays" },
       }),
     );
     expect(result._tag).toBe("Success");
@@ -181,17 +183,39 @@ describe("automation_* for an assistant", () => {
         manage_url: "https://github.com/settings/installations/1",
       }),
     );
+    // A chat's agent: a pull request runs in a chat, not on an assistant.
     const result = await run((service) =>
-      service.toolCreate(caller("assistant:assistant-ada"), {
-        instruction: "Review",
-        trigger: { kind: "github.pull_request", repo: "getuno/secret" },
-      }),
+      service
+        .chatTools({ threadId: "thread-7", assistant: Effect.succeed<string | null>(null) })
+        .create({
+          instruction: "Review",
+          trigger: { kind: "github.pull_request", repo: "getuno/secret" },
+        }),
     );
     expect(result._tag).toBe("Failure");
     if (result._tag === "Failure") {
       expect(result.failure.message).toContain("https://github.com/settings/installations/1");
       expect(result.failure.message).toContain("give them the link");
     }
+  });
+
+  it("a pull request isn't set up on an assistant: said at once, the console isn't asked (20.11)", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    const trigger = { kind: "github.pull_request", repo: "getuno/x" };
+    const byTool = await run((service) =>
+      service.toolCreate(caller("assistant:assistant-ada"), { instruction: "Review", trigger }),
+    );
+    const byWeb = await run((service) =>
+      service.create({ assistant: "assistant-ada", instruction: "Review", trigger }),
+    );
+    for (const result of [byTool, byWeb]) {
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(result.failure.code).toBe("INVALID_EXECUTOR");
+        expect(result.failure.message).toBe(PR_ON_ASSISTANT);
+      }
+    }
+    expect(calls).toEqual([]);
   });
 
   it("lists only its own; changes and deletes only its own", async () => {
@@ -438,6 +462,64 @@ describe("outside triggers: what an agent may not do", () => {
     );
     const patch = calls.find((call) => call.method === "PATCH");
     expect((patch!.body as { trigger: unknown }).trigger).toEqual({ kind: "webhook", ask: true });
+  });
+
+  it("a pull request from an agent always asks: its `ask: false` is dropped (20.11)", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    await run((service) =>
+      service.chatTools(chat()).create({
+        instruction: "Review it",
+        trigger: { kind: "github.pull_request", repo: "getuno/x", ask: false },
+      }),
+    );
+    expect((calls[0]!.body as { trigger: unknown }).trigger).toEqual({
+      kind: "github.pull_request",
+      repo: "getuno/x",
+      ask: true,
+    });
+  });
+
+  it("the person's Ask me first off on a pull request reaches the console (20.11)", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    const made = await run((service) =>
+      service.create({
+        instruction: "Review it",
+        trigger: { kind: "github.pull_request", repo: "getuno/x", ask: false },
+        executor: { kind: "chat", threadId: "thread-7" },
+      }),
+    );
+    expect(made._tag).toBe("Success");
+    expect((calls[0]!.body as { trigger: unknown }).trigger).toEqual({
+      kind: "github.pull_request",
+      repo: "getuno/x",
+      ask: false,
+    });
+    if (made._tag === "Success") {
+      expect(made.success.trigger).toMatchObject({ kind: "github.pull_request", ask: false });
+    }
+  });
+
+  it("a chat that can't ask refuses a pull request at setup, unless Ask me first is off (20.11)", async () => {
+    const { calls, run } = setup((_m, _p, body) => json(201, automation({ ...(body as object) })));
+    const executor = { kind: "chat" as const, threadId: "thread-hermes" };
+    const asks = await run((service) =>
+      service.create({
+        instruction: "Review it",
+        trigger: { kind: "github.pull_request", repo: "getuno/x" },
+        executor,
+      }),
+    );
+    expect(asks._tag).toBe("Failure");
+    expect(JSON.stringify(asks)).toContain("Uno Code");
+    expect(calls).toHaveLength(0);
+    const open = await run((service) =>
+      service.create({
+        instruction: "Review it",
+        trigger: { kind: "github.pull_request", repo: "getuno/x", ask: false },
+        executor,
+      }),
+    );
+    expect(open._tag).toBe("Success");
   });
 
   it("a form isn't set through automation_create", async () => {

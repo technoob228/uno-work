@@ -178,6 +178,21 @@ describe("outside triggers", () => {
     });
   });
 
+  it("a pull request's ask: read when the console has it, absent from an older one (20.11)", () => {
+    expect(parseTrigger({ kind: "github.pull_request", repo: "getuno/x", ask: false })).toEqual({
+      kind: "github.pull_request",
+      repo: "getuno/x",
+      ask: false,
+    });
+    expect(parseTrigger({ kind: "github.pull_request", repo: "getuno/x" })).toEqual({
+      kind: "github.pull_request",
+      repo: "getuno/x",
+    });
+    expect(triggerToConsole({ kind: "github.pull_request", repo: "getuno/x", ask: false })).toEqual(
+      { kind: "github.pull_request", repo: "getuno/x", ask: false },
+    );
+  });
+
   it("a hook without a URL is no hook", () => {
     expect(parseHook({ url: "https://x", signing_secret: "s" })).toMatchObject({
       url: "https://x",
