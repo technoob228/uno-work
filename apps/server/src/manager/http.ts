@@ -44,6 +44,8 @@ import {
   ManagerConnectorAddressingConfig,
   ManagerConnectorGroupMembersPolicy,
   ManagerSlackConnectorConfig,
+  ManagerSlackDefaultInput,
+  ManagerSlackDeviceSyncInput,
   ManagerTelegramConnectorConfig,
   ManagerTokenId,
   ModelSelection,
@@ -90,8 +92,11 @@ import { isRelayCredential, isRouteCredential } from "./channelRelay.ts";
 import {
   afterTelegramConfigSaved,
   connectSharedTelegram,
+  forgetDeviceSlack,
   readSlackInstall,
+  syncDeviceSlackInstall,
   assignSlackChannelsFor,
+  slackRoutingStatus,
   isRoutedSlack,
   routeSlackThroughHolder,
   slackRelayHolderFor,
@@ -101,6 +106,7 @@ import {
   type ChannelSetupOutcome,
 } from "./channelSetup.ts";
 import { readWorkMachineIdentity } from "./workConsole.ts";
+import { channelRoutedAway, currentSlackRouting, setSlackDefaultHere } from "./slackRouting.ts";
 import { ConnectorNotifyService } from "./Services/ConnectorNotify.ts";
 import { AssistantScheduledTurns } from "../assistants/scheduledTurn.ts";
 import {
@@ -816,6 +822,85 @@ export const managerAssistantSlackInstallDeleteRouteLayer = HttpRouter.add(
     return yield* uninstallSlack({ projectId, identity }).pipe(
       Effect.map(respondChannelSetup),
       Effect.catch(respondServerError("assistant:slack-uninstall")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/slack/device` {projectId, available, installed,
+ * teamName, botUserName, installerUserId, relayToken?} → the installation
+ * status + `needsRelay`: "Add to Slack" for the desktop app on a laptop
+ * (21.10). This server has no console identity; the interface reads the
+ * desktop's installation at the console (its own sign-in) and hands the
+ * answer here, plus a fresh relay token when `needsRelay` asked for one. 409
+ * `cloud_computer` on a cloud computer (it does this by itself).
+ */
+export const managerAssistantSlackDeviceSyncRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack/device",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(ManagerSlackDeviceSyncInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    const identity = yield* currentWorkMachineIdentity;
+    const install = {
+      available: input.available,
+      installed: input.installed,
+      teamName: input.teamName,
+      botUserName: input.botUserName,
+      installerUserId: input.installerUserId,
+      relayFingerprint: input.relayFingerprint ?? null,
+    };
+    const relayToken = input.relayToken ?? null;
+    // One Uno app per workspace here too: a second assistant routes through
+    // the holder and sees the holder's installation.
+    const holder = yield* slackRelayHolderFor(input.projectId);
+    if (holder !== null) {
+      return yield* routeSlackThroughHolder({ projectId: input.projectId, holder }).pipe(
+        Effect.andThen(
+          syncDeviceSlackInstall({ projectId: holder, identity, install, relayToken }),
+        ),
+        Effect.map(respondChannelSetup),
+        Effect.catch(respondServerError("assistant:slack-device")),
+      );
+    }
+    return yield* syncDeviceSlackInstall({
+      projectId: input.projectId,
+      identity,
+      install,
+      relayToken,
+    }).pipe(
+      Effect.map(respondChannelSetup),
+      Effect.catch(respondServerError("assistant:slack-device")),
+    );
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `DELETE /api/manager/assistant/slack/device?projectId=` → {ok: true}: the
+ * interface removed the desktop's Slack app at the console; forget the
+ * relay-mode row (a routed assistant just leaves).
+ */
+export const managerAssistantSlackDeviceDeleteRouteLayer = HttpRouter.add(
+  "DELETE",
+  "/api/manager/assistant/slack/device",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const projectId = yield* assistantProjectIdFromQuery;
+    yield* requireAssistantProject(projectId);
+    if (yield* isRoutedSlack(projectId)) {
+      const repository = yield* ManagerConnectorRepository;
+      return yield* repository.remove({ projectId, kind: "slack" }).pipe(
+        Effect.map(() => HttpServerResponse.jsonUnsafe({ ok: true }, { status: 200 })),
+        Effect.catch(respondServerError("assistant:slack-device-forget")),
+      );
+    }
+    const identity = yield* currentWorkMachineIdentity;
+    return yield* forgetDeviceSlack({ projectId, identity }).pipe(
+      Effect.map(respondChannelSetup),
+      Effect.catch(respondServerError("assistant:slack-device-forget")),
     );
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
@@ -1818,6 +1903,8 @@ export const managerAssistantSlackChannelsGetRouteLayer = HttpRouter.add(
       if (decoded._tag !== "Success") continue;
       for (const id of decoded.value.allowedChannelIds) owners.set(id, row.projectId);
     }
+    // Several computers in the workspace (257): channels answered elsewhere.
+    const routing = yield* currentSlackRouting().pipe(Effect.orElseSucceed(() => null));
     return HttpServerResponse.jsonUnsafe(
       {
         channels: channels.map((channel) => ({
@@ -1826,6 +1913,7 @@ export const managerAssistantSlackChannelsGetRouteLayer = HttpRouter.add(
           isPrivate: channel.isPrivate,
           isMember: channel.isMember,
           assistantProjectId: owners.get(channel.id) ?? null,
+          routedAway: channelRoutedAway(channel.id, routing),
         })),
       },
       { status: 200 },
@@ -1860,6 +1948,33 @@ export const managerAssistantSlackChannelsPutRouteLayer = HttpRouter.add(
       }
       return HttpServerResponse.jsonUnsafe({ allowedChannelIds: assigned }, { status: 200 });
     }).pipe(Effect.catch(respondServerError("assistant:slack-channels")));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
+ * `POST /api/manager/assistant/slack/default` {projectId, isDefault} — owner
+ * only. "Answer direct messages here" for the workspace's computers of this
+ * account (console 257), or back to the cloud-first rule.
+ */
+export const managerAssistantSlackDefaultRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/assistant/slack/default",
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const input = yield* HttpServerRequest.schemaBodyJson(ManagerSlackDefaultInput).pipe(
+      Effect.mapError(() => new AuthError({ message: "Invalid payload.", status: 400 })),
+    );
+    yield* requireAssistantProject(input.projectId);
+    return yield* Effect.gen(function* () {
+      const routing = yield* setSlackDefaultHere({ isDefault: input.isDefault });
+      if (routing === null) {
+        return HttpServerResponse.jsonUnsafe(
+          { error: "Uno's Slack app didn't answer. Try again in a minute." },
+          { status: 502 },
+        );
+      }
+      return HttpServerResponse.jsonUnsafe(slackRoutingStatus(routing), { status: 200 });
+    }).pipe(Effect.catch(respondServerError("assistant:slack-default")));
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 

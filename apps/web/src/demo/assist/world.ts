@@ -79,6 +79,12 @@ export interface AssistWorld {
    * before Create: Performance picked → 403 PERFORMANCE_REQUIRES_MAX.
    */
   readonly perf?: "off" | "max" | "plus" | "busy" | "full" | "lapsed";
+  /**
+   * Uno's Slack app (20.11): `available` — "Add to Slack"; `installed` —
+   * already in the Acme workspace; `unavailable` — not set up on the console
+   * (your own Slack app only); `signin` — the desktop app isn't signed in with Uno.
+   */
+  readonly slack?: "available" | "installed" | "unavailable" | "signin";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -173,6 +179,10 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
       take("perf", ["off", "max", "plus", "busy", "full", "lapsed"] as const) ??
       start.perf ??
       "off",
+    slack:
+      take("slack", ["available", "installed", "unavailable", "signin"] as const) ??
+      start.slack ??
+      "available",
   };
   return touched ? next : null;
 }

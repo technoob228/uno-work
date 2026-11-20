@@ -96,6 +96,15 @@
         "google-drive": ["📁", "Google Drive", ["Files you open or create with Uno"]],
         notion: ["📝", "Notion", ["Pages you share with Uno"]],
         gmail: ["✉️", "Google", ["Read and draft mail", "See your calendar"]],
+        slack: [
+          "💬",
+          "Acme (Slack)",
+          [
+            "Read messages that mention @Uno",
+            "Send messages as @Uno",
+            "See the channels it's invited to",
+          ],
+        ],
       }[provider] || ["🔗", provider, []];
       document.getElementById("logo").textContent = meta[0];
       document.getElementById("name").textContent = meta[1];
@@ -106,7 +115,10 @@
         try {
           window.opener &&
             window.opener.postMessage(
-              { type: "uno-connector", ok: true, provider },
+              // Add to Slack waits for its own message type (setupApi.openAuthWindow).
+              provider === "slack"
+                ? { type: "uno-slack", ok: true }
+                : { type: "uno-connector", ok: true, provider },
               location.origin,
             );
         } catch {}

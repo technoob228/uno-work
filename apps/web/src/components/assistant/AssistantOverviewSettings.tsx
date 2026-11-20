@@ -240,7 +240,7 @@ export function AssistantOverviewSettings({
         />
         <SettingsRow
           title="Slack"
-          description="Your own Slack app; each channel gets its own conversation with Uno."
+          description="Uno in your Slack workspace; each channel gets its own conversation with Uno."
           status={<span className={CHANNEL_COPY[slack].tone}>{CHANNEL_COPY[slack].label}</span>}
           control={
             <Button

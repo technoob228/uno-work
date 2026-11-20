@@ -31,6 +31,7 @@ export const UNO_CONSOLE_URL = (
 ).replace(/\/+$/, "");
 
 const SIGN_IN_TIMEOUT_MS = 5 * 60_000;
+const SIGN_OUT_TIMEOUT_MS = 10_000;
 
 export interface SecretCodec {
   readonly isEncryptionAvailable: () => boolean;
@@ -112,6 +113,12 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   { method: "GET", pattern: /^\/api\/v1\/ai\/meter$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/verify-email$/ },
   { method: "POST", pattern: /^\/api\/v1\/ai\/computer\/trial$/ },
+  // "Add to Slack" for this desktop app itself (21.10): Uno's Slack app answers
+  // here while Uno Work is open. The console's target is this sign-in's token,
+  // never a computer; the local server only gets the relay token.
+  { method: "POST", pattern: /^\/api\/v1\/work\/slack\/device\/(install|relay)$/ },
+  { method: "GET", pattern: /^\/api\/v1\/work\/slack\/device$/ },
+  { method: "DELETE", pattern: /^\/api\/v1\/work\/slack\/device$/ },
   // Uno Drive (w0139): "Share with a link…" for a file on this Mac uploads a
   // copy through a one-time upload address and links to it (driveShareFile.ts).
   { method: "GET", pattern: /^\/api\/v1\/drive$/ },
@@ -200,7 +207,35 @@ export class UnoAccountService {
     return { signedIn: account !== null, email: account?.email ?? null };
   }
 
-  signOut(): DesktopUnoAccountStatus {
+  /**
+   * "Sign out" revokes the token at the console (Misha, 21.10), not only here:
+   * a forgotten-but-valid token would keep this desktop's Slack relay and
+   * everything else it was allowed alive. The console removes Uno's Slack
+   * app of this desktop with it. Offline or the console down: the sign-in is
+   * still forgotten here (the person asked to sign out), the token can be
+   * revoked on the console's Tokens page.
+   */
+  async signOut(): Promise<DesktopUnoAccountStatus> {
+    const account = this.read();
+    if (account) {
+      try {
+        const response = await this.deps.fetch(`${this.consoleUrl}/api/v1/work/desktop-token`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${account.token}` },
+          signal: AbortSignal.timeout(SIGN_OUT_TIMEOUT_MS),
+        });
+        // 401: already revoked or deleted at the console — nothing to do.
+        if (!response.ok && response.status !== 401) {
+          console.warn("[uno-account] the console didn't revoke the sign-in", {
+            status: response.status,
+          });
+        }
+      } catch (error) {
+        console.warn("[uno-account] couldn't reach the console to revoke the sign-in", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     this.write(null);
     return this.status();
   }

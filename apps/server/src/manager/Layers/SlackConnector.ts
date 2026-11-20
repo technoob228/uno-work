@@ -41,7 +41,18 @@ import {
   type ChatImageAttachment,
   type ModelSelection,
 } from "@t3tools/contracts";
-import { Context, Data, Duration, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
+import {
+  Context,
+  Data,
+  Duration,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Ref,
+  Schema,
+  Semaphore,
+} from "effect";
 import * as crypto from "node:crypto";
 import * as fsPromises from "node:fs/promises";
 import * as os from "node:os";
@@ -58,6 +69,7 @@ import { slackCommandOrigin } from "../../orchestration/commandOrigin.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
+import { syncSlackRouting } from "../slackRouting.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
 import type { ConnectorPendingReply } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
@@ -72,7 +84,7 @@ import { detectReplyLanguage, type ReplyLanguage } from "../connectorReplyText.t
 import { UNO_WORK_OPEN_URL } from "../taskDoneNotify.ts";
 import { currentWorkAddress } from "../../workAddress.ts";
 import { SLACK_UPLOAD_LIMIT_BYTES } from "../largeFileLink.ts";
-import { hidesLinkPreview, markdownLinksForSlack } from "../telegramMarkdown.ts";
+import { boldForSlack, hidesLinkPreview, markdownLinksForSlack } from "../telegramMarkdown.ts";
 import { DEFAULT_ADDRESSING_CONFIG, decideAddressing } from "../addressing.ts";
 import type { AddressingReason } from "../addressing.ts";
 import {
@@ -118,6 +130,16 @@ import {
   type SlackAssistantChoice,
 } from "../slackAssistants.ts";
 import { bindingOnConnector } from "../connectorBindings.ts";
+import {
+  addSlackReplyRoute,
+  decodeSlackReplyRoutes,
+  EMPTY_SLACK_REPLY_ROUTES,
+  findSlackReplyRoute,
+  pruneSlackReplyRoutes,
+  resolveSlackOptionReply,
+  type SlackReplyOption,
+  type SlackReplyRoutesState,
+} from "../slackReplyRoutes.ts";
 import { ManagerConnectorBindingRepository } from "../../persistence/Services/ManagerConnectorBindings.ts";
 import { readProfile } from "../../assistants/localAssistantStore.ts";
 
@@ -143,6 +165,15 @@ export interface ManagerSlackServiceShape {
     readonly threadTs?: string;
     /** Write as this assistant (name + emoji) when several share Uno's app. */
     readonly asAssistant?: ProjectId;
+    /**
+     * A chat other than the assistant writes: the person's reply in this
+     * message's thread goes back to `threadId` (slackReplyRoutes.ts);
+     * `options` are the numbered buttons a "2" in the thread picks.
+     */
+    readonly routeReplies?: {
+      readonly threadId: ThreadId;
+      readonly options: ReadonlyArray<SlackReplyOption>;
+    };
   }) => Effect.Effect<boolean>;
   /** Upload a file to a channel/DM; a failure is told in the chat. `false`: no live bot. */
   readonly sendFile: (input: {
@@ -460,6 +491,34 @@ const makeSlackConnector = Effect.gen(function* () {
           }),
         );
 
+  // Replies in the thread of a chat's message go back to that chat.
+  const replyRoutesFile = nodePath.join(serverConfig.stateDir, "slack-reply-routes.json");
+  const replyRoutesRef = yield* Ref.make<SlackReplyRoutesState>(
+    yield* Effect.promise(() =>
+      fsPromises
+        .readFile(replyRoutesFile, "utf8")
+        .then((raw) => pruneSlackReplyRoutes(decodeSlackReplyRoutes(JSON.parse(raw)), Date.now()))
+        .catch(() => EMPTY_SLACK_REPLY_ROUTES),
+    ),
+  );
+  const replyRoutesWriteLock = yield* Semaphore.make(1);
+  const updateReplyRoutes = (change: (state: SlackReplyRoutesState) => SlackReplyRoutesState) =>
+    replyRoutesWriteLock.withPermits(1)(
+      Effect.gen(function* () {
+        const next = yield* Ref.updateAndGet(replyRoutesRef, change);
+        yield* Effect.promise(async () => {
+          const temp = `${replyRoutesFile}.${process.pid}.tmp`;
+          await fsPromises.mkdir(nodePath.dirname(replyRoutesFile), { recursive: true });
+          await fsPromises.writeFile(temp, JSON.stringify(next), { mode: 0o600 });
+          await fsPromises.rename(temp, replyRoutesFile);
+        }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("slack reply routes not saved").pipe(Effect.annotateLogs({ cause })),
+          ),
+        );
+      }),
+    );
+
   const getUnoApiKey = serverSettingsService.getSettings.pipe(
     Effect.map((settings) => settings.uno.apiKey?.trim() ?? ""),
     Effect.orElseSucceed(() => ""),
@@ -478,7 +537,7 @@ const makeSlackConnector = Effect.gen(function* () {
       try: async () => {
         const base = {
           channel,
-          text: markdownLinksForSlack(text).slice(0, SLACK_MESSAGE_LIMIT),
+          text: boldForSlack(markdownLinksForSlack(text)).slice(0, SLACK_MESSAGE_LIMIT),
           ...(hidesLinkPreview(text) ? { unfurl_links: false, unfurl_media: false } : {}),
           ...(threadTs === undefined
             ? {}
@@ -1075,6 +1134,78 @@ const makeSlackConnector = Effect.gen(function* () {
         yield* rememberSlackOwner(projectId, event.user);
       }
 
+      // The owner answers a chat's message in its thread: that chat gets it,
+      // whichever assistant this DM or channel belongs to (Telegram: Reply).
+      const eventThreadTs = typeof event.thread_ts === "string" ? event.thread_ts : null;
+      const replyRoute =
+        senderRole === "owner" && eventThreadTs !== null && eventThreadTs !== ts
+          ? findSlackReplyRoute(yield* Ref.get(replyRoutesRef), {
+              connectorProjectId: projectId,
+              channel,
+              threadTs: eventThreadTs,
+              nowMs: Date.now(),
+            })
+          : null;
+      const routedThread =
+        replyRoute === null
+          ? null
+          : yield* projectionSnapshotQuery
+              .getThreadShellById(ThreadId.make(replyRoute.threadId))
+              .pipe(
+                Effect.map((shell) =>
+                  Option.isSome(shell) && shell.value.archivedAt === null ? shell.value : null,
+                ),
+                Effect.orElseSucceed(() => null),
+              );
+      if (replyRoute !== null && routedThread !== null && eventThreadTs !== null) {
+        const replyKey = `${channel}:${ts}`;
+        if (yield* replies.isKnown(projectId, replyKey)) return;
+        const answer = resolveSlackOptionReply(rawText, replyRoute.options);
+        const language = detectReplyLanguage(answer.text, null);
+        const ingested =
+          files.length > 0
+            ? yield* ingestSlackFiles({
+                botToken: config.botToken,
+                threadId: routedThread.id,
+                channel,
+                files,
+                fromThread: false,
+                sender: "the person",
+                language,
+                tell: (text) => postMessage(web, channel, text, eventThreadTs).pipe(Effect.ignore),
+              })
+            : { attachments: [], notes: [] };
+        const bodyParts = [answer.text, ...ingested.notes].filter((part) => part.length > 0);
+        if (bodyParts.length === 0) {
+          bodyParts.push("[The user sent the attached image(s) without a caption.]");
+        }
+        yield* replies.enqueue({
+          connectorProjectId: projectId,
+          replyKey,
+          chatId: channel,
+          replyTo: ts,
+          // The chat's answer lands in the same Slack thread.
+          replyThread: eventThreadTs,
+          threadId: routedThread.id,
+          language,
+          dispatch: {
+            text: [...bodyParts, SLACK_SEND_FILE_HINT].join("\n\n"),
+            attachments: ingested.attachments,
+            // The chat's own modes: a reply never widens them.
+            runtimeMode: routedThread.runtimeMode,
+            interactionMode: routedThread.interactionMode,
+          },
+          extraMeta: {
+            hotKey: `${projectId}:route:${channel}:${eventThreadTs}`,
+            identityProjectId: null,
+          },
+        });
+        yield* Effect.logInfo("slack reply routed to the chat that wrote").pipe(
+          Effect.annotateLogs({ projectId, channel, threadId: routedThread.id }),
+        );
+        return;
+      }
+
       // Which assistant answers: the channel's, or for a DM the one the
       // person named ("who is this for?"); the holder alone answers all.
       let assistantId: ProjectId = projectId;
@@ -1453,6 +1584,18 @@ const makeSlackConnector = Effect.gen(function* () {
         };
         runtimes.set(projectId, runtime);
         runtime.stopRelay = startRelayEvents({ projectId, relayToken, config, web, botUserId });
+        // Several computers in the workspace (console 257): claim this
+        // computer's channels there (best effort; again on every start).
+        runFork(
+          syncSlackRouting().pipe(
+            Effect.provideService(ManagerConnectorRepository, connectorRepository),
+            Effect.catch((cause) =>
+              Effect.logWarning("slack routing sync failed").pipe(
+                Effect.annotateLogs({ projectId, cause: String(cause) }),
+              ),
+            ),
+          ),
+        );
         return;
       }
       const client = new SocketModeClient({ appToken: config.appToken });
@@ -1562,16 +1705,35 @@ const makeSlackConnector = Effect.gen(function* () {
         );
         return false;
       }
-      return yield* postMessage(
+      const posted = yield* postMessage(
         runtime.web,
         input.channelId,
         input.text,
         input.threadTs,
         identity,
-      ).pipe(
-        Effect.map(() => true),
-        Effect.catch(() => Effect.succeed(false)),
-      );
+      ).pipe(Effect.option);
+      if (Option.isNone(posted)) return false;
+      const ts = posted.value.ts;
+      const route = input.routeReplies;
+      if (route !== undefined && typeof ts === "string") {
+        // A message posted into a thread is answered in that same thread.
+        const nowMs = Date.now();
+        yield* updateReplyRoutes((state) =>
+          addSlackReplyRoute(
+            state,
+            {
+              connectorProjectId: holder,
+              channel: input.channelId,
+              ts: input.threadTs ?? ts,
+              threadId: route.threadId,
+              options: route.options,
+              atMs: nowMs,
+            },
+            nowMs,
+          ),
+        );
+      }
+      return true;
     });
 
   return {

@@ -312,15 +312,6 @@ export const replyButtons = (
     })),
   );
 
-/** The flat list in the order shown — for a channel without buttons (Slack). */
-export const buttonsAsText = (
-  rows: ReadonlyArray<ReadonlyArray<{ readonly label: string }>>,
-  language: ReplyLanguage,
-): string => {
-  const labels = rows.flat().map((button) => button.label);
-  return `${language === "ru" ? "Варианты" : "Options"}: ${labels.join(" · ")}`;
-};
-
 // ── Telegram wire format ─────────────────────────────────────────────────
 
 export const newButtonGroupId = (): string => crypto.randomBytes(9).toString("base64url");

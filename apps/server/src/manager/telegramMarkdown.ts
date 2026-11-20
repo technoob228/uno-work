@@ -127,6 +127,10 @@ export const markdownLinksForSlack = (text: string): string =>
       `<${url}|${label.replaceAll("|", "/").replaceAll(">", "›").replaceAll("<", "‹")}>`,
   );
 
+/** Markdown `**bold**` as Slack's `*bold*` (Slack shows `**` as is). */
+export const boldForSlack = (text: string): string =>
+  text.replace(/\*\*(?=\S)([^*\n]+?)(?<=\S)\*\*/gu, "*$1*");
+
 /**
  * A link behind a word, or a page of Uno Hosting: the messenger shows no
  * preview, so a report's title and text stay inside the report.

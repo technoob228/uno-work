@@ -602,6 +602,35 @@ export const ManagerSlackInstallStartResult = Schema.Struct({
 export type ManagerSlackInstallStartResult = typeof ManagerSlackInstallStartResult.Type;
 
 /** `GET /api/manager/assistant/slack/install` — the "Add to Slack" installation as the daemon sees it. */
+/** One computer of this account answering in the Slack workspace. */
+export const ManagerSlackRoutingComputer = Schema.Struct({
+  name: Schema.String,
+  kind: Schema.Literals(["cloud", "desktop"]),
+  isThis: Schema.Boolean,
+  isDefault: Schema.Boolean,
+});
+export type ManagerSlackRoutingComputer = typeof ManagerSlackRoutingComputer.Type;
+
+/**
+ * Several computers — of this account or of several Uno accounts — in one
+ * Slack workspace through Uno's app (console 257): each channel answers on
+ * the computer that took it; direct messages and @mentions elsewhere go to
+ * the account's default computer (picked, else the cloud computer).
+ */
+export const ManagerSlackRoutingStatus = Schema.Struct({
+  /** This account's computers in the workspace (this one included). */
+  computers: Schema.Array(ManagerSlackRoutingComputer),
+  /** This computer gets the account's direct messages and @mentions. */
+  isDefault: Schema.Boolean,
+  /** The person picked the default (not the cloud-first rule). */
+  defaultChosen: Schema.Boolean,
+  /** Other Uno accounts answer in this workspace too. */
+  shared: Schema.Boolean,
+  /** What replies are signed with there ("Misha's assistant"); null = the app's name. */
+  signedAs: Schema.NullOr(Schema.String),
+});
+export type ManagerSlackRoutingStatus = typeof ManagerSlackRoutingStatus.Type;
+
 export const ManagerSlackInstallStatus = Schema.Struct({
   available: Schema.Boolean,
   installed: Schema.Boolean,
@@ -614,16 +643,56 @@ export const ManagerSlackInstallStatus = Schema.Struct({
    * allowlisted — they can message the computer right away.
    */
   installerDmReady: Schema.Boolean,
+  /** The workspace's computers; absent when the console can't tell (older console). */
+  routing: Schema.optionalKey(ManagerSlackRoutingStatus),
 });
+
+/**
+ * `POST /api/manager/assistant/slack/default` {projectId, isDefault} —
+ * "Answer direct messages here" (true) or back to the cloud computer (false).
+ */
+export const ManagerSlackDefaultInput = Schema.Struct({
+  projectId: ProjectId,
+  isDefault: Schema.Boolean,
+});
+export type ManagerSlackDefaultInput = typeof ManagerSlackDefaultInput.Type;
 export type ManagerSlackInstallStatus = typeof ManagerSlackInstallStatus.Type;
 
 /**
+ * `POST /api/manager/assistant/slack/device` — "Add to Slack" for the desktop
+ * app on a laptop. The interface reads the installation at the console with
+ * the desktop's own sign-in and passes the answer here; `relayToken` only
+ * when the previous call said `needsRelay`.
+ */
+export const ManagerSlackDeviceSyncInput = Schema.Struct({
+  projectId: ProjectId,
+  available: Schema.Boolean,
+  installed: Schema.Boolean,
+  teamName: Schema.NullOr(Schema.String),
+  botUserName: Schema.NullOr(Schema.String),
+  installerUserId: Schema.NullOr(Schema.String),
+  /** The console's `relay_fingerprint`: tells a relay token of an earlier sign-in. */
+  relayFingerprint: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  relayToken: Schema.optionalKey(Schema.String),
+});
+export type ManagerSlackDeviceSyncInput = typeof ManagerSlackDeviceSyncInput.Type;
+
+export const ManagerSlackDeviceSyncResult = Schema.Struct({
+  ...ManagerSlackInstallStatus.fields,
+  /** Installed, but this computer has no relay token yet: mint one and call again. */
+  needsRelay: Schema.Boolean,
+});
+export type ManagerSlackDeviceSyncResult = typeof ManagerSlackDeviceSyncResult.Type;
+
+/**
  * Error codes of the shared-bot / Add-to-Slack routes, in `{ error }`:
- * `not_cloud_computer` (409, no machine token), `shared_bot_unavailable` /
+ * `not_cloud_computer` (409, no machine token), `cloud_computer` (409, the
+ * desktop-only routes on a cloud computer), `shared_bot_unavailable` /
  * `slack_app_unavailable` (503), `console_unreachable` / `console_error` (502).
  */
 export const ManagerChannelSetupErrorCode = Schema.Literals([
   "not_cloud_computer",
+  "cloud_computer",
   "shared_bot_unavailable",
   "slack_app_unavailable",
   "slack_not_installed",
