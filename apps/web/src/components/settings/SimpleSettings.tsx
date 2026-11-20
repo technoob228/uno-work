@@ -75,6 +75,7 @@ import { MachineAccessSections } from "./MachineAccessSettings";
 import { GeneralSettingsPanel, UnoGatewayBalance } from "./SettingsPanels";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { ChatRequestsSettingsSection } from "./ChatRequestsSettings";
 import { buildSettingsNavGroups } from "./settingsNavGroups";
 
 /** Where Uno Work opens in a phone's browser. */
@@ -723,6 +724,9 @@ export function ComputerSettings() {
       </SettingsSection>
 
       <MachineAccessSections />
+
+      {/* A cloud chat asks to start a chat on this computer (only on the person's own). */}
+      <ChatRequestsSettingsSection environmentId={environmentId} isCloud={isCloud} />
 
       <ChatCopiesCleanupSection environmentId={environmentId} />
 

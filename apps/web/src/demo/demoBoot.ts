@@ -25,6 +25,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { deployApprovalHandlers } from "./deployApprovalsDemo";
+import { answerChatRequestsRpc, installChatRequestsDemo } from "./chatRequestsDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
@@ -327,6 +328,13 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   if (DEMO_ASSIST) {
     const vaultAnswer = answerVaultRpc(machine.environmentId, String(tag), body);
     if (vaultAnswer !== undefined) return vaultAnswer;
+  }
+  // A cloud chat asks to start a chat on the MacBook (chatRequestsDemo.ts).
+  if (DEMO_ASSIST && machine.key === "mac") {
+    const requestAnswer = answerChatRequestsRpc(String(tag), body, {
+      startChat: (input) => startRequestedChat(machine, input),
+    });
+    if (requestAnswer !== undefined) return requestAnswer;
   }
   const searchAnswer = answerThreadSearchRpc(
     modelFor(machine).threads,
@@ -1816,8 +1824,34 @@ const lifecycleOps: LifecycleOps = {
   finishTurn: (key, threadId, text) => finishTurn(MACHINES[key], threadId, text),
 };
 
+/**
+ * Start on a chat request from the cloud: an ordinary chat on the MacBook in
+ * the asked folder, the brief as its first message, the agent at work.
+ */
+function startRequestedChat(
+  machine: DemoMachine,
+  input: { title: string; cwd: string | null; brief: string },
+): string {
+  const model = modelFor(machine);
+  const folder = input.cwd?.replace(/^~/, machine.home) ?? null;
+  const project =
+    (folder && model.projects.find((p) => String(p.workspaceRoot) === folder)) ||
+    model.projects.find((p) => p.title !== "Uno") ||
+    model.projects[0]!;
+  const threadId = `m-requested-${Date.now()}`;
+  createDemoThread(machine, { threadId, projectId: String(project.id), title: input.title });
+  demoAgentWorksIn(
+    machine.environmentId,
+    threadId,
+    input.brief,
+    `On it. Working in ${input.cwd ?? String(project.title)}; I'll write here what I find.`,
+  );
+  return threadId;
+}
+
 function startAssist() {
   startLinks();
+  installChatRequestsDemo(MACHINES.mac.environmentId);
   startLifecycle(lifecycleOps);
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });

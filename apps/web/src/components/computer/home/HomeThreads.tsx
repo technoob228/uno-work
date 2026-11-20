@@ -24,6 +24,8 @@ import { cn } from "~/lib/utils";
 import { usePendingApproval } from "../../../inbox/usePendingApproval";
 import { useDeployLiveCount } from "../../../deployApprovals/deployApprovalsStore";
 import { DeployApprovalCards } from "../../inbox/DeployApprovalCards";
+import { ChatRequestCards } from "../../inbox/ChatRequestCards";
+import { useChatRequestsWaitingCount } from "../../../chatRequests/chatRequestsStore";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { buildThreadRouteParams } from "../../../threadRoutes";
@@ -437,7 +439,9 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
   const waiting = useAttentionThreads(threads, now).slice(0, 4);
   // Deploy-window requests and open windows (deployApprovals/): on top.
   const deployLive = useDeployLiveCount();
-  if (waiting.length === 0 && deployLive === 0) {
+  // Chat requests from the cloud (chatRequests/), first: they wait at most 2 h.
+  const chatRequests = useChatRequestsWaitingCount();
+  if (waiting.length === 0 && deployLive === 0 && chatRequests === 0) {
     return (
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
         <span className="size-2 rounded-full bg-success" aria-hidden />
@@ -447,6 +451,7 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
   }
   return (
     <>
+      <ChatRequestCards className="-mx-1 px-0" />
       <DeployApprovalCards liveOnly className="-mx-1 px-0" />
       {waiting.length > 0 ? (
         <ul className="-mx-2 flex flex-col">

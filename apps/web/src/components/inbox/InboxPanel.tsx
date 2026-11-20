@@ -53,6 +53,8 @@ import {
   WithInboxItemActions,
 } from "./InboxItemActions";
 import { DeployApprovalCards } from "./DeployApprovalCards";
+import { ChatRequestCards } from "./ChatRequestCards";
+import { useChatRequestsWaitingCount } from "../../chatRequests/chatRequestsStore";
 import { MyComputerActivityBanner } from "./MyComputerActivityBanner";
 
 type Filter = "all" | "needs-you" | "chats" | "apps" | "snoozed";
@@ -112,7 +114,9 @@ export const InboxPanel = memo(function InboxPanel(props: {
   const [filter, setFilter] = useState<Filter>("all");
   const now = new Date();
   const visible = useMemo(() => filterInbox(entries, filter), [entries, filter]);
-  const needsYou = useMemo(() => filterInbox(entries, "needs-you").length, [entries]);
+  const chatRequestsWaiting = useChatRequestsWaitingCount();
+  const needsYou =
+    useMemo(() => filterInbox(entries, "needs-you").length, [entries]) + chatRequestsWaiting;
   const snoozedCount = useMemo(() => filterInbox(entries, "snoozed").length, [entries]);
   const unreadVisible = visible.some((item) => item.readAt === null);
   const hasRead = entries.some((item) => item.readAt !== null);
@@ -184,10 +188,14 @@ export const InboxPanel = memo(function InboxPanel(props: {
 
       <MyComputerActivityBanner />
       {filter === "all" || filter === "needs-you" ? (
-        <DeployApprovalCards liveOnly={filter === "needs-you"} />
+        <>
+          <ChatRequestCards />
+          <DeployApprovalCards liveOnly={filter === "needs-you"} />
+        </>
       ) : null}
 
-      {visible.length === 0 ? (
+      {visible.length === 0 &&
+      !((filter === "all" || filter === "needs-you") && chatRequestsWaiting > 0) ? (
         <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground/70">
           <InboxIcon className="size-5" />
           {filter === "needs-you"
@@ -502,6 +510,7 @@ function RowAction(props: { label: string; onClick: () => void; children: React.
 /** "Needs you" on the rail's Home panel: approvals and questions, nothing else. */
 export const InboxNeedsYouList = memo(function InboxNeedsYouList() {
   const entries = useInboxEntries();
+  const chatRequestsWaiting = useChatRequestsWaitingCount();
   const needsYou = useMemo(() => filterInbox(entries, "needs-you"), [entries]);
   return (
     <section aria-label="Needs you" className="flex flex-col gap-px">
@@ -510,8 +519,9 @@ export const InboxNeedsYouList = memo(function InboxNeedsYouList() {
           Needs you
         </span>
       </div>
+      <ChatRequestCards />
       <DeployApprovalCards liveOnly />
-      {needsYou.length === 0 ? (
+      {needsYou.length === 0 && chatRequestsWaiting === 0 ? (
         <p className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground/60">
           Nothing waits for you. Approvals and questions from agents show up here.
         </p>

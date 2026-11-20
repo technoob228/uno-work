@@ -402,6 +402,8 @@ const ACTIVITY_VERB: Readonly<Record<MyComputerActivityEntry["kind"], string>> =
   read: "Read",
   write: "Wrote",
   list: "Listed",
+  // A request to start a chat there (chatRequests.ts); the summary says which and how it ended.
+  chat: "Asked to start a chat:",
 };
 
 export function activityLine(

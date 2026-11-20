@@ -21,6 +21,7 @@ import { memo, type ComponentType, type ReactNode } from "react";
 import { APP_VERSION } from "../../branding";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { useMachineRows } from "../../hooks/useMachineRows";
+import { useChatRequestsWaitingCount } from "../../chatRequests/chatRequestsStore";
 import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { useInboxNeedsYouCount, useInboxUnreadCount } from "../../inbox/inboxStore";
 import { cn } from "../../lib/utils";
@@ -132,8 +133,8 @@ export const NavRail = memo(function NavRail({ isElectron }: { isElectron: boole
   const goHome = useGoHome();
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
-  // Deploy-window requests that wait count as needing the person.
-  const deployWaiting = useDeployWaitingCount();
+  // Deploy-window requests and chat requests from the cloud that wait count as needing the person.
+  const deployWaiting = useDeployWaitingCount() + useChatRequestsWaitingCount();
   const unread = useInboxUnreadCount() + deployWaiting;
   const needsYou = useInboxNeedsYouCount() + deployWaiting;
   const { pins } = usePins();

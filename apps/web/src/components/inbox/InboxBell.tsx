@@ -34,15 +34,17 @@ import { InboxActionButtons, WithInboxItemActions } from "./InboxItemActions";
 import { ItemIcon, filterInbox } from "./InboxPanel";
 import { InboxCountBadge } from "../sidebar/SidebarInboxRow";
 import { DeployApprovalCards } from "./DeployApprovalCards";
+import { useChatRequestsWaitingCount } from "../../chatRequests/chatRequestsStore";
 import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
+import { ChatRequestCards } from "./ChatRequestCards";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
 
 export const InboxBell = memo(function InboxBell() {
   const [open, setOpen] = useState(false);
-  // Deploy-window requests that wait count as needing the person.
-  const deployWaiting = useDeployWaitingCount();
+  // Deploy-window requests and chat requests from the cloud that wait count as needing the person.
+  const deployWaiting = useDeployWaitingCount() + useChatRequestsWaitingCount();
   const unread = useInboxUnreadCount() + deployWaiting;
   const needsYou = useInboxNeedsYouCount() + deployWaiting;
   const label =
@@ -87,10 +89,14 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
   const [filter, setFilter] = useState<BellFilter>("all");
   const now = Date.now();
   const sections = useMemo(() => bellSections(entries, filter, now), [entries, filter, now]);
-  const needsYouCount = useMemo(() => filterInbox(entries, "needs-you").length, [entries]);
+  const chatRequestsWaiting = useChatRequestsWaitingCount();
+  const needsYouCount =
+    useMemo(() => filterInbox(entries, "needs-you").length, [entries]) + chatRequestsWaiting;
   const anyUnread = entries.some((item) => item.readAt === null && !isSnoozed(item));
   const system = useSystemNotificationsState();
-  const empty = sections.every((section) => section.items.length === 0);
+  const empty =
+    sections.every((section) => section.items.length === 0) &&
+    !((filter === "all" || filter === "needs-you") && chatRequestsWaiting > 0);
   const assistantChatId = useAssistantChat().chat?.id ?? null;
 
   return (
@@ -162,7 +168,10 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {filter === "all" || filter === "needs-you" ? (
-          <DeployApprovalCards liveOnly={filter === "needs-you"} className="px-0 pt-2" />
+          <>
+            <ChatRequestCards className="px-0 pt-2" onOpened={onClose} />
+            <DeployApprovalCards liveOnly={filter === "needs-you"} className="px-0 pt-2" />
+          </>
         ) : null}
         {empty ? (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground/70">
