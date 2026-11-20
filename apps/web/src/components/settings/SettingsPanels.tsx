@@ -1,4 +1,5 @@
 import { ArchiveIcon, ArchiveX } from "lucide-react";
+import { LookSection } from "../../blocks/LookSettings";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
@@ -610,6 +611,7 @@ export function GeneralSettingsPanel({
           />
         </SettingsSection>
       ) : null}
+      <LookSection />
       <SettingsSection title="General">
         <SettingsRow
           title="Start screen"

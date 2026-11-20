@@ -34,6 +34,7 @@ import {
   playWith,
 } from "./engine";
 import { type AssistWorld, WORLD } from "./world";
+import { registerLayoutAgent } from "./layoutAgent";
 
 // ── An assistant on the MacBook (`?macassistant=on`) ─────────────────────
 
@@ -245,6 +246,8 @@ export function resetAutomations(input: { readonly world: AssistWorld }) {
   nextId = 1;
   nextRunId = 1;
   registerOnce();
+  // T55: "make me a sidebar …" (after the variant's triggers, so it wins).
+  registerLayoutAgent();
   if (world.account !== "live" || world.automations !== "some") return;
   const timezone = browserTimeZone();
   const evening = automationCronFor({ cadence: "weekdays", time: "18:00" });

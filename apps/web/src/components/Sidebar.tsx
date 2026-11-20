@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -382,6 +383,20 @@ import { SidebarChatRequests } from "./sidebar/SidebarChatRequests";
 import { useSidebarChatDrag } from "./sidebar/useSidebarChatDrag";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { useSidebarLayoutStore } from "../blocks/layoutStore";
+import { parseWidgetBlockId, type LayoutBlock } from "../blocks/layoutModel";
+import { useWidgetApps, widgetAppOf } from "../blocks/catalog";
+import {
+  BlockCatalog,
+  ComputersBlock,
+  ProjectsBlock,
+  RunningAppsBlock,
+  SidebarAddBlockButton,
+  SidebarBlocksEditor,
+  SidebarEditBar,
+  SidebarLayoutUndoNote,
+  WidgetBlock,
+} from "../blocks/SidebarBlocks";
 
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
@@ -2407,6 +2422,10 @@ export default function Sidebar() {
 
   // ── Sidebar D: Uno's running chats, Projects, Recents ───────────────
   const sidebarD = !railLayout;
+  // T55 (blocks layout, demo 20.11): the sidebar as blocks in the person's order.
+  const layoutBlocks = useSidebarLayoutStore((state) => state.layout.blocks);
+  const editingLayout = useSidebarLayoutStore((state) => state.editing);
+  const widgetApps = useWidgetApps();
   const dHomeFolderPath = useHomeFolderPath(activeEnvironmentId ?? primaryEnvironmentId);
   const [foldedProjectKeys, setFoldedProjectKeys] = useLocalStorage<
     ReadonlyArray<string>,
@@ -4874,18 +4893,10 @@ export default function Sidebar() {
       ) : null}
     </>
   );
-  const dChatList = (inPanel: boolean) => (
-    <SidebarContent className="min-h-full gap-0">
-      <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
-        {/* A cloud chat asks to start a chat here (chatRequests/): above everything else. */}
-        <SidebarChatRequests />
-        <SidebarDraftsBlock />
-        <TooltipProvider delay={150} closeDelay={0} timeout={400}>
-          <ul
-            role="list"
-            className="relative flex flex-1 flex-col gap-px"
-            data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
-          >
+  // T55 blocks: what each block of the sidebar renders. The chats block is
+  // the list as before (bar, groups, shelves); the rest are rows of <li>.
+  const dAssistantsBlock = (
+    <>
             {assistantChatsInSidebar ? (
               <SidebarAssistants
                 routeThreadKey={routeThreadKey}
@@ -4911,10 +4922,15 @@ export default function Sidebar() {
                     )}
               </>
             )}
+    </>
+  );
+  const dPinnedBlock = (force: boolean) => (
+    <>
             {/* Pinned sits under the assistants (Misha 30.10) and scrolls with
                 the chats: a block of its own held 40% of the sidebar. */}
             {/* Apps and widgets may live in the icon row: nothing to list then. */}
-            {pins.some((item) => !appPinsInRow || item.kind !== "app") ||
+            {force ||
+            pins.some((item) => !appPinsInRow || item.kind !== "app") ||
             pinnedThreads.length > 0 ? (
               <li className="mt-2 list-none" data-testid="sidebar-d-pinned">
                 <SidebarPinned
@@ -4926,6 +4942,10 @@ export default function Sidebar() {
                 />
               </li>
             ) : null}
+    </>
+  );
+  const dChatsBlock = (
+    <>
             {!sidebarViewMenu ? (
               <LegacySidebarDChatsBar
                 onNewChat={handleNewThreadClick}
@@ -5079,6 +5099,101 @@ export default function Sidebar() {
                 </button>
               </li>
             ) : null}
+    </>
+  );
+  const dProjectsForBlock = projectGroups.map((group) => ({
+    key: group.projectKey,
+    name: group.displayName,
+    chats: threads.filter((thread) => projectKeyOf(thread) === group.projectKey).length,
+  }));
+  const dBlockContent = (block: LayoutBlock, editing: boolean): ReactNode => {
+    switch (block.id) {
+      case "places":
+        return (
+          <li className="list-none pb-1">
+            <SidebarDPlaces />
+          </li>
+        );
+      case "assistants":
+        return editing ? <ul role="list" className="flex flex-col gap-px">{dAssistantsBlock}</ul> : dAssistantsBlock;
+      case "pinned":
+        return editing ? <ul role="list" className="flex flex-col gap-px">{dPinnedBlock(true)}</ul> : dPinnedBlock(false);
+      case "chats":
+        return editing ? <ul role="list" className="flex flex-col gap-px">{dChatsBlock}</ul> : dChatsBlock;
+      case "needs-you":
+        return (
+          <li className="list-none pb-2" data-testid="block-needs-you">
+            <InboxNeedsYouList />
+          </li>
+        );
+      case "computers":
+        return (
+          <li className="list-none pb-2">
+            <ComputersBlock />
+          </li>
+        );
+      case "projects":
+        return (
+          <li className="list-none pb-2">
+            <ProjectsBlock
+              projects={dProjectsForBlock}
+              onOpen={(key) => {
+                const member = projectGroupByScopeKey.get(key)?.memberProjects[0];
+                if (!member) return;
+                void newThreadContext.handleNewThread(
+                  scopeProjectRef(member.environmentId, member.id),
+                  { envMode: newChatEnvMode(scopeProjectRef(member.environmentId, member.id)) },
+                );
+              }}
+            />
+          </li>
+        );
+      case "apps":
+        return (
+          <li className="list-none pt-2 pb-2">
+            <RunningAppsBlock />
+          </li>
+        );
+      default:
+        return parseWidgetBlockId(block.id) ? (
+          <li className="list-none pb-2">
+            <WidgetBlock item={widgetAppOf(widgetApps, block.id)} size={block.size} />
+          </li>
+        ) : null;
+    }
+  };
+  // Places leading the layout stay pinned on top (outside the scroll), as before.
+  const dPlacesOnTop = !editingLayout && layoutBlocks[0]?.id === "places";
+  const dListBlocks = dPlacesOnTop ? layoutBlocks.slice(1) : layoutBlocks;
+  const dChatList = (inPanel: boolean) => {
+    const dLayoutEditing = editingLayout && !inPanel;
+    return (
+    <SidebarContent className="min-h-full gap-0">
+      <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
+        {/* A cloud chat asks to start a chat here (chatRequests/): above everything else. */}
+        {/* System rows aren't blocks: always on top, out of the way while editing. */}
+        {dLayoutEditing ? null : (
+          <>
+            <SidebarChatRequests />
+            <SidebarDraftsBlock />
+          </>
+        )}
+        <TooltipProvider delay={150} closeDelay={0} timeout={400}>
+          <ul
+            role="list"
+            className="relative flex flex-1 flex-col gap-px"
+            data-testid={inPanel ? "sidebar-panel-chats" : "sidebar-d-chats"}
+          >
+            {dLayoutEditing ? (
+              <li className="list-none">
+                <SidebarBlocksEditor render={(block) => dBlockContent(block, true)} />
+                <SidebarAddBlockButton />
+              </li>
+            ) : (
+              dListBlocks.map((block) => (
+                <Fragment key={block.id}>{dBlockContent(block, false)}</Fragment>
+              ))
+            )}
           </ul>
         </TooltipProvider>
         <SidebarUnoAiChats />
@@ -5119,7 +5234,8 @@ export default function Sidebar() {
         ) : null}
       </SidebarGroup>
     </SidebarContent>
-  );
+    );
+  };
 
   if (sidebarD) {
     const showPanel = dRailShown && dPanelOpen && typeof document !== "undefined";
@@ -5132,9 +5248,19 @@ export default function Sidebar() {
               waits; the chats below with Uno pinned first. Settings and the
               account live in the menu on top. */}
             <SidebarSetupRow />
-            <SidebarDPlaces />
+            {dPlacesOnTop ? <SidebarDPlaces /> : null}
           </SidebarGroup>
+          {editingLayout ? <SidebarEditBar /> : <SidebarLayoutUndoNote />}
           {dChatList(false)}
+          <BlockCatalog
+            left="calc(var(--sidebar-width, 16rem) + 12px)"
+            onAskAgent={(text) => {
+              // Demo: the request goes to Uno as a toast; the real flow starts
+              // a chat with Uno that makes a small app with a widget.
+              useSidebarLayoutStore.getState().setCatalogOpen(false);
+              toastManager.add({ type: "success", title: "Sent to Uno", description: text });
+            }}
+          />
           <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
             <SidebarThreadUndoNotice />
             <SidebarUpdatePill />

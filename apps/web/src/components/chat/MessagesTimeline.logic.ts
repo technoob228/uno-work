@@ -436,6 +436,13 @@ export function deriveMessagesTimelineRows(input: {
   // The answer stays in sight even when its turn went on after an agent
   // wrote (one turn, folded to its last answer — which is the agents').
   if (agentTalk !== null) collapsedEntryIds.delete(agentTalk.answerEntryId);
+  // A card the person acts on (an agent's sidebar proposal, T55) stays in
+  // sight when its turn folds into "Worked for …".
+  for (const entry of input.timelineEntries) {
+    if (entry.kind === "work" && entry.entry.toolName === "sidebar_layout_propose") {
+      collapsedEntryIds.delete(entry.id);
+    }
+  }
   const lastUserIndex = input.timelineEntries.findLastIndex(
     (entry) => entry.kind === "message" && entry.message.role === "user",
   );

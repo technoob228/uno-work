@@ -33,8 +33,10 @@ function app(
   detail: string,
   url: string | null,
   status: UnoMachineApp["status"] = "running",
+  widget: UnoMachineApp["widget"] = null,
 ): UnoMachineApp {
   return {
+    widget,
     id: `manifest:${id}`,
     source: "manifest",
     name,
@@ -59,16 +61,27 @@ function app(
 
 const APPS_BY_MACHINE: Record<DemoMachine["key"], () => UnoMachineApp[]> = {
   own: () => [],
-  product: () => [
-    app("pult", "Пульт", "🎛", "Agents, questions and reports", demoSiteUrl("apps/pult.html")),
-  ],
+  product: () => [],
+  // T55 (blocks layout): Пульт and the limits live on uno-work with a widget
+  // each (`apps/<id>/widget.html`), so Home and the sidebar's blocks show them.
   work: () => [
+    app(
+      "pult",
+      "Пульт",
+      "📋",
+      "Agents, questions and reports",
+      demoSiteUrl("apps/pult/"),
+      "running",
+      { path: "/widget.html", size: "medium", title: "Пульт" },
+    ),
     app(
       "ai-limits",
       "Лимиты нейронок",
       "📊",
       "Claude, Codex and Uno AI limits",
-      demoSiteUrl("apps/ai-limits.html"),
+      demoSiteUrl("apps/ai-limits/"),
+      "running",
+      { path: "/widget.html", size: "small", title: "Лимиты нейронок" },
     ),
     app("grafana-nodes", "Grafana · nodes", "📈", "Load of hector and nl-2", null, "stopped"),
   ],

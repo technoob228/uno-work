@@ -1,0 +1,26 @@
+/* Demo widgets (T55): small pages an app serves at its widget path. They
+   follow Uno Work's look through ?uno-theme= and ?uno-accent= (the plan's
+   theme tokens for widgets); transparent so the block's card shows through. */
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; }
+body {
+  font: 12.5px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #1b1d22; padding: 10px 12px; --accent: #5b5bd6; --muted: #6b7080; --line: #e6e7ea;
+  --tag-bg: #f1f1f4;
+}
+body.dark { color: #e8e8ec; --muted: #9a9cab; --line: #2b2d36; --tag-bg: #24262e; }
+.top { display: flex; align-items: baseline; gap: 6px; }
+.big { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; color: var(--accent); }
+.lbl { color: var(--muted); font-size: 11.5px; }
+ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+li span.t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 99px; background: var(--tag-bg); color: var(--muted); flex-shrink: 0; }
+.tag.q { background: color-mix(in oklab, var(--accent) 16%, transparent); color: var(--accent); }
+.tag.r { background: #e9f6ee; color: #23774a; }
+body.dark .tag.r { background: #17311f; color: #6fd396; }
+.bar { height: 5px; border-radius: 9px; background: var(--line); overflow: hidden; margin-top: 3px; }
+.bar i { display: block; height: 100%; background: var(--accent); border-radius: 9px; }
+.row { display: grid; gap: 2px; margin-top: 7px; }
+.row .h { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+.more { margin-top: 8px; color: var(--muted); font-size: 11px; }

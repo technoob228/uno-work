@@ -1,4 +1,5 @@
 import { ScreenRecordingBar } from "../screenRecording/ScreenRecordingBar";
+import { LookApplier } from "../blocks/LookSettings";
 import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime";
 import {
@@ -247,6 +248,7 @@ function RootRouteView() {
         <AppSidebarLayout>
           <Outlet />
         </AppSidebarLayout>
+        <LookApplier />
         <NewProjectDialog />
         <ConnectComputerDialog />
         <ComputersLifecycleSync />

@@ -37,6 +37,7 @@ import { describeHandoffSeed, isHandoffSeed } from "../../continueOnMachine";
 import { isUnoAiHandoff } from "../../unoai/unoAiHandoff";
 import { UnoAiHandoffCard } from "./UnoAiHandoffCard";
 import { AutomationCreatedCard } from "../automations/AutomationCreatedCard";
+import { LayoutProposalCard, layoutProposalFromToolResult } from "../../blocks/LayoutProposalCard";
 import { automationFromToolResult } from "../automations/automations.logic";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import {
@@ -1030,6 +1031,20 @@ const WorkGroupSection = memo(function WorkGroupSection({
       workEntry.toolName === "automation_create"
         ? automationFromToolResult(workEntry.rawResult)
         : null;
+    // An agent proposed a sidebar (T55 demo): its card with Apply.
+    const layoutProposal =
+      workEntry.toolName === "sidebar_layout_propose"
+        ? layoutProposalFromToolResult(workEntry.rawResult)
+        : null;
+    if (layoutProposal) {
+      return (
+        <LayoutProposalCard
+          key={`work-row:${workEntry.id}`}
+          proposal={layoutProposal}
+          agent="Uno"
+        />
+      );
+    }
     return automation ? (
       <AutomationCreatedCard key={`work-row:${workEntry.id}`} automation={automation} />
     ) : (
@@ -1051,7 +1066,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
   // tool's (a runtime error — a failed tool only marks the phrase).
   const pinned = groupedEntries.filter(
     (entry) =>
-      entry.toolName === "automation_create" || (entry.tone === "error" && !entry.itemType),
+      entry.toolName === "automation_create" ||
+      entry.toolName === "sidebar_layout_propose" ||
+      (entry.tone === "error" && !entry.itemType),
   );
   const hasOverflow = groupedEntries.length > MAX_VISIBLE_WORK_LOG_ENTRIES * 2;
   const visibleEntries =

@@ -12,6 +12,7 @@
  *   bottom;
  * - Uno's face, used on the rail, the pinned Uno row and chats Uno started.
  */
+import { useSidebarLayoutStore } from "../../blocks/layoutStore";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
@@ -29,6 +30,7 @@ import {
   PanelLeftCloseIcon,
   PanelLeftIcon,
   SearchIcon,
+  LayoutPanelLeftIcon,
   SettingsIcon,
   SparklesIcon,
   SquarePenIcon,
@@ -200,6 +202,16 @@ export const SidebarDAccountMenu = memo(function SidebarDAccountMenu(props: {
           >
             <SettingsIcon />
             Settings
+          </MenuItem>
+          <MenuItem
+            data-testid="sidebar-customize"
+            onClick={() => {
+              close();
+              useSidebarLayoutStore.getState().setEditing(true);
+            }}
+          >
+            <LayoutPanelLeftIcon />
+            Customize sidebar…
           </MenuItem>
           {lines.signInElsewhere ? (
             // This address can't reach the Uno account: say where it works.
