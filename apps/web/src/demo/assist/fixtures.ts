@@ -23,6 +23,7 @@ import {
   type ProjectSpec,
 } from "../heavyFixtures";
 import { PLAN_LIMIT_CHAT } from "./plans";
+import { pendingTrayChats } from "../pendingTrayDemo";
 import { type AssistWorld, macOnline } from "./world";
 
 /** An assistant the demo has: its folder on one computer, how it looks, what its daemon keeps. */
@@ -478,6 +479,8 @@ function liveChats(world: AssistWorld): ChatSpec[] {
   ];
   chats.push(...PERSON_NEEDED_CHATS);
   chats.push(...ANSWER_HELD_CHATS);
+  // T52: a long coordinator chat where three things wait for the person.
+  chats.push(...pendingTrayChats());
   // Multi-computer variants (28.10): one chat at work on each computer that's on.
   chats.push({
     id: "w-refunds",

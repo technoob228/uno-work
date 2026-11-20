@@ -25,6 +25,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { deployApprovalHandlers } from "./deployApprovalsDemo";
+import { installPendingTrayReplies } from "./pendingTrayDemo";
 import { answerChatRequestsRpc, installChatRequestsDemo } from "./chatRequestsDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { answerThreadSearchRpc } from "./threadSearchDemo";
@@ -1861,6 +1862,7 @@ function startAssist() {
   startLinks();
   installChatRequestsDemo(MACHINES.mac.environmentId);
   startLifecycle(lifecycleOps);
+  installPendingTrayReplies();
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });

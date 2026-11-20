@@ -9,6 +9,7 @@ import { injectHtmlRenderBootstrap } from "@t3tools/shared/htmlRender";
 
 import type { NormalizedWsRpcRequestBody } from "./rpcHarness";
 import type { DemoMachine } from "./heavyFixtures";
+import { PENDING_TRAY_PAGES } from "./pendingTrayDemo";
 
 const TEXT: Record<string, string> = {
   "README.md": `# landing
@@ -171,7 +172,11 @@ function readFile(path: string) {
   const name = baseName(path);
   const mime = ASSETS[name];
   if (mime) return readAsset(name, mime);
-  const text = TEXT[name] ?? DEMO_TEXT[name] ?? `# ${name}\n\nA file of the mock.\n`;
+  const text =
+    TEXT[name] ??
+    DEMO_TEXT[name] ??
+    PENDING_TRAY_PAGES[name] ??
+    `# ${name}\n\nA file of the mock.\n`;
   return {
     content: text,
     encoding: "utf8",

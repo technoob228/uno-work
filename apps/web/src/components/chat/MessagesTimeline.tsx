@@ -49,6 +49,8 @@ import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import type { ThreadFindMatch } from "./threadFind";
 import { useThreadFindReveal } from "./useThreadFindReveal";
+import { PendingMarkLine, pendingRowClassName } from "./PendingForYouStrip";
+import { useTimelineJump } from "./useTimelineJump";
 import { fixWorkVisibleText } from "../../fixWork/fixWork";
 import {
   BotIcon,
@@ -150,8 +152,12 @@ interface TimelineRowSharedState {
   onRespondToApproval:
     | ((requestId: ApprovalRequestId, decision: ProviderApprovalDecision) => Promise<void>)
     | undefined;
+  /** "Waiting for you" (T52): rows to mark, and the row the strip just jumped to. */
+  pendingMarks: ReadonlyMap<string, "waiting" | "replaced">;
+  highlightRowId: string | null;
 }
 
+const EMPTY_PENDING_MARKS: ReadonlyMap<string, "waiting" | "replaced"> = new Map();
 const EMPTY_PENDING_APPROVALS: ReadonlyArray<PendingApproval> = [];
 const EMPTY_REQUEST_IDS: ReadonlyArray<ApprovalRequestId> = [];
 
@@ -220,6 +226,9 @@ interface MessagesTimelineProps {
    * Read once, when the chat opens.
    */
   openAtAnswer?: boolean;
+  /** "Waiting for you" (T52): rows to mark; an entry to bring into view and light. */
+  pendingMarks?: ReadonlyMap<string, "waiting" | "replaced">;
+  jumpTo?: { readonly entryId: string; readonly navigationId: number } | null;
 }
 
 /** Shown only if loading takes a noticeable moment: a quick load stays blank. */
@@ -283,6 +292,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRespondToApproval,
   endOfFeed = null,
   openAtAnswer = false,
+  pendingMarks = EMPTY_PENDING_MARKS,
+  jumpTo = null,
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
@@ -393,6 +404,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     onMissingRow: onFindMissingRow,
   });
 
+  // "Waiting for you" (T52): open what hides the entry, scroll to it, light it.
+  const highlightRowId = useTimelineJump({
+    listRef,
+    jumpTo,
+    rowIndex: jumpTo ? rows.findIndex((row) => row.id === jumpTo.entryId) : -1,
+    timelineEntries,
+    onHidden: (turnId) => {
+      setAgentTalkExpanded(true);
+      if (turnId) setExpandedTurnIds((current) => new Set(current).add(turnId));
+    },
+  });
+
   const handleScroll = useCallback(() => {
     const state = listRef.current?.getState?.();
     if (state) {
@@ -455,6 +478,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
+      pendingMarks,
+      highlightRowId,
     }),
     [
       activeTurnInProgress,
@@ -477,6 +502,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onDisclosureToggle,
       respondingRequestIds,
       onRespondToApproval,
+      pendingMarks,
+      highlightRowId,
     ],
   );
 
@@ -560,18 +587,25 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   // 29.10: "Revert to this message" is a developer tool (Dev mode only).
   const devMode = useDevMode();
 
+  const pendingMark = ctx.pendingMarks.get(row.id) ?? null;
+  const highlighted = ctx.highlightRowId === row.id;
+
   return (
     <div
       className={cn(
         // A person's message keeps room for the line that shows under it on hover.
         row.kind === "message" && row.message.role === "user" ? "pb-8" : "pb-4",
         row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
+        pendingRowClassName(highlighted, pendingMark),
       )}
       data-timeline-row-id={row.id}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
+      data-pending-mark={pendingMark ?? undefined}
+      data-highlighted={highlighted ? "true" : undefined}
     >
+      {pendingMark ? <PendingMarkLine mark={pendingMark} /> : null}
       {row.kind === "work" && (
         <WorkGroupSection groupedEntries={row.groupedEntries} live={row.live} />
       )}
