@@ -7,6 +7,7 @@ import {
   buildMediaTextFailure,
   buildTranscriptMessageText,
   buildVideoMessageText,
+  classifyMediaFailure,
   describeTelegramVideo,
   isDescribableVideo,
   isGatingSpeechMedia,
@@ -315,6 +316,59 @@ describe("mediaToText", () => {
     }),
   );
 
+  // 19.11: OpenRouter out of credit -> gateway 502 «Transcription provider
+  // failed»; the old note sent the assistant after ffmpeg and it answered
+  // «Whisper isn't connected». Now: a recognition error, Uno's side, support.
+  it.effect("a provider failure is Uno's side: recognition error, support contact, text", () =>
+    Effect.gen(function* () {
+      const gateway = fakeGateway({
+        "/audio/transcriptions": () =>
+          jsonResponse(
+            {
+              error: {
+                message: "Transcription provider failed",
+                type: "upstream_error",
+                code: 502,
+              },
+            },
+            502,
+          ),
+      });
+      const result = yield* convert({ ...voiceDescriptor, durationSec: 8 }, gateway.fetchImpl);
+      const text = result?.text ?? "";
+      expect(text.split("\n")[0]).toBe("[voice, 0:08 — could not transcribe]");
+      expect(text).toContain("saved at /s/voice.ogg");
+      expect(text).toContain("failed on Uno's side (Transcription provider failed)");
+      expect(text).toContain("(a speech recognition error)");
+      expect(text).toContain("@get_uno_support");
+      expect(text).toContain("write the same as text");
+      expect(text).toContain("Never say that Whisper or speech recognition is not connected");
+      expect(text).not.toContain("ffmpeg");
+    }),
+  );
+
+  it.effect("the person's own limit is theirs: the gateway's reason, no support", () =>
+    Effect.gen(function* () {
+      const gateway = fakeGateway({
+        "/audio/transcriptions": () =>
+          jsonResponse({ error: { code: "ai_hours_empty", message: "AI hours are used up" } }, 402),
+      });
+      const text = (yield* convert(voiceDescriptor, gateway.fetchImpl))?.text ?? "";
+      expect(text).toContain("own Uno AI balance or limit (AI hours are used up)");
+      expect(text).not.toContain("get_uno_support");
+      expect(text).toContain("write the same as text");
+    }),
+  );
+
+  it.effect("silence is no speech, not an outage", () =>
+    Effect.gen(function* () {
+      const gateway = fakeGateway({ "/audio/transcriptions": () => jsonResponse({ text: "  " }) });
+      const text = (yield* convert(voiceDescriptor, gateway.fetchImpl))?.text ?? "";
+      expect(text).toContain("no speech was heard");
+      expect(text).not.toContain("get_uno_support");
+    }),
+  );
+
   it.effect("reuses the transcript made for group gating (no second STT)", () =>
     Effect.gen(function* () {
       const gateway = fakeGateway({});
@@ -370,6 +424,7 @@ describe("mediaToText", () => {
       });
       const result = yield* convert(videoDescriptor, gateway.fetchImpl);
       expect(result?.text.split("\n")[0]).toBe("[video, 0:35 — could not describe]");
+      expect(result?.text).toContain("failed on Uno's side");
       expect(gateway.seen).toHaveLength(1);
     }),
   );
@@ -381,6 +436,8 @@ describe("mediaToText", () => {
       const video = yield* convert(videoDescriptor, gateway.fetchImpl, { apiKey: "" });
       expect(voice?.text.split("\n")[0]).toBe("[voice, 0:03 — could not transcribe]");
       expect(video?.text.split("\n")[0]).toBe("[video, 0:35 — could not describe]");
+      expect(voice?.text).toContain("not signed in to Uno (no Uno key)");
+      expect(voice?.text).not.toContain("get_uno_support");
       expect(gateway.seen).toEqual([]);
     }),
   );
@@ -393,4 +450,25 @@ describe("mediaToText", () => {
       ).toBeNull();
     }),
   );
+});
+
+describe("classifyMediaFailure", () => {
+  it("sorts gateway answers by whose side they are on", () => {
+    const at = (status: number | undefined, gatewayCode?: string) =>
+      classifyMediaFailure({
+        message: "x",
+        ...(status !== undefined ? { status } : {}),
+        ...(gatewayCode !== undefined ? { gatewayCode } : {}),
+      }).kind;
+    expect(at(502, "upstream_error")).toBe("uno_side");
+    expect(at(503, "provider_unavailable")).toBe("uno_side");
+    expect(at(500)).toBe("uno_side");
+    expect(at(401)).toBe("uno_side");
+    expect(at(undefined)).toBe("uno_side"); // no answer: network, timeout
+    expect(at(402, "insufficient_balance")).toBe("limit");
+    expect(at(429, "dictation_limit_reached")).toBe("limit");
+    expect(at(400, "invalid_request")).toBe("bad_file");
+    expect(at(400, "model_not_found")).toBe("uno_side");
+    expect(classifyMediaFailure({ message: "x", empty: true }).kind).toBe("no_speech");
+  });
 });
