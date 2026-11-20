@@ -57,6 +57,12 @@ export const AutomationPullRequestTrigger = Schema.Struct({
   actions: Schema.optional(Schema.Array(AutomationPullRequestAction)),
   /** Run on draft pull requests too. Default false (`ready_for_review` still runs). */
   drafts: Schema.optional(Schema.Boolean),
+  /**
+   * In a chat (20.11): a run works in Ask mode, as a webhook's does — its
+   * title and description are written by whoever opened it. Absent (an older
+   * console): true. Only the person turns it off, in Automations.
+   */
+  ask: Schema.optional(Schema.Boolean),
 });
 export type AutomationPullRequestTrigger = typeof AutomationPullRequestTrigger.Type;
 
@@ -140,6 +146,17 @@ export function isOutsideTrigger(
   trigger: AutomationTrigger,
 ): trigger is AutomationWebhookTrigger | AutomationSiteFormTrigger {
   return trigger.kind === "webhook" || trigger.kind === "site.form";
+}
+
+/**
+ * A trigger that runs only in a chat (20.11): a webhook, a form, or a pull
+ * request — its text is written by someone else, and an assistant's manager
+ * tools can't ask before they act. Its `ask` is the person's Ask me first.
+ */
+export function isChatOnlyTrigger(
+  trigger: AutomationTrigger,
+): trigger is AutomationWebhookTrigger | AutomationSiteFormTrigger | AutomationPullRequestTrigger {
+  return isOutsideTrigger(trigger) || trigger.kind === "github.pull_request";
 }
 
 /** Its executor (absent on an older daemon's answer: the assistant). */

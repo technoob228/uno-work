@@ -18,6 +18,7 @@ import {
   automationRunsInChat,
   describeAutomationTrigger,
   isAssistantProjectId,
+  isChatOnlyTrigger,
   ProjectId,
   type Automation,
   type AutomationGithubReposResult,
@@ -82,6 +83,13 @@ export function createdTell(automation: Automation): string {
       return base;
   }
 }
+
+/**
+ * A pull request automation set up for an assistant (20.11). The dialog says
+ * the same before Create; an assistant reads it from `automation_create`.
+ */
+export const PR_ON_ASSISTANT =
+  "A pull request runs in a chat, not on an assistant: its title and description are written by whoever opened it, and an assistant can't ask before it acts. Set it up from the chat that should review it (the clock at the top of the chat), or pick a chat for it on the Automations page.";
 
 /** The refusal an assistant reads: the console's line plus what to do with it. */
 function forAssistant(error: AutomationClientError): AutomationClientError {
@@ -209,6 +217,9 @@ export function agentTrigger(
       return Effect.fail(invalid("A site's form starts a chat through site_forms_set {chat}."));
     case "webhook":
       return Effect.succeed({ kind: "webhook", ask: true });
+    case "github.pull_request":
+      // Its title and description are its author's: Ask stays as a webhook's.
+      return Effect.succeed({ ...trigger, ask: true });
     default:
       return Effect.succeed(trigger);
   }
@@ -316,7 +327,7 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
      */
     const checkHoldsOutsideText = (trigger: AutomationTrigger, executor: AutomationExecutor) =>
       Effect.gen(function* () {
-        if (trigger.kind !== "webhook" && trigger.kind !== "site.form") return;
+        if (!isChatOnlyTrigger(trigger)) return;
         if (trigger.ask === false || executor.kind === "assistant") return;
         const snapshot = yield* projections
           .getShellSnapshot()
@@ -373,6 +384,13 @@ export const makeAutomationsService = (options?: { readonly fetchImpl?: FetchLik
 
     const createFor = (assistant: string, input: AutomationCreateInput) =>
       Effect.gen(function* () {
+        // A pull request is its author's text: an assistant's manager tools
+        // don't ask, so the event loop refuses it there. Say so now, not on
+        // the first pull request (20.11). The console still takes it from an
+        // older Uno Work, which runs it as before.
+        if (input.trigger.kind === "github.pull_request") {
+          return yield* badExecutor(PR_ON_ASSISTANT);
+        }
         const name = yield* assistantName(assistant);
         if (name === null) {
           return yield* new AutomationClientError({

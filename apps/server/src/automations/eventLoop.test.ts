@@ -409,6 +409,43 @@ describe("an automation a chat runs (29.10)", () => {
     expect(chatTurns[0]!.prompt).toContain("<outside_input_");
   });
 
+  it("a pull request in a chat asks and marks it unless the console says ask: false (20.11)", async () => {
+    const chatTurns: ChatTurnInput[] = [];
+    const marked: string[] = [];
+    const { world, loop } = stand({
+      runChatTurn: (input) =>
+        Effect.gen(function* () {
+          chatTurns.push(input);
+          if (input.onThread) yield* input.onThread("thread-7");
+          return { status: "answered" as const, threadId: "thread-7", reply: "Reviewed." };
+        }),
+      markOutside: (threadId) => Effect.sync(() => void marked.push(threadId)),
+    });
+    const pr = { repo: "getuno/x", number: 41, title: "Fix", action: "opened", head_sha: "abc" };
+    const inChat = {
+      assistant: "",
+      assistantName: "",
+      executor: { kind: "chat" as const, threadId: "thread-7" },
+      kind: "github.pull_request" as const,
+    };
+    // An older console sends no `ask`: it asks, as before.
+    world.queue = [event(41, { ...inChat, payload: pr })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(chatTurns[0]).toMatchObject({ ask: true });
+    expect(marked).toEqual(["thread-7"]);
+    expect(chatTurns[0]!.prompt).toContain("This chat is in Ask mode for it");
+    world.queue = [event(42, { ...inChat, payload: { ...pr, number: 42, ask: false } })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(2));
+    expect(chatTurns[1]!.ask).toBeUndefined();
+    expect(marked).toEqual(["thread-7"]);
+    // Still the author's text, framed as data; just no Allow on each tool.
+    expect(chatTurns[1]!.prompt).toContain("<outside_input_");
+    expect(chatTurns[1]!.prompt).not.toContain("This chat is in Ask mode for it");
+    expect(chatTurns[1]!.prompt).toContain("github_pr_comment");
+  });
+
   it("a stranger's text never reaches an assistant", async () => {
     const { world, loop } = stand();
     world.queue = [event(33, { kind: "webhook", payload: { ask: true, body: "x" } })];
@@ -420,10 +457,18 @@ describe("an automation a chat runs (29.10)", () => {
 
   it("a PR, written by its author, never reaches an assistant either", async () => {
     const { world, loop } = stand();
-    world.queue = [event(34, { kind: "github.pull_request" })];
+    // Ask me first off (20.11) doesn't open an assistant either.
+    world.queue = [
+      event(34, { kind: "github.pull_request" }),
+      event(35, {
+        kind: "github.pull_request",
+        payload: { ask: false, repo: "getuno/x", number: 35, title: "Fix", action: "opened" },
+      }),
+    ];
     await poll(loop);
-    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    await vi.waitFor(() => expect(world.results).toHaveLength(2));
     expect(world.turns).toEqual([]);
+    expect(world.results[1]!.body.state).toBe("failed");
     expect(world.results[0]!.body).toEqual({
       state: "failed",
       reason: "A webhook, a form or a pull request runs in a chat: pick one for this automation.",
@@ -457,10 +502,25 @@ describe("an automation a chat runs (29.10)", () => {
         kind: "site.form",
         payload: { ask: false, slug: "report", fields: [{ name: "m", value: "hi" }] },
       }),
+      // 20.11: the same switch on a pull request, the same and no more.
+      event(36, {
+        assistant: "",
+        assistantName: "",
+        executor: { kind: "chat", threadId: "thread-7" },
+        kind: "github.pull_request",
+        payload: {
+          ask: false,
+          repo: "getuno/x",
+          number: 36,
+          title: "Fix",
+          action: "opened",
+          head_sha: "abcdef0",
+        },
+      }),
     ];
     await poll(loop);
-    await vi.waitFor(() => expect(world.results).toHaveLength(2));
-    expect(chatTurns).toHaveLength(2);
+    await vi.waitFor(() => expect(world.results).toHaveLength(3));
+    expect(chatTurns).toHaveLength(3);
     for (const turn of chatTurns) {
       expect(turn.ask).toBeUndefined();
       expect(turn.onThread).toBeUndefined();

@@ -23,6 +23,8 @@ import {
   triggerOf,
   unavailableLine,
   automationsShown,
+  prOnAssistant,
+  PR_NEEDS_CHAT,
 } from "./automations.logic";
 
 const run = (over: Partial<AutomationRun> = {}): AutomationRun =>
@@ -129,7 +131,9 @@ describe("what's wrong with it", () => {
       "Full access — Ada comments on its own",
     );
     expect(modeLine("Uno", false, "schedule")).toBe("Full access — Uno acts and tells you after");
-    expect(emptyHint("Uno")).toContain("every time a PR comes to owner/repo, review it");
+    // Not a pull request: that runs in a chat, not on an assistant (20.11).
+    expect(emptyHint("Uno")).toContain("every weekday at 9");
+    expect(emptyHint("Uno")).not.toContain("PR");
   });
 });
 
@@ -160,7 +164,7 @@ describe("the dialog's draft", () => {
         },
         "UTC",
       ),
-    ).toMatchObject({ kind: "github.pull_request", repo: "getuno/web", drafts: false });
+    ).toMatchObject({ kind: "github.pull_request", repo: "getuno/web", drafts: false, ask: true });
     expect(normalizeRepo("getuno/web/")).toBe("getuno/web");
     expect(isRepoName("getuno")).toBe(false);
     expect(triggerOf({ ...EMPTY_DRAFT, when: "event", source: "call" }, "UTC")).toEqual({
@@ -374,6 +378,33 @@ describe("webhooks and forms", () => {
       name: "CI",
     } as Parameters<typeof draftOf>[0]);
     expect(back).toMatchObject({ source: "webhook", ask: false, requireSignature: true });
+  });
+
+  it("a pull request carries Ask me first and comes back the same (20.11)", () => {
+    const trigger = triggerOf(
+      { ...event, source: "github", repo: "getuno/web", ask: false },
+      "UTC",
+    );
+    expect(trigger).toMatchObject({ kind: "github.pull_request", ask: false });
+    const back = draftOf({ trigger, instruction: "Review", name: "x" } as Parameters<
+      typeof draftOf
+    >[0]);
+    expect(back).toMatchObject({ source: "github", repo: "getuno/web", ask: false });
+    // An older console's pull request has no `ask`: it asks.
+    expect(draftOf(automation()).ask).toBe(true);
+  });
+
+  it("a pull request on an assistant is told apart from one in a chat (20.11)", () => {
+    expect(prOnAssistant(automation())).toBe(true);
+    expect(prOnAssistant(automation({ executor: { kind: "chat", threadId: "t-1" } }))).toBe(false);
+    expect(
+      prOnAssistant(
+        automation({
+          trigger: { kind: "schedule", cron: "0 9 * * *", timezone: "UTC", label: "Daily" },
+        }),
+      ),
+    ).toBe(false);
+    expect(PR_NEEDS_CHAT).toContain("runs in a chat");
   });
 
   it("a stored trigger without `ask` reads as asking", () => {

@@ -118,10 +118,26 @@ export function unavailableLine(reason: AutomationsUnavailableReason | null): st
 // ── Words around it ──────────────────────────────────────────────────────
 
 export function emptyHint(name: string): string {
-  return `Ask ${name} in the chat: “every time a PR comes to owner/repo, review it”.`;
+  return `Ask ${name} in the chat: “every weekday at 9, tell me what needs me”.`;
 }
 
-/** How a webhook or a form works in a chat, on its card and in the dialog. */
+/**
+ * A pull request on an assistant (20.11): it doesn't run there — its text is
+ * its author's, and an assistant's tools can't ask first. The dialog says it
+ * before Create; the card says it on one set up earlier.
+ */
+export const PR_NEEDS_CHAT =
+  "A pull request runs in a chat, not on an assistant: whoever opened it wrote its text, and an assistant can't ask you first.";
+
+/** An automation set up before 20.11 that no longer runs: a pull request on an assistant. */
+export function prOnAssistant(automation: Automation): boolean {
+  return (
+    automation.trigger.kind === "github.pull_request" &&
+    automationExecutorOf(automation).kind === "assistant"
+  );
+}
+
+/** How a webhook, a form or a pull request works in a chat, on its card and in the dialog. */
 export function askLine(ask: boolean): string {
   return ask
     ? "Ask mode: it reads and answers, anything else waits for your Allow"
@@ -183,7 +199,7 @@ export interface AutomationDraft {
   readonly repo: string;
   /** A form: the site's name. */
   readonly slug: string;
-  /** A webhook or a form in a chat: Ask mode. On unless the person turns it off. */
+  /** A webhook, a form or a pull request in a chat: Ask mode. On unless the person turns it off. */
   readonly ask: boolean;
   /** A webhook: refuse a request without a valid signature. */
   readonly requireSignature: boolean;
@@ -264,6 +280,7 @@ export function triggerOf(draft: AutomationDraft, timezone: string): AutomationT
     repo: normalizeRepo(draft.repo),
     actions: [...AUTOMATION_DEFAULT_PR_ACTIONS],
     drafts: false,
+    ask: draft.ask,
   };
 }
 
@@ -324,7 +341,13 @@ export function draftOf(automation: Automation): AutomationDraft {
   const trigger = automation.trigger;
   switch (trigger.kind) {
     case "github.pull_request":
-      return { ...base, when: "event", source: "github", repo: trigger.repo };
+      return {
+        ...base,
+        when: "event",
+        source: "github",
+        repo: trigger.repo,
+        ask: trigger.ask !== false,
+      };
     case "call.ended":
       return { ...base, when: "event", source: "call" };
     case "gmail.message":

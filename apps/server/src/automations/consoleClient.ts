@@ -266,6 +266,7 @@ export function parseTrigger(raw: unknown): AutomationTrigger | null {
         repo,
         ...(actions !== undefined ? { actions } : {}),
         ...(typeof r["drafts"] === "boolean" ? { drafts: r["drafts"] } : {}),
+        ...(typeof r["ask"] === "boolean" ? { ask: r["ask"] } : {}),
       };
     }
     case "call.ended":
