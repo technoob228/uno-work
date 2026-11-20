@@ -23,7 +23,9 @@ import { parsePeakExceeded } from "./alwaysOn";
 import { AccountHttpError, accountRequest } from "./unoAccount";
 import { type ComputerRole, computerRole, parseRoleComment, withRole } from "./computerRoles";
 
-export const CONSOLE_URL = "https://console.uno.place";
+import { CONSOLE_URL } from "./consoleUrl";
+
+export { CONSOLE_URL };
 
 // ---- small readers ----
 

@@ -15,7 +15,7 @@
 import type { UnoMachineClass } from "@t3tools/contracts";
 import { parseUnoMachineClass } from "@t3tools/shared/unoCloud";
 
-import { CONSOLE_URL } from "./accountOverview";
+import { CONSOLE_URL } from "./consoleUrl";
 
 export interface MachineClassSettings {
   readonly enabled: boolean;
