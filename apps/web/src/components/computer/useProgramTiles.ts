@@ -4,7 +4,7 @@
  * that belong to this computer). Same sources and rules as the desktop
  * (`buildProgramTiles`); installs in progress stay a home-screen concern.
  */
-import type { UnoComputerAppTemplate } from "@t3tools/contracts";
+import type { EnvironmentId, UnoComputerAppTemplate } from "@t3tools/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
@@ -39,9 +39,11 @@ export interface ProgramTilesState {
   };
 }
 
-export function useProgramTiles(): ProgramTilesState {
+/** `environmentId`: another computer than the active one (the app window opens apps anywhere). */
+export function useProgramTiles(environmentIdOverride?: EnvironmentId | null): ProgramTilesState {
   const machine = useActiveMachine();
-  const environmentId = machine.environmentId;
+  const environmentId =
+    environmentIdOverride === undefined ? machine.environmentId : environmentIdOverride;
   const stateQuery = useQuery(computerStateQueryOptions(environmentId, null));
   const box = stateQuery.data?.box ?? null;
   const hasBox = box !== null;

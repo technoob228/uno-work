@@ -8,6 +8,7 @@ import {
   publicationFor,
   readSystemd,
   scanMachineApps,
+  type AutostartRetry,
   type MachineProbe,
   type ScannedApp,
 } from "./machineAppsScan.ts";
@@ -432,36 +433,66 @@ describe("pickAutostartApps", () => {
       manifest: { ...MANIFEST, ...manifest },
     }) as unknown as ScannedApp;
 
+  const makeState = (manuallyStopped: ReadonlyArray<string> = []) => ({
+    manuallyStopped: new Set(manuallyStopped),
+    retry: new Map<string, AutostartRetry>(),
+  });
+
   it("starts a registered app the first time it is seen — at boot or registered later", () => {
-    const seen = new Set<string>();
+    const state = makeState();
     // Daemon start: Notes is registered and stopped → start it.
-    expect(pickAutostartApps([app({ id: "notes" })], seen).map((a) => a.id)).toEqual([
+    expect(pickAutostartApps([app({ id: "notes" })], state).map((a) => a.id)).toEqual([
       "manifest:notes",
     ]);
-    // Later the agent writes a manifest for Bookings → start it on the next pass,
-    // without starting Notes again.
+    // Later the agent writes a manifest for Bookings → start it on the same pass,
+    // without starting Notes again right away (it is backing off).
     expect(
-      pickAutostartApps([app({ id: "notes" }), app({ id: "bookings", port: 3100 })], seen).map(
+      pickAutostartApps([app({ id: "notes" }), app({ id: "bookings", port: 3100 })], state).map(
         (a) => a.id,
       ),
     ).toEqual(["manifest:bookings"]);
   });
 
   it("starts a port-less bot whose processes the daemon can see are gone", () => {
-    const seen = new Set<string>();
+    const state = makeState();
     expect(
-      pickAutostartApps([app({ id: "bot", port: null }, "stopped")], seen).map((a) => a.id),
+      pickAutostartApps([app({ id: "bot", port: null }, "stopped")], state).map((a) => a.id),
     ).toEqual(["manifest:bot"]);
   });
 
-  it("leaves an app the person stopped alone", () => {
-    const seen = new Set<string>();
-    pickAutostartApps([app({ id: "notes" }, "running")], seen);
-    expect(pickAutostartApps([app({ id: "notes" }, "stopped")], seen)).toEqual([]);
+  it("leaves an app the person stopped on purpose alone", () => {
+    const state = makeState(["notes"]);
+    expect(pickAutostartApps([app({ id: "notes" }, "stopped")], state)).toEqual([]);
+  });
+
+  it("retries a crashed app with backoff, and forgets failures once it runs again", () => {
+    const state = makeState();
+    let now = 1_000_000;
+    // First crash (or cold boot): started at once.
+    expect(
+      pickAutostartApps([app({ id: "notes" }, "stopped")], state, now).map((a) => a.id),
+    ).toEqual(["manifest:notes"]);
+    // Crashes again right away: still backing off, not retried yet.
+    expect(
+      pickAutostartApps([app({ id: "notes" }, "stopped")], state, now).map((a) => a.id),
+    ).toEqual([]);
+    // 20s later the backoff has elapsed: tried again.
+    now += 20_000;
+    expect(
+      pickAutostartApps([app({ id: "notes" }, "stopped")], state, now).map((a) => a.id),
+    ).toEqual(["manifest:notes"]);
+    // It stays up this time — the daemon sees it running.
+    now += 1_000;
+    pickAutostartApps([app({ id: "notes" }, "running")], state, now);
+    // A later crash backs off from zero again, not from the second attempt.
+    now += 1_000;
+    expect(
+      pickAutostartApps([app({ id: "notes" }, "stopped")], state, now).map((a) => a.id),
+    ).toEqual(["manifest:notes"]);
   });
 
   it("skips apps that opt out or have nothing to start", () => {
-    const seen = new Set<string>();
+    const state = makeState();
     expect(
       pickAutostartApps(
         [
@@ -470,7 +501,7 @@ describe("pickAutostartApps", () => {
           app({ id: "noport", port: null }, "unknown"),
           app({ id: "already", port: 8087 }, "running"),
         ],
-        seen,
+        state,
       ),
     ).toEqual([]);
   });
