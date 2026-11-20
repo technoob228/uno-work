@@ -1,17 +1,7 @@
 import {
-  ChatAttachment,
-  IsoDateTime,
-  MessageId,
-  NonNegativeInt,
-  OrchestrationCheckpointFile,
-  OrchestrationProposedPlanId,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
-  ProjectComputer,
-  ProjectScript,
-  ThreadComputerWait,
-  TurnId,
   type RepositoryIdentity,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -22,13 +12,9 @@ import {
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
-  ModelSelection,
   ProjectId,
-  ThreadId,
-  ThreadPullRequest,
-  ThreadSource,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Schema, Struct } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
@@ -36,227 +22,45 @@ import {
   isPersistenceError,
   toPersistenceDecodeError,
   toPersistenceSqlError,
-  type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
-import { ProjectionCheckpoint } from "../../persistence/Services/ProjectionCheckpoints.ts";
-import {
-  ProjectionProject,
-  ProjectionProjectRepository,
-} from "../../persistence/Services/ProjectionProjects.ts";
+import { ProjectionProjectRepository } from "../../persistence/Services/ProjectionProjects.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
-import { ProjectionState } from "../../persistence/Services/ProjectionState.ts";
-import { ProjectionThreadActivity } from "../../persistence/Services/ProjectionThreadActivities.ts";
-import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionThreadMessages.ts";
-import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
-import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
-import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
-import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
+import {
+  ProjectionProjectDbRowSchema,
+  ProjectionThreadMessageDbRowSchema,
+  ProjectionThreadProposedPlanDbRowSchema,
+  ProjectionThreadDbRowSchema,
+  ProjectionThreadActivityDbRowSchema,
+  ProjectionThreadSessionDbRowSchema,
+  ProjectionCheckpointDbRowSchema,
+  ProjectionLatestTurnDbRowSchema,
+  ProjectionStateDbRowSchema,
+  ProjectionCountsRowSchema,
+  WorkspaceRootLookupInput,
+  ProjectIdLookupInput,
+  ThreadIdLookupInput,
+  ProjectionProjectLookupRowSchema,
+  ProjectionThreadIdLookupRowSchema,
+  ProjectionThreadCheckpointContextThreadRowSchema,
+  maxIso,
+  computeSnapshotSequence,
+  mapLatestTurn,
+  mapSessionRow,
+  mapProjectShellRow,
+  mapProposedPlanRow,
+  toPersistenceSqlOrDecodeError,
+} from "./ProjectionSnapshotQuery.rows.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
-const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
-  Struct.assign({
-    defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
-    scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
-    computer: Schema.optional(Schema.NullOr(Schema.fromJsonString(ProjectComputer))),
-  }),
-);
-const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
-  Struct.assign({
-    isStreaming: Schema.Number,
-    attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
-  }),
-);
-const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-    pullRequests: Schema.optional(
-      Schema.NullOr(Schema.fromJsonString(Schema.Array(ThreadPullRequest))),
-    ),
-    source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
-    computerWait: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadComputerWait))),
-  }),
-);
-const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
-  Struct.assign({
-    payload: Schema.fromJsonString(Schema.Unknown),
-    sequence: Schema.NullOr(NonNegativeInt),
-  }),
-);
-const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession;
-const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
-  Struct.assign({
-    files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
-  }),
-);
-const ProjectionLatestTurnDbRowSchema = Schema.Struct({
-  threadId: ProjectionThread.fields.threadId,
-  turnId: TurnId,
-  state: Schema.String,
-  requestedAt: IsoDateTime,
-  startedAt: Schema.NullOr(IsoDateTime),
-  completedAt: Schema.NullOr(IsoDateTime),
-  assistantMessageId: Schema.NullOr(MessageId),
-  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
-  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
-});
-const ProjectionStateDbRowSchema = ProjectionState;
-const ProjectionCountsRowSchema = Schema.Struct({
-  projectCount: Schema.Number,
-  threadCount: Schema.Number,
-});
-const WorkspaceRootLookupInput = Schema.Struct({
-  workspaceRoot: Schema.String,
-});
-const ProjectIdLookupInput = Schema.Struct({
-  projectId: ProjectId,
-});
-const ThreadIdLookupInput = Schema.Struct({
-  threadId: ThreadId,
-});
-const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
-const ProjectionThreadIdLookupRowSchema = Schema.Struct({
-  threadId: ThreadId,
-});
-const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
-  threadId: ThreadId,
-  projectId: ProjectId,
-  workspaceRoot: Schema.String,
-  worktreePath: Schema.NullOr(Schema.String),
-});
-
-const REQUIRED_SNAPSHOT_PROJECTORS = [
-  ORCHESTRATION_PROJECTOR_NAMES.projects,
-  ORCHESTRATION_PROJECTOR_NAMES.threads,
-  ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
-  ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
-  ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
-  ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
-  ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-] as const;
-
-function maxIso(left: string | null, right: string): string {
-  if (left === null) {
-    return right;
-  }
-  return left > right ? left : right;
-}
-
-function computeSnapshotSequence(
-  stateRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionStateDbRowSchema>>,
-): number {
-  if (stateRows.length === 0) {
-    return 0;
-  }
-  const sequenceByProjector = new Map(
-    stateRows.map((row) => [row.projector, row.lastAppliedSequence] as const),
-  );
-
-  let minSequence = Number.POSITIVE_INFINITY;
-  for (const projector of REQUIRED_SNAPSHOT_PROJECTORS) {
-    const sequence = sequenceByProjector.get(projector);
-    if (sequence === undefined) {
-      return 0;
-    }
-    if (sequence < minSequence) {
-      minSequence = sequence;
-    }
-  }
-
-  return Number.isFinite(minSequence) ? minSequence : 0;
-}
-
-function mapLatestTurn(
-  row: Schema.Schema.Type<typeof ProjectionLatestTurnDbRowSchema>,
-): OrchestrationLatestTurn {
-  return {
-    turnId: row.turnId,
-    state:
-      row.state === "error"
-        ? "error"
-        : row.state === "interrupted"
-          ? "interrupted"
-          : row.state === "completed"
-            ? "completed"
-            : "running",
-    requestedAt: row.requestedAt,
-    startedAt: row.startedAt,
-    completedAt: row.completedAt,
-    assistantMessageId: row.assistantMessageId,
-    ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
-      ? {
-          sourceProposedPlan: {
-            threadId: row.sourceProposedPlanThreadId,
-            planId: row.sourceProposedPlanId,
-          },
-        }
-      : {}),
-  };
-}
-
-function mapSessionRow(
-  row: Schema.Schema.Type<typeof ProjectionThreadSessionDbRowSchema>,
-): OrchestrationSession {
-  return {
-    threadId: row.threadId,
-    status: row.status,
-    providerName: row.providerName,
-    ...(row.providerInstanceId !== null ? { providerInstanceId: row.providerInstanceId } : {}),
-    runtimeMode: row.runtimeMode,
-    activeTurnId: row.activeTurnId,
-    lastError: row.lastError,
-    ...(row.lastErrorClass != null ? { lastErrorClass: row.lastErrorClass } : {}),
-    updatedAt: row.updatedAt,
-  };
-}
-
-function mapProjectShellRow(
-  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
-  repositoryIdentity: OrchestrationProject["repositoryIdentity"],
-): OrchestrationProjectShell {
-  return {
-    id: row.projectId,
-    title: row.title,
-    workspaceRoot: row.workspaceRoot,
-    repositoryIdentity,
-    defaultModelSelection: row.defaultModelSelection,
-    scripts: row.scripts,
-    ...(row.computer != null ? { computer: row.computer } : {}),
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function mapProposedPlanRow(
-  row: Schema.Schema.Type<typeof ProjectionThreadProposedPlanDbRowSchema>,
-): OrchestrationProposedPlan {
-  return {
-    id: row.planId,
-    turnId: row.turnId,
-    planMarkdown: row.planMarkdown,
-    implementedAt: row.implementedAt,
-    implementationThreadId: row.implementationThreadId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
-  return (cause: unknown): ProjectionRepositoryError =>
-    Schema.isSchemaError(cause)
-      ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause);
-}
-
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
