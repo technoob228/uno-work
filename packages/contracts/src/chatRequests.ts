@@ -18,7 +18,14 @@
  * - `state.json`   — written by Uno Work there: allowed or not, how many are
  *                    active, when it last looked (it rewrites it every minute);
  * - `in/<id>.json` — a request (`ChatRequestFile`), written by the cloud daemon;
- * - `out/<id>.json`— its answer (`ChatRequestAnswer`), written by Uno Work there.
+ * - `out/<id>.json`— its answer (`ChatRequestAnswer`), written by Uno Work there;
+ * - `decisions/<id>.json` — Start / Decline pressed in the person's Telegram
+ *                    (`ChatRequestRemoteDecision`), written by the cloud daemon;
+ *                    Uno Work there applies it like its own button, first
+ *                    decision wins.
+ *
+ * Off by default (Misha 20.11): until the person turns it on in Settings →
+ * Computer there, every request is refused at once with that reason.
  * Agents' own `my_computer_*` calls can't touch it (pathPolicy.ts: blocked).
  *
  * Rules (MAC_FROM_CLOUD_PLAN.md, Misha 14.11): at most 2 at once on one
@@ -111,6 +118,10 @@ export const ChatRequestThread = Schema.Struct({
 });
 export type ChatRequestThread = typeof ChatRequestThread.Type;
 
+/** Where the person pressed Start / Decline: in Uno Work there, or in their Telegram. */
+export const ChatRequestDecidedVia = Schema.Literals(["here", "telegram"]);
+export type ChatRequestDecidedVia = typeof ChatRequestDecidedVia.Type;
+
 /** `out/<id>.json`: the answer, rewritten as things change. */
 export const ChatRequestAnswer = Schema.Struct({
   v: Schema.Literal(1),
@@ -120,9 +131,25 @@ export const ChatRequestAnswer = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   updatedAt: Schema.String,
   decidedAt: Schema.NullOr(Schema.String),
+  /** Started / declined: where the person pressed (absent before 0.0.190). */
+  decidedVia: Schema.optionalKey(ChatRequestDecidedVia),
   thread: Schema.NullOr(ChatRequestThread),
 });
 export type ChatRequestAnswer = typeof ChatRequestAnswer.Type;
+
+/**
+ * `decisions/<id>.json`: the person pressed Start or Decline in their
+ * Telegram (the cloud side holds the bot). Uno Work there applies it as its
+ * own Start: the same checks, the first decision wins, a late one is dropped.
+ */
+export const ChatRequestRemoteDecision = Schema.Struct({
+  v: Schema.Literal(1),
+  id: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+  decision: Schema.Literals(["start", "decline"]),
+  via: Schema.Literal("telegram"),
+  at: Schema.String,
+});
+export type ChatRequestRemoteDecision = typeof ChatRequestRemoteDecision.Type;
 
 /** `state.json`: what the cloud side checks before it asks. */
 export const ChatRequestsHostState = Schema.Struct({
@@ -154,6 +181,8 @@ export const ChatRequestView = Schema.Struct({
   gist: Schema.String,
   brief: Schema.String,
   reason: Schema.NullOr(Schema.String),
+  /** Started / declined: pressed here or in the person's Telegram. */
+  decidedVia: Schema.optionalKey(ChatRequestDecidedVia),
   /** The chat it started here. */
   threadId: Schema.NullOr(Schema.String),
   threadState: Schema.NullOr(Schema.String),

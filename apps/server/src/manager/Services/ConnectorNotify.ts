@@ -98,8 +98,14 @@ export interface ConnectorNotifyServiceShape {
    * service bot (text only). Never fails.
    */
   readonly sendToPerson: (input: PersonMessageInput) => Effect.Effect<PersonMessageResult>;
-  /** An approval was answered somewhere: its Telegram buttons go. */
-  readonly retireButtons: (requestId: string) => Effect.Effect<void>;
+  /**
+   * An approval was answered somewhere: its Telegram buttons go, and the
+   * message gets `line` (default "Already answered").
+   */
+  readonly retireButtons: (
+    requestId: string,
+    line?: (language: ReplyLanguage) => string,
+  ) => Effect.Effect<void>;
   /** The HTTP endpoint's semantics: resolve (with assistant fallback) and send. */
   readonly notify: (input: ChannelNotifyInput) => Effect.Effect<ChannelNotifyResult>;
 }
