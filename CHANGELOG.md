@@ -25,6 +25,7 @@
 - The agent can roll a Spark app back to an earlier version in seconds and tells you what a rollback doesn't bring back (variables, timers).
 - A new computer opens 0.4–0.75 s faster: one sign-in request instead of four.
 - When a Telegram voice message can't be transcribed, the assistant gives the real reason (a problem on Uno's side, or a limit, file or silence on yours), says what to do, and offers to type instead.
+- Codex no longer shows "Sign in needed" after you sign in. A newer Codex reported models that take audio, and Uno Work read that as not signed in.
 - Slack on the desktop: Add to Slack from the Uno Work app on your laptop, and several computers and Uno accounts in one Slack workspace. The laptop answers while Uno Work is open.
 
 ## v0.0.189 — 2026-11-14
