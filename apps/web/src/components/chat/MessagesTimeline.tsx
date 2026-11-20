@@ -10,7 +10,6 @@ import {
   type EnvironmentId,
   type MessageId,
   type ProviderApprovalDecision,
-  type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 import { cleanUnoFinalAnswerText } from "@t3tools/shared/unoFinalAnswer";
@@ -104,11 +103,8 @@ import {
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
-import { useNavigate } from "@tanstack/react-router";
-import { describeAgentSentMessage } from "~/agentThreads.logic";
-import { latestReportIdBySender } from "~/agentTasks.logic";
 import { AgentTaskReportRow } from "./AgentTaskReportRow";
-import { useThreadTitle } from "~/hooks/useThreadTitle";
+import { AgentSentMessageLabel, useLatestTaskReportIds } from "./MessagesTimeline.agentMessages";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 
@@ -434,20 +430,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listRef, onIsAtEndChange, rows.length]);
 
-  // Keyed by value: a streaming chunk must not change the context.
-  const latestTaskReportKey = useMemo(
-    () =>
-      [
-        ...latestReportIdBySender(
-          timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
-        ).values(),
-      ].join("\n"),
-    [timelineEntries],
-  );
-  const latestTaskReportIds = useMemo(
-    () => new Set(latestTaskReportKey.split("\n")),
-    [latestTaskReportKey],
-  );
+  const latestTaskReportIds = useLatestTaskReportIds(timelineEntries);
   // Memoised context value — only changes on state transitions, NOT on
   // every streaming chunk. Callbacks from ChatView are useCallback-stable.
   const sharedState = useMemo<TimelineRowSharedState>(
@@ -572,40 +555,6 @@ function formatVideoDuration(durationMs: number): string {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
-/** "From the agent in “<thread>”" above a user message another chat's agent sent. */
-const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
-  sentByThreadId,
-}: {
-  sentByThreadId: ThreadId;
-}) {
-  const ctx = use(TimelineRowCtx);
-  const senderTitle = useThreadTitle(ctx.activeThreadEnvironmentId, sentByThreadId);
-  const navigate = useNavigate();
-  const label = describeAgentSentMessage(senderTitle);
-  return (
-    <div className="mb-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-      <BotIcon aria-hidden="true" className="size-3 shrink-0 text-info" />
-      {senderTitle ? (
-        <button
-          type="button"
-          title="Open the chat this message came from"
-          onClick={() =>
-            void navigate({
-              to: "/$environmentId/$threadId",
-              params: { environmentId: ctx.activeThreadEnvironmentId, threadId: sentByThreadId },
-            })
-          }
-          className="cursor-pointer truncate rounded-sm underline-offset-2 outline-hidden hover:text-foreground hover:underline focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          {label}
-        </button>
-      ) : (
-        <span className="truncate">{label}</span>
-      )}
-    </div>
-  );
-});
-
 function TimelineRowContent({ row }: { row: TimelineRow }) {
   const ctx = use(TimelineRowCtx);
   // 29.10: "Revert to this message" is a developer tool (Dev mode only).
@@ -711,7 +660,12 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                   )}
                   data-sent-by-agent={sentByThreadId ? "true" : undefined}
                 >
-                  {sentByThreadId && <AgentSentMessageLabel sentByThreadId={sentByThreadId} />}
+                  {sentByThreadId && (
+                    <AgentSentMessageLabel
+                      environmentId={ctx.activeThreadEnvironmentId}
+                      sentByThreadId={sentByThreadId}
+                    />
+                  )}
                   {quotesPart.quotes.length > 0 && <SentQuotes quotes={quotesPart.quotes} />}
                   {userImages.length > 0 && (
                     <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">

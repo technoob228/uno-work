@@ -262,6 +262,30 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
       ["assistant", "This week: “pricing for small teams” up from 14 to 9; nothing dropped."],
     ],
   },
+  // An agent's thread the person wrote in an hour ago (Misha 20.11): theirs
+  // in Only mine although the coordinator's agent wrote after them.
+  {
+    id: "h-faq",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Pricing FAQ: refunds, seats, invoices",
+    minutesAgo: 45,
+    state: "read",
+    role: "helper",
+    parent: "w-launch",
+    handler: "you",
+    messages: [
+      [
+        "user",
+        "From the pricing page chat: write the FAQ under the plans — refunds, seats, invoices.",
+      ],
+      ["assistant", "Six questions drafted. Refunds in days or in plain words?"],
+      ["user", "Plain words. And add one about switching plans mid-month."],
+      ["assistant", "Done: seven questions, refunds in plain words, switching plans added."],
+      ["user", "From the pricing page chat: the copy now says “per seat”, match it.", "w-launch"],
+      ["assistant", "Matched: “per seat” everywhere in the FAQ."],
+    ],
+  },
   {
     id: "h-copy",
     machine: "work",

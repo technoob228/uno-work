@@ -2735,6 +2735,7 @@ export default function Sidebar() {
         threadOwnerWithStarter(
           thread,
           startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
+          Date.parse(now),
         ) === "you" ||
         thread.pinnedAt !== null ||
         threadKeyOf(thread) === routeThreadKey ||
@@ -2756,6 +2757,7 @@ export default function Sidebar() {
     dOnlyMine,
     dProjectPicks,
     dSpace,
+    now,
     routeThreadKey,
     startedBy.byKey,
   ]);
@@ -4163,6 +4165,7 @@ export default function Sidebar() {
           threadOwnerWithStarter(
             thread,
             startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
+            Date.parse(now),
           ) === "agent"
         }
         section={section}

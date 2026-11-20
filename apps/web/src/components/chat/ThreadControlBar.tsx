@@ -13,7 +13,7 @@ import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThre
 import { useThreadTitle } from "../../hooks/useThreadTitle";
 import { cn } from "../../lib/utils";
 import { selectSidebarThreadSummaryByRef, useStore } from "../../store";
-import { threadOwner } from "../Sidebar.owner";
+import { isWaitingOnAgents, threadOwner } from "../Sidebar.owner";
 import { Button } from "../ui/button";
 
 interface ThreadControlBarProps {
@@ -49,7 +49,10 @@ export const ThreadControlBar = memo(function ThreadControlBar({
   const [pending, setPending] = useState(false);
   const agentLed = useStore((store) => {
     const summary = selectSidebarThreadSummaryByRef(store, { environmentId, threadId });
-    return summary !== undefined && threadOwner(summary) === "agent";
+    // The person's own chat stays theirs while agents talk in it (Sidebar.owner).
+    return (
+      summary !== undefined && (isWaitingOnAgents(summary) || threadOwner(summary) === "agent")
+    );
   });
   const state = resolveThreadControlBarState({
     spawnedByThreadId,
