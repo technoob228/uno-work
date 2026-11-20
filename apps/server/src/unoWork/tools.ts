@@ -127,6 +127,8 @@ import type { AutomationChatTools } from "../automations/AutomationsService.ts";
 import type { MyComputerShape } from "../myComputer/MyComputerService.ts";
 import type { CallTrust } from "../myComputer/myComputerCore.ts";
 import { myComputerTools } from "../myComputer/myComputerTools.ts";
+import type { TeamCollabShape } from "../team/TeamCollab.ts";
+import { teamTools } from "../team/teamTools.ts";
 import type { Outgoing } from "../chatRequests/outgoing.ts";
 import { workspaceTools, type WorkspaceToolDeps } from "../myComputer/workspaceTools.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
@@ -567,6 +569,8 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
    * say this Uno Work can't.
    */
   readonly chatRequestsOut?: Outgoing;
+  /** T51: the people of the person's team projects (team/). Absent: the tools say it isn't on here. */
+  readonly team?: TeamCollabShape;
   /** The calling chat is an assistant's: its name; null: the person's own chat. Absent: no assistants. */
   readonly callerAssistantName?: Effect.Effect<string | null>;
   /** Set by the gate for a call it judged by trust tier: the journal line carries it. */
@@ -4902,6 +4906,9 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     requireAccess: requireAccountAccess,
     fail: toolError,
   }),
+
+  // T51: the people of a team project (team/teamTools.ts)
+  ...teamTools({ fail: toolError }),
 
   // A chat whose project is on the person's computer: its hands there
   // (myComputer/workspaceTools.ts; listed only to such a chat)

@@ -252,12 +252,35 @@ export function setChatRequestDecider(next: Decider | null): void {
   decider = next;
 }
 
+/** T51: a colleague's session request (its id starts `team-`), decided by the team service. */
+type TeamDecider = (
+  input: { readonly requestId: string; readonly decision: "start" | "decline" },
+  language: ReplyLanguage,
+) => Promise<ChatRequestPressReply>;
+
+let teamDecider: TeamDecider | null = null;
+
+/** The team service of this computer (team/TeamCollab.ts); null when it stops. */
+export function setTeamRequestDecider(next: TeamDecider | null): void {
+  teamDecider = next;
+}
+
+export const TEAM_REQUEST_ID_PREFIX = "team-";
+
 /** A press of Start / Decline in Telegram (TelegramConnector.ts). */
 export async function answerChatRequestPress(
   action: { readonly requestId: string; readonly decision: "start" | "decline" },
   language: ReplyLanguage,
   nowMs: number = Date.now(),
 ): Promise<ChatRequestPressReply> {
+  if (action.requestId.startsWith(TEAM_REQUEST_ID_PREFIX)) {
+    const team = teamDecider;
+    if (team === null)
+      return chatRequestPressReply({ kind: "gone" }, action.decision, language, nowMs);
+    return team(action, language).catch(() =>
+      chatRequestPressReply({ kind: "failed" }, action.decision, language, nowMs),
+    );
+  }
   const outcome =
     decider === null
       ? ({ kind: "gone" } as const)

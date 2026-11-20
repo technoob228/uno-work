@@ -316,6 +316,12 @@ export interface WsRpcClient {
     readonly decide: RpcUnaryMethod<typeof WS_METHODS.chatRequestsDecide>;
     readonly setAllowed: RpcUnaryMethod<typeof WS_METHODS.chatRequestsSetAllowed>;
   };
+  /** T51: what this computer does for the people of a project (contracts team.ts). */
+  readonly team: {
+    readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.teamState>;
+    readonly refresh: RpcUnaryNoArgMethod<typeof WS_METHODS.teamRefresh>;
+    readonly letAgentAnswer: RpcUnaryMethod<typeof WS_METHODS.teamLetAgentAnswer>;
+  };
   /** Computers lifecycle (contracts computers.ts). */
   readonly computers: {
     readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.computersState>;
@@ -854,6 +860,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.chatRequestsDecide](input)),
       setAllowed: (input) =>
         transport.request((client) => client[WS_METHODS.chatRequestsSetAllowed](input)),
+    },
+    team: {
+      state: () => transport.request((client) => client[WS_METHODS.teamState]({})),
+      refresh: () => transport.request((client) => client[WS_METHODS.teamRefresh]({})),
+      letAgentAnswer: (input) =>
+        transport.request((client) => client[WS_METHODS.teamLetAgentAnswer](input)),
     },
     computers: {
       state: () => transport.request((client) => client[WS_METHODS.computersState]({})),

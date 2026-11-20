@@ -59,6 +59,7 @@ import type {
   ChatRequestsSetAllowedInput,
   ChatRequestsState,
 } from "./chatRequests.ts";
+import type { TeamLetAgentAnswerInput, TeamLetAgentAnswerResult, TeamState } from "./team.ts";
 import type {
   ComputerInput,
   ComputersBringWorkInput,
@@ -1155,6 +1156,15 @@ export interface EnvironmentApi {
     state: () => Promise<ChatRequestsState>;
     decide: (input: ChatRequestDecideInput) => Promise<ChatRequestDecideResult>;
     setAllowed: (input: ChatRequestsSetAllowedInput) => Promise<ChatRequestsState>;
+  };
+  /**
+   * T51: what this computer does for the people of a project (team.ts).
+   * Optional: test doubles of this API needn't have it.
+   */
+  team?: {
+    state: () => Promise<TeamState>;
+    refresh: () => Promise<TeamState>;
+    letAgentAnswer: (input: TeamLetAgentAnswerInput) => Promise<TeamLetAgentAnswerResult>;
   };
   /** Computers lifecycle (computers.ts): what each own computer is for, its work, chats on it. */
   computers: {

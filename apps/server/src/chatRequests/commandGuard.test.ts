@@ -123,3 +123,36 @@ describe("the request folder on the person's computer", () => {
     expect(judgePath("/Users/m/.uno-work/agent-browser/x", "read", ctx).tier).not.toBe("blocked");
   });
 });
+
+describe("T51: a chat answering a colleague's agent's question", () => {
+  const readOnly = () =>
+    makeCommandGuard(
+      {
+        why: "started at a colleague's request",
+        blockedRoots: [stateDir],
+        readOnly: true,
+      },
+      { home, os: "linux" },
+    );
+  const ask = (toolName: string, toolInput: unknown) =>
+    readOnly().check({ toolName, toolInput, cwd: project });
+
+  it("reads the project", async () => {
+    expect(await ask("Read", { file_path: path.join(project, "index.html") })).toBeNull();
+    expect(await ask("Grep", { pattern: "price", path: project })).toBeNull();
+  });
+
+  it.each([
+    ["Bash", { command: "ls" }],
+    ["Edit", { file_path: "index.html" }],
+    ["Write", { file_path: "x" }],
+    ["WebFetch", { url: "https://example.com" }],
+    ["mcp__uno-work__mail_send", {}],
+  ])("refuses %s", async (toolName, input) => {
+    expect((await ask(toolName, input))?.deny).toContain("This chat only reads");
+  });
+
+  it("still never reads keys", async () => {
+    expect(await ask("Read", { file_path: path.join(home, ".ssh", "id_ed25519") })).not.toBeNull();
+  });
+});

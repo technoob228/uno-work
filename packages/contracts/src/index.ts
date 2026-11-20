@@ -22,6 +22,7 @@ export * from "./credentialsVault.ts";
 export * from "./projectSync.ts";
 export * from "./myComputer.ts";
 export * from "./chatRequests.ts";
+export * from "./team.ts";
 export * from "./computers.ts";
 export * from "./browserLive.ts";
 export * from "./git.ts";
