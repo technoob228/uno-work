@@ -12,6 +12,7 @@ import {
   noteSavedEnvironmentHealthy,
   resetSelfHeal,
   resetSelfHealForTests,
+  SavedEnvironmentAccessExpiredError,
 } from "./selfHeal";
 
 const environmentId = EnvironmentId.make("env-broken");
@@ -79,6 +80,24 @@ describe("classifyPermanentFailure", () => {
 });
 
 describe("needs attention", () => {
+  it("stops at once when the saved access expired and could not be renewed", async () => {
+    const { performReconnect, onNeedsAttention } = configure();
+    performReconnect.mockRejectedValue(
+      new SavedEnvironmentAccessExpiredError("Uno Work could not renew its access to box."),
+    );
+
+    await healSavedEnvironment(environmentId, "test");
+
+    expect(getSelfHealNeedsAttention(environmentId)?.kind).toBe("access-expired");
+    expect(onNeedsAttention).toHaveBeenCalledTimes(1);
+
+    await healSavedEnvironment(environmentId, "test", { immediate: true });
+    expect(performReconnect).toHaveBeenCalledTimes(1);
+
+    resetSelfHeal(environmentId);
+    expect(getSelfHealNeedsAttention(environmentId)).toBeNull();
+  });
+
   it("stops automatic retries at the first changed host key until a manual reconnect", async () => {
     const { performReconnect, onNeedsAttention } = configure();
     performReconnect.mockRejectedValue(HOST_KEY_ERROR);

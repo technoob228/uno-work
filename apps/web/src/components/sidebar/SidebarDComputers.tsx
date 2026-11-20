@@ -94,7 +94,7 @@ function ComputerIcon(props: { cloud: boolean; className?: string }) {
   );
 }
 
-/** A computer's mark on a row: its icon, the name in the tooltip; grey while asleep. */
+/** A computer's mark on a row: its icon and short name (full in the tooltip); grey while asleep. */
 export function SidebarDComputerChip(props: { environmentId: EnvironmentId | string }) {
   const computer = useContext(ComputersContext).get(props.environmentId);
   const label = computer?.label ?? "Another computer";
@@ -115,6 +115,11 @@ export function SidebarDComputerChip(props: { environmentId: EnvironmentId | str
         }
       >
         <ComputerIcon cloud={computer?.cloud ?? false} />
+        {/* The name, not only the icon (Misha 10.11: every cloud computer had the
+            same cloud — "непонятно, на каком компьютере какой чат"). */}
+        {computer ? (
+          <span className="ml-0.5 max-w-16 truncate text-[10px] leading-none">{label}</span>
+        ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top">
         On {label}
