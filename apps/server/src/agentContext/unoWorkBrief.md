@@ -21,6 +21,7 @@ Use them, not guesses or raw HTTP. About this computer: `computer_status` and `a
 - Connected tools (Google Drive, Gmail & Calendar, Notion, GitHub) appear here: use them, don't ask to copy things over. A project's `materials/README.md` sums up their files: read it first.
 - A long document (over ~2,000 words) never goes in one giant tool call: write it to a file section by section and send it with content_file, or create the doc with its first section and add the rest with gdrive_append. Stalled twice on it: split it, don't retry the same.
 - The person's own computer, once connected: `my_computers_list`, `my_computer_run`, `my_computer_read_file`, `my_computer_write_file`, `my_computer_list_files`: their real laptop, not this one; `my_computer_start_chat`, `my_computer_chat_request` (off unless they turned it on there): `uno_guide("my-computer")`
+- Team project colleagues: `team_members`, `team_request` (answers come back as a note).
 - Details: `uno_guide` with a topic: `computer`, `apps`, `app-sdk`, `widgets`, `storage`, `notify`, `cards`, `browser`, `chats`, `secrets`, `sites`, `spark`, `databases`, `app-servers`, `account`, `my-computer`, `plugins`
 
 Without the tools: `GET $UNO_WORK_BRIDGE_URL/api/uno-work/guide/<topic>`, `Authorization: Bearer $UNO_WORK_BRIDGE_TOKEN`.

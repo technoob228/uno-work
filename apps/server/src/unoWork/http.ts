@@ -93,6 +93,8 @@ import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { makeCancellableCalls } from "../myComputer/cancelCalls.ts";
 import { MyComputerService } from "../myComputer/MyComputerService.ts";
 import { ChatRequests } from "../chatRequests/ChatRequests.ts";
+import { TeamCollab } from "../team/TeamCollab.ts";
+import { TEAM_TOOL_NAMES } from "../team/teamTools.ts";
 import { CommandGuardPolicy } from "../provider/Services/CommandGuardPolicy.ts";
 import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
 import { WORKSPACE_TOOL_NAMES, type ComputerWaitMark } from "../myComputer/workspaceTools.ts";
@@ -468,6 +470,7 @@ const makeDeps = (input: {
     const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
     const guardPolicy = Option.getOrNull(yield* Effect.serviceOption(CommandGuardPolicy));
     const chatRequests = Option.getOrNull(yield* Effect.serviceOption(ChatRequests));
+    const team = Option.getOrNull(yield* Effect.serviceOption(TeamCollab));
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     // The calling chat's project on the person's computer (workspace tools), once per call.
     const computerWorkspaceOf = myComputer
@@ -657,6 +660,7 @@ const makeDeps = (input: {
       // Started here at a cloud chat's request: a few tools only (chatRequests/).
       ...(guardPolicy ? { guardedChat: guardPolicy.isGuarded(input.threadId) } : {}),
       ...(chatRequests?.outgoing ? { chatRequestsOut: chatRequests.outgoing } : {}),
+      ...(team ? { team } : {}),
       callerAssistantName: callerAssistant.pipe(Effect.map((owner) => owner?.title ?? null)),
       // An Observer changes nothing: its chats get no change tools at all.
       presetRefusal: callerAssistant.pipe(
@@ -1129,6 +1133,7 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     // asks: a chat that knew these tools still gets their own clear error.
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     const settingsService = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
+    const teamService = Option.getOrNull(yield* Effect.serviceOption(TeamCollab));
     const hiddenTools = !isMethod(body, "tools/list")
       ? Effect.succeed(NO_HIDDEN_TOOLS)
       : Effect.all([
@@ -1139,11 +1144,17 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
                 Effect.map((settings) => settings.devMode),
                 Effect.orElseSucceed(() => false),
               ),
+          // T51: the team's tools only once requests are on for the person.
+          teamService === null
+            ? Effect.succeed(false)
+            : // What is known now: never wait on the cloud for a list (the loops keep it fresh).
+              Effect.sync(() => teamService.parts.peek().requests),
         ]).pipe(
           Effect.map(
-            ([computersVisible, inDevMode]): ReadonlySet<string> =>
+            ([computersVisible, inDevMode, teamOn]): ReadonlySet<string> =>
               new Set([
                 ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES),
+                ...(teamOn ? [] : TEAM_TOOL_NAMES),
                 ...(inDevMode ? [] : DEV_MODE_TOOL_NAMES),
                 // Listed only to a chat whose project is on the person's
                 // computer: unhidden below, once the caller is known.

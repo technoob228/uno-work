@@ -577,6 +577,16 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
   ],
   chat_status: ["Checking another chat…", "Checked another chat", "Couldn't check the other chat"],
   chat_call_person: ["Calling you into a chat…", "Called you into a chat", "Couldn't call you in"],
+  team_members: [
+    "Looking up your colleagues…",
+    "Looked up your colleagues",
+    "Couldn't look up your colleagues",
+  ],
+  team_request: [
+    "Writing to a colleague…",
+    "Wrote to a colleague",
+    "Couldn't write to the colleague",
+  ],
   chat_person_not_needed: [
     "Letting you off a chat…",
     "You're not needed in that chat",
