@@ -7,14 +7,10 @@
  * product name small under it. Uno Drive,
  * Terminal and the App Store sit at the bottom, like fixed items of a dock.
  *
- * The same list is the Apps tab of "Apps & sites" (`variant="page"`): there
- * the built-in ones come first — on an empty computer the page used to say
- * "No apps yet" on top and keep Drive, Terminal and the App Store at the very
- * bottom of an empty page (P14, 28.10).
+ * The Apps tab of "Apps & sites" is a grid of icons instead (`AppsGrid`, 28.10).
  */
 import { useNavigate } from "@tanstack/react-router";
 import {
-  AudioLinesIcon,
   GlobeIcon,
   HardDriveIcon,
   PanelRightIcon,
@@ -24,7 +20,7 @@ import {
   ShoppingBagIcon,
   SquareTerminalIcon,
 } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import { cn } from "../../lib/utils";
@@ -36,11 +32,7 @@ import {
   primaryActionTitle,
   ProgramIcon,
   STATUS_NOTE,
-  TileChip,
 } from "../computer/ComputerPrograms";
-import { NotetakerConfirmDialog, useNotetakerApp } from "../computer/NotetakerBuiltIn";
-import { isNotetakerTile, NOTETAKER_NAME } from "../computer/notetakerApp";
-import { useAppInstalls } from "../computer/useAppInstalls";
 import type { ProgramTile } from "../computer/programModel";
 import {
   type AppPrimaryRunner,
@@ -48,18 +40,13 @@ import {
   useStartingAppId,
 } from "../computer/useAppPrimaryAction";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
-import { type ProgramTilesState, useProgramTiles } from "../computer/useProgramTiles";
+import { useProgramTiles } from "../computer/useProgramTiles";
 import { useSidebar } from "../ui/sidebar";
 import { SidebarAppServers } from "./SidebarAppServers";
 import { Skeleton } from "../ui/skeleton";
 
-export const SidebarAppsList = memo(function SidebarAppsList({
-  variant = "sidebar",
-}: {
-  /** "page": the Apps tab of Apps & sites — built-in apps first, then the person's. */
-  readonly variant?: "sidebar" | "page";
-}) {
-  const { tiles, loading, hasStore, computer } = useProgramTiles();
+export const SidebarAppsList = memo(function SidebarAppsList() {
+  const { tiles, loading, hasStore } = useProgramTiles();
   const machine = useActiveMachine();
   const launchers = useHomeLaunchers(machine.environmentId);
   const primary = useAppPrimaryAction({ environmentId: machine.environmentId });
@@ -84,102 +71,6 @@ export const SidebarAppsList = memo(function SidebarAppsList({
     close();
     void navigate({ to: "/computer", search: { store: "1" } });
   };
-
-  if (variant === "page") {
-    // Uno Notetaker is in Built in, installed or not: not twice.
-    const ownTiles = tiles.filter((tile) => !isNotetakerTile(tile));
-    return (
-      <div className="flex flex-col gap-6" data-testid="apps-page">
-        <section aria-labelledby="apps-built-in">
-          <h2
-            id="apps-built-in"
-            className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide"
-          >
-            Built in
-          </h2>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <BuiltInTile
-              icon={<HardDriveIcon className="size-4.5 text-sky-500" />}
-              label="Uno Drive"
-              hint="Your files in the cloud"
-              onClick={openDrive}
-            />
-            <NotetakerBuiltInTile
-              tiles={tiles}
-              computer={computer}
-              primary={primary}
-              onNavigate={close}
-            />
-            <BuiltInTile
-              icon={<SquareTerminalIcon className="size-4.5" />}
-              label="Terminal"
-              hint="Command line of this computer"
-              disabled={terminalBusy}
-              onClick={openTerminal}
-            />
-            {hasStore ? (
-              <BuiltInTile
-                icon={<ShoppingBagIcon className="size-4.5" />}
-                label="App Store"
-                hint="Ready-made apps, one click"
-                onClick={openStore}
-              />
-            ) : null}
-          </div>
-        </section>
-        <section aria-labelledby="apps-yours">
-          <h2
-            id="apps-yours"
-            className="mb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide"
-          >
-            Your apps
-          </h2>
-          {loading && ownTiles.length === 0 ? (
-            <div className="flex flex-col gap-1.5">
-              {[0, 1, 2].map((i) => (
-                <Skeleton key={i} className="h-9 w-full rounded-lg" />
-              ))}
-            </div>
-          ) : ownTiles.length === 0 ? (
-            <div
-              className="rounded-xl border border-dashed border-border px-4 py-5 text-center"
-              data-testid="apps-page-empty"
-            >
-              <p className="text-sm text-foreground">No apps of your own yet</p>
-              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                {hasStore
-                  ? "Add one from the App Store, or ask Uno in a chat to make one for you."
-                  : "Ask Uno in a chat to make one for you."}
-              </p>
-              {hasStore ? (
-                <button
-                  type="button"
-                  onClick={openStore}
-                  className="mt-3 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-background px-3 text-sm font-medium hover:bg-accent"
-                >
-                  <ShoppingBagIcon className="size-3.5" />
-                  Open the App Store
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-px">
-              {ownTiles.map((tile) => (
-                <AppRow
-                  key={tile.key}
-                  tile={tile}
-                  primary={primary}
-                  starting={startingId !== null && startingId === tile.machineApp?.id}
-                  onNavigate={close}
-                />
-              ))}
-            </ul>
-          )}
-          <SidebarAppServers />
-        </section>
-      </div>
-    );
-  }
 
   return (
     <div className="flex min-h-full flex-col gap-px">
@@ -235,125 +126,6 @@ export const SidebarAppsList = memo(function SidebarAppsList({
     </div>
   );
 });
-
-function BuiltInTile({
-  icon,
-  label,
-  hint,
-  onClick,
-  disabled,
-  title,
-  problem = false,
-  trailing = null,
-  onContextMenu,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  hint: string;
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  /** The hint says something went wrong (red). */
-  problem?: boolean;
-  /** A chip at the end ("Add", "Installing…"). */
-  trailing?: React.ReactNode;
-  onContextMenu?: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      title={title}
-      onContextMenu={
-        onContextMenu
-          ? (event) => {
-              event.preventDefault();
-              onContextMenu();
-            }
-          : undefined
-      }
-      className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2 disabled:cursor-wait"
-    >
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 leading-tight">
-        <span className="block truncate text-sm font-medium">{label}</span>
-        <span
-          className={cn(
-            "block truncate text-xs",
-            problem ? "text-destructive-foreground" : "text-muted-foreground",
-          )}
-        >
-          {hint}
-        </span>
-      </span>
-      {trailing}
-    </button>
-  );
-}
-
-/**
- * Uno Notetaker in Built in, next to Uno Drive: Add (the usual install, with
- * the store's low-memory question), its progress, then it opens like any app.
- * Its own component: the install poll runs only on this page.
- */
-function NotetakerBuiltInTile({
-  tiles,
-  computer,
-  primary,
-  onNavigate,
-}: {
-  tiles: ReadonlyArray<ProgramTile>;
-  computer: ProgramTilesState["computer"];
-  primary: AppPrimaryRunner;
-  onNavigate: () => void;
-}) {
-  const machine = useActiveMachine();
-  const navigate = useNavigate();
-  const inFlight = useMemo(
-    () => tiles.flatMap((tile) => (tile.storeApp ? [tile.storeApp] : [])),
-    [tiles],
-  );
-  const installs = useAppInstalls({ environmentId: machine.environmentId, boxId: null, inFlight });
-  const notetaker = useNotetakerApp({
-    installs,
-    tiles,
-    computer,
-    onOpen: (tile) => {
-      onNavigate();
-      primary.run(tile);
-    },
-    onDetails: (tile) => {
-      onNavigate();
-      void navigate({ to: "/computer", search: { app: tile.key } });
-    },
-  });
-  const { view } = notetaker;
-  const installed = notetaker.state.kind === "installed" ? notetaker.state.tile : null;
-  const note = installed ? STATUS_NOTE[installed.status] : null;
-  return (
-    <>
-      <BuiltInTile
-        icon={<AudioLinesIcon className="size-4.5 text-rose-500" />}
-        label={NOTETAKER_NAME}
-        hint={note ? note.text : view.hint}
-        problem={view.problem}
-        title={view.title}
-        disabled={view.disabled}
-        onClick={notetaker.onClick}
-        {...(notetaker.onDetails ? { onContextMenu: notetaker.onDetails } : {})}
-        trailing={
-          view.chip ? (
-            <TileChip label={view.chip.label} busy={view.chip.busy} className="shrink-0" />
-          ) : null
-        }
-      />
-      <NotetakerConfirmDialog notetaker={notetaker} />
-    </>
-  );
-}
 
 function FixedRow({
   icon,
