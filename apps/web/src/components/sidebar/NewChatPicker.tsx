@@ -558,3 +558,32 @@ export function NewChatPickerButton({
     </Popover>
   );
 }
+
+/**
+ * Demo T54 (variant C): where New chat would start right now — the folder's
+ * and the computer's names, for the split button's label.
+ */
+export function useNewChatDefaultLabel(): { folder: string; computer: string } | null {
+  const computers = useNewChatComputers();
+  const lastChat = useLastChatTarget();
+  const { environmentId: activeEnvironmentId } = useActiveMachine();
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const last = readLastNewChatTarget();
+  const environmentId = defaultNewChatComputer({ computers, last, lastChat, activeEnvironmentId });
+  if (environmentId === null) return null;
+  const target = [last, lastChat].find((item) => item?.environmentId === environmentId);
+  const project =
+    target?.cwd != null
+      ? projects.find(
+          (item) =>
+            item.environmentId === environmentId &&
+            !isAssistantProjectId(item.id) &&
+            normalizeProjectPathForComparison(item.cwd) ===
+              normalizeProjectPathForComparison(target.cwd!),
+        )
+      : undefined;
+  return {
+    folder: project ? project.name : HOME_FOLDER_TITLE,
+    computer: computers.find((computer) => computer.id === environmentId)?.name ?? "",
+  };
+}

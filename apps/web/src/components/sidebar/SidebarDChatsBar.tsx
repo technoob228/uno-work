@@ -58,6 +58,7 @@ import { create } from "zustand";
 
 import { cn } from "../../lib/utils";
 import { NewChatPickerButton } from "./NewChatPicker";
+import { smallNewChatShown } from "./NewChatButtonVariant";
 import {
   filterSidebarProjectScopeItems,
   reduceSidebarProjectScopeMenuState,
@@ -165,14 +166,16 @@ export function LegacySidebarDChatsBar(props: {
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
         Chats
       </span>
-      <NewChatPickerButton
-        tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
-        testId="sidebar-d-new-chat"
-        className={BAR_BUTTON_CLASS}
-        onShiftClick={props.onNewChat}
-      >
-        <SquarePenIcon className="size-3.5" />
-      </NewChatPickerButton>
+      {smallNewChatShown() ? (
+        <NewChatPickerButton
+          tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
+          testId="sidebar-d-new-chat"
+          className={BAR_BUTTON_CLASS}
+          onShiftClick={props.onNewChat}
+        >
+          <SquarePenIcon className="size-3.5" />
+        </NewChatPickerButton>
+      ) : null}
       <BarButton
         label="Add a project"
         tooltip="Add a project"
@@ -862,14 +865,16 @@ export function SidebarDChatsBar(props: {
       >
         <FolderPlusIcon className="size-3.5" />
       </BarButton>
-      <NewChatPickerButton
-        tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
-        testId="sidebar-d-new-chat"
-        className={BAR_BUTTON_CLASS}
-        onShiftClick={props.onNewChat}
-      >
-        <SquarePenIcon className="size-3.5" />
-      </NewChatPickerButton>
+      {smallNewChatShown() ? (
+        <NewChatPickerButton
+          tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
+          testId="sidebar-d-new-chat"
+          className={BAR_BUTTON_CLASS}
+          onShiftClick={props.onNewChat}
+        >
+          <SquarePenIcon className="size-3.5" />
+        </NewChatPickerButton>
+      ) : null}
     </li>
   );
 }

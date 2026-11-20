@@ -313,6 +313,7 @@ import {
 import { DEMO, demoHooks, useDemoSwitch } from "../demo/demoFlag";
 import { sidebarDPanel, useSidebarDPanelDismiss, useSidebarDStore } from "./sidebar/sidebarDState";
 import { SidebarAssistants } from "./sidebar/SidebarAssistants";
+import { NewChatTopButton } from "./sidebar/NewChatButtonVariant";
 import { StartedByFace, type StartedByView, useStartedBy } from "./sidebar/useStartedBy";
 import { startedByElsewhere, startedByKey } from "./sidebar/startedBy.logic";
 import { isTeamConversation } from "./assistants/assistantTeam.logic";
@@ -5133,6 +5134,10 @@ export default function Sidebar() {
               account live in the menu on top. */}
             <SidebarSetupRow />
             <SidebarDPlaces />
+            <NewChatTopButton
+              shortcutLabel={newChatShortcutLabel}
+              onShiftClick={handleNewThreadClick}
+            />
           </SidebarGroup>
           {dChatList(false)}
           <SidebarFooter className="gap-1 px-[var(--sidebar-content-inset)] py-1 empty:hidden">
