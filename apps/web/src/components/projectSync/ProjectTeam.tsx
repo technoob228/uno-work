@@ -13,6 +13,7 @@ import { UNO_WORK_URL } from "../../account/unoAccount";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
+import { useTeamCollabOn } from "../team/ProjectTeamAgents";
 import { toastManager } from "../ui/toast";
 import {
   cancelInvite,
@@ -78,6 +79,8 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
   const [noEmail, setNoEmail] = useState<string | null>(null);
   const [rotate, setRotate] = useState<string | null>(null);
   const [removing, setRemoving] = useState<number | null>(null);
+  // T51 mockup: People becomes Team, with the agents' rules under it.
+  const teamCollab = useTeamCollabOn(props.syncName);
 
   // Teams aren't on here (or the interface has no sign-in): nothing to show.
   if (teams.isPending || teams.isError || teams.data === null) return null;
@@ -137,7 +140,7 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
     <section className="space-y-2" data-testid="project-team">
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
         <UsersIcon className="size-4 text-muted-foreground" />
-        People
+        {teamCollab ? "Team" : "People"}
       </div>
       {rotate ? (
         <div

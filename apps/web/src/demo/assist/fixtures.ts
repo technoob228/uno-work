@@ -23,6 +23,7 @@ import {
   type ProjectSpec,
 } from "../heavyFixtures";
 import { PLAN_LIMIT_CHAT } from "./plans";
+import { teamDemoChats } from "../teamCollabDemo";
 import { type AssistWorld, macOnline } from "./world";
 
 /** An assistant the demo has: its folder on one computer, how it looks, what its daemon keeps. */
@@ -666,7 +667,7 @@ function replace<T>(target: T[], next: ReadonlyArray<T>) {
 export function installAssistFixtures(world: AssistWorld) {
   const live = world.account === "live";
   const projects = live ? liveProjects() : newProjects();
-  const chats = live ? liveChats(world) : [];
+  const chats = live ? [...liveChats(world), ...teamDemoChats()] : [];
   if (live && (world.plans === "full" || world.plans === "accounts")) {
     chats.push({
       ...PLAN_LIMIT_CHAT,

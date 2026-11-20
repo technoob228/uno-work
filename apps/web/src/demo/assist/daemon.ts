@@ -8,6 +8,7 @@
  * Asleep computers (the MacBook when `mac=asleep`, the Free cloud computer)
  * don't answer at all: the page sees them offline as it would.
  */
+import { TEAM_DEMO_AS_ANDREI } from "../teamCollabDemo";
 import {
   ASSISTANT_PROJECT_ID,
   type AssistantPreset,
@@ -1173,9 +1174,10 @@ export function accountHandlers(): HttpHandler[] {
     ...securityDemoHandlers(),
     http.get("*/_account/auth/me", () =>
       HttpResponse.json({
-        id: 1001,
-        username: "misha",
-        email: "misha@example.com",
+        // T51 mockup: `as=andrei` is the colleague's Work.
+        id: TEAM_DEMO_AS_ANDREI ? 2731 : 1001,
+        username: TEAM_DEMO_AS_ANDREI ? "andrei" : "misha",
+        email: TEAM_DEMO_AS_ANDREI ? "andrei@example.com" : "misha@example.com",
         balance: world.tier === "plus" ? 24.5 : 0,
         llm_balance: 0,
         one_wallet: true,

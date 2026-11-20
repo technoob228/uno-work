@@ -236,6 +236,8 @@ import { UnoBillingTopUpBanner } from "./chat/UnoBillingTopUpBanner";
 import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
 import { OutsideTextNote } from "./chat/OutsideTextNote";
+import { TeamAgentNote } from "./team/TeamAgentMessage";
+import { SharedChatReadOnlyBar, useSharedWithMe } from "./team/SharedChat";
 import { outsideTextSource } from "./chat/OutsideTextNote.logic";
 import { useChatOutsideText } from "../lib/outsideTextApi";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
@@ -1753,6 +1755,8 @@ export default function ChatView(props: ChatViewProps) {
   // A chat imported from a computer has no messages of its own: they stay on
   // that computer until the chat is opened (see `useImportedChat`).
   const importedSource = activeThread?.source ?? null;
+  // T51 mockup: a colleague's chat shared with you to read — no composer.
+  const sharedWithMe = useSharedWithMe(activeThread?.id ?? null);
   const continueInCloud = useContinueInCloud();
   const importedChat = useImportedChat({
     environmentId,
@@ -5508,6 +5512,7 @@ export default function ChatView(props: ChatViewProps) {
                       source={outsideSource}
                     />
                   ) : null}
+                  {activeThread ? <TeamAgentNote threadId={activeThread.id} /> : null}
                   <ComposerBannerStack
                     className="relative z-0"
                     items={
@@ -5529,7 +5534,9 @@ export default function ChatView(props: ChatViewProps) {
                     />
                   ) : null}
                   <div className="relative z-10">
-                    {importedSource !== null ? (
+                    {sharedWithMe ? (
+                      <SharedChatReadOnlyBar threadId={activeThread?.id ?? ""} />
+                    ) : importedSource !== null ? (
                       <ImportedChatNote
                         source={importedSource}
                         history={importedChat.data}

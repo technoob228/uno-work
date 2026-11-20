@@ -10,6 +10,7 @@ import { latestReportIdBySender } from "~/agentTasks.logic";
 import { describeAgentSentMessage } from "~/agentThreads.logic";
 import { useThreadTitle } from "~/hooks/useThreadTitle";
 import type { deriveTimelineEntries } from "../../session-logic";
+import { TeamAgentMessageLabel, useTeamAgentSender } from "../team/TeamAgentMessage";
 
 /**
  * Each agent task's latest message in the feed (agentTasks.logic): it says
@@ -41,6 +42,9 @@ export const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
   const senderTitle = useThreadTitle(environmentId, sentByThreadId);
   const navigate = useNavigate();
   const label = describeAgentSentMessage(senderTitle);
+  // T51 mockup: another person's agent wrote it — their face, their chat, your level.
+  const teamSender = useTeamAgentSender(sentByThreadId);
+  if (teamSender) return <TeamAgentMessageLabel sender={teamSender} />;
   return (
     <div className="mb-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
       <BotIcon aria-hidden="true" className="size-3 shrink-0 text-info" />

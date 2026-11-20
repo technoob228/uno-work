@@ -36,6 +36,7 @@ import { toastManager } from "../ui/toast";
 import { ProjectFiles } from "./ProjectFiles";
 import { ProjectTeam, ProjectTeamNeedsSync } from "./ProjectTeam";
 import { ProjectVersions } from "./ProjectVersions";
+import { ProjectTeamAgents, useTeamCollabOn } from "../team/ProjectTeamAgents";
 import { conflictLine, hostLine, mineWasReplaced, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
 
@@ -149,8 +150,13 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
     }
   };
 
+  // T51 mockup: a wider dialog with the team's agents, shared chats and journal.
+  const teamCollab = useTeamCollabOn(target.name);
   return (
-    <DialogPopup className="max-w-lg" data-testid="project-settings-dialog">
+    <DialogPopup
+      className={teamCollab ? "max-w-xl" : "max-w-lg"}
+      data-testid="project-settings-dialog"
+    >
       <DialogHeader>
         <DialogTitle>{target.name}</DialogTitle>
         <DialogDescription>{target.cwd}</DialogDescription>
@@ -266,6 +272,7 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             {entry?.name ? (
               <ProjectTeam syncName={entry.name} teamId={entry.team?.id ?? null} />
             ) : null}
+            <ProjectTeamAgents projectName={target.name} environmentId={target.environmentId} />
           </>
         ) : (
           <ProjectTeamNeedsSync />

@@ -25,6 +25,7 @@ import { usePendingApproval } from "../../../inbox/usePendingApproval";
 import { useDeployLiveCount } from "../../../deployApprovals/deployApprovalsStore";
 import { DeployApprovalCards } from "../../inbox/DeployApprovalCards";
 import { ChatRequestCards } from "../../inbox/ChatRequestCards";
+import { TeamRequestCards } from "../../team/TeamRequestCards";
 import { useChatRequestsWaitingCount } from "../../../chatRequests/chatRequestsStore";
 import { useMinuteClock } from "../../../hooks/useMinuteClock";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
@@ -451,6 +452,7 @@ export function NeedsYouWidget({ threads, now }: { threads: HomeThread[]; now: n
   }
   return (
     <>
+      <TeamRequestCards className="-mx-1 px-0" />
       <ChatRequestCards className="-mx-1 px-0" />
       <DeployApprovalCards liveOnly className="-mx-1 px-0" />
       {waiting.length > 0 ? (

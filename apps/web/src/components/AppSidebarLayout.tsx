@@ -11,6 +11,7 @@ import { DockBadgeListener } from "../inbox/DockBadgeListener";
 import { DeployApprovalsListener } from "../deployApprovals/DeployApprovalsListener";
 import { ChatRequestsListener } from "../chatRequests/ChatRequestsListener";
 import { ChatRequestBriefDialog } from "./chatRequests/ChatRequestBriefDialog";
+import { TeamRequestBriefDialog } from "./team/TeamRequestCards";
 import { PaymentNoticeBanner } from "./billing/PaymentNoticeBanner";
 import { useNavLayout } from "../navigation/useNavLayout";
 import { DesktopTabs } from "./DesktopTabs";
@@ -169,6 +170,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <DeployApprovalsListener />
         <ChatRequestsListener />
         <ChatRequestBriefDialog />
+        <TeamRequestBriefDialog />
         <DockBadgeListener />
       </SidebarProvider>
       <FileBrowser />

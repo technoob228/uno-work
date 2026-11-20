@@ -18,6 +18,7 @@ import { useMachineRows } from "../hooks/useMachineRows";
 import { deriveMachineKind } from "../machineKind";
 import { useMinuteClock } from "../hooks/useMinuteClock";
 import { failureMessage, waitingCount } from "./chatRequests.logic";
+import { useTeamWaitingCount } from "../team/teamCollab";
 
 export const CHAT_REQUESTS_POLL_MS = 5_000;
 
@@ -43,7 +44,9 @@ export const useChatRequestsStore = create<ChatRequestsStoreState>(() => ({
 export function useChatRequestsWaitingCount(): number {
   // Re-read each minute: a request past its 2 h stops counting before the server says so.
   useMinuteClock();
-  return useChatRequestsStore((store) => waitingCount(store.state));
+  // T51 mockup: a colleague's agent asking for a session here counts too.
+  const team = useTeamWaitingCount();
+  return useChatRequestsStore((store) => waitingCount(store.state)) + team;
 }
 
 /**

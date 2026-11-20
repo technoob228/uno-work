@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { selectEnvironmentState, useStore } from "../../store";
 import { useGoHome } from "../../navigation/useGoHome";
-import { UnoFace } from "../sidebar/SidebarDParts";
+import { UnoFace, useSidebarDComputerName } from "../sidebar/SidebarDParts";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, {
@@ -56,6 +56,8 @@ import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantCh
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
 import { ChatDoneButton } from "./ChatDoneButton";
+import { ChatShareButton } from "../team/ChatShareButton";
+import { SharedChatChip } from "../team/SharedChat";
 import { ChatAutomationsButton } from "../automations/ChatAutomations";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { AssistantSettingsButton } from "../assistants/AssistantSettingsButton";
@@ -190,6 +192,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const computerName = useNameAmongComputers(activeThreadEnvironmentId);
+  const sidebarComputerName = useSidebarDComputerName();
   const terminalWords = computerName ? `Terminal on ${computerName}` : "Toggle terminal drawer";
   const devMode = useDevMode();
   const { isMobile, open, openMobile } = useSidebar();
@@ -325,6 +328,8 @@ export const ChatHeader = memo(function ChatHeader({
             </Badge>
           </Foldable>
         ) : null}
+        {/* T51 mockup: a colleague's chat shared with you. */}
+        {draftId ? null : <SharedChatChip threadId={activeThreadId} />}
         {startedByUno && !isAssistantChat ? (
           <Foldable id="startedByUno" folded={folded}>
             <button
@@ -353,6 +358,14 @@ export const ChatHeader = memo(function ChatHeader({
             <SquarePenIcon className="size-3.5" />
           </button>
         ) : null}
+        {/* T51 mockup: share this chat with people of its project. */}
+        {draftId ? null : (
+          <ChatShareButton
+            threadId={activeThreadId}
+            projectName={activeProjectName}
+            computerName={computerName ?? sidebarComputerName}
+          />
+        )}
         {draftId ? null : (
           <ChatDoneButton
             environmentId={activeThreadEnvironmentId}

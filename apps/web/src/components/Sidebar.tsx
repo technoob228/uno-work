@@ -379,6 +379,7 @@ import { resolveHomeFolder } from "../hooks/useFolderChats";
 import { ChatInFolderDialog } from "./computer/ChatInFolderDialog";
 import { SidebarDraftsBlock } from "./sidebar/SidebarDraftsBlock";
 import { SidebarChatRequests } from "./sidebar/SidebarChatRequests";
+import { SidebarSharedWithMe } from "./team/SharedChat";
 import { useSidebarChatDrag } from "./sidebar/useSidebarChatDrag";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -4879,6 +4880,8 @@ export default function Sidebar() {
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
         {/* A cloud chat asks to start a chat here (chatRequests/): above everything else. */}
         <SidebarChatRequests />
+        {/* T51 mockup: chats colleagues shared with you. */}
+        <SidebarSharedWithMe />
         <SidebarDraftsBlock />
         <TooltipProvider delay={150} closeDelay={0} timeout={400}>
           <ul

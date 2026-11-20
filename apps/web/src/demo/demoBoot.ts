@@ -26,6 +26,7 @@ import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarne
 import { demoHooks } from "./demoFlag";
 import { deployApprovalHandlers } from "./deployApprovalsDemo";
 import { answerChatRequestsRpc, installChatRequestsDemo } from "./chatRequestsDemo";
+import { answerTeamCollabRpc, installTeamCollabDemo, teamAccountHandlers } from "./teamCollabDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
@@ -328,6 +329,11 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   if (DEMO_ASSIST) {
     const vaultAnswer = answerVaultRpc(machine.environmentId, String(tag), body);
     if (vaultAnswer !== undefined) return vaultAnswer;
+  }
+  // T51 mockup: landing on all computers, so Project settings shows its Team.
+  if (DEMO_ASSIST) {
+    const teamAnswer = answerTeamCollabRpc(machine.key, String(tag), body);
+    if (teamAnswer !== undefined) return teamAnswer;
   }
   // A cloud chat asks to start a chat on the MacBook (chatRequestsDemo.ts).
   if (DEMO_ASSIST && machine.key === "mac") {
@@ -1860,6 +1866,7 @@ function startRequestedChat(
 function startAssist() {
   startLinks();
   installChatRequestsDemo(MACHINES.mac.environmentId);
+  installTeamCollabDemo();
   startLifecycle(lifecycleOps);
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
@@ -1971,6 +1978,8 @@ export async function startDemo(): Promise<void> {
     }),
     // Deploy-window requests in the Inbox (deployApprovals/, 13.11).
     ...deployApprovalHandlers(),
+    // T51 mockup: the project team of landing (the console's /api/v1/work/team).
+    ...(DEMO_ASSIST ? teamAccountHandlers() : []),
     http.all("*/_account/*", () => HttpResponse.json({}, { status: 404 })),
     // p2: the test site's backend (/api/order → 500, a missing image).
     ...demoSiteHandlers,
