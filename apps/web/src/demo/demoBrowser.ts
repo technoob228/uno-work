@@ -83,9 +83,59 @@ const APPS_BY_MACHINE: Record<DemoMachine["key"], () => UnoMachineApp[]> = {
   ],
 };
 
+/**
+ * `?apps=many`: a computer with a person's real set of apps (about fifteen),
+ * for the shots of Apps & sites → Apps (the grid of 28.10).
+ */
+const MANY_APPS = (): UnoMachineApp[] => [
+  app("crm", "CRM · клиенты", "🗂", "Clients and deals", demoSiteUrl("apps/pult.html?app=crm")),
+  app("okr", "OKR статус", "🎯", "Goals of the quarter", demoSiteUrl("apps/pult.html?app=okr")),
+  app(
+    "finance",
+    "Финансы",
+    "💰",
+    "Cash flow and invoices",
+    demoSiteUrl("apps/pult.html?app=finance"),
+  ),
+  app(
+    "hiring",
+    "Найм",
+    "🧑‍💼",
+    "Candidates and interviews",
+    demoSiteUrl("apps/pult.html?app=hiring"),
+  ),
+  app("support-bot", "Бот поддержки", "🤖", "Telegram bot", null, "stopped"),
+  app(
+    "content-plan",
+    "Контент-план",
+    "🗓",
+    "Posts and stories",
+    demoSiteUrl("apps/pult.html?app=content-plan"),
+  ),
+  app(
+    "analytics",
+    "Аналитика",
+    "📊",
+    "Traffic and sales",
+    demoSiteUrl("apps/pult.html?app=analytics"),
+  ),
+  app("inventory", "Склад", "📦", "Stock left", demoSiteUrl("apps/pult.html?app=inventory")),
+  app("vpn", "VPN", "🛡", "WireGuard in docker", null),
+  app("wiki", "Wiki команды", "📚", "Notes and docs", demoSiteUrl("apps/pult.html?app=wiki")),
+];
+
+function manyApps(): boolean {
+  return (
+    typeof location !== "undefined" && new URLSearchParams(location.search).get("apps") === "many"
+  );
+}
+
 export function demoMachineApps(machine: DemoMachine): UnoMachineApps {
   return {
-    apps: APPS_BY_MACHINE[machine.key](),
+    apps: [
+      ...APPS_BY_MACHINE[machine.key](),
+      ...(manyApps() && machine.key === "work" ? MANY_APPS() : []),
+    ],
     manifestDir: "~/.uno/apps",
     scannedAt: new Date().toISOString(),
     publishBlockedReason: null,
