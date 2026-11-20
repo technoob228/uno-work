@@ -30,6 +30,7 @@ import {
   type MachineKey,
 } from "../heavyFixtures";
 import { automationHandlers, resetAutomations } from "./automations";
+import { securityDemoHandlers } from "./securityDemo";
 import { type DemoPersona, assistantsOn } from "./fixtures";
 import {
   demoMachineClass,
@@ -924,6 +925,8 @@ export function accountHandlers(): HttpHandler[] {
   return [
     // The plan, the catalog and the assistant's own computer (wizard, edit 1).
     ...ownComputerHandlers(),
+    // Settings → Security: Protection off / on / after the red button (?security=).
+    ...securityDemoHandlers(),
     http.get("*/_account/auth/me", () =>
       HttpResponse.json({
         id: 1001,
