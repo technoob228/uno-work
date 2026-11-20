@@ -360,9 +360,21 @@ let demoGroups: DemoGroup[] = freshDemoGroups();
 
 function demoGroupsResult(linked: boolean): ManagerTelegramGroupsResult {
   if (!linked) return { supported: true, botUsername: null, groups: [], pending: [] };
+  // T57: through Uno's assistant bot, groups off at the console.
+  const tgbot = world.tgbot ?? "own";
+  if (tgbot === "shared-off") {
+    return {
+      supported: false,
+      bot: "shared",
+      botUsername: "uno_work_bot",
+      groups: [],
+      pending: [],
+    };
+  }
   return {
     supported: true,
-    botUsername: "uno_team_bot",
+    bot: tgbot === "shared-on" ? "shared" : "own",
+    botUsername: tgbot === "shared-on" ? "uno_work_bot" : "uno_team_bot",
     groups: demoGroups
       .filter((group) => group.added)
       .map((group) => ({

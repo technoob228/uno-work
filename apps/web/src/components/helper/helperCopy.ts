@@ -64,9 +64,14 @@ export const helperCopy = {
     add: "Add",
     empty: (bot: string) =>
       `Add ${bot} to a group and call it there once: “${bot} hi”. The group shows up here.`,
-    unsupported: "Groups need a bot of your own. Uno's shared bot answers only in private chats.",
+    unsupportedTitle: "Uno in your Telegram groups",
+    unsupportedBody:
+      "Uno's shared bot answers only in private chats for now. To have Uno answer in a group, connect your assistant's own bot: create it in @BotFather, paste its token in Connect Telegram, then add it to the group.",
+    connectOwnBot: "Connect your own bot",
     privacyHint:
       "To be called by name without @, turn off Group Privacy for the bot in @BotFather.",
+    sharedHint: (bot: string) =>
+      `In groups Uno hears only messages that mention ${bot} or reply to it.`,
     saved: (group: string) => `Saved for ${group}.`,
     added: (group: string) => `Uno now answers in ${group}.`,
   },

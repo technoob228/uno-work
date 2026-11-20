@@ -32,6 +32,19 @@ async function openGroups(page, url, world = {}) {
   });
 }
 
+/** Toasts of the demo's start ("Models set for your plans") cover the page in shots. */
+async function dismissToasts(page) {
+  await page.waitForTimeout(800);
+  const close = page.getByLabel("Dismiss notification");
+  for (let i = 0; i < 3 && (await close.count()) > 0; i += 1) {
+    await close
+      .first()
+      .click({ timeout: 2000 })
+      .catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+}
+
 export default flow("tg-groups", async ({ page, url, step, shot }) => {
   await step("Settings → Assistant lists the groups with who is heard", async () => {
     await openGroups(page, url);
@@ -98,6 +111,56 @@ export default flow("tg-groups", async ({ page, url, step, shot }) => {
 });
 
 export const flows = [
+  // T57 (20.11): groups through Uno's assistant bot.
+  flow("tg-groups-shared-off", async ({ page, url, step, shot }) => {
+    await step("groups off for Uno's bot: a clear card, not a grey line", async () => {
+      await openGroups(page, url, { tgbot: "shared-off" });
+      const card = page.getByTestId("telegram-groups-unsupported");
+      await card.waitFor({ timeout: 30_000 });
+      await seeText(page, "Uno in your Telegram groups");
+      await dismissToasts(page);
+      await card.evaluate((node) => node.closest("section")?.scrollIntoView({ block: "center" }));
+      await page.waitForTimeout(400);
+      await shot("card");
+      await card
+        .locator("xpath=ancestor::section[1]")
+        .screenshot({ path: join(SHOTS, "tg-groups-shared-off-section.png") });
+    });
+    await step("Connect your own bot opens the token field and how to get one", async () => {
+      await page.getByTestId("telegram-groups-connect-own-bot").click();
+      await seeText(page, "Send /newbot and follow the prompts.");
+      const token = page.getByTestId("telegram-bot-token");
+      for (let i = 0; i < 30; i += 1) {
+        if (await token.evaluate((node) => node === document.activeElement)) break;
+        await page.waitForTimeout(100);
+      }
+      if (!(await token.evaluate((node) => node === document.activeElement))) {
+        throw new Error("the token field is not focused");
+      }
+      await page.waitForTimeout(600);
+      await shot("connect");
+    });
+  }),
+  flow("tg-groups-shared-on", async ({ page, url, step, shot }) => {
+    await step("groups on for Uno's bot: the usual section, calls only", async () => {
+      await openGroups(page, url, { tgbot: "shared-on" });
+      await group(page, FAMILY).waitFor({ timeout: 30_000 });
+      await seeText(page, "In groups Uno hears only messages that mention @uno_work_bot");
+      await seeText(page, "Book club");
+      await dismissToasts(page);
+      if ((await page.getByText("turn off Group Privacy").count()) !== 0) {
+        throw new Error("the BotFather hint is shown for Uno's bot");
+      }
+      await group(page, FAMILY).evaluate((node) =>
+        node.closest("section")?.scrollIntoView({ block: "center" }),
+      );
+      await page.waitForTimeout(400);
+      await shot("groups");
+      await group(page, FAMILY)
+        .locator("xpath=ancestor::section[1]")
+        .screenshot({ path: join(SHOTS, "tg-groups-shared-on-section.png") });
+    });
+  }),
   flow("tg-groups-no-telegram", async ({ page, url, step }) => {
     await step("without Telegram there is no Groups section", async () => {
       await openGroups(page, url, { tg: "off" });

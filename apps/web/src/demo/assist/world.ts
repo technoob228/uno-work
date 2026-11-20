@@ -85,6 +85,12 @@ export interface AssistWorld {
    * (your own Slack app only); `signin` — the desktop app isn't signed in with Uno.
    */
   readonly slack?: "available" | "installed" | "unavailable" | "signin";
+  /**
+   * Which bot Uno's Telegram groups go through (T57, 20.11): its own bot
+   * (`own`, as before); Uno's assistant bot with groups off at the console
+   * (`shared-off`: the page offers the own bot) or on (`shared-on`).
+   */
+  readonly tgbot?: "own" | "shared-off" | "shared-on";
 }
 
 export const CONNECTOR_PROVIDERS: ReadonlyArray<ConnectorProvider> = [
@@ -183,6 +189,7 @@ export function worldFromSearch(search: string, base: AssistWorld): AssistWorld 
       take("slack", ["available", "installed", "unavailable", "signin"] as const) ??
       start.slack ??
       "available",
+    tgbot: take("tgbot", ["own", "shared-off", "shared-on"] as const) ?? start.tgbot ?? "own",
   };
   return touched ? next : null;
 }
