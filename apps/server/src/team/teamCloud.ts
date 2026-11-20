@@ -19,6 +19,7 @@ import type { TeamChatStatus, TeamParts } from "@t3tools/contracts";
 import { consoleRequest, type ConsoleReply } from "../unoWork/consoleClient.ts";
 import {
   errorCode,
+  fieldProblem,
   NO_PARTS,
   OFF_CODES,
   parseInbound,
@@ -49,10 +50,13 @@ export const LONG_POLL_WAIT_S = 25;
 export class TeamCloudError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  /** `INVALID_FIELD`: which field and why ("title: too_long"), else "". */
+  readonly field: string;
+  constructor(status: number, code: string, message: string, field = "") {
     super(message);
     this.status = status;
     this.code = code;
+    this.field = field;
   }
   /** The part is off for this person (or the other one): stop quietly. */
   get off(): boolean {
@@ -65,7 +69,18 @@ function problem(status: number, code: string): string {
   if (status === 0) return "Couldn't reach the Uno cloud.";
   if (status === 401) return "Uno didn't accept this computer's key. Sign in to Uno again.";
   if (OFF_CODES.has(code)) return "Working with the team isn't on for this account.";
+  if (code === "PERSON_NOT_ENABLED") return "Working with the team isn't on for that person yet.";
   if (code === "NOT_SHARED") return "The chat isn't shared with anyone any more.";
+  if (code === "SOURCE_MISMATCH") return "That chat is mirrored from another computer.";
+  if (code === "CHAT_IN_OTHER_PROJECT") return "That chat is shared in another project.";
+  if (code === "NOT_CLAIMER") return "Another computer of this person took that request.";
+  if (code === "REQUEST_NOT_WAITING") return "That request isn't waiting any more.";
+  if (code === "ASSISTANT_COMPUTER_NO_TEAM_REQUESTS") {
+    return "An assistant's computer doesn't send requests to colleagues.";
+  }
+  if (code === "CANNOT_TARGET_SELF") return "That's the person themself.";
+  if (code === "INVALID_FIELD") return "The Uno cloud didn't accept a field.";
+  if (code === "BODY_TOO_LARGE" || status === 413) return "It is too long for the Uno cloud.";
   if (code === "CLAIMED") return "Another computer took it first.";
   if (code === "LEVEL_OFF") return "Their agents can't reach this person in this project.";
   if (code === "TOO_MANY_ROUNDS") return "Too many rounds between the agents.";
@@ -106,6 +121,8 @@ export interface StatusInput {
   readonly reason?: string;
   readonly threadTitle?: string;
   readonly answer?: string;
+  /** Who decided (started, declined, answered): the person here, in Telegram, or the level. */
+  readonly decidedVia?: "here" | "telegram" | "auto";
 }
 
 export function makeTeamCloud(access: TeamCloudAccess) {
@@ -133,7 +150,13 @@ export function makeTeamCloud(access: TeamCloudAccess) {
     }
     if (reply.status < 200 || reply.status >= 300) {
       const code = errorCode(reply.body);
-      throw new TeamCloudError(reply.status, code, problem(reply.status, code));
+      const field = code === "INVALID_FIELD" ? fieldProblem(reply.body) : "";
+      throw new TeamCloudError(
+        reply.status,
+        code,
+        field ? `${problem(reply.status, code)} (${field})` : problem(reply.status, code),
+        field,
+      );
     }
     return reply.body;
   };
@@ -200,6 +223,7 @@ export function makeTeamCloud(access: TeamCloudAccess) {
         ...(input.reason !== undefined ? { reason: input.reason } : {}),
         ...(input.threadTitle !== undefined ? { thread_title: input.threadTitle } : {}),
         ...(input.answer !== undefined ? { answer: input.answer } : {}),
+        ...(input.decidedVia !== undefined ? { decided_via: input.decidedVia } : {}),
       });
     },
     /** True only for the first computer of the account that asks: it sends the Telegram copy. */
@@ -244,9 +268,10 @@ export function makePartsCache(input: {
     let ttl = PARTS_FAILED_TTL_MS;
     try {
       parts = await input.fetch();
-      ttl = parts.share || parts.requests || parts.agents || parts.tasks
-        ? PARTS_ON_TTL_MS
-        : PARTS_OFF_TTL_MS;
+      ttl =
+        parts.share || parts.requests || parts.agents || parts.tasks
+          ? PARTS_ON_TTL_MS
+          : PARTS_OFF_TTL_MS;
       lastError = null;
     } catch (error) {
       if (error instanceof TeamCloudError && error.off) {
@@ -282,4 +307,3 @@ export function makePartsCache(input: {
 }
 
 export type PartsCache = ReturnType<typeof makePartsCache>;
-

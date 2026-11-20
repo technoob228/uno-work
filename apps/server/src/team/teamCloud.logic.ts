@@ -204,9 +204,7 @@ function parseChat(raw: unknown): SharedChat | null {
       const share = obj(entry);
       const userId = int(share?.["user_id"]);
       const level = share?.["level"];
-      return userId !== null && (level === "read" || level === "write")
-        ? [{ userId, level }]
-        : [];
+      return userId !== null && (level === "read" || level === "write") ? [{ userId, level }] : [];
     }),
   };
 }
@@ -312,6 +310,15 @@ export function parseLevels(body: unknown): TeamLevels {
   };
 }
 
+/** `400 INVALID_FIELD {field, reason}` → "title: too_long"; else "". */
+export function fieldProblem(body: unknown): string {
+  const value = obj(body);
+  const field = value?.["field"];
+  const reason = value?.["reason"];
+  if (typeof field !== "string" || field.length === 0) return "";
+  return typeof reason === "string" && reason.length > 0 ? `${field}: ${reason}` : field;
+}
+
 /** The error code of a console answer (`{error: "CODE"}`), or "". */
 export function errorCode(body: unknown): string {
   const code = obj(body)?.["error"];
@@ -322,5 +329,4 @@ export function errorCode(body: unknown): string {
 export const OFF_CODES: ReadonlySet<string> = new Set([
   "WORK_TEAM_COLLAB_DISABLED",
   "WORK_TEAM_DISABLED",
-  "PERSON_NOT_ENABLED",
 ]);

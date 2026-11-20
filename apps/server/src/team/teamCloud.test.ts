@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { makePartsCache, makeTeamCloud, PARTS_FAILED_TTL_MS, TeamCloudError } from "./teamCloud.ts";
-import { NO_PARTS, parseInbound, parseLevels, parseRequest, personName } from "./teamCloud.logic.ts";
+import {
+  NO_PARTS,
+  parseInbound,
+  parseLevels,
+  parseRequest,
+  personName,
+} from "./teamCloud.logic.ts";
 
 const reply = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -82,6 +88,27 @@ describe("the team routes", () => {
     expect(calls[0]!.url).toBe(
       "https://cloud.test/api/v1/work/team/requests/outgoing?source=env%201&after_rev=5&wait=25",
     );
+  });
+
+  it("a status says who decided", async () => {
+    const { cloud, calls } = cloudWith(() => reply(200, { request: {} }));
+    await cloud.status(5, "env-1", { status: "started", decidedVia: "auto" });
+    expect(calls[0]!.body).toEqual({ source: "env-1", status: "started", decided_via: "auto" });
+  });
+
+  it("INVALID_FIELD names the field", async () => {
+    const { cloud } = cloudWith(() =>
+      reply(400, { error: "INVALID_FIELD", field: "title", reason: "too_long" }),
+    );
+    await expect(cloud.status(5, "s", { status: "done" })).rejects.toMatchObject({
+      code: "INVALID_FIELD",
+      field: "title: too_long",
+    });
+  });
+
+  it("the other person not on isn't this account off", () => {
+    expect(new TeamCloudError(409, "PERSON_NOT_ENABLED", "x").off).toBe(false);
+    expect(new TeamCloudError(404, "WORK_TEAM_COLLAB_DISABLED", "x").off).toBe(true);
   });
 
   it("only the first computer sends the Telegram copy", async () => {
