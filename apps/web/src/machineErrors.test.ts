@@ -45,3 +45,25 @@ describe("describeMachineError", () => {
     expect(human.details).toBe('{"weird":true}');
   });
 });
+
+describe("machine class refusals", () => {
+  it.each([
+    [
+      'Could not create the box: 403: {"error":"PERFORMANCE_REQUIRES_MAX","detail":"…","upgrade_url":"https://console.uno.place/billing"}',
+      "Performance comes with Max",
+      "Performance computers come with the Max plan. Create a Standard one or switch to Max.",
+    ],
+    [
+      'Could not create the box: 503: {"error":"PERFORMANCE_NO_CAPACITY","detail":"…"}',
+      "Performance servers are busy",
+      "All Performance servers are busy. Try again in a few minutes, or create a Standard computer.",
+    ],
+  ])("%s", (raw, title, message) => {
+    const human = describeMachineError(new Error(raw));
+    expect(human.title).toBe(title);
+    expect(human.message).toBe(message);
+    expect(human.transient).toBe(false);
+    // The console's own wording of the class stays out of sight.
+    expect(human.details).toBeNull();
+  });
+});

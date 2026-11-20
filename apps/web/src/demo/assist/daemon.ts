@@ -31,7 +31,12 @@ import {
 } from "../heavyFixtures";
 import { automationHandlers, resetAutomations } from "./automations";
 import { type DemoPersona, assistantsOn } from "./fixtures";
-import { ownComputerHandlers, ownComputerRunning, withOwnComputer } from "./ownComputer";
+import {
+  demoMachineClass,
+  ownComputerHandlers,
+  ownComputerRunning,
+  withOwnComputer,
+} from "./ownComputer";
 import { startedByOn } from "./startedBy";
 import {
   type AssistWorld,
@@ -885,7 +890,13 @@ export function accountHandlers(): HttpHandler[] {
       work_machine: true,
       plan,
     });
-    const list = [wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier)];
+    const workClass = demoMachineClass();
+    const list = [
+      {
+        ...wire(MACHINES.work.boxId!, MACHINES.work.label, "running", world.tier),
+        ...(workClass ? { class: workClass } : {}),
+      },
+    ];
     if (live() && !lcDeletedBox(MACHINES.product.boxId!))
       list.push(wire(MACHINES.product.boxId!, MACHINES.product.label, "sleeping", "free"));
     if (live() && world.fleet === "on")

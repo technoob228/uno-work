@@ -87,6 +87,9 @@ const ALLOWED: ReadonlyArray<{ method: string; pattern: RegExp; query?: RegExp }
   // What the person already started: Home's next step opens the same chat (B2).
   { method: "GET", pattern: /^\/api\/v1\/account\/resume$/ },
   { method: "PUT", pattern: /^\/api\/v1\/account\/goal$/ },
+  // Machine class (19.11): which class a new computer gets, and whether the
+  // plan includes Performance (Max). Read only; the class goes with the launch.
+  { method: "GET", pattern: /^\/api\/v1\/account\/machine-class$/ },
   { method: "GET", pattern: /^\/api\/v1\/boxes\/\d+\/(metrics|apps)$/ },
   // "Use your own tools" (onboarding v3): a key for an agent pinned to this
   // computer, and SSH (the command, adding a public key).

@@ -17,6 +17,10 @@ import {
   isRemoteEnvironmentAuthHttpError,
   isRemoteEnvironmentUnreachableError,
 } from "./environments/remote/api";
+import {
+  PERFORMANCE_NO_CAPACITY_TEXT,
+  PERFORMANCE_REQUIRES_MAX_TEXT,
+} from "./account/machineClass";
 
 export interface HumanMachineError {
   readonly title: string;
@@ -45,6 +49,8 @@ interface Rule {
   readonly title: string;
   readonly message: string;
   readonly transient: boolean;
+  /** The raw answer adds nothing a person can use (and may word the class differently). */
+  readonly hideDetails?: boolean;
 }
 
 /**
@@ -52,6 +58,21 @@ interface Rule {
  * network shapes they are usually wrapped in.
  */
 const RULES: ReadonlyArray<Rule> = [
+  // Machine class (19.11): before the generic 403 and 503 below.
+  {
+    test: /PERFORMANCE_REQUIRES_MAX/,
+    title: "Performance comes with Max",
+    message: PERFORMANCE_REQUIRES_MAX_TEXT,
+    transient: false,
+    hideDetails: true,
+  },
+  {
+    test: /PERFORMANCE_NO_CAPACITY/,
+    title: "Performance servers are busy",
+    message: PERFORMANCE_NO_CAPACITY_TEXT,
+    transient: false,
+    hideDetails: true,
+  },
   {
     test: /connect your uno account first|no api key|not linked|sign in with uno|managed at app\.uno4\.work/i,
     title: "Not signed in to Uno",
@@ -155,7 +176,7 @@ export function describeMachineError(error: unknown): HumanMachineError {
       return {
         title: rule.title,
         message: rule.message,
-        details: raw.length > 0 ? raw : null,
+        details: raw.length > 0 && !rule.hideDetails ? raw : null,
         transient: rule.transient,
       };
     }

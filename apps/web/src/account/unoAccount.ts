@@ -241,6 +241,7 @@ export const interfaceUnoCloud = {
         diskGb: input.diskGb,
         computerRole: input.computerRole,
         assistant: input.assistant,
+        machineClass: input.machineClass,
       },
       {
         client: provisionClient,

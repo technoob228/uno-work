@@ -350,6 +350,17 @@ Dev Electron включает локальный CDP endpoint для Playwright:
 - **Общий бот Uno** группы не берёт (реле консоли отдаёт только личные чаты): раздел и инструмент говорят, что нужен свой бот.
 - Не сделано: режим «только отвечать, без инструментов» для участников; выбор людей кнопками прямо в Telegram.
 
+### 17. Класс машины Performance / Standard (19.11)
+
+Класс — ресурс тарифа: Performance только на Max (там он по умолчанию), остальные тарифы — Standard. Решает консоль (`GET /api/v1/account/machine-class`, fishcode `feat/perf-class-1119`).
+
+- **Создание** (`CreateUnoBoxSection` — облачный компьютер из Add computer, My Uno, Move to a box): выбор Performance / Standard, если консоль ответила `enabled: true`; иначе (старая консоль, ошибка, `enabled: false`) выбора нет. Предвыбран `effective`; вне Max Performance заблокирован («Comes with Max · See Max»). `class` уходит в launch только если человек поменял его (`account/machineClass.ts#machineClassToSend`). Тексты — там же, слово в слово.
+- **Ответы консоли:** `class_notice` → тост «Performance servers were busy, so this computer is Standard.» (`useCreateUnoBoxFlow`); 403 `PERFORMANCE_REQUIRES_MAX` и 503 `PERFORMANCE_NO_CAPACITY` → правила в `machineErrors.ts` (без «Show details»: сырой текст консоли не показываем) + кнопки Use Standard / See Max.
+- **Провод:** `UnoBox.machineClass`, `UnoBoxCreateJobStatus.classNotice`, `UnoCloudCreateBoxInput.machineClass` (contracts); `parseUnoBox` читает `class`, задача создания (`shared/unoBoxProvision.ts`) шлёт `class` и несёт `class_notice` во всех статусах после запуска.
+- **Бейдж «Performance»:** строка и панель компьютера в My Uno, строка в «Connect an Uno box». У Standard бейджа нет.
+- Серверы приложений (`/api/v1/work/servers`, роли в Dev Mode) классом не управляются — консоль держит их на Standard.
+- **Демо:** `?perf=max|plus|busy|full|lapsed` (`demo/assist/world.ts`), скриншоты `demo-e2e/perf-class-shots.mjs`.
+
 ## Мердж апстрима
 
 Конфликтные точки при `git fetch upstream && git merge upstream/main`:

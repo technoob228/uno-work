@@ -150,6 +150,14 @@ export const UnoAccount = Schema.Struct({
 });
 export type UnoAccount = typeof UnoAccount.Type;
 
+/**
+ * Machine class (console `class`, 19.11): a plan resource. Performance comes
+ * only with Max (new computers there are Performance unless the account picks
+ * Standard); every other plan is Standard.
+ */
+export const UnoMachineClass = Schema.Literals(["standard", "performance"]);
+export type UnoMachineClass = typeof UnoMachineClass.Type;
+
 export const UnoBox = Schema.Struct({
   id: Schema.Number,
   name: Schema.String,
@@ -173,6 +181,8 @@ export const UnoBox = Schema.Struct({
   url: Schema.optional(Schema.NullOr(Schema.String)),
   /** An Uno Work computer (console `work_machine`), not a plain server. */
   workMachine: Schema.optional(Schema.Boolean),
+  /** Console `class`; absent from older consoles (read as Standard). */
+  machineClass: Schema.optional(UnoMachineClass),
 });
 export type UnoBox = typeof UnoBox.Type;
 
@@ -277,6 +287,11 @@ export const UnoBoxCreateJobStatus = Schema.Struct({
    * stops in `failed` rather than pretending it can be paired.
    */
   daemonInstallRequired: Schema.optional(Schema.Boolean),
+  /**
+   * The launch asked for Performance, Performance was full and the console
+   * made the computer Standard (`class_notice` in its answer).
+   */
+  classNotice: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoBoxCreateJobStatus = typeof UnoBoxCreateJobStatus.Type;
 

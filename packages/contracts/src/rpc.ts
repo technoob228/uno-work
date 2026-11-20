@@ -25,6 +25,7 @@ import {
   UnoBoxConnection,
   UnoBoxCreateJobStatus,
   UnoCloudState,
+  UnoMachineClass,
   WorkspaceInstructions,
   WorkspaceMachineKind,
   WorkspaceMachineScope,
@@ -2151,6 +2152,8 @@ export const UnoCloudCreateBoxInput = Schema.Struct({
       template: Schema.String.check(Schema.isMaxLength(32)),
     }),
   ),
+  /** Sent only when the person changed it from the account's effective class. */
+  machineClass: Schema.optional(UnoMachineClass),
 });
 export type UnoCloudCreateBoxInput = typeof UnoCloudCreateBoxInput.Type;
 

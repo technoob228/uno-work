@@ -54,6 +54,7 @@ import {
   computerMetricsQuery,
   myUnoKeys,
 } from "./myUnoQueries";
+import { PerformanceBadge } from "../machines/MachineClass";
 import { ROLE_ICON, ROLE_TINT, RoleBadge } from "./roleUi";
 import { AppGlyph, Dot } from "./rowsUi";
 import { SiteStatusPill } from "../sites/SiteStatusPill";
@@ -231,6 +232,7 @@ export function ComputerDetail({
               ) : (
                 <RoleBadge role={entry.role} />
               )}
+              <PerformanceBadge machineClass={box?.machineClass} />
               <span className="inline-flex items-center gap-1.5 text-xs">
                 <Dot tone={restarting ? "busy" : stateTone(entry)} />
                 {restarting

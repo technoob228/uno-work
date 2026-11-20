@@ -13,6 +13,7 @@ import type { EnvironmentId, UnoBoxCreateJobStatus } from "@t3tools/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { CLASS_NOTICE_TEXT } from "../account/machineClass";
 import { unoCloudCreateBoxMutationOptions, workspaceQueryKeys } from "../lib/workspaceReactQuery";
 import type { CreateUnoBoxInput, CreateUnoBoxResult, UnoBoxCreateStage } from "../unoBoxCreation";
 import {
@@ -20,6 +21,7 @@ import {
   connectUnoBoxById,
   isUnoBoxStillStartingError,
 } from "../unoBoxConnect";
+import { toastManager } from "./ui/toast";
 
 /** Between automatic retries of a "still starting" box. */
 const STILL_STARTING_RETRY_MS = 15_000;
@@ -49,6 +51,7 @@ export function useCreateUnoBoxFlow(
   const [retrying, setRetrying] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const boxListedRef = useRef(false);
+  const classNoticeShownRef = useRef(false);
 
   // Closing the surface stops background retries (the box stays on the list).
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -67,6 +70,12 @@ export function useCreateUnoBoxFlow(
       if (status.boxId != null && !boxListedRef.current) {
         boxListedRef.current = true;
         refreshBoxList();
+      }
+      // Performance was full and the console made it Standard: say so once,
+      // in a toast that outlives the dialog closing on success.
+      if (status.classNotice && !classNoticeShownRef.current) {
+        classNoticeShownRef.current = true;
+        toastManager.add({ type: "info", title: CLASS_NOTICE_TEXT });
       }
     },
     [refreshBoxList],
@@ -131,6 +140,7 @@ export function useCreateUnoBoxFlow(
       setError(null);
       setStage("creating");
       boxListedRef.current = false;
+      classNoticeShownRef.current = false;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;

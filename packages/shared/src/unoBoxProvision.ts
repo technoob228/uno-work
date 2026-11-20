@@ -29,9 +29,11 @@ import {
   type UnoBox,
   type UnoBoxConnection,
   type UnoBoxCreateJobStatus,
+  type UnoMachineClass,
 } from "@t3tools/contracts";
 
 import {
+  asNullableString,
   controlPlaneErrorStatus,
   parseUnoBox,
   parseUnoBoxConnection,
@@ -47,6 +49,8 @@ export interface UnoBoxLaunchBody {
   /** Assistants MVP: `assistant` = this Work computer is one assistant's home. */
   readonly computer_role?: string;
   readonly assistant?: { readonly name: string; readonly emoji: string; readonly template: string };
+  /** Machine class; omitted = the account's effective class (Max: Performance). */
+  readonly class?: UnoMachineClass;
 }
 
 export interface UnoBoxPlainCreateBody extends UnoBoxLaunchBody {
@@ -138,6 +142,8 @@ export interface UnoBoxProvisionInput {
   readonly assistant?:
     | { readonly name: string; readonly emoji: string; readonly template: string }
     | undefined;
+  /** Sent as `class` only when set (the person changed it from the account's own). */
+  readonly machineClass?: UnoMachineClass | undefined;
 }
 
 /** Plain-box fallback: what the console would create from its own "New box" form. */
@@ -168,6 +174,7 @@ function errorMessage(cause: unknown): string {
 }
 
 function toLaunchBody(input: UnoBoxProvisionInput): UnoBoxLaunchBody {
+  const machineClass = input.machineClass ? { class: input.machineClass } : {};
   if (input.computerRole === "assistant") {
     // The console picks an assistant's shape (the smallest Work runs on) and
     // its economy mode; sizes go only when the caller names them.
@@ -178,6 +185,7 @@ function toLaunchBody(input: UnoBoxProvisionInput): UnoBoxLaunchBody {
       ...(input.diskGb !== undefined ? { disk_gb: input.diskGb } : {}),
       computer_role: "assistant",
       ...(input.assistant ? { assistant: input.assistant } : {}),
+      ...machineClass,
     };
   }
   return {
@@ -185,6 +193,7 @@ function toLaunchBody(input: UnoBoxProvisionInput): UnoBoxLaunchBody {
     ram_mb: input.ramMb ?? UNO_BOX_DEFAULT_RAM_MB,
     vcpu: input.vcpu ?? UNO_BOX_DEFAULT_VCPU,
     disk_gb: input.diskGb ?? UNO_BOX_DEFAULT_DISK_GB,
+    ...machineClass,
   };
 }
 
@@ -231,8 +240,10 @@ export async function runUnoBoxProvisionJob(
   const { client } = deps;
 
   let current: UnoBoxCreateJobStatus = { jobId: input.jobId, state: "creating" };
+  // Performance was full and the console made it Standard: every later status says so.
+  let classNotice: string | null = null;
   const emit = (next: Omit<UnoBoxCreateJobStatus, "jobId">): UnoBoxCreateJobStatus => {
-    current = { jobId: input.jobId, ...next };
+    current = { jobId: input.jobId, ...next, ...(classNotice ? { classNotice } : {}) };
     deps.onStatus(current);
     return current;
   };
@@ -259,7 +270,9 @@ export async function runUnoBoxProvisionJob(
   let useGoldenImage = true;
   const body = toLaunchBody(input);
   try {
-    box = parseUnoBox(await client.launchImage(imageId, body));
+    const launched = await client.launchImage(imageId, body);
+    box = parseUnoBox(launched);
+    classNotice = launchClassNotice(launched);
   } catch (cause) {
     if (controlPlaneErrorStatus(cause) !== 404) {
       return fail(`Could not create the box: ${errorMessage(cause)}`);
@@ -417,6 +430,12 @@ export async function runUnoBoxProvisionJob(
       ? null
       : "Your computer is created but still starting up. We'll keep trying to connect.",
   });
+}
+
+/** `class_notice` of a launch answer (Performance was full, the computer is Standard). */
+function launchClassNotice(raw: unknown): string | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  return asNullableString((raw as Record<string, unknown>)["class_notice"]);
 }
 
 /** Origin of the pairing link (`https://<box>/pair#token=…` → `https://<box>`), or null if unparsable. */

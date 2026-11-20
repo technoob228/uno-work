@@ -6,7 +6,7 @@
  * `UnoCloudService` and the Promise-based provisioning job, and so they can be
  * unit-tested against recorded payloads without a runtime.
  */
-import type { UnoBox, UnoBoxConnection } from "@t3tools/contracts";
+import type { UnoBox, UnoBoxConnection, UnoMachineClass } from "@t3tools/contracts";
 
 export function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -22,6 +22,11 @@ export function asNullableString(value: unknown): string | null {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+/** Console `class`: "standard" | "performance"; anything else is unknown (null). */
+export function parseUnoMachineClass(value: unknown): UnoMachineClass | null {
+  return value === "standard" || value === "performance" ? value : null;
 }
 
 export function parseUnoBox(raw: unknown): UnoBox | null {
@@ -45,7 +50,13 @@ export function parseUnoBox(raw: unknown): UnoBox | null {
     hostname: asNullableString(record["hostname"]),
     url: asNullableString(record["url"]),
     workMachine: record["work_machine"] === true || record["role"] === "work",
+    ...withMachineClass(record["class"]),
   };
+}
+
+function withMachineClass(value: unknown): { machineClass?: UnoMachineClass } {
+  const machineClass = parseUnoMachineClass(value);
+  return machineClass ? { machineClass } : {};
 }
 
 /**

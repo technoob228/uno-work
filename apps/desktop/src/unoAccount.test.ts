@@ -95,6 +95,9 @@ describe("UnoAccountService", () => {
     expect(isAllowedAccountRequest("POST", "/api/v1/account/resume")).toBe(false);
     expect(isAllowedAccountRequest("PUT", "/api/v1/account/goal")).toBe(true);
     expect(isAllowedAccountRequest("DELETE", "/api/v1/account/goal")).toBe(false);
+    // Machine class (19.11): read only — the class goes with the launch.
+    expect(isAllowedAccountRequest("GET", "/api/v1/account/machine-class")).toBe(true);
+    expect(isAllowedAccountRequest("PUT", "/api/v1/account/machine-class")).toBe(false);
     expect(isAllowedAccountRequest("PATCH", "/api/v1/boxes/12")).toBe(true);
     // Computers lifecycle: own computers, and deleting a cloud computer — never its channel.
     expect(isAllowedAccountRequest("GET", "/api/v1/work/computers")).toBe(true);
