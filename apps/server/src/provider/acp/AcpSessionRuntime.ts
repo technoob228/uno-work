@@ -122,6 +122,12 @@ export interface AcpSessionRuntimeOptions {
    * tail of it for diagnostics.
    */
   readonly onStderr?: (text: string) => void;
+  /**
+   * Agent text chunks that are the agent's own bookkeeping, not words for the
+   * person (Gemini CLI's `[MODE_UPDATE] plan`): dropped before they open an
+   * assistant message.
+   */
+  readonly dropAgentText?: (text: string) => boolean;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -372,6 +378,7 @@ const makeAcpSessionRuntime = (
         assistantSegmentRef,
         runNonce: assistantSegmentRunNonce,
         params: notification,
+        ...(options.dropAgentText ? { dropAgentText: options.dropAgentText } : {}),
       }),
     );
 
@@ -748,6 +755,7 @@ const handleSessionUpdate = ({
   assistantSegmentRef,
   runNonce,
   params,
+  dropAgentText,
 }: {
   readonly queue: Queue.Queue<AcpParsedSessionEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
@@ -755,6 +763,7 @@ const handleSessionUpdate = ({
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly runNonce: string;
   readonly params: EffectAcpSchema.SessionNotification;
+  readonly dropAgentText?: (text: string) => boolean;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
     const parsed = parseSessionUpdateEvent(params);
@@ -791,6 +800,7 @@ const handleSessionUpdate = ({
         continue;
       }
       if (event._tag === "ContentDelta") {
+        if (dropAgentText?.(event.text)) continue;
         if (event.text.trim().length === 0) {
           const assistantSegmentState = yield* Ref.get(assistantSegmentRef);
           if (!assistantSegmentState.activeItemId) {

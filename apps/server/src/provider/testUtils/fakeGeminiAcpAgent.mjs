@@ -23,6 +23,9 @@ const MODES = ["default", "autoEdit", "yolo", "plan"];
 let mode = process.env.FAKE_GEMINI_START_MODE || "default";
 let model = "auto";
 const modeLog = [];
+// Gemini CLI 0.70 announces a mode switch to its own UI as agent text at the
+// start of the next prompt.
+let modeAnnouncement;
 
 async function permission(sessionId, toolCall) {
   update(sessionId, { sessionUpdate: "tool_call", ...toolCall, status: "pending" });
@@ -75,6 +78,7 @@ const handlers = {
     if (!MODES.includes(modeId)) throw new Error(`Invalid mode: ${modeId}`);
     mode = modeId;
     modeLog.push(modeId);
+    modeAnnouncement = `[MODE_UPDATE] ${modeId}`;
     return {};
   },
   "session/set_model": ({ modelId }) => {
@@ -86,6 +90,13 @@ const handlers = {
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("\n");
+    if (modeAnnouncement) {
+      update(sessionId, {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: modeAnnouncement },
+      });
+      modeAnnouncement = undefined;
+    }
     if (/\bDO_API_ERROR\b/.test(text)) {
       // What Gemini CLI 0.70 answers when Google refuses the key (checked
       // live 20.11.2026): HTTP status as the JSON-RPC code, the API's JSON

@@ -142,6 +142,8 @@ export interface AcpAgentProfile {
    * the uno-work tools, which ask the person themselves). Returns the option id.
    */
   readonly autoApprove?: (request: EffectAcpSchema.RequestPermissionRequest) => string | undefined;
+  /** Agent text chunks that are the agent's bookkeeping, never shown. */
+  readonly dropAgentText?: (text: string) => boolean;
 }
 
 export interface AcpAgentAdapterOptions {
@@ -481,6 +483,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             ...(mcpServers.length > 0 ? { mcpServers } : {}),
             ...(profile.authMethodId ? { authMethodId: profile.authMethodId } : {}),
             onStderr: stderr.append,
+            ...(profile.dropAgentText ? { dropAgentText: profile.dropAgentText } : {}),
             clientInfo: { name: "uno-work", version: options.clientVersion ?? "0.0.0" },
             ...makeAcpNativeLoggers({
               nativeEventLogger,

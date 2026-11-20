@@ -17,6 +17,7 @@ import {
   GEMINI_SIGN_IN_HINT,
   GEMINI_START_TIMEOUT_MS,
   geminiAutoApprove,
+  isGeminiControlText,
   geminiModeFor,
   geminiPreflight,
 } from "../acp/GeminiAcpSupport.ts";
@@ -47,6 +48,7 @@ export function geminiProfile(settings: Pick<GeminiSettings, "binaryPath">): Acp
     startTimeoutMessage: `Gemini CLI did not start in time. If it is waiting for a sign-in: ${GEMINI_SIGN_IN_HINT}`,
     modeFor: geminiModeFor,
     autoApprove: geminiAutoApprove,
+    dropAgentText: isGeminiControlText,
   };
 }
 

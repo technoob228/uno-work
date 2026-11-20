@@ -12,6 +12,7 @@ import {
   geminiAutoApprove,
   geminiGoogleAccount,
   geminiModeFor,
+  isGeminiControlText,
   geminiPreflight,
   parseJsonWithComments,
   probeGeminiAuth,
@@ -196,5 +197,15 @@ describe("Gemini CLI modes and permissions", () => {
         toolCall: { toolCallId: "t", title: "notify (uno-work MCP Server)", kind: "execute" },
       }),
     ).toBeUndefined();
+  });
+});
+
+describe("Gemini CLI's own bookkeeping text", () => {
+  it("drops only the mode announcement chunk", () => {
+    expect(isGeminiControlText("[MODE_UPDATE] plan")).toBe(true);
+    expect(isGeminiControlText("[MODE_UPDATE] autoEdit\n")).toBe(true);
+    expect(isGeminiControlText("Switched to plan: [MODE_UPDATE] plan")).toBe(false);
+    expect(isGeminiControlText("[MODE_UPDATE] plan, then the answer")).toBe(false);
+    expect(isGeminiControlText("plan")).toBe(false);
   });
 });

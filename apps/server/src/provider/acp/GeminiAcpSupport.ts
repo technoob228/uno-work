@@ -378,6 +378,17 @@ export function geminiModeFor(input: {
 }
 
 /**
+ * Gemini CLI 0.70 tells its own UI about a mode switch with an agent text
+ * chunk, `[MODE_UPDATE] plan`, at the start of the next prompt (seen live
+ * 20.11.2026). Not words for the person: dropped.
+ */
+const GEMINI_MODE_UPDATE_CHUNK = /^\s*\[MODE_UPDATE\] [\w-]+\s*$/;
+
+export function isGeminiControlText(text: string): boolean {
+  return GEMINI_MODE_UPDATE_CHUNK.test(text);
+}
+
+/**
  * Gemini CLI titles MCP tool calls "<tool> (<server> MCP Server)". The
  * uno-work tools ask the person themselves (the same reason Claude and
  * OpenCode pre-approve them), so their prompt is answered "allow once".
