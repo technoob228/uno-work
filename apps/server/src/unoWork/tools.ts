@@ -3059,6 +3059,54 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
       }),
   },
   {
+    name: "purchase_approve",
+    group: "person",
+    description:
+      "Before you buy anything outside Uno (a VPS, a domain, a paid API plan): ask the person for the purchase. Say what, from whom and the total in USD. Always shows an Allow card with the amount, whatever the mode; refused above the limit (UNO_AGENT_PURCHASE_LIMIT_USD, default 100). Allowed → one line goes to the Inbox as the record, and you may buy exactly this and nothing more. Not for Uno plans: never change those.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        item: { type: "string", minLength: 1, maxLength: 200 },
+        vendor: { type: "string", minLength: 1, maxLength: 80 },
+        amountUsd: { type: "number", exclusiveMinimum: 0 },
+        why: { type: "string", maxLength: 300 },
+      },
+      required: ["item", "vendor", "amountUsd"],
+      additionalProperties: false,
+    },
+    level: "sensitive",
+    approvalTitle: (args) =>
+      `Buy ${str(args, "item") ?? "?"} from ${str(args, "vendor") ?? "?"} for $${num(args, "amountUsd") ?? "?"}`,
+    approvalDetail: (args) =>
+      `The agent wants to spend real money: ${str(args, "why") ?? "no reason given"}. Allow only if you asked for this.`,
+    run: (deps, args) =>
+      Effect.gen(function* () {
+        const amount = num(args, "amountUsd")!;
+        const limit = Number(process.env.UNO_AGENT_PURCHASE_LIMIT_USD ?? "100");
+        if (!Number.isFinite(amount) || amount <= 0 || amount > limit) {
+          return {
+            ok: false,
+            error: `Over the limit: $${amount} > $${limit}. Ask the person to buy it themselves.`,
+          };
+        }
+        const title = `Purchase allowed: ${str(args, "item")} · ${str(args, "vendor")} · $${amount}`;
+        yield* deps.inboxPost({
+          kind: "agent.done",
+          source: {
+            kind: "agent",
+            id: deps.caller.threadId,
+            name: deps.caller.threadTitle,
+            icon: null,
+          },
+          title,
+          body: str(args, "why") ?? null,
+          open: null,
+          groupKey: null,
+        });
+        return { ok: true, approved: { item: str(args, "item"), vendor: str(args, "vendor"), amountUsd: amount } };
+      }),
+  },
+  {
     name: "messenger_send",
     group: "person",
     description:
