@@ -322,7 +322,7 @@ describe("the person's own chat where agents talk (Misha 13.11)", () => {
     const held = mine(answered);
     expect(yourTurnKind(held, NOW)).toBe("ready");
     expect(countChatsWaitingOnYou([held], NOW)).toBe(1);
-    expect(threadOwner(held)).toBe("you");
+    expect(threadOwner(held, Date.parse(NOW))).toBe("you");
     // An agent's turn running right now does not hide it either.
     const agentsWorking = mine({ ...answered, session: session("running") });
     expect(dRowMark("working", yourTurnKind(agentsWorking, NOW))).toBe("your-turn");
@@ -330,7 +330,8 @@ describe("the person's own chat where agents talk (Misha 13.11)", () => {
     // chat goes back to waiting on agents.
     const opened = mine({ ...answered, unreadAnswerAt: undefined });
     expect(isYourTurn(opened, NOW)).toBe(false);
-    expect(threadOwner(opened)).toBe("agent");
+    // Still theirs in Only mine: a chat they started is (Misha 14.11, 20.11).
+    expect(threadOwner(opened, Date.parse(NOW))).toBe("you");
     expect(dRowMark("working", yourTurnKind({ ...opened, session: session("running") }, NOW))).toBe(
       "working",
     );

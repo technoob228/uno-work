@@ -130,7 +130,7 @@ export function resolveThreadControlBarState(input: {
   readonly parentTitle: string | null | undefined;
   readonly agentsClosedAt?: string | null | undefined;
   readonly supportsAgentsAccess?: boolean | undefined;
-  /** An agent drives the chat now (Sidebar.owner's threadOwner is "agent"). */
+  /** Agents drive the chat now (Sidebar.owner: waiting on agents, or the agent's). */
   readonly agentLed?: boolean | undefined;
 }): ThreadControlBarState | null {
   const controller = normalizeThreadController(input.controller);

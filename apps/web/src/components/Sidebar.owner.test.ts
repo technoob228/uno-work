@@ -9,11 +9,22 @@ import {
 import { describe, expect, it } from "vitest";
 
 import type { SidebarThreadSummary, ThreadSession } from "../types";
-import { isAgentStartedChat, threadOwner, threadOwnerWithStarter } from "./Sidebar.owner";
+import {
+  isAgentStartedChat,
+  PERSON_RECENT_MS,
+  threadOwner as threadOwnerAt,
+  threadOwnerWithStarter as threadOwnerWithStarterAt,
+  type ThreadOwnerInput,
+} from "./Sidebar.owner";
 
 const NOW = Date.parse("2026-10-28T12:00:00.000Z");
 const MINUTE_MS = 60 * 1_000;
+const HOUR = 60;
+const DAY = 24 * HOUR;
 const at = (minutesAgo: number) => new Date(NOW - minutesAgo * MINUTE_MS).toISOString();
+const threadOwner = (thread: ThreadOwnerInput) => threadOwnerAt(thread, NOW);
+const threadOwnerWithStarter = (thread: ThreadOwnerInput, startedByAssistant: boolean) =>
+  threadOwnerWithStarterAt(thread, startedByAssistant, NOW);
 
 function completedTurn(completedAt: string): OrchestrationLatestTurn {
   return {
@@ -137,7 +148,9 @@ describe("threadOwner", () => {
     expect(threadOwner(replied)).toBe("you");
   });
 
-  it("answers the person's own message until they Read or Done the answer", () => {
+  it("answers their automation's message until they Read or Done the answer", () => {
+    // An automation of theirs wrote in an agent's chat they never joined: it
+    // counts as their request (13.11), not as "they wrote here" (20.11).
     const answered = agentChat({ latestPersonMessageAt: at(20), latestUserMessageAt: at(20) });
     expect(threadOwner(answered)).toBe("you");
     expect(threadOwner({ ...answered, readAt: at(5) })).toBe("agent");
@@ -150,7 +163,7 @@ describe("threadOwner", () => {
     expect(threadOwner({ ...answered, readAt: at(5), session: session("running") })).toBe("you");
   });
 
-  it("goes back to the agent when another agent wrote last", () => {
+  it("goes back to the agent when another agent wrote after their automation", () => {
     expect(
       threadOwner(agentChat({ latestPersonMessageAt: at(60), latestUserMessageAt: at(20) })),
     ).toBe("agent");
@@ -160,6 +173,150 @@ describe("threadOwner", () => {
     const old = agentChat({ startedBy: undefined, latestPersonMessageAt: undefined });
     expect(threadOwner(old)).toBe("agent");
     expect(threadOwner({ ...old, controller: "human" })).toBe("you");
+  });
+});
+
+describe("threadOwner: yours if you started it or wrote there recently (Misha 20.11)", () => {
+  // An agent's chat the person wrote in: writing took it from the agent
+  // (controller "human" since then). Agents wrote after them, and they read
+  // the last answer: nothing else holds it for them.
+  const wrote = (minutesAgo: number, overrides: Partial<SidebarThreadSummary> = {}) =>
+    agentChat({
+      controller: "human",
+      controlChangedAt: at(minutesAgo),
+      latestPersonMessageAt: at(minutesAgo),
+      latestUserMessageAt: at(Math.min(minutesAgo, 20)),
+      readAt: at(5),
+      ...overrides,
+    });
+
+  it("an agent's chat they wrote in an hour ago is theirs", () => {
+    expect(threadOwner(wrote(HOUR))).toBe("you");
+    // Agents working in it right now don't take it either.
+    expect(threadOwner(wrote(HOUR, { session: session("running") }))).toBe("you");
+  });
+
+  it("one they last wrote in three days ago is the agent's again", () => {
+    expect(threadOwner(wrote(3 * DAY))).toBe("agent");
+    // "Recently" is PERSON_RECENT_MS, a day.
+    expect(PERSON_RECENT_MS).toBe(DAY * MINUTE_MS);
+    expect(threadOwner(wrote(DAY - 1))).toBe("you");
+    expect(threadOwner(wrote(DAY))).toBe("agent");
+    // A later message of theirs counts, not the one that took it over.
+    expect(threadOwner(wrote(3 * DAY, { latestPersonMessageAt: at(2 * HOUR) }))).toBe("you");
+    // Still theirs while it needs them.
+    expect(threadOwner(wrote(3 * DAY, { hasPendingUserInput: true }))).toBe("you");
+    expect(threadOwner(wrote(3 * DAY, { personCalledAt: at(1) }))).toBe("you");
+  });
+
+  it("Join counts like a message: theirs for a day after it", () => {
+    const joined = agentChat({ controller: "human", controlChangedAt: at(10), readAt: at(5) });
+    expect(threadOwner(joined)).toBe("you");
+    expect(threadOwner({ ...joined, controlChangedAt: at(3 * DAY) })).toBe("agent");
+  });
+
+  it("Hand to agent after their message makes it the agent's", () => {
+    const handed = wrote(HOUR, { controller: "agent", controlChangedAt: at(30), readAt: null });
+    expect(threadOwner(handed)).toBe("agent");
+    // Even with the answer to their message unread.
+    expect(threadOwner({ ...handed, unreadAnswerAt: at(40) })).toBe("agent");
+    // Except while it needs them.
+    expect(threadOwner({ ...handed, hasPendingApprovals: true })).toBe("you");
+    expect(threadOwner({ ...handed, personCalledAt: at(10) })).toBe("you");
+    // Writing there again takes it back.
+    expect(
+      threadOwner({
+        ...handed,
+        controller: "human",
+        controlChangedAt: at(2),
+        latestPersonMessageAt: at(2),
+      }),
+    ).toBe("you");
+  });
+
+  it("their automation's message in an agent's chat is not them writing there", () => {
+    const automation = agentChat({
+      latestPersonMessageAt: at(HOUR),
+      latestUserMessageAt: at(20),
+      readAt: at(5),
+    });
+    expect(threadOwner(automation)).toBe("agent");
+  });
+
+  it("a chat Uno started is theirs while they write there", () => {
+    const uno = agentChat({
+      spawnedByThreadId: null,
+      startedBy: "assistant",
+      controller: "human",
+      latestPersonMessageAt: at(HOUR),
+      latestUserMessageAt: at(20),
+      readAt: at(5),
+    });
+    expect(threadOwner(uno)).toBe("you");
+    expect(threadOwner({ ...uno, latestPersonMessageAt: at(3 * DAY) })).toBe("agent");
+    // The sidebar knows Uno started it, the chat doesn't say so.
+    const quiet = { ...uno, startedBy: null };
+    expect(threadOwnerWithStarter(quiet, true)).toBe("you");
+    expect(threadOwnerWithStarter({ ...quiet, latestPersonMessageAt: at(3 * DAY) }, true)).toBe(
+      "agent",
+    );
+  });
+});
+
+describe("threadOwner: their coordinator is always theirs (Misha 20.11)", () => {
+  const tasks = { working: 0, latestStartedAt: at(3 * DAY) };
+
+  it("a chat they started that runs agents, however long agents talk in it", () => {
+    const own = agentChat({
+      startedBy: null,
+      spawnedByThreadId: null,
+      controller: "human",
+      latestPersonMessageAt: at(3 * DAY),
+      latestUserMessageAt: at(20),
+      readAt: at(5),
+      childWork: tasks,
+    });
+    expect(threadOwner(own)).toBe("you");
+    expect(threadOwner({ ...own, childWork: { working: 2, latestStartedAt: at(30) } })).toBe("you");
+    expect(threadOwner({ ...own, session: session("running") })).toBe("you");
+  });
+
+  it("an agent's chat they took over that runs agents of its own", () => {
+    const lead = agentChat({
+      controller: "human",
+      controlChangedAt: at(4 * DAY),
+      latestPersonMessageAt: at(3 * DAY),
+      latestUserMessageAt: at(20),
+      readAt: at(5),
+      childWork: tasks,
+    });
+    expect(threadOwner(lead)).toBe("you");
+    // Without tasks of its own it is a chat they left three days ago.
+    expect(threadOwner({ ...lead, childWork: undefined })).toBe("agent");
+    // An agent's coordinator they never joined is the agent's.
+    expect(
+      threadOwner({
+        ...lead,
+        controller: "agent",
+        controlChangedAt: null,
+        latestPersonMessageAt: null,
+      }),
+    ).toBe("agent");
+    // Handed to its agent: the agent's.
+    expect(threadOwner({ ...lead, controller: "agent", controlChangedAt: at(DAY) })).toBe("agent");
+  });
+
+  it("Uno's own chat is always theirs", () => {
+    const unoChat = agentChat({
+      startedBy: null,
+      spawnedByThreadId: null,
+      assistantRole: "chat",
+      controller: "agent",
+      controlChangedAt: at(DAY),
+      childWork: tasks,
+    });
+    expect(threadOwner(unoChat)).toBe("you");
+    expect(threadOwnerWithStarter(unoChat, true)).toBe("you");
   });
 });
 
