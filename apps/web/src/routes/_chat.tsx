@@ -10,6 +10,8 @@ import {
   startNewThreadFromContext,
 } from "../lib/chatThreadActions";
 import { isTerminalFocused } from "../lib/terminalFocus";
+import { useStartNewChatAtDefault } from "../components/sidebar/NewChatPicker";
+import { openNewChatPicker } from "../components/sidebar/newChatPickerStore";
 import { resolveShortcutCommand } from "../keybindings";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
@@ -41,6 +43,7 @@ function ChatRouteGlobalShortcuts() {
   );
   const appSettings = useSettings();
   const folderChats = useFolderChats(activeEnvironmentId);
+  const startNewChatAtDefault = useStartNewChatAtDefault();
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -83,23 +86,27 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // Same as the sidebar's New chat: the home folder, with the folder
-        // chip on the chat to pick another. chat.newLocal stays "this project".
-        void folderChats.chatInHomeFolder().then((started) => {
-          if (started) return;
-          void startNewThreadFromContext({
-            activeDraftThread,
-            activeThread,
-            defaultProjectRef,
-            defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
-              defaultEnvMode: appSettings.defaultThreadEnvMode,
-            }),
-            handleNewThread,
-            activeEnvironmentId,
-            createStarterProject,
-            onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
+        // Same as the sidebar's New chat (T53): its picker of computer and
+        // folder opens on the button; no button on screen — the chat starts
+        // where the picker would have. chat.newLocal stays "this project".
+        if (openNewChatPicker()) return;
+        void startNewChatAtDefault()
+          .then(async (started) => started || (await folderChats.chatInHomeFolder()) !== null)
+          .then((started) => {
+            if (started) return;
+            void startNewThreadFromContext({
+              activeDraftThread,
+              activeThread,
+              defaultProjectRef,
+              defaultThreadEnvMode: resolveSidebarNewThreadEnvMode({
+                defaultEnvMode: appSettings.defaultThreadEnvMode,
+              }),
+              handleNewThread,
+              activeEnvironmentId,
+              createStarterProject,
+              onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
+            });
           });
-        });
       }
     };
 
@@ -115,6 +122,7 @@ function ChatRouteGlobalShortcuts() {
     clearSelection,
     folderChats,
     handleNewThread,
+    startNewChatAtDefault,
     keybindings,
     defaultProjectRef,
     selectedThreadKeysSize,
