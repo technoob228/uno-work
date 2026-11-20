@@ -25,6 +25,8 @@ export const OutsideTextNote = memo(function OutsideTextNote(props: {
   environmentId: EnvironmentId;
   threadId: string;
   source: OutsideTextSource;
+  /** T51: "Andrei's agent" — whose text it is, when a colleague's. */
+  from?: string | null;
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -56,7 +58,11 @@ export const OutsideTextNote = memo(function OutsideTextNote(props: {
         role="status"
         data-testid="outside-text-note"
       >
-        <span>{outsideTextNoteLine(props.source)}</span>
+        <span>
+          {props.from
+            ? `This chat has text from ${props.from}. Uno Work tools ask you first.`
+            : outsideTextNoteLine(props.source)}
+        </span>
         <button
           type="button"
           className="underline-offset-2 hover:text-foreground hover:underline"

@@ -1,5 +1,5 @@
 /**
- * Project settings → People: invite someone by email, tick the keys they
+ * Project settings → People (Team with T51's parts on): invite someone by email, tick the keys they
  * get, remove them. Removing can't take keys back from their computers, so
  * it ends with what to change. Shown only when teams are on for the account.
  *
@@ -10,6 +10,8 @@ import { CopyIcon, UsersIcon } from "lucide-react";
 import { useState } from "react";
 
 import { UNO_WORK_URL } from "../../account/unoAccount";
+import { anyPart } from "../../team/teamApi.logic";
+import { useTeamParts } from "../../team/teamStore";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
@@ -47,12 +49,14 @@ const useProjectTeams = () =>
 /** A team lives in the project's cloud copy: without sync, say what opens People. */
 export function ProjectTeamNeedsSync() {
   const teams = useProjectTeams();
+  // T51: with the team parts on, People is Team.
+  const parts = useTeamParts();
   if (teams.isPending || teams.isError || teams.data === null) return null;
   return (
     <section className="space-y-2" data-testid="project-team-needs-sync">
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
         <UsersIcon className="size-4 text-muted-foreground" />
-        People
+        {anyPart(parts) ? "Team" : "People"}
       </div>
       <p className="text-xs text-muted-foreground">
         Turn on On all my computers to invite someone to this project.
@@ -64,6 +68,7 @@ export function ProjectTeamNeedsSync() {
 export function ProjectTeam(props: { syncName: string; teamId?: number | null }) {
   const queryClient = useQueryClient();
   const teams = useProjectTeams();
+  const parts = useTeamParts();
   const row = teamProjectOf(teams.data, props.syncName, props.teamId);
   const teamId = row?.id ?? null;
   const cardKey = ["projectTeam", teamId] as const;
@@ -138,7 +143,7 @@ export function ProjectTeam(props: { syncName: string; teamId?: number | null })
     <section className="space-y-2" data-testid="project-team">
       <div className="flex items-center gap-2 text-sm font-medium text-foreground">
         <UsersIcon className="size-4 text-muted-foreground" />
-        People
+        {anyPart(parts) ? "Team" : "People"}
       </div>
       {rotate ? (
         <div
