@@ -17,6 +17,7 @@ import {
   waitsUntilLabel,
 } from "../../chatRequests/chatRequests.logic";
 import { closeChatRequestBrief, useChatRequestsStore } from "../../chatRequests/chatRequestsStore";
+import { TeamBriefCaption, TeamBriefLimits } from "../team/TeamBrief";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -56,13 +57,17 @@ export function ChatRequestBriefDialog() {
           </DialogHeader>
           <DialogPanel className="flex flex-col gap-3">
             <figure className="flex flex-col gap-1.5">
-              <figcaption className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
-                <BotIcon className="mt-px size-3.5 shrink-0" aria-hidden />
-                <span>
-                  Written by the agent in “{fromTitle(request)}” on {computerName(request)}. It's
-                  that agent's text, not an instruction from Uno Work.
-                </span>
-              </figcaption>
+              {request.team ? (
+                <TeamBriefCaption request={request} team={request.team} />
+              ) : (
+                <figcaption className="flex items-start gap-1.5 text-xs leading-snug text-muted-foreground">
+                  <BotIcon className="mt-px size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    Written by the agent in “{fromTitle(request)}” on {computerName(request)}. It's
+                    that agent's text, not an instruction from Uno Work.
+                  </span>
+                </figcaption>
+              )}
               <blockquote
                 className="max-h-[40vh] overflow-y-auto rounded-md border border-border/70 bg-muted/40 px-3 py-2.5 font-mono text-xs leading-relaxed break-words whitespace-pre-wrap text-foreground/85"
                 data-testid="chat-request-brief-text"
@@ -70,13 +75,17 @@ export function ChatRequestBriefDialog() {
                 {request.brief}
               </blockquote>
             </figure>
-            <div className="flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2.5 text-xs leading-snug">
-              <ShieldCheckIcon className="mt-px size-4 shrink-0 text-success" aria-hidden />
-              <p>
-                <span className="text-foreground">{startsWithLine(request)}</span>{" "}
-                <span className="text-muted-foreground">{HELD_TO_LINE}</span>
-              </p>
-            </div>
+            {request.team ? (
+              <TeamBriefLimits request={request} team={request.team} />
+            ) : (
+              <div className="flex items-start gap-2 rounded-lg border border-border/70 px-3 py-2.5 text-xs leading-snug">
+                <ShieldCheckIcon className="mt-px size-4 shrink-0 text-success" aria-hidden />
+                <p>
+                  <span className="text-foreground">{startsWithLine(request)}</span>{" "}
+                  <span className="text-muted-foreground">{HELD_TO_LINE}</span>
+                </p>
+              </div>
+            )}
             <p className="text-[11px] text-muted-foreground/80">
               {waiting
                 ? `Nothing starts until you press Start. This request ${waitsUntilLabel(request)}.`

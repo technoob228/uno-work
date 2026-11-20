@@ -7,7 +7,7 @@
 import { CloudIcon } from "lucide-react";
 import { memo } from "react";
 
-import { fromTitle, waitingRequests } from "../../chatRequests/chatRequests.logic";
+import { fromTitle, ownWaitingRequests } from "../../chatRequests/chatRequests.logic";
 import { openChatRequestBrief, useChatRequestsStore } from "../../chatRequests/chatRequestsStore";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { useChatRequestActions } from "../chatRequests/useChatRequestActions";
@@ -17,7 +17,7 @@ export const SidebarChatRequests = memo(function SidebarChatRequests() {
   const state = useChatRequestsStore((store) => store.state);
   const busy = useChatRequestsStore((store) => store.busy);
   useMinuteClock();
-  const requests = waitingRequests(state);
+  const requests = ownWaitingRequests(state);
   const actions = useChatRequestActions();
   if (requests.length === 0) return null;
   return (

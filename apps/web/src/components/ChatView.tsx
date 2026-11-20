@@ -237,6 +237,7 @@ import { CloudSleepsBanner } from "./assistants/PersonaMode";
 import { AiBusyNotice } from "./chat/AiBusyNotice";
 import { OutsideTextNote } from "./chat/OutsideTextNote";
 import { outsideTextSource } from "./chat/OutsideTextNote.logic";
+import { teamOutsideFrom } from "../team/team.logic";
 import { useChatOutsideText } from "../lib/outsideTextApi";
 import { HarnessReauthCard } from "./chat/HarnessReauthCard";
 import { resolveThreadHarnessAuthLoss, shouldReprobeProvider } from "./harness/harnessAuthLoss";
@@ -1932,6 +1933,10 @@ export default function ChatView(props: ChatViewProps) {
   );
   const outsideSource = useMemo(
     () => (outsideMarked ? outsideTextSource(serverMessages ?? []) : null),
+    [outsideMarked, serverMessages],
+  );
+  const outsideFrom = useMemo(
+    () => (outsideMarked ? teamOutsideFrom(serverMessages ?? []) : null),
     [outsideMarked, serverMessages],
   );
   const timelineEntries = useMemo(
@@ -5158,6 +5163,7 @@ export default function ChatView(props: ChatViewProps) {
               {...(routeKind === "draft" && draftId ? { draftId } : {})}
               activeThreadTitle={activeThread.title}
               activeProjectName={activeProject?.name}
+              activeProjectId={activeProject?.id}
               activeProjectComputerName={activeProject?.computer?.computerName ?? null}
               activeProjectCwd={activeProject?.cwd}
               hideDraftFolderChip={isDraftHeroState}
@@ -5506,6 +5512,7 @@ export default function ChatView(props: ChatViewProps) {
                       environmentId={activeThread.environmentId}
                       threadId={activeThread.id}
                       source={outsideSource}
+                      from={outsideFrom}
                     />
                   ) : null}
                   <ComposerBannerStack

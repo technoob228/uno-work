@@ -17,6 +17,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { useMachineRows } from "../hooks/useMachineRows";
 import { deriveMachineKind } from "../machineKind";
 import { useMinuteClock } from "../hooks/useMinuteClock";
+import { useTeamInboxWaitingCount, useTeamParts } from "../team/teamStore";
 import { failureMessage, waitingCount } from "./chatRequests.logic";
 
 export const CHAT_REQUESTS_POLL_MS = 5_000;
@@ -39,11 +40,15 @@ export const useChatRequestsStore = create<ChatRequestsStoreState>(() => ({
   briefId: null,
 }));
 
-/** Waiting requests — added to every Needs you count (bell, rail, Dock, Home). */
+/**
+ * Waiting requests — added to every Needs you count (bell, rail, Dock, Home).
+ * T51: what colleagues sent to the Inbox counts too (From your team).
+ */
 export function useChatRequestsWaitingCount(): number {
   // Re-read each minute: a request past its 2 h stops counting before the server says so.
   useMinuteClock();
-  return useChatRequestsStore((store) => waitingCount(store.state));
+  const team = useTeamInboxWaitingCount();
+  return useChatRequestsStore((store) => waitingCount(store.state)) + team;
 }
 
 /**
@@ -59,6 +64,19 @@ export function useChatRequestsHostId(): EnvironmentId | null {
   const row = rows.find((candidate) => candidate.environmentId === descriptor.environmentId);
   const kind = row?.kind ?? deriveMachineKind({ descriptor });
   return kind === "uno_box" ? null : descriptor.environmentId;
+}
+
+/**
+ * The computer whose requests the listener asks for. Besides the person's own
+ * computer: with T51's parts on, a cloud computer too — a colleague's session
+ * requests come to whichever computer has the project (PLAN.md, Work).
+ */
+export function useChatRequestsPollHostId(): EnvironmentId | null {
+  const own = useChatRequestsHostId();
+  const descriptor = usePrimaryEnvironmentDescriptor();
+  const parts = useTeamParts();
+  if (own) return own;
+  return parts.requests && descriptor ? descriptor.environmentId : null;
 }
 
 /** The listener found (or lost) the host: a different computer forgets the old answer. */
