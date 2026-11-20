@@ -86,6 +86,11 @@ const rpcClientMock = {
     decide: vi.fn(),
     setAllowed: vi.fn(),
   },
+  team: {
+    state: vi.fn(),
+    refresh: vi.fn(),
+    letAgentAnswer: vi.fn(),
+  },
   computers: {
     state: vi.fn(),
     setPurpose: vi.fn(),
