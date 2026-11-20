@@ -1528,12 +1528,37 @@ async function triggerChatNewShortcutUntilPath(
   while (Date.now() < deadline) {
     dispatchChatNewShortcut();
     await waitForLayout();
+    // With the sidebar on screen the shortcut opens the New chat picker (T53):
+    // Enter on what it highlights.
+    const picked = document.querySelector<HTMLElement>(
+      '[data-testid="new-chat-picker"] [aria-selected="true"]',
+    );
+    if (picked) {
+      picked.click();
+      await waitForLayout();
+    }
     pathname = router.state.location.pathname;
     if (predicate(pathname)) {
       return pathname;
     }
   }
   throw new Error(`${errorMessage} Last path: ${pathname}`);
+}
+
+/**
+ * New chat opens the picker of computer and folder (T53): pick `projectId`'s
+ * folder, as the old New chat landed in the open chat's project here (the
+ * test computer has no home folder to offer).
+ */
+async function pickInNewChatPicker(projectId: string): Promise<void> {
+  const row = await waitForElement(
+    () =>
+      document.querySelector<HTMLElement>(
+        `[data-testid="new-chat-picker-folder-project-${projectId}"]`,
+      ),
+    "The New chat picker should list the project.",
+  );
+  row.click();
 }
 
 /** These tests' window is under 1000 px, where the sidebar stays a rail until opened by hand. */
@@ -4196,6 +4221,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       // The route should change to a new draft thread ID.
       const newThreadPath = await waitForURL(
@@ -4257,6 +4283,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4322,6 +4349,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4354,6 +4382,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const firstDraftPath = await waitForURL(
         mounted.router,
@@ -4367,6 +4396,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(mounted.router.state.location.pathname).toBe(firstDraftPath);
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const secondDraftPath = await waitForURL(
         mounted.router,
@@ -4408,6 +4438,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4464,6 +4495,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4505,6 +4537,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const newThreadPath = await waitForURL(
         mounted.router,
@@ -4548,6 +4581,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await expect.element(newThreadButton).toBeInTheDocument();
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       const threadPath = await waitForURL(
         mounted.router,
@@ -4579,6 +4613,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
 
       await newThreadButton.click();
+      await pickInNewChatPicker(PROJECT_ID);
 
       await waitForURL(
         mounted.router,

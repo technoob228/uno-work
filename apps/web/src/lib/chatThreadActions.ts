@@ -157,3 +157,36 @@ export async function startNewLocalThreadFromContext(
   await context.handleNewThread(projectRef, buildDefaultThreadOptions(context, projectRef));
   return true;
 }
+
+/**
+ * A new chat in a project picked by hand (the New chat picker, T53). The
+ * project of the chat that's open keeps that chat's branch, worktree and mode
+ * (as ⇧-click and the old New chat did); any other project starts with its own
+ * default mode (project, then computer settings), as "New chat in a project".
+ */
+export async function startNewThreadInPickedProject(
+  context: ChatThreadActionContext,
+  projectRef: ScopedProjectRef,
+): Promise<void> {
+  const here = contextOnMachine(context, projectRef);
+  const open =
+    here.activeThread?.projectId === projectRef.projectId ||
+    here.activeDraftThread?.projectId === projectRef.projectId;
+  if (open) {
+    await startNewThreadInProjectFromContext(
+      {
+        ...here,
+        // Only the open chat in this project lends its worktree.
+        activeThread:
+          here.activeThread?.projectId === projectRef.projectId ? here.activeThread : undefined,
+        activeDraftThread:
+          here.activeDraftThread?.projectId === projectRef.projectId
+            ? here.activeDraftThread
+            : null,
+      },
+      projectRef,
+    );
+    return;
+  }
+  await context.handleNewThread(projectRef, buildDefaultThreadOptions(context, projectRef));
+}
