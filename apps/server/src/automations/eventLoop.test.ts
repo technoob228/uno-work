@@ -44,7 +44,10 @@ const event = (id: number, overrides: Partial<AutomationEvent> = {}): Automation
   name: "Review PRs in getuno/x",
   instruction: "Review the PR and leave a comment",
   executor: { kind: "assistant" },
-  kind: "github.pull_request",
+  // Not "github.pull_request": that kind is outside (its own test below) and
+  // an assistant executor refuses it. This default exercises the ordinary
+  // assistant-turn mechanics most of these tests are about.
+  kind: "schedule",
   title: `PR #${id}`,
   url: null,
   payload: { repo: "getuno/x", number: id, title: "Fix", action: "opened", head_sha: "abcdef0" },
@@ -407,6 +410,18 @@ describe("an automation a chat runs (29.10)", () => {
     await vi.waitFor(() => expect(world.results).toHaveLength(1));
     expect(world.turns).toEqual([]);
     expect(world.results[0]!.body.state).toBe("failed");
+  });
+
+  it("a PR, written by its author, never reaches an assistant either", async () => {
+    const { world, loop } = stand();
+    world.queue = [event(34, { kind: "github.pull_request" })];
+    await poll(loop);
+    await vi.waitFor(() => expect(world.results).toHaveLength(1));
+    expect(world.turns).toEqual([]);
+    expect(world.results[0]!.body).toEqual({
+      state: "failed",
+      reason: "A webhook, a form or a pull request runs in a chat: pick one for this automation.",
+    });
   });
 
   it("the person turned Ask off: the chat's own mode", async () => {

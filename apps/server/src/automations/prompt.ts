@@ -71,12 +71,17 @@ export function eventPullRequest(event: AutomationEvent): EventPullRequest | nul
   };
 }
 
-/** "PR #12 "Fix login" opened by alice in owner/x — <url>, head 1a2b3c4". */
+/**
+ * "PR #12 "Fix login" opened by alice in owner/x — <url>, head 1a2b3c4". Title
+ * and author are written by whoever opened the PR: neutralized the same way
+ * a webhook's or a form's text is, so they can't act as a mention or a
+ * command where this line lands.
+ */
 export function describePullRequest(pr: EventPullRequest): string {
   const parts = [
-    `PR #${pr.number}${pr.title ? ` "${pr.title}"` : ""}`,
+    `PR #${pr.number}${pr.title ? ` "${outsideText(pr.title)}"` : ""}`,
     ACTION_WORDS[pr.action] ?? (pr.action ? oneLine(pr.action, 40) : "opened or updated"),
-    pr.author ? `by ${pr.author}` : "",
+    pr.author ? `by ${outsideText(pr.author)}` : "",
     `in ${pr.repo}`,
   ].filter((part) => part.length > 0);
   const tail = [pr.url, pr.headSha ? `head ${pr.headSha.slice(0, 7)}` : ""].filter(Boolean);
@@ -116,9 +121,18 @@ function outsideText(value: string): string {
   return value.replace(MENTION, "$&\u2060");
 }
 
-/** Does this event carry text from the outside? */
+/**
+ * Does this event carry text from the outside? A pull request's title and
+ * description are written by whoever opened it — on a public repository,
+ * anyone — so an automation that fires on one is outside too: manager tools
+ * don't run it (eventLoop.ts), and a chat run asks before anything changes.
+ * `manual` (the person pressed Run now) stays trusted even when it carries a
+ * PR: they chose to run it.
+ */
 export function isOutsideRun(event: Pick<AutomationEvent, "kind">): boolean {
-  return event.kind === "webhook" || event.kind === "site.form";
+  return (
+    event.kind === "webhook" || event.kind === "site.form" || event.kind === "github.pull_request"
+  );
 }
 
 /**
@@ -139,6 +153,18 @@ interface OutsideLines {
 
 function outsideLines(event: AutomationEvent): OutsideLines {
   const p = event.payload;
+  if (event.kind === "github.pull_request") {
+    const pr = eventPullRequest(event);
+    if (pr === null) return { trigger: "a pull request", source: "The pull request", body: "" };
+    const title = outsideText(pr.title);
+    return {
+      trigger: describePullRequest(pr),
+      source: `The pull request's title and description — PR #${pr.number} in ${pr.repo}, written by ${pr.author ? outsideText(pr.author) : "its author"}`,
+      body: [title, outsideText(pr.body.trim().slice(0, PR_BODY_MAX))]
+        .filter((line) => line.length > 0)
+        .join("\n\n"),
+    };
+  }
   if (event.kind === "site.form") {
     const slug = sanitizeUntrustedField(str(p, "slug"), 63) || "the site";
     const fields = Array.isArray(p["fields"]) ? (p["fields"] as ReadonlyArray<unknown>) : [];
@@ -221,7 +247,11 @@ export function automationEventPrompt(event: AutomationEvent): string {
 export function automationChatPrompt(event: AutomationEvent, nonce = outsideNonce()): string {
   const name = oneLine(event.name, 80) || "Automation";
   const outside = isOutsideRun(event);
+  // Outside (github.pull_request): the body goes through outsideBlock below,
+  // never both ways. The git-fetch / github_pr_comment hint is about how to
+  // act on an allowed task, not the untrusted text, so it stays regardless.
   const pr = outside ? null : eventPullRequest(event);
+  const prInfo = eventPullRequest(event);
   const body = pr !== null ? pr.body.trim().slice(0, PR_BODY_MAX) : "";
   return [
     `[Automation "${name}" — it runs on its own: the person may not be watching this chat right now. Trigger: ${describeEventTrigger(event)}.]`,
@@ -242,10 +272,10 @@ export function automationChatPrompt(event: AutomationEvent, nonce = outsideNonc
           "</untrusted_pr_text>",
         ]
       : []),
-    ...(pr !== null
+    ...(prInfo !== null
       ? [
           "",
-          `For this PR: \`git fetch origin pull/${pr.number}/head\`, read the diff. If the instruction says to comment, post with github_pr_comment {repo: "${pr.repo}", number: ${pr.number}, body}.`,
+          `For this PR: \`git fetch origin pull/${prInfo.number}/head\`, read the diff. If the instruction says to comment, post with github_pr_comment {repo: "${prInfo.repo}", number: ${prInfo.number}, body}.`,
         ]
       : []),
     "",
