@@ -30,7 +30,6 @@ import { useGoHome } from "../../navigation/useGoHome";
 import { usePins } from "../../navigation/usePins";
 import { SidebarHeader, SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { NewChatPickerButton } from "./NewChatPicker";
 import { PinIcon, useOpenPin, usePinActive } from "./SidebarPinned";
 import { InboxCountBadge } from "./SidebarInboxRow";
 
@@ -211,21 +210,25 @@ export const NavRail = memo(function NavRail({ isElectron }: { isElectron: boole
         </div>
       ) : null}
       <div className="mt-auto flex flex-col items-center gap-1">
-        {/* T53: the picker of computer and folder, on the button itself. */}
-        <NewChatPickerButton
-          tooltip="New chat"
-          testId="nav-rail-new-chat"
-          side="right"
-          align="end"
-          onShiftClick={() => {
-            if (mode !== "chats") setMode("chats");
-            if (!open) setOpen(true);
-            requestNewChat();
-          }}
-          className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm outline-hidden hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <SquarePenIcon className="size-4" />
-        </NewChatPickerButton>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <button
+                type="button"
+                aria-label="New chat"
+                onClick={() => {
+                  if (mode !== "chats") setMode("chats");
+                  if (!open) setOpen(true);
+                  requestNewChat();
+                }}
+                className="flex size-10 cursor-pointer items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm outline-hidden hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            }
+          >
+            <SquarePenIcon className="size-4" />
+          </TooltipTrigger>
+          <TooltipPopup side="right">New chat</TooltipPopup>
+        </Tooltip>
         <RailButton
           label="Settings"
           caption={false}
