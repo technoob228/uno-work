@@ -58,6 +58,7 @@ import {
 } from "./unoCloudParse.ts";
 import { parseComputerBoost } from "./unoComputerBoost.ts";
 import { parseComputerEconomy } from "./unoComputerEconomy.ts";
+import { hasAutosize, parseComputerSizing } from "./unoComputerSizing.ts";
 
 export const NOT_LINKED_MESSAGE = "Connect your Uno account first.";
 export const NO_COMPUTER_MESSAGE = "This machine isn't an Uno computer.";
@@ -320,7 +321,18 @@ export async function readComputerState(
     return { ...base, linked: true, error: errorMessage(boxResult.reason) };
   }
   const ports = portsResult.status === "fulfilled" ? parseComputerPorts(portsResult.value) : [];
-  const box = parseComputerBox(boxResult.value, ports);
+  const parsed = parseComputerBox(boxResult.value, ports);
+  // Automatic sizing: only when the box says it is on (the call asks the node).
+  // A garnish like ports — a failed call just leaves the card out.
+  let box = parsed;
+  if (parsed && hasAutosize(boxResult.value)) {
+    try {
+      const sizing = parseComputerSizing(await request(`/api/v1/boxes/${boxId}/sizing`));
+      if (sizing) box = { ...parsed, sizing };
+    } catch {
+      // keep the box without sizing
+    }
+  }
   return {
     ...base,
     linked: true,

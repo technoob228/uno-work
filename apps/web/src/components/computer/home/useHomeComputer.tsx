@@ -157,6 +157,7 @@ export function useHomeComputer({
             <EconomyLine environmentId={environmentId} boxId={boxId} />
           ) : null,
           boostSummary: computer?.linked ? boostSummaryLine(box?.boost, boostWording) : null,
+          sizing: computer?.linked ? (box?.sizing ?? null) : null,
         };
 
   const dialogs: ReactNode = (

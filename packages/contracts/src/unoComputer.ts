@@ -117,6 +117,48 @@ export const UnoComputerEconomy = Schema.Struct({
 });
 export type UnoComputerEconomy = typeof UnoComputerEconomy.Type;
 
+/* ------------------------------------------------------------------ *
+ * Automatic sizing (Misha 20.11, fishcode internal/box/autosize.go)
+ *
+ * The computer grows by itself under load — cores and memory, up to 4× its
+ * own size, free — and shrinks back when it is quiet. `GET /boxes/{id}`
+ * carries `autosize` when it is on for the account; the numbers and the
+ * history come from `GET /boxes/{id}/sizing`. Absent — nothing shows.
+ * ------------------------------------------------------------------ */
+
+export const UnoComputerSizingRange = Schema.Struct({
+  current: Schema.Number,
+  /** The computer's own size (what the plan pays for). */
+  base: Schema.Number,
+  /** How far it grows by itself, free. */
+  max: Schema.Number,
+});
+export type UnoComputerSizingRange = typeof UnoComputerSizingRange.Type;
+
+export const UnoComputerSizingEvent = Schema.Struct({
+  seq: Schema.Number,
+  at: Schema.String,
+  /** cpu | memory */
+  resource: Schema.Literals(["cpu", "memory"]),
+  from: Schema.Number,
+  to: Schema.Number,
+  /** pressure (grew under load) · idle (shrank back) · node_limit (wanted more, no room) · manual */
+  reason: Schema.String,
+  applied: Schema.Boolean,
+});
+export type UnoComputerSizingEvent = typeof UnoComputerSizingEvent.Type;
+
+export const UnoComputerSizing = Schema.Struct({
+  /** auto — on; off — paused. */
+  mode: Schema.Literals(["auto", "off"]),
+  cpu: UnoComputerSizingRange,
+  memoryMb: UnoComputerSizingRange,
+  diskGb: UnoComputerSizingRange,
+  /** Newest last, without the boot lines. */
+  history: Schema.Array(UnoComputerSizingEvent),
+});
+export type UnoComputerSizing = typeof UnoComputerSizing.Type;
+
 export const UnoComputerBox = Schema.Struct({
   id: Schema.Number,
   name: Schema.String,
@@ -137,6 +179,8 @@ export const UnoComputerBox = Schema.Struct({
   boost: Schema.optional(UnoComputerBoost),
   /** Economy mode; absent when the console does not offer it yet. */
   economy: Schema.optional(UnoComputerEconomy),
+  /** Automatic sizing; absent when it is not on for this computer. */
+  sizing: Schema.optional(UnoComputerSizing),
 });
 export type UnoComputerBox = typeof UnoComputerBox.Type;
 

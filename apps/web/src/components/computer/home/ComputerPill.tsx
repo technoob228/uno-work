@@ -41,7 +41,7 @@ import {
   TriangleAlertIcon,
   ZapIcon,
 } from "lucide-react";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId, UnoComputerSizing } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
@@ -71,6 +71,7 @@ import { CONNECTION_ACTION_LABEL, CONNECTION_DOT } from "./connectionStatus";
 import { type ComputerConnection, useComputerConnection } from "./useComputerConnection";
 import type { SidebarDComputer } from "../../sidebar/sidebarDView.logic";
 import { ComputersPill } from "./ComputersOverview";
+import { SizingLine } from "../SizingCard";
 import { useComputersLifecycleOn } from "../../../computersLifecycle/flag";
 
 export interface HomeComputer {
@@ -101,6 +102,8 @@ export interface HomeComputer {
   readonly economy?: ReactNode;
   /** "Boost: 7 h left this month (+1.8 h earned by economy)"; null when no boost hours. */
   readonly boostSummary?: string | null | undefined;
+  /** Automatic sizing: a quiet line with the size now; absent — not on for this computer. */
+  readonly sizing?: UnoComputerSizing | null | undefined;
 }
 
 function powerStateOf(computer: HomeComputer): ComputerPowerState {
@@ -556,8 +559,9 @@ export function ComputerDetails({
         </p>
       ) : null}
 
-      {!compact && (computer.economy || computer.boostSummary) ? (
+      {!compact && (computer.economy || computer.boostSummary || computer.sizing) ? (
         <div className="flex flex-col gap-1.5 border-t border-border/60 pt-2.5">
+          {computer.sizing ? <SizingLine sizing={computer.sizing} /> : null}
           {computer.economy}
           {computer.boostSummary ? (
             <p className="flex items-center gap-2 text-xs text-muted-foreground">
