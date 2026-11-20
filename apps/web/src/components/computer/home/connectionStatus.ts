@@ -233,6 +233,7 @@ export function connectionDot(kind: ConnectionKind, strained: boolean): string {
       return "animate-pulse bg-warning";
     case "offline":
     case "sign-in":
+    case "not-responding":
       return "bg-warning";
     case "no-network":
       return "bg-muted-foreground/50";

@@ -9,8 +9,6 @@ const mockBootstrapRemoteBearerSession = vi.fn();
 const mockFetchRemoteSessionState = vi.fn();
 const mockIsRemoteEnvironmentAuthHttpError = vi.fn((_: unknown) => false);
 const mockResolveRemoteWebSocketConnectionUrl = vi.fn();
-const mockBootstrapSshBearerSession = vi.fn();
-const mockFetchSshSessionState = vi.fn();
 const mockPersistSavedEnvironmentRecord = vi.fn();
 const mockWriteSavedEnvironmentBearerToken = vi.fn();
 const mockSetSavedEnvironmentRegistry = vi.fn();
@@ -44,9 +42,6 @@ const mockUpsert = vi.fn((record: Record<string, unknown>) => {
   ];
 });
 const mockListSavedEnvironmentRecords = vi.fn(() => mockSavedRecords);
-const mockEnsureSshEnvironment = vi.fn();
-const mockDisconnectSshEnvironment = vi.fn();
-const mockFetchSshEnvironmentDescriptor = vi.fn();
 const mockToPersistedSavedEnvironmentRecord = vi.fn((record) => record);
 const mockCreateEnvironmentConnection = vi.fn();
 const mockConnectBox = vi.fn();

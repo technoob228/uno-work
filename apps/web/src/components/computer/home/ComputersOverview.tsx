@@ -253,6 +253,8 @@ function markRank(live: Live | null, asleep: boolean): MarkRank {
     case "reconnecting":
     case "offline":
     case "sign-in":
+    // Online, but Uno Work on it isn't answering: amber, like the dot (0.0.189).
+    case "not-responding":
       return 1;
     case "lost":
       return 0;
