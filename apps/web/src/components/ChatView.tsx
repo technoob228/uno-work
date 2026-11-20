@@ -5158,6 +5158,7 @@ export default function ChatView(props: ChatViewProps) {
               {...(routeKind === "draft" && draftId ? { draftId } : {})}
               activeThreadTitle={activeThread.title}
               activeProjectName={activeProject?.name}
+              activeProjectId={activeProject?.id}
               activeProjectComputerName={activeProject?.computer?.computerName ?? null}
               activeProjectCwd={activeProject?.cwd}
               hideDraftFolderChip={isDraftHeroState}
