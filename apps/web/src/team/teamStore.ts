@@ -253,7 +253,8 @@ export function useSharedChatFeed(chatId: number | null): SharedFeedState {
           if (!first && page.events.length === 0 && Date.now() - started < 2_000) {
             await sleep(5_000);
           }
-          first = false;
+          // More pages waiting: the next one at once, no long poll.
+          first = page.more;
         } catch (error) {
           if (life.disposed) return;
           const status = (error as { status?: unknown } | null)?.status;

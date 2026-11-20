@@ -18,7 +18,7 @@ import { openChatRequestBrief, useChatRequestsStore } from "../../chatRequests/c
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { cn } from "../../lib/utils";
-import { loadProjectChats, sendPersonRequest, shareChat } from "../../team/teamApi";
+import { loadProjectChats, sendPersonRequest } from "../../team/teamApi";
 import { teamCollabErrorMessage, type TeamRequest } from "../../team/teamApi.logic";
 import { firstName, possessive, requestHeadline, teamSessionHeadline } from "../../team/team.logic";
 import { teamDaemonRefresh, teamLetAgentAnswer, teamRpcAvailable } from "../../team/teamRpc";
@@ -241,35 +241,18 @@ function TeamInboxCard(props: { readonly request: TeamRequest }) {
 
   const allowWrite = async () => {
     if (!request.from) return;
-    setTeamInboxBusy(request.id, true);
-    // The server's "allow" gives write by itself (PLAN); the share is set here
-    // too so this computer's Work hears of it at once (team.refresh).
-    let source: string | null = null;
+    // The server's "allow" sets the share to write itself (and wakes the
+    // daemon): no separate PUT, so write never lands while the request still
+    // waits. This computer's Work is told at once (team.refresh) too.
+    if (!fail("Couldn't allow", await decideTeamRequest(request, "allow"))) return;
+    toastManager.add({ type: "success", title: `${name} can write in your chat` });
+    await queryClient.invalidateQueries({ queryKey: teamChatsQueryKey(request.projectId) });
     try {
       const chats = await loadProjectChats(request.projectId);
       const chat = chats.mine.find((item) => item.id === request.chatId) ?? null;
-      if (chat) {
-        source = chat.source;
-        await shareChat({
-          projectId: request.projectId,
-          source: chat.source,
-          threadId: chat.threadId,
-          title: chat.title,
-          computer: chat.computer,
-          userId: request.from.userId,
-          level: "write",
-        });
-      }
-    } catch (error) {
-      setTeamInboxBusy(request.id, false);
-      fail("Couldn't allow", teamCollabErrorMessage(error));
-      return;
-    }
-    setTeamInboxBusy(request.id, false);
-    if (fail("Couldn't allow", await decideTeamRequest(request, "allow"))) {
-      void queryClient.invalidateQueries({ queryKey: teamChatsQueryKey(request.projectId) });
-      if (source) void teamDaemonRefresh(source as EnvironmentId);
-      toastManager.add({ type: "success", title: `${name} can write in your chat` });
+      if (chat) void teamDaemonRefresh(chat.source as EnvironmentId);
+    } catch {
+      // The daemon hears of it on its own next round.
     }
   };
 

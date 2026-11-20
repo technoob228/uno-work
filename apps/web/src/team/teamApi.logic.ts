@@ -87,6 +87,8 @@ export interface FeedPage {
   readonly status: SharedChatStatus;
   readonly title: string;
   readonly nextSeq: number;
+  /** More pages after this one: ask again at once. */
+  readonly more: boolean;
   readonly myLevel: ShareLevel | null;
 }
 
@@ -276,6 +278,7 @@ export function parseFeedPage(body: unknown): FeedPage {
     status: oneOf(r["status"], STATUSES) ?? "idle",
     title: str(r["title"]),
     nextSeq: num(r["next_seq"]),
+    more: bool(r["more"]),
     myLevel: shareLevelOf(r["my_level"]),
   };
 }
@@ -400,6 +403,14 @@ const MESSAGES: Readonly<Record<string, string>> = {
   TOO_MANY_SESSIONS: "Two sessions from colleagues already run there.",
   CLAIMED: "Another of your computers already took this.",
   RATE_LIMITED: "That's a lot of messages. Try again in a while.",
+  WRITE_NOT_ALLOWED: "You can only read this chat.",
+  ALREADY_CAN_WRITE: "They can already write in this chat.",
+  MESSAGE_RATE_LIMITED: "That's a lot of messages. Try again in a while.",
+  REQUEST_RATE_LIMITED: "That's a lot of requests. Try again in a while.",
+  REQUEST_NOT_WAITING: "This was already answered or ran out.",
+  CANNOT_TARGET_SELF: "That's you.",
+  BODY_TOO_LARGE: "That's too long. Make it shorter.",
+  INVALID_FIELD: "Something in that didn't look right. Try again.",
   WORK_TEAM_COLLAB_DISABLED: "This isn't on for your account yet.",
   WORK_TEAM_DISABLED: "Teams aren't on for your account.",
 };

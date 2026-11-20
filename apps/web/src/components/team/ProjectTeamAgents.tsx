@@ -8,6 +8,9 @@
  * - "Chats you share", each with Stop.
  * - "What their agents did": the project's journal.
  *
+ * Levels and the journal need the agents part (the server refuses them
+ * without it); the shared chats need the share part.
+ *
  * Nothing while T51's parts are off; "Do tasks" only with the tasks part.
  */
 import { useQueryClient } from "@tanstack/react-query";
@@ -98,9 +101,7 @@ export const ProjectTeamAgents = memo(function ProjectTeamAgents(props: {
         />
       ) : null}
       {parts.share ? <SharedChatsSection projectId={projectId} card={card.data} /> : null}
-      {parts.agents || parts.requests ? (
-        <JournalSection projectId={projectId} card={card.data} />
-      ) : null}
+      {parts.agents ? <JournalSection projectId={projectId} card={card.data} /> : null}
     </>
   );
 });

@@ -156,7 +156,7 @@ export const SharedChatComposer = memo(function SharedChatComposer(props: {
       <div className="flex items-end gap-2 rounded-[20px] border border-border bg-background px-3 py-2">
         <Textarea
           unstyled
-          className="flex-1"
+          className="flex-1 resize-none"
           value={text}
           placeholder={`Write to ${possessive(props.ownerName)} agent`}
           onChange={(event) => setText(event.target.value)}
