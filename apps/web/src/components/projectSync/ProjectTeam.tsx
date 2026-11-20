@@ -19,6 +19,7 @@ import {
   invite,
   loadTeam,
   loadTeams,
+  projectTeamsQueryKey,
   removeMember,
   setMemberKeys,
   startTeam,
@@ -33,7 +34,7 @@ import {
   type TeamMember,
 } from "./projectTeam.logic";
 
-export const projectTeamsQueryKey = ["projectTeams"] as const;
+export { projectTeamsQueryKey };
 
 const useProjectTeams = () =>
   useQuery({
