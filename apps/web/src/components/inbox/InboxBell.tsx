@@ -37,6 +37,7 @@ import { DeployApprovalCards } from "./DeployApprovalCards";
 import { useChatRequestsWaitingCount } from "../../chatRequests/chatRequestsStore";
 import { useDeployWaitingCount } from "../../deployApprovals/deployApprovalsStore";
 import { ChatRequestCards } from "./ChatRequestCards";
+import { TeamRequestCards } from "../team/TeamRequestCards";
 import { type BellFilter, BELL_FILTERS, bellSections } from "./inboxBell.logic";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { ASSISTANT_CHAT_NAME } from "../../assistant/assistantChat.logic";
@@ -169,6 +170,7 @@ export function BellPanel({ onClose }: { onClose: () => void }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {filter === "all" || filter === "needs-you" ? (
           <>
+            <TeamRequestCards className="px-0 pt-2" onOpened={onClose} />
             <ChatRequestCards className="px-0 pt-2" onOpened={onClose} />
             <DeployApprovalCards liveOnly={filter === "needs-you"} className="px-0 pt-2" />
           </>

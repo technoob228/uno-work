@@ -14,12 +14,12 @@ import {
   openChatRequestBrief,
   refreshChatRequests,
   setChatRequestsHost,
-  useChatRequestsHostId,
+  useChatRequestsPollHostId,
   useChatRequestsStore,
 } from "./chatRequestsStore";
 
 export function ChatRequestsListener() {
-  const hostId = useChatRequestsHostId();
+  const hostId = useChatRequestsPollHostId();
   useEffect(() => {
     setChatRequestsHost(hostId);
     if (!hostId) return;

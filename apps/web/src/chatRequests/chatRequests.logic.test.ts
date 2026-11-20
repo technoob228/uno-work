@@ -9,9 +9,11 @@ import {
   journalEntries,
   journalTimeLabel,
   newlyWaiting,
+  ownWaitingRequests,
   requestTitle,
   startsWithLine,
   statusChip,
+  teamWaitingRequests,
   waitingCount,
   waitingRequests,
 } from "./chatRequests.logic";
@@ -107,5 +109,32 @@ describe("chat requests from the cloud", () => {
       "2 chats at once already.",
     );
     expect(failureMessage(undefined)).toMatch(/didn't answer/);
+  });
+});
+
+describe("T51 session requests from a colleague", () => {
+  const team = {
+    requestId: 77,
+    projectId: 512,
+    projectName: "landing",
+    fromUserId: 2731,
+    fromName: "Andrei Petrov",
+    viaAgent: true,
+    level: "answer" as const,
+    auto: false,
+  };
+
+  it("splits own requests from the team's", () => {
+    const s = state([request({ id: "own" }), request({ id: "team", team })]);
+    expect(ownWaitingRequests(s, NOW).map((q) => q.id)).toEqual(["own"]);
+    expect(teamWaitingRequests(s, NOW).map((q) => q.id)).toEqual(["team"]);
+    expect(waitingCount(s, NOW)).toBe(2);
+  });
+
+  it("titles a team request by the colleague", () => {
+    expect(requestTitle(request({ team }))).toBe("Andrei's agent suggests starting a session here");
+    expect(requestTitle(request({ team: { ...team, viaAgent: false } }))).toBe(
+      "Andrei suggests starting a session here",
+    );
   });
 });
