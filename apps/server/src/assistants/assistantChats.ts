@@ -84,6 +84,8 @@ export function billingForDriver(driver: string | null): AssistantChatBilling {
     case "claudeAgent":
     case "codex":
     case "cursor":
+    // The person's own Google sign-in or Gemini key.
+    case "gemini":
       return "plan";
     default:
       return "other";

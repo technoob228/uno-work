@@ -192,6 +192,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
+const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
@@ -222,6 +223,8 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-sonnet-5",
   [CURSOR_DRIVER_KIND]: "auto",
+  // Gemini CLI's own router (Pro for hard turns, Flash for the rest).
+  [GEMINI_DRIVER_KIND]: "auto",
   // Hermes — прежде всего оркестратор: "Smart" из часов Uno AI (id шлюза,
   // без префикса харнесса). Тяжёлые модели выбираются явно (ROUTING.md).
   [HERMES_DRIVER_KIND]: UNO_SMART_GATEWAY_MODEL,
@@ -325,5 +328,6 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
+  [GEMINI_DRIVER_KIND]: "Gemini CLI",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

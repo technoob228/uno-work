@@ -132,6 +132,7 @@ export type InstallPlan =
 const NPM_SPEC_BY_DRIVER: Readonly<Record<string, string>> = {
   codex: "@openai/codex@latest",
   claudeAgent: "@anthropic-ai/claude-code@latest",
+  gemini: "@google/gemini-cli@latest",
   opencode: `opencode-ai@${UNO_OPENCODE_VERSION}`,
 };
 

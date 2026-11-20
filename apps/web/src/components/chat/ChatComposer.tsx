@@ -227,9 +227,9 @@ function inferVideoMimeType(file: File): VideoMimeType | null {
 
 type ImageAttachmentSupport = "supported" | "unsupported" | "unknown";
 
-// Claude and Codex always take images; their model lists simply carry no
-// vision metadata, so "unknown" would nag on every screenshot.
-const PROVIDERS_WITH_IMAGE_INPUT: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
+// Claude, Codex and Gemini CLI always take images; their model lists simply
+// carry no vision metadata, so "unknown" would nag on every screenshot.
+const PROVIDERS_WITH_IMAGE_INPUT: ReadonlySet<string> = new Set(["claudeAgent", "codex", "gemini"]);
 
 function deriveImageAttachmentSupport(
   capabilities: ModelCapabilities | null | undefined,

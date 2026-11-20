@@ -622,3 +622,172 @@ describe("sign out", () => {
     await harness.runner.drain();
   });
 });
+
+describe("Gemini CLI sign-in", () => {
+  const GOOGLE_URL =
+    "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&access_type=offline&scope=openid&code_challenge=AB12-CD34xyz&state=one";
+  const RETRY_URL = GOOGLE_URL.replace("state=one", "state=two");
+
+  function makeGemini(initial: { account?: string; selected?: string } = {}) {
+    const state = {
+      account: initial.account,
+      selected: initial.selected,
+      storedKey: undefined as string | undefined,
+      selections: [] as Array<string | undefined>,
+      cleared: 0,
+    };
+    let signedIn = false;
+    const harness = makeHarness({
+      authWatchIntervalMs: 2,
+      resolveCliEnvironment: async () => ({
+        binaryPath: "gemini",
+        env: { NO_BROWSER: "true", GEMINI_CLI_NO_RELAUNCH: "true" },
+      }),
+      probeAuth: async () => ({
+        authenticated: signedIn,
+        signature: signedIn ? "authenticated|oauth-personal|Google account|me@example.com" : "",
+      }),
+      gemini: {
+        googleAccount: async () => state.account,
+        selectedAuthType: async () => state.selected,
+        selectAuthType: async (type) => {
+          state.selected = type;
+          state.selections.push(type);
+        },
+        storeApiKey: async (apiKey) => {
+          state.storedKey = apiKey;
+        },
+        removeApiKey: async () => {
+          const had = state.storedKey !== undefined;
+          state.storedKey = undefined;
+          return had;
+        },
+        clearGoogleSignIn: async () => {
+          state.cleared += 1;
+          const had = state.account !== undefined;
+          state.account = undefined;
+          return had;
+        },
+      },
+    });
+    return { harness, state, signIn: () => (signedIn = true) };
+  }
+
+  it("stores a Gemini API key and makes the CLI use it, without running anything", async () => {
+    const { harness, state } = makeGemini({ selected: "oauth-personal" });
+    const { jobId: id } = harness.runner.authStart({
+      driver: "gemini",
+      method: "apiKey",
+      apiKey: "AIzaSyTEST-KEY-123",
+    });
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("GEMINI_API_KEY");
+    expect(status.log).not.toContain("AIzaSyTEST-KEY-123");
+    expect(state.storedKey).toBe("AIzaSyTEST-KEY-123");
+    expect(state.selected).toBe("gemini-api-key");
+    expect(harness.processes).toHaveLength(0);
+    expect(harness.refreshed).toEqual(["gemini"]);
+  });
+
+  it("runs the Google sign-in through `gemini --acp`: link, code, a retry's new link, done", async () => {
+    const { harness, state, signIn } = makeGemini({ selected: "gemini-api-key" });
+    const { jobId: id } = harness.runner.authStart({ driver: "gemini", method: "oauth" });
+    await tick(8);
+    const child = harness.latest();
+    expect(child.input.command).toBe("gemini");
+    expect(child.input.args).toEqual(["--acp"]);
+    expect(child.input.env.NO_BROWSER).toBe("true");
+    // Selected before the start: that is what makes the CLI ask.
+    expect(state.selections).toEqual(["oauth-personal"]);
+    // Nothing goes to stdin before the code: the CLI would take it for one.
+    expect(child.stdin).toEqual([]);
+
+    child.input.onOutput(
+      `Please visit the following URL to authorize the application:\n\n${GOOGLE_URL}\n\nEnter the authorization code: `,
+    );
+    const asking = harness.runner.authStatus({ jobId: id });
+    expect(asking.verificationUrl).toBe(GOOGLE_URL);
+    expect(asking.needsCodeInput).toBe(true);
+    expect(asking.userCode).toBeUndefined();
+
+    harness.runner.authSubmitCode({ jobId: id, code: "4/0bad" });
+    child.input.onOutput(
+      `Failed to authenticate with authorization code: invalid_grant\nRetrying...\nPlease visit the following URL to authorize the application:\n\n${RETRY_URL}\n\nEnter the authorization code: `,
+    );
+    const rejected = harness.runner.authStatus({ jobId: id });
+    expect(rejected.codeCheck).toBe("rejected");
+    expect(rejected.needsCodeInput).toBe(true);
+    expect(rejected.verificationUrl).toBe(RETRY_URL);
+
+    harness.runner.authSubmitCode({ jobId: id, code: "4/0good" });
+    expect(child.stdin).toEqual(["4/0bad\n", "4/0good\n"]);
+    // The CLI saves the tokens and waits for ACP; the watch sees the account.
+    signIn();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await harness.runner.drain();
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("succeeded");
+    expect(child.killed).toBe(true);
+    expect(state.selected).toBe("oauth-personal");
+  });
+
+  it("gives the previous choice back when the Google sign-in fails", async () => {
+    const { harness, state } = makeGemini({ selected: "gemini-api-key" });
+    const { jobId: id } = harness.runner.authStart({ driver: "gemini", method: "oauth" });
+    await tick(8);
+    harness.latest().input.onOutput("Manual authorization is required.\n");
+    harness.latest().input.onExit({ code: 41, signal: null });
+    await harness.runner.drain();
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("failed");
+    expect(state.selections).toEqual(["oauth-personal", "gemini-api-key"]);
+    expect(state.selected).toBe("gemini-api-key");
+  });
+
+  it("is done at once when Gemini CLI is already signed in to Google", async () => {
+    const { harness, state } = makeGemini({ account: "me@example.com" });
+    const { jobId: id } = harness.runner.authStart({ driver: "gemini", method: "oauth" });
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("already signed in to me@example.com");
+    expect(harness.processes).toHaveLength(0);
+    expect(state.selected).toBe("oauth-personal");
+  });
+
+  it("has no second account", () => {
+    const { harness } = makeGemini();
+    expect(() =>
+      harness.runner.authStart({
+        driver: "gemini",
+        method: "oauth",
+        instanceId: "gemini_account_1" as ProviderInstanceId,
+      }),
+    ).toThrow(/one account per computer/);
+  });
+
+  it("signs out: the stored key, the Google tokens and the choice go", async () => {
+    const { harness, state } = makeGemini({
+      account: "me@example.com",
+      selected: "oauth-personal",
+    });
+    state.storedKey = "AIzaSyTEST";
+    await expect(harness.runner.authSignOut({ driver: "gemini" })).resolves.toEqual({
+      driver: "gemini",
+      signedOut: true,
+    });
+    expect(state.storedKey).toBeUndefined();
+    expect(state.cleared).toBe(1);
+    expect(state.selected).toBeUndefined();
+    expect(harness.processes).toHaveLength(0);
+    expect(harness.refreshed).toEqual(["gemini"]);
+  });
+
+  it("refuses without the sign-in store", () => {
+    const harness = makeHarness();
+    const { jobId: id } = harness.runner.authStart({ driver: "gemini", method: "oauth" });
+    return harness.runner.drain().then(() => {
+      expect(harness.runner.authStatus({ jobId: id }).error).toMatch(/not available/);
+    });
+  });
+});

@@ -16,6 +16,13 @@
  *     If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&...
  *     Paste code here if prompted >
  *
+ *   gemini --acp (Google sign-in selected, no tokens; 0.70.0, 2026-11)
+ *     Please visit the following URL to authorize the application:
+ *
+ *     https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&...
+ *
+ *     Enter the authorization code:
+ *
  * @module provider/setup/harnessSetupParsers
  */
 
@@ -72,7 +79,9 @@ const URL_PATTERN = /https?:\/\/[^\s"'<>`)\]]+/g;
 // Codex prints e.g. `41IV-83JI8`; be permissive on segment lengths but keep the
 // dash-joined upper-case shape so version strings and hashes never match.
 const DEVICE_CODE_PATTERN = /\b([A-Z0-9]{4,8}-[A-Z0-9]{4,8})\b/;
-const PASTE_CODE_PATTERN = /paste (?:the |your )?(?:authorization |auth )?code/i;
+// "Enter this one-time code" (codex's device code, typed on the web page)
+// is not a request for input here.
+const PASTE_CODE_PATTERN = /(?:paste|enter) (?:the |your )?(?:authorization |auth )?code/i;
 
 function trimTrailingPunctuation(url: string): string {
   return url.replace(/[.,;:!?]+$/, "");
@@ -107,8 +116,12 @@ export function parseOAuthPrompt(rawText: string): OAuthPromptParse {
   // for a code before the prompt has even started.
   let userCode: string | undefined;
   if (verificationUrl) {
+    // Not inside a URL: a PKCE challenge or state can look like a code.
+    const withoutUrls = (part: string) => part.replace(URL_PATTERN, " ");
     const afterUrl = text.slice(text.indexOf(verificationUrl) + verificationUrl.length);
-    userCode = DEVICE_CODE_PATTERN.exec(afterUrl)?.[1] ?? DEVICE_CODE_PATTERN.exec(text)?.[1];
+    userCode =
+      DEVICE_CODE_PATTERN.exec(withoutUrls(afterUrl))?.[1] ??
+      DEVICE_CODE_PATTERN.exec(withoutUrls(text))?.[1];
   }
 
   return {

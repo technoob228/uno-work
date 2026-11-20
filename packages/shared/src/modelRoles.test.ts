@@ -132,6 +132,31 @@ describe("suggestRoles: a set by the plans connected here", () => {
     expect(roles.why).toContain("save the Claude limit");
   });
 
+  it("only Gemini CLI: its Auto router for complex work, a Flash for simple tasks (T58)", () => {
+    const gemini = provider(
+      "gemini",
+      [
+        { slug: "auto", name: "Auto", isDefault: true },
+        { slug: "gemini-3.1-pro-preview-customtools", name: "Gemini 3.1 Pro Preview" },
+        { slug: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
+      ],
+      { auth: { status: "authenticated", type: "oauth-personal" } },
+    );
+    const roles = suggestRoles({ providers: [uno, gemini], isReady: ready, unoReplies: true });
+    expect(roles.complex).toEqual(sel("gemini", "auto"));
+    expect(roles.simple).toEqual(sel("gemini", "gemini-3-flash-preview"));
+    expect(roles.sources).toEqual(["gemini", "uno"]);
+    expect(roles.why).toMatch(/^Gemini CLI signed in here/);
+    // With a Claude plan Gemini is not part of the set.
+    const withClaude = suggestRoles({
+      providers: [gemini, claude, uno],
+      isReady: ready,
+      unoReplies: true,
+    });
+    expect(withClaude.complex).toEqual(sel("claudeAgent", "claude-opus-5-5"));
+    expect(withClaude.sources).toEqual(["claude", "uno"]);
+  });
+
   it("a plan that isn't ready here doesn't count", () => {
     const signedOut = provider("codex", codex.models, { auth: { status: "unknown" } });
     const roles = suggestRoles({ providers: [signedOut, uno], isReady: ready, unoReplies: true });

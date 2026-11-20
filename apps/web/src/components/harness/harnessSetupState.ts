@@ -17,7 +17,11 @@ import {
 } from "@t3tools/contracts";
 
 /** Drivers that can be signed in from the app. */
-export const AUTHABLE_DRIVERS: ReadonlyArray<ProviderAuthDriver> = ["claudeAgent", "codex"];
+export const AUTHABLE_DRIVERS: ReadonlyArray<ProviderAuthDriver> = [
+  "claudeAgent",
+  "codex",
+  "gemini",
+];
 
 export type HarnessStatus =
   /** No snapshot yet — the daemon has not reported providers. */
@@ -186,6 +190,7 @@ export const HARNESS_ROW_DRIVERS: ReadonlyArray<ProviderDriverKind> = [
   "uno",
   "claudeAgent",
   "codex",
+  "gemini",
   "opencode",
   "hermes",
   "cursor",

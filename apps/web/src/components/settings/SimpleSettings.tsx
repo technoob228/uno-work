@@ -160,8 +160,8 @@ export function AccountPlanSettings() {
 // ── AI ───────────────────────────────────────────────────────────────
 
 /**
- * The agents a person can use, as rows of Settings → AI. Claude and ChatGPT
- * sign in here (their own subscription); OpenCode and Cursor are installed
+ * The agents a person can use, as rows of Settings → AI. Claude, ChatGPT and
+ * Gemini sign in here (their own account); OpenCode and Cursor are installed
  * here and take a key or a terminal login. Anything else is a custom harness.
  */
 const AGENTS = [
@@ -176,6 +176,13 @@ const AGENTS = [
     label: "ChatGPT",
     plans: "ChatGPT Plus or Pro",
     description: "Codex on your ChatGPT Plus or Pro subscription",
+  },
+  {
+    driver: "gemini",
+    label: "Gemini",
+    plans: "a Google account or a Gemini API key",
+    description:
+      "Google's Gemini CLI on your Google account (free tier, Google AI Pro or Ultra) or a Gemini API key",
   },
   {
     driver: "opencode",
@@ -317,9 +324,11 @@ export function AiSettings() {
 
       <SettingsSection title="Agents">
         {agents.map(({ agent, entry, row }) => {
-          // Claude and ChatGPT sign in (and out) with the person's own account here.
+          // Claude, ChatGPT and Gemini sign in (and out) with the person's own account here.
           const authDriver =
-            agent.driver === "claudeAgent" || agent.driver === "codex" ? agent.driver : null;
+            agent.driver === "claudeAgent" || agent.driver === "codex" || agent.driver === "gemini"
+              ? agent.driver
+              : null;
           const ownAccount = authDriver !== null;
           const action =
             row.paneKind === "signin" && !ownAccount

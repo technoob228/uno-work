@@ -30,6 +30,7 @@ export const HARNESS_OPTIONS: ReadonlyArray<{ readonly value: string; readonly l
   { value: "claudeAgent", label: "Claude" },
   { value: "opencode", label: "OpenCode" },
   { value: "codex", label: "Codex" },
+  { value: "gemini", label: "Gemini CLI" },
   { value: "cursor", label: "Cursor" },
 ];
 

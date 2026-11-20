@@ -43,6 +43,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   defaultInstanceIdForDriver,
+  GeminiSettings,
   type ProviderAccountAddInput,
   type ProviderAccountAddResult,
   type ProviderAccountRemoveInput,
@@ -95,6 +96,17 @@ import {
   withUserLocalBinOnPath,
 } from "./harnessProcess.ts";
 import { lastNonEmptyLine, parseOAuthPrompt } from "./harnessSetupParsers.ts";
+import {
+  clearGeminiGoogleSignIn,
+  GEMINI_ACP_ARGS,
+  GEMINI_API_KEY_AUTH_TYPE,
+  GEMINI_API_KEY_ENV,
+  GEMINI_GOOGLE_AUTH_TYPE,
+  GEMINI_PROCESS_ENV,
+  geminiGoogleAccount,
+  readGeminiSelectedAuthType,
+  writeGeminiSelectedAuthType,
+} from "../acp/GeminiAcpSupport.ts";
 
 export const AUTH_JOB_TIMEOUT_MS = 10 * 60_000;
 /** How often a waiting browser sign-in checks whether the harness got signed in another way. */
@@ -168,6 +180,8 @@ export interface HarnessSetupRunnerDeps {
     instanceId?: ProviderInstanceId,
   ) => Promise<CliEnvironment>;
   readonly storeClaudeApiKey: (apiKey: string) => Promise<void>;
+  /** Gemini CLI's sign-in files and stored key; absent: Gemini sign-in is refused. */
+  readonly gemini?: GeminiSignInStore;
   /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
   readonly removeClaudeApiKey: () => Promise<boolean>;
   readonly refreshProvider: (
@@ -189,6 +203,24 @@ export interface HarnessSetupRunnerDeps {
   readonly now?: () => number;
   readonly makeJobId?: () => string;
   readonly log?: (message: string, meta?: Record<string, unknown>) => void;
+}
+
+/**
+ * Gemini CLI has no `login` command: its Google sign-in runs when the CLI
+ * starts with the Google sign-in selected and no tokens (GeminiAcpSupport),
+ * an API key is `GEMINI_API_KEY` plus the CLI's own "use the key" choice.
+ */
+export interface GeminiSignInStore {
+  /** The Google account the CLI is signed in to here, if any. */
+  readonly googleAccount: () => Promise<string | undefined>;
+  readonly selectedAuthType: () => Promise<string | undefined>;
+  readonly selectAuthType: (type: string | undefined) => Promise<void>;
+  /** GEMINI_API_KEY into the default Gemini instance's environment. */
+  readonly storeApiKey: (apiKey: string) => Promise<void>;
+  /** Drops it; true if one was there. */
+  readonly removeApiKey: () => Promise<boolean>;
+  /** Token files gone, the account marked signed out; true if there was one. */
+  readonly clearGoogleSignIn: () => Promise<boolean>;
 }
 
 interface InstallExtra {
@@ -329,7 +361,11 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
 
   const runInstall = async (job: SetupJobRecord<InstallExtra>) => {
     const driver = job.driver as ProviderDriverKind;
-    const needsNpm = driver === "codex" || driver === "claudeAgent" || driver === "opencode";
+    const needsNpm =
+      driver === "codex" ||
+      driver === "claudeAgent" ||
+      driver === "gemini" ||
+      driver === "opencode";
     const [npmGlobalWritable, uvAvailable] = await Promise.all([
       needsNpm ? deps.probeNpmGlobalWritable().catch(() => false) : Promise.resolve(true),
       driver === "hermes" ? deps.probeUvAvailable().catch(() => false) : Promise.resolve(true),
@@ -526,6 +562,14 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
               // After a code went in, only a prompt printed since then asks
               // again — and means that code didn't work.
               const since = outputSinceCodeSubmitted(accumulated);
+              // A retry comes with a link of its own (Gemini CLI: a new
+              // sign-in each time); the old one would not take the new code.
+              const retryUrl = since.submitted
+                ? parseOAuthPrompt(since.text).verificationUrl
+                : undefined;
+              if (retryUrl && retryUrl !== current.extra.verificationUrl) {
+                patch.verificationUrl = retryUrl;
+              }
               const asks = since.submitted
                 ? parseOAuthPrompt(since.text).needsCodeInput
                 : parsed.needsCodeInput;
@@ -555,8 +599,58 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     });
   };
 
+  const runGeminiAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
+    const store = deps.gemini;
+    if (!store) throw new Error("Gemini CLI sign-in is not available on this computer.");
+    if (job.extra.method === "apiKey") {
+      auths.markRunning(job.jobId);
+      await store.storeApiKey(apiKey ?? "");
+      await store.selectAuthType(GEMINI_API_KEY_AUTH_TYPE);
+      auths.appendLog(
+        job.jobId,
+        `Stored ${GEMINI_API_KEY_ENV} in the Gemini CLI provider environment on this machine; Gemini CLI now signs in with it.\n`,
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(ProviderDriverKind.make("gemini"));
+      return;
+    }
+    const account = await store.googleAccount();
+    if (account) {
+      auths.markRunning(job.jobId);
+      await store.selectAuthType(GEMINI_GOOGLE_AUTH_TYPE);
+      auths.appendLog(
+        job.jobId,
+        `Gemini CLI is already signed in to ${account}. To use another account, sign out first.\n`,
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(ProviderDriverKind.make("gemini"));
+      return;
+    }
+    // The CLI asks for the Google sign-in when it starts with it selected and
+    // no tokens: it prints the link, reads the code from stdin (nothing else
+    // may be written there first — it would be taken for the code), and once
+    // the tokens are saved it waits for ACP. The sign-in watch sees the
+    // account appear and stops it.
+    const previous = await store.selectedAuthType();
+    await store.selectAuthType(GEMINI_GOOGLE_AUTH_TYPE);
+    try {
+      await runCliLogin(job, { args: GEMINI_ACP_ARGS, parsePrompt: true });
+    } finally {
+      if (auths.get(job.jobId)?.state !== "succeeded" && previous !== GEMINI_GOOGLE_AUTH_TYPE) {
+        await store.selectAuthType(previous).catch((error: unknown) => {
+          log("restoring the Gemini CLI sign-in choice failed", { error: String(error) });
+        });
+      }
+    }
+  };
+
   const runAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
     const { driver, method } = job.extra;
+
+    if (driver === "gemini") {
+      await runGeminiAuth(job, apiKey);
+      return;
+    }
 
     if (driver === "claudeAgent" && method === "apiKey") {
       auths.markRunning(job.jobId);
@@ -593,6 +687,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     // default instance's, and an extra one would read as a provider's account.
     if (input.method === "apiKey" && input.instanceId) {
       throw fail("invalid", "A second account signs in with its plan, not an API key.");
+    }
+    if (input.driver === "gemini" && input.instanceId) {
+      throw fail("invalid", "Gemini CLI has one account per computer.");
     }
     const jobKey = authJobKey(input);
     const waiting = auths.findActive("auth", jobKey);
@@ -713,6 +810,21 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     // Signing out while a sign-in still waits for its browser half: that
     // sign-in is moot — stop it rather than ask the person to hunt for it.
     authCancel(input);
+    if (driver === "gemini") {
+      const store = deps.gemini;
+      if (!store)
+        return { driver, signedOut: false, error: "Gemini CLI sign-in is not available." };
+      try {
+        await store.removeApiKey();
+        await store.clearGoogleSignIn();
+        await store.selectAuthType(undefined);
+      } catch (error) {
+        log("provider sign-out failed", { driver, error: describeError(error) });
+        return { driver, signedOut: false, error: describeError(error) };
+      }
+      await refreshAfterSuccess(ProviderDriverKind.make(driver));
+      return { driver, signedOut: true };
+    }
     const cli = await (instanceId
       ? deps.resolveCliEnvironment(driver, instanceId)
       : deps.resolveCliEnvironment(driver));
@@ -837,6 +949,7 @@ export function makeHarnessSetupShape(
 
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
+const decodeGeminiSettings = Schema.decodeUnknownSync(GeminiSettings);
 
 const isWritableDir = (dir: string): Promise<boolean> =>
   access(dir, fsConstants.W_OK).then(
@@ -919,26 +1032,34 @@ export const HarnessSetupLive = Layer.effect(
             },
           } satisfies CliEnvironment;
         }
+        if (driver === "gemini") {
+          const config = decodeGeminiSettings(instance?.config ?? {});
+          return {
+            binaryPath: config.binaryPath.trim() || "gemini",
+            env: { ...instanceEnv, ...GEMINI_PROCESS_ENV },
+          } satisfies CliEnvironment;
+        }
         const config = decodeClaudeSettings(instance?.config ?? {});
         const env = yield* makeClaudeEnvironment(config, instanceEnv);
         return { binaryPath: config.binaryPath, env } satisfies CliEnvironment;
       }).pipe(Effect.provideService(Path.Path, path));
 
-    const storeClaudeApiKey = (apiKey: string) =>
+    /** A key into the default instance's environment, stored as sensitive. */
+    const storeApiKey = (driver: "claudeAgent" | "gemini", name: string, apiKey: string) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
-        const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent"));
+        const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
         const existing: ProviderInstanceConfig = settings.providerInstances[instanceId] ?? {
-          driver: ProviderDriverKind.make("claudeAgent"),
-          config: settings.providers.claudeAgent,
+          driver: ProviderDriverKind.make(driver),
+          config: settings.providers[driver],
         };
         const variable: ProviderInstanceEnvironmentVariable = {
-          name: ANTHROPIC_API_KEY_ENV,
+          name,
           value: apiKey,
           sensitive: true,
         };
         const environment = [
-          ...(existing.environment ?? []).filter((entry) => entry.name !== ANTHROPIC_API_KEY_ENV),
+          ...(existing.environment ?? []).filter((entry) => entry.name !== name),
           variable,
         ];
         yield* serverSettings.updateSettings({
@@ -949,25 +1070,39 @@ export const HarnessSetupLive = Layer.effect(
         });
       });
 
-    const removeClaudeApiKey = Effect.gen(function* () {
-      const settings = yield* serverSettings.getSettings;
-      const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent"));
-      const existing = settings.providerInstances[instanceId];
-      const environment = existing?.environment ?? [];
-      if (!existing || !environment.some((entry) => entry.name === ANTHROPIC_API_KEY_ENV)) {
-        return false;
-      }
-      yield* serverSettings.updateSettings({
-        providerInstances: {
-          ...settings.providerInstances,
-          [instanceId]: {
-            ...existing,
-            environment: environment.filter((entry) => entry.name !== ANTHROPIC_API_KEY_ENV),
+    const removeApiKey = (driver: "claudeAgent" | "gemini", name: string) =>
+      Effect.gen(function* () {
+        const settings = yield* serverSettings.getSettings;
+        const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
+        const existing = settings.providerInstances[instanceId];
+        const environment = existing?.environment ?? [];
+        if (!existing || !environment.some((entry) => entry.name === name)) {
+          return false;
+        }
+        yield* serverSettings.updateSettings({
+          providerInstances: {
+            ...settings.providerInstances,
+            [instanceId]: {
+              ...existing,
+              environment: environment.filter((entry) => entry.name !== name),
+            },
           },
-        },
+        });
+        return true;
       });
-      return true;
-    });
+
+    // Gemini CLI's files are where the daemon's own Gemini runs look
+    // (`GEMINI_CLI_HOME` of the default instance, else the home folder).
+    const geminiEnv = () =>
+      runPromise(resolveCliEnvironment("gemini")).then((cli) => ({ ...process.env, ...cli.env }));
+    const gemini: GeminiSignInStore = {
+      googleAccount: () => geminiEnv().then(geminiGoogleAccount),
+      selectedAuthType: () => geminiEnv().then(readGeminiSelectedAuthType),
+      selectAuthType: (type) => geminiEnv().then((env) => writeGeminiSelectedAuthType(env, type)),
+      storeApiKey: (apiKey) => runPromise(storeApiKey("gemini", GEMINI_API_KEY_ENV, apiKey)),
+      removeApiKey: () => runPromise(removeApiKey("gemini", GEMINI_API_KEY_ENV)),
+      clearGoogleSignIn: () => geminiEnv().then(clearGeminiGoogleSignIn),
+    };
 
     const runner = makeHarnessSetupRunner({
       spawn: spawnHarnessProcess,
@@ -978,8 +1113,10 @@ export const HarnessSetupLive = Layer.effect(
       probeUvAvailable: () => probeCommandAvailable("uv", baseEnv),
       resolveCliEnvironment: (driver, instanceId) =>
         runPromise(resolveCliEnvironment(driver, instanceId)),
-      storeClaudeApiKey: (apiKey) => runPromise(storeClaudeApiKey(apiKey)),
-      removeClaudeApiKey: () => runPromise(removeClaudeApiKey),
+      storeClaudeApiKey: (apiKey) =>
+        runPromise(storeApiKey("claudeAgent", ANTHROPIC_API_KEY_ENV, apiKey)),
+      removeClaudeApiKey: () => runPromise(removeApiKey("claudeAgent", ANTHROPIC_API_KEY_ENV)),
+      gemini,
       refreshProvider: (driver, instanceId) =>
         runPromise(
           instanceId
@@ -1016,6 +1153,9 @@ export const HarnessSetupLive = Layer.effect(
         const settings = yield* serverSettings.getSettings;
         if (!settings.multipleAccounts) {
           return yield* fail("invalid", 'Turn on "Use more than one account" first.');
+        }
+        if (input.driver === "gemini") {
+          return yield* fail("invalid", "Gemini CLI has one account per computer.");
         }
         const instanceId = newAccountInstanceId(input.driver);
         const folder = accountFolder(homeDir, instanceId);

@@ -320,6 +320,7 @@ const PROVIDER_ALIASES: Readonly<Record<string, string>> = {
   claude: "claudeAgent",
   "claude-code": "claudeAgent",
   claudecode: "claudeAgent",
+  "gemini-cli": "gemini",
 };
 
 export type ProviderModelResolution =

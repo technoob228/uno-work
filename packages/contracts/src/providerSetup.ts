@@ -29,10 +29,11 @@ export const INSTALLABLE_PROVIDER_DRIVERS = [
   "opencode",
   "hermes",
   "cursor",
+  "gemini",
 ] as const;
 
 /** Drivers that support the in-app sign-in flow. */
-export const ProviderAuthDriver = Schema.Literals(["codex", "claudeAgent"]);
+export const ProviderAuthDriver = Schema.Literals(["codex", "claudeAgent", "gemini"]);
 export type ProviderAuthDriver = typeof ProviderAuthDriver.Type;
 
 export const ProviderAuthMethod = Schema.Literals(["apiKey", "oauth"]);

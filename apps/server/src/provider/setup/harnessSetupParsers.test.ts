@@ -61,6 +61,29 @@ describe("parseOAuthPrompt", () => {
     expect(parsed.userCode).toBeUndefined();
   });
 
+  it("reads Gemini CLI's Google sign-in and does not take a PKCE challenge for a code", () => {
+    // `gemini --acp` with the Google sign-in selected and no tokens (0.70.0).
+    const parsed = parseOAuthPrompt(
+      [
+        "Please visit the following URL to authorize the application:",
+        "",
+        "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=https%3A%2F%2Fcodeassist.google.com%2Fauthcode&access_type=offline&code_challenge=Q7ZX-AB12CD&code_challenge_method=S256&state=f00",
+        "",
+        "Enter the authorization code: ",
+      ].join("\n"),
+    );
+    expect(parsed.verificationUrl).toMatch(
+      /^https:\/\/accounts\.google\.com\/o\/oauth2\/v2\/auth\?/,
+    );
+    expect(parsed.verificationUrl).toContain("state=f00");
+    expect(parsed.needsCodeInput).toBe(true);
+    expect(parsed.userCode).toBeUndefined();
+  });
+
+  it('codex\'s "Enter this one-time code" is not a request for input', () => {
+    expect(parseOAuthPrompt(CODEX_DEVICE_PROMPT).needsCodeInput).toBe(false);
+  });
+
   it("prefers an auth-looking URL over a docs link and trims trailing punctuation", () => {
     const parsed = parseOAuthPrompt(
       "See https://docs.example.com/cli for help.\nVisit: https://login.example.com/device.",

@@ -33,6 +33,9 @@ const ACCOUNTS_DIR_NAME = ".uno-accounts";
 const PROVIDER_NAME: Readonly<Record<ProviderAuthDriver, string>> = {
   claudeAgent: "Claude",
   codex: "ChatGPT",
+  // Not offered (HarnessSetupService refuses a second Gemini account); here
+  // for the exhaustive table only.
+  gemini: "Gemini",
 };
 
 /**

@@ -146,6 +146,7 @@ export function ownAgentStartSelection(input: {
     ...(input.picked ? [input.picked] : []),
     "claudeAgent",
     "codex",
+    "gemini",
   ];
   for (const driver of order) {
     const provider = byDriver(driver);

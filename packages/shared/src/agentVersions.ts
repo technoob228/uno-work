@@ -1,6 +1,6 @@
 /**
- * The agents "Update everything" keeps current, and to what. Claude Code and
- * Codex follow npm's latest. OpenCode is pinned: it is also the engine of Uno
+ * The agents "Update everything" keeps current, and to what. Claude Code,
+ * Codex and Gemini CLI follow npm's latest. OpenCode is pinned: it is also the engine of Uno
  * Code, and a new one reaches computers only after it passed our checks.
  *
  * Keep UNO_OPENCODE_VERSION in step with `UNO_WORK_OPENCODE_VERSION` in
@@ -12,6 +12,7 @@ export const UNO_OPENCODE_VERSION = "1.18.32";
 export const UPDATABLE_AGENTS = [
   { driver: "claudeAgent", name: "Claude", npmPackage: "@anthropic-ai/claude-code", bin: "claude" },
   { driver: "codex", name: "Codex", npmPackage: "@openai/codex", bin: "codex" },
+  { driver: "gemini", name: "Gemini CLI", npmPackage: "@google/gemini-cli", bin: "gemini" },
   { driver: "opencode", name: "OpenCode", npmPackage: "opencode-ai", bin: "opencode" },
 ] as const;
 

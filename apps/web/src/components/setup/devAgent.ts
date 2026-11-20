@@ -19,11 +19,14 @@ import { signedInWithOwnAccount } from "../computer/home/agentStart";
 
 export type DevAgentId = ProviderAuthDriver | "uno";
 
+// Not Gemini CLI: the developer way moves Claude Code / Codex projects and
+// chats over, and there is no import of Gemini's.
 export const DEV_AGENTS: ReadonlyArray<ProviderAuthDriver> = ["claudeAgent", "codex"];
 
 export const DEV_AGENT_LABEL: Readonly<Record<DevAgentId, string>> = {
   claudeAgent: "Claude Code",
   codex: "Codex",
+  gemini: "Gemini CLI",
   uno: "Uno AI",
 };
 
