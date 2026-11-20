@@ -21,7 +21,8 @@ import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../../ui/coll
 import { SettingsPageContainer } from "../settingsLayout";
 import { AccessJournal, SecurityOverview } from "./AccessJournal";
 import { NetworkAccess } from "./NetworkAccess";
-import { ProtectionSection, useProtectionOff } from "./ProtectionSection";
+import { ProtectionSection } from "./ProtectionSection";
+import { useProtectionStatus } from "./useProtection";
 
 export function SecuritySettings() {
   const transport = accountTransport();
@@ -48,7 +49,9 @@ export function SecuritySettings() {
   const selected = boxes.find((b) => b.id === selectedId) ?? null;
   // A link from a notification (?box=) is about the details: open Advanced.
   const [advancedOpen, setAdvancedOpen] = useState(pickedId !== null);
-  const protectionOff = useProtectionOff();
+  // Not on for this account yet (the server said 404): a plain line on top,
+  // and the journal and network open below, as before.
+  const protectionOff = useProtectionStatus() === "not-on";
   const details = (
     <>
       <SecurityOverview boxes={boxes} selectedId={selectedId} onSelect={setPicked} />
@@ -70,7 +73,10 @@ export function SecuritySettings() {
           <CloudIcon className="size-4" /> No cloud computers on this account yet.
         </p>
       ) : protectionOff ? (
-        details
+        <>
+          <ProtectionSection />
+          {details}
+        </>
       ) : (
         <>
           <ProtectionSection />

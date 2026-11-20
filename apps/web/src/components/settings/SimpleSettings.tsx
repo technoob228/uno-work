@@ -66,6 +66,8 @@ import { GeneralSettingsPanel, UnoGatewayBalance } from "./SettingsPanels";
 import { buildProviderInstanceUpdatePatch } from "./SettingsPanels.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { ChatRequestsSettingsSection } from "./ChatRequestsSettings";
+import { securityRowDescription } from "./security/protectionStatus";
+import { useProtectionStatus } from "./security/useProtection";
 import { buildSettingsNavGroups } from "./settingsNavGroups";
 
 /** Where Uno Work opens in a phone's browser. */
@@ -617,6 +619,7 @@ export function ComputerSettings() {
   const rows = useMachineRows();
   const label = rows.find((row) => row.environmentId === environmentId)?.label ?? "This computer";
   const { economy } = useComputerEconomy(environmentId, null);
+  const protection = useProtectionStatus();
   return (
     <SettingsPageContainer>
       <WhereAgentsRunSection />
@@ -650,7 +653,7 @@ export function ComputerSettings() {
         <LinkRow
           icon={<LockIcon />}
           title="Security"
-          description="Cut computers off the internet, the red button, and who got in."
+          description={securityRowDescription(protection)}
           onClick={() => void navigate({ to: "/settings/security" })}
         />
         <LinkRow

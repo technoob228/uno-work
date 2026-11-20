@@ -12,7 +12,7 @@
  * Both go through the person's account (accountRequest), never the computer's
  * token: an agent on the computer can't loosen isolation or undo the stop.
  */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckIcon,
   CopyIcon,
@@ -25,7 +25,9 @@ import {
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { AccountHttpError, accountRequest } from "../../../account/unoAccount";
+import { SUPPORT_CONTACTS } from "@t3tools/shared/supportDraft";
+
+import { accountRequest } from "../../../account/unoAccount";
 import { DEMO } from "../../../demo/demoFlag";
 import { Alert, AlertDescription, AlertTitle } from "../../ui/alert";
 import {
@@ -55,6 +57,7 @@ import { Switch } from "../../ui/switch";
 import { Textarea } from "../../ui/textarea";
 import { toastManager } from "../../ui/toast";
 import { Toggle, ToggleGroup } from "../../ui/toggle-group";
+import { openExternal } from "../../sidebar/SidebarDAccountButton";
 import { SettingsRow, SettingsSection } from "../settingsLayout";
 import {
   type ComputerIsolation,
@@ -70,11 +73,10 @@ import {
   modeTitle,
   needsPrivateNetwork,
   plural,
-  protectionPath,
   stoppable,
 } from "./protectionModel";
-
-const protectionKey = ["account", "security", "protection"] as const;
+import { protectionNotEnabled } from "./protectionStatus";
+import { protectionKey, useProtection } from "./useProtection";
 
 function statusWord(status: string): string {
   if (status === "running") return "Running";
@@ -85,25 +87,6 @@ function statusWord(status: string): string {
 
 function errorText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : "Something went wrong.";
-}
-
-/** The server answers 404 while protection is not on for this account (flag SECURITY_PROTECTION). */
-function notEnabled(error: unknown): boolean {
-  return error instanceof AccountHttpError && error.status === 404;
-}
-
-export function useProtection() {
-  return useQuery({
-    queryKey: protectionKey,
-    queryFn: async () => (await accountRequest("GET", protectionPath)) as Protection,
-    retry: (count, error) => !notEnabled(error) && count < 2,
-  });
-}
-
-/** Protection is off for this account (the server said 404): the page stays as before. */
-export function useProtectionOff(): boolean {
-  const query = useProtection();
-  return query.isError && notEnabled(query.error);
 }
 
 export function ProtectionSection() {
@@ -124,7 +107,7 @@ export function ProtectionSection() {
   // Isolated picked while no device is in the private network: ask first.
   const [confirmIsolate, setConfirmIsolate] = useState<IsolationBody | null>(null);
 
-  if (query.isError && notEnabled(query.error)) return null;
+  if (query.isError && protectionNotEnabled(query.error)) return <ProtectionNotOn />;
   if (query.isError) {
     return (
       <SettingsSection title="Protection">
@@ -375,6 +358,31 @@ function IsolatedExtras(props: {
         />
       </Label>
     </div>
+  );
+}
+
+/**
+ * The server hasn't turned Protection on for this account (404): say so in
+ * plain words instead of hiding the section, and give the one thing that
+ * works today — Support stops the computers by hand.
+ */
+function ProtectionNotOn() {
+  return (
+    <SettingsSection title="Protection" icon={<ShieldIcon className="size-3" />}>
+      <SettingsRow
+        title="Not on for your account yet"
+        description="Here you'll cut your computers off the internet and stop all of them with one button. Something looks wrong right now? Write to us — we'll stop your computers by hand."
+        control={
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => openExternal(SUPPORT_CONTACTS.telegram.url)}
+          >
+            {SUPPORT_CONTACTS.telegram.label}
+          </Button>
+        }
+      />
+    </SettingsSection>
   );
 }
 

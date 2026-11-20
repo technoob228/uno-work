@@ -149,11 +149,7 @@ export function resetAccountAuthMeCache(): void {
   authMeShared = null;
 }
 
-async function sendAccountRequest(
-  method: Method,
-  path: string,
-  body?: unknown,
-): Promise<unknown> {
+async function sendAccountRequest(method: Method, path: string, body?: unknown): Promise<unknown> {
   const transport = accountTransport();
   if (transport === "desktop") {
     const bridge = window.desktopBridge!.unoAccount!;
