@@ -41,7 +41,10 @@ describe("accountRequest GET /auth/me", () => {
 
   it("leaves other requests alone", async () => {
     const fetchMock = stubWorkProxy(async () => new Response("[]", { status: 200 }));
-    await Promise.all([accountRequest("GET", "/api/v1/boxes"), accountRequest("GET", "/api/v1/boxes")]);
+    await Promise.all([
+      accountRequest("GET", "/api/v1/boxes"),
+      accountRequest("GET", "/api/v1/boxes"),
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

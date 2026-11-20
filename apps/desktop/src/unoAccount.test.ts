@@ -50,7 +50,9 @@ describe("UnoAccountService", () => {
         expect(body.code).toBe("CODE123");
         return new Response(JSON.stringify({ token: "uno_usr_secret", user: { email: "m@x" } }));
       }
-      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe("Bearer uno_usr_secret");
+      expect((init?.headers as Record<string, string> | undefined)?.Authorization).toBe(
+        "Bearer uno_usr_secret",
+      );
       return new Response(JSON.stringify({ boxes: [] }));
     }) as typeof fetch;
     const { service, filePath } = makeService(consoleFetch);
@@ -70,7 +72,9 @@ describe("UnoAccountService", () => {
       if (method === "POST" && input.endsWith("/api/v1/work/desktop-token")) {
         return new Response(JSON.stringify({ token: "uno_usr_secret", user: { email: "m@x" } }));
       }
-      seen.push(`${method} ${input} ${(init?.headers as Record<string, string> | undefined)?.Authorization}`);
+      seen.push(
+        `${method} ${input} ${(init?.headers as Record<string, string> | undefined)?.Authorization}`,
+      );
       if (down) throw new TypeError("fetch failed");
       return new Response(null, { status: 204 });
     }) as typeof fetch;

@@ -523,7 +523,9 @@ export function sparkTools(kit: SparkToolKit): ReadonlyArray<UnoWorkTool> {
           path: appPath(name, "/rollback"),
           json: { to },
         }).pipe(
-          Effect.flatMap((reply) => ensureOk(kit, reply, { name, what: `roll back to version ${to}` })),
+          Effect.flatMap((reply) =>
+            ensureOk(kit, reply, { name, what: `roll back to version ${to}` }),
+          ),
           Effect.map((reply) => {
             const json = (reply.json ?? {}) as Record<string, unknown>;
             return {

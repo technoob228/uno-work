@@ -317,9 +317,21 @@ describe("planAutoRoles: Uno applies its set by itself, never over the person's 
       }),
     ).toBeNull();
     // Still only Uno AI and a set applied: nothing again.
-    const first = planAutoRoles({ roles: unoOnly, autoComplex: null, preset: null, current: untouched, now })!;
+    const first = planAutoRoles({
+      roles: unoOnly,
+      autoComplex: null,
+      preset: null,
+      current: untouched,
+      now,
+    })!;
     expect(
-      planAutoRoles({ roles: unoOnly, autoComplex: null, preset: first.preset, current: untouched, now }),
+      planAutoRoles({
+        roles: unoOnly,
+        autoComplex: null,
+        preset: first.preset,
+        current: untouched,
+        now,
+      }),
     ).toBeNull();
   });
 

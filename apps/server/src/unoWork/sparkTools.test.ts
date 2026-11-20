@@ -553,9 +553,9 @@ describe("spark_versions, spark_rollback", () => {
           ? { status: 0 }
           : notFound('"cafe-bot" has no version 1 kept;', "no_version"),
     });
-    expect(failMessage(await run("spark_rollback", gone.deps, { name: "cafe-bot", to: 1 }))).toMatch(
-      /keeps only the last few versions.*spark_versions/,
-    );
+    expect(
+      failMessage(await run("spark_rollback", gone.deps, { name: "cafe-bot", to: 1 })),
+    ).toMatch(/keeps only the last few versions.*spark_versions/);
     const same = makeDeps({
       respond: (call) =>
         call.url.endsWith("/spark/token")
@@ -568,7 +568,9 @@ describe("spark_versions, spark_rollback", () => {
               }),
             },
     });
-    const message = failMessage(await run("spark_rollback", same.deps, { name: "cafe-bot", to: 4 }));
+    const message = failMessage(
+      await run("spark_rollback", same.deps, { name: "cafe-bot", to: 4 }),
+    );
     expect(message).toMatch(/Nothing changed: version 4 is the current one/);
     expect(message).not.toMatch(/app limit/);
   });
