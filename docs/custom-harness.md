@@ -1,6 +1,6 @@
 # Custom harnesses — bring your own agent into Uno Work
 
-Uno Work can run **your own agent** in its chat, next to the built-in ones (Uno, Claude, Codex, OpenCode, Hermes…): an agent you wrote, or a third-party CLI such as Gemini CLI, `opencode`, Goose, Kimi Code — anything installed on the machine that speaks the **Agent Client Protocol (ACP)**.
+Uno Work can run **your own agent** in its chat, next to the built-in ones (Uno, Claude, Codex, Gemini CLI, OpenCode, Hermes…): an agent you wrote, or a third-party CLI such as Goose, Kimi Code, Qwen Code — anything installed on the machine that speaks the **Agent Client Protocol (ACP)**.
 
 You get the same chat UI as the built-in agents: streaming answers, tool calls with diffs, plans, Approve / Deny cards, the model picker, per-chat sessions, stop/resume.
 
@@ -204,11 +204,11 @@ Settings → Harnesses → **Test connection** runs the whole handshake in a thr
 
 Check your tool's own documentation for its ACP mode — flags change between versions. Verified on 2026-09-24:
 
-| Tool              | Command                                      | Checked with                               |
-| ----------------- | -------------------------------------------- | ------------------------------------------ |
-| Gemini CLI 0.61.0 | `gemini --acp` (older: `--experimental-acp`) | `gemini --help`                            |
-| OpenCode          | `opencode acp`                               | `opencode --help`                          |
-| Hermes Agent      | `hermes acp`                                 | `hermes --help` (also built into Uno Work) |
+| Tool              | Command                                      | Checked with                                        |
+| ----------------- | -------------------------------------------- | --------------------------------------------------- |
+| Gemini CLI 0.61.0 | `gemini --acp` (older: `--experimental-acp`) | `gemini --help` (built into Uno Work since 0.0.191) |
+| OpenCode          | `opencode acp`                               | `opencode --help`                                   |
+| Hermes Agent      | `hermes acp`                                 | `hermes --help` (also built into Uno Work)          |
 
 For other tools (Kimi Code, Goose, Devin CLI, …) check the tool's docs for "ACP" / "Agent Client Protocol" support.
 

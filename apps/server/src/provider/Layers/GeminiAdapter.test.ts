@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { Effect, Exit, Fiber, Layer, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Option, Schema, Stream } from "effect";
 
 import {
   GeminiSettings,
@@ -178,6 +178,31 @@ it.effect("Full access answers the shell prompt itself", () =>
         const turn = yield* runTurn(adapter, threadId, "DO_SHELL");
         assert.equal(turn.asked, 0);
         assert.match(turn.text, /^shell allowed; mode=default/);
+        yield* adapter.stopSession(threadId);
+      }),
+    );
+  }),
+);
+
+it.effect("a refused API key comes back as a failed turn with Google's own words", () =>
+  Effect.gen(function* () {
+    const machine = yield* makeMachine(API_KEY_SETTINGS);
+    const env = { ...machine.env, GEMINI_API_KEY: "test-key" };
+    yield* withAdapter(env, (adapter) =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("gemini-api-error");
+        yield* start(adapter, threadId, "approval-required");
+        const sent = yield* Effect.exit(
+          adapter.sendTurn({ threadId, input: "DO_API_ERROR", attachments: [] }),
+        );
+        assert.ok(Exit.isFailure(sent));
+        const failure = Cause.findErrorOption(sent.cause);
+        assert.ok(Option.isSome(failure), Cause.pretty(sent.cause));
+        assert.match(
+          String(failure.value.message),
+          /API key not valid\. Please pass a valid API key\./,
+        );
+        assert.notMatch(String(failure.value.message), /\{"error"/);
         yield* adapter.stopSession(threadId);
       }),
     );

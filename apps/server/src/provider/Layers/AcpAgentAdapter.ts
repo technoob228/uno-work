@@ -209,6 +209,39 @@ function parseResume(raw: unknown): { sessionId: string } | undefined {
   return { sessionId: raw.sessionId.trim() };
 }
 
+/**
+ * The words of an agent's JSON-RPC error. The ACP client turns an error
+ * answer to `session/prompt` into a defect carrying only its message, and
+ * some agents put an API's whole JSON body there — Gemini CLI 0.70 answers a
+ * refused key with `{"error":{"message":"{\n \"error\": {\"message\":
+ * \"API key not valid…\"…`. Unwraps such JSON down to the innermost message.
+ */
+export function agentErrorText(defect: unknown): string {
+  let text =
+    defect instanceof Error
+      ? defect.message
+      : typeof defect === "object" && defect !== null && "message" in defect
+        ? String((defect as { message: unknown }).message)
+        : String(defect);
+  for (let depth = 0; depth < 4; depth += 1) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      break;
+    }
+    if (typeof parsed !== "object" || parsed === null) break;
+    const record = parsed as { error?: unknown; message?: unknown };
+    const inner =
+      typeof record.error === "object" && record.error !== null
+        ? (record.error as { message?: unknown }).message
+        : record.message;
+    if (typeof inner !== "string") break;
+    text = inner;
+  }
+  return text.trim() || "The agent failed without a message.";
+}
+
 function withStderr(detail: string, stderr: string): string {
   const tail = stderr.trim().split("\n").slice(-12).join("\n").trim();
   return tail.length > 0 ? `${detail}\n\nAgent stderr (last lines):\n${tail}` : detail;
@@ -817,6 +850,19 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                       })
                     : mapped;
                 }),
+                // An error answer of the agent arrives as a defect (see
+                // agentErrorText): a failed turn with the agent's own words,
+                // not a crash of the chat.
+                Effect.catchDefect((defect) =>
+                  Effect.fail(
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "session/prompt",
+                      detail: agentErrorText(defect),
+                      cause: defect,
+                    }),
+                  ),
+                ),
               );
 
             liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });

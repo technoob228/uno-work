@@ -86,6 +86,30 @@ const handlers = {
       .filter((block) => block.type === "text")
       .map((block) => block.text)
       .join("\n");
+    if (/\bDO_API_ERROR\b/.test(text)) {
+      // What Gemini CLI 0.70 answers when Google refuses the key (checked
+      // live 20.11.2026): HTTP status as the JSON-RPC code, the API's JSON
+      // body wrapped twice in the message.
+      const body = JSON.stringify(
+        {
+          error: {
+            code: 400,
+            message: "API key not valid. Please pass a valid API key.",
+            status: "INVALID_ARGUMENT",
+          },
+        },
+        null,
+        2,
+      );
+      throw Object.assign(new Error("api"), {
+        rpc: {
+          code: 400,
+          message: JSON.stringify({
+            error: { message: `${body}\n`, code: 400, status: "Bad Request" },
+          }),
+        },
+      });
+    }
     const parts = [];
     if (/\bDO_MCP\b/.test(text)) {
       const allowed = await permission(sessionId, {
@@ -127,6 +151,6 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   try {
     send({ id: msg.id, result: await handler(msg.params ?? {}) });
   } catch (error) {
-    send({ id: msg.id, error: { code: -32603, message: String(error) } });
+    send({ id: msg.id, error: error.rpc ?? { code: -32603, message: String(error) } });
   }
 });

@@ -156,7 +156,12 @@ export function pollDemoAuth(jobId: string) {
       status: {
         ...base,
         state: "running",
-        verificationUrl: "https://claude.ai/oauth/authorize?demo",
+        verificationUrl:
+          job.driver === "gemini"
+            ? "https://accounts.google.com/o/oauth2/v2/auth?demo"
+            : "https://claude.ai/oauth/authorize?demo",
+        // Gemini CLI shows a code on Google's page to paste back here.
+        ...(job.driver === "gemini" ? { needsCodeInput: true } : {}),
       },
       done: false,
     };
@@ -355,7 +360,38 @@ function signInProvidersFor(machineKey: string, checkedAt: string, version: stri
     slashCommands: [],
     skills: [],
   });
-  return [agent("claudeAgent"), agent("codex")];
+  // Gemini CLI (T58, 20.11): installed, signs in with a Google account.
+  const gemini = {
+    ...agent("claudeAgent"),
+    driver: "gemini",
+    instanceId: "gemini",
+    displayName: "Gemini CLI",
+    auth: signedInHere.has("gemini")
+      ? {
+          status: "authenticated",
+          type: "oauth-personal",
+          label: "Google account",
+          email: "misha@getuno.xyz",
+        }
+      : { status: "unauthenticated" },
+    models: [
+      { slug: "auto", name: "Auto", isCustom: false, capabilities: null, isDefault: true },
+      {
+        slug: "gemini-3.1-pro-preview-customtools",
+        name: "Gemini 3.1 Pro Preview",
+        isCustom: false,
+        capabilities: null,
+      },
+      {
+        slug: "gemini-3-flash-preview",
+        name: "Gemini 3 Flash Preview",
+        isCustom: false,
+        capabilities: null,
+      },
+      { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro", isCustom: false, capabilities: null },
+    ],
+  };
+  return [agent("claudeAgent"), agent("codex"), gemini];
 }
 
 /** Claude Code (and Codex on the MacBook) signed in with the person's own accounts. */

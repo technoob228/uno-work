@@ -207,8 +207,8 @@ export function CustomHarnessDialog({
             <DialogTitle>{editing ? "Edit custom harness" : "Add custom harness"}</DialogTitle>
             <DialogDescription>
               Any agent installed on this machine that speaks the Agent Client Protocol (ACP) — your
-              own, Gemini CLI, opencode, Kimi Code… It gets its own chats, the Approve / Deny cards
-              and the model picker, like the built-in agents.
+              own, Goose, Kimi Code, Qwen Code… It gets its own chats, the Approve / Deny cards and
+              the model picker, like the built-in agents.
             </DialogDescription>
           </DialogHeader>
 
@@ -217,7 +217,7 @@ export function CustomHarnessDialog({
               <Field label="Name" error={errors.name}>
                 <Input
                   className="bg-background"
-                  placeholder="e.g. Gemini CLI"
+                  placeholder="e.g. Goose"
                   value={draft.name}
                   onChange={(event) => update({ name: event.target.value })}
                   aria-invalid={Boolean(errors.name)}
