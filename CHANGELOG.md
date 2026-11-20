@@ -16,6 +16,7 @@
 - A cloud chat can ask to start a chat on your Mac. The request shows up in Uno Work on the Mac (Needs you and the sidebar) and in Telegram, and the chat starts only after you press Start. It is off until you turn it on in Settings → Computer on the Mac.
 - Pull request automations have "Ask me first". Untick it for your own repositories, and a PR review in a chat runs without an Allow on every step. A PR automation can't be saved on an assistant; the window says so right away and offers a chat instead.
 - The text of someone else's pull request no longer gives the agent orders: it counts as outside text, like a form or a webhook. The desktop installer trusts only Uno's own addresses.
+- New chat opens a small picker right on the button: your computers on top, folders below, the last one you used highlighted. One click or Enter starts the chat there. Shift-click starts in the open chat's folder as before. In Pinned, "+ Link" shows only when you point at it, so it no longer looks like a new chat.
 - Apps & sites → Apps is one grid of big icons with search on top, like Launchpad. Enter opens the first match, Esc clears the search.
 - Settings → Security: who signed in to your computers and what is open to the internet. Until protection is on for your account, the screen says so and offers to write to support.
 - The agent can share an app with a teammate: the teammate signs in with their own Uno account, and the agent can take the access back the same way. No public link and no tunnels.
