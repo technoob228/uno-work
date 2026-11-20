@@ -313,20 +313,22 @@ export function sessionCantLines(name: string, projectName: string): ReadonlyArr
 
 /**
  * Who wrote a message the daemon put into a chat from a colleague (T51),
- * read off its first line. The daemon frames it as text from outside (T49):
+ * read off its first line. The texts are the daemon's own
+ * (apps/server/src/team/teamNotes.logic.ts, chatRequests/hostLogic.ts
+ * `framedTeamBrief`); the colleague's words sit in an `<outside_input_…>`
+ * block (T49):
  *
- *   [Uno Work: from Andrei's agent, chat "Pricing page: mobile layout", project landing, level answer]
- *   …
- *   <outside_input_x7f3>
- *   the colleague's words
- *   </outside_input_x7f3>
+ * - a colleague typed in a chat shared with them:
+ *   `[Uno Work · team] A message from Andrei, a colleague in landing: …`
+ * - their agent asks a question here (read-only answer):
+ *   `[Uno Work · team] Andrei's agent (a colleague in landing, from their chat “Pricing”) asks a question …`
+ * - the answer to this chat's request came back:
+ *   `[Uno Work · team] About this chat's request to Andrei (a colleague in landing) … The answer is Andrei's agent's text …`
+ * - a session started at their request:
+ *   `[Uno Work: this chat was started at the request of Andrei's agent (a colleague in landing, from their chat “Pricing”); …]`
  *
- * or, for a message a colleague typed into a chat shared with them:
- *
- *   [Uno Work: from Andrei, a colleague in landing]
- *
- * `chat`, `project` and `level` may be missing; quotes may be straight or
- * curly. Anything else — not this.
+ * A note with no colleague's words in it (a status line) is not this.
+ * Keep in step with the daemon's texts: team.logic.test.ts quotes them.
  */
 export interface TeamOutsideText {
   readonly name: string;
@@ -334,37 +336,66 @@ export interface TeamOutsideText {
   readonly chatTitle: string | null;
   readonly project: string | null;
   readonly level: AgentLevel | null;
-  /** The colleague's words (inside the outside block when there is one). */
+  /** The colleague's words (inside the outside block). */
   readonly body: string;
 }
 
-const TEAM_HEADER = /^\[Uno Work: from ([^\n\]]+)\][ \t]*(?:\n|$)/;
-const AGENT_WHO = /^(.+?)['’]s agent\b/;
-const COLLEAGUE_WHO = /^(.+?), a colleague(?: in ([^,]+))?/;
-const CHAT_TITLE = /\bchat ["“]([^"”]+)["”]/;
-const PROJECT = /\bproject ([^,]+)/;
-const LEVEL = /\blevel (off|ask|answer|tasks)\b/;
+const NOTE = "[Uno Work · team] ";
+const COLLEAGUE_MESSAGE =
+  /^A message from (.+?), a colleague in (.+?): the person shared this chat/;
+const AGENT_QUESTION =
+  /^(.+?)['’]s agent \(a colleague in (.+?), from their chat “(.*?)”\) asks a question/;
+const REQUEST_ANSWER = /^About this chat's request to (.+?) \(a colleague in (.+?)\) /;
+const SESSION_BRIEF =
+  /^\[Uno Work: this chat was started at the request of (.+?) \(a colleague in (.+?), from their chat “(.*?)”\); /;
 // The block opens on a line of its own: the line before it names the tag too.
 const OUTSIDE_BLOCK = /(?:^|\n)<(outside_input_[A-Za-z0-9_-]+)>[ \t]*\n([\s\S]*?)\n?<\/\1>/;
 
+const agentName = (who: string) => /^(.+?)['’]s agent$/.exec(who)?.[1] ?? null;
+
 export function parseTeamOutsideText(text: string): TeamOutsideText | null {
-  const header = TEAM_HEADER.exec(text);
-  if (!header) return null;
-  const inner = header[1]!.trim();
-  const agent = AGENT_WHO.exec(inner);
-  const colleague = agent ? null : COLLEAGUE_WHO.exec(inner);
-  const name = (agent?.[1] ?? colleague?.[1] ?? "").trim();
-  if (!name) return null;
   const block = OUTSIDE_BLOCK.exec(text);
-  const body = (block ? block[2]! : text.slice(header[0].length)).trim();
-  return {
-    name,
-    kind: agent ? "agent" : "colleague",
-    chatTitle: CHAT_TITLE.exec(inner)?.[1]?.trim() ?? null,
-    project: (PROJECT.exec(inner)?.[1] ?? colleague?.[2] ?? "").trim() || null,
-    level: (LEVEL.exec(inner)?.[1] as AgentLevel | undefined) ?? null,
-    body,
-  };
+  if (!block) return null;
+  const body = block[2]!.trim();
+  const firstLine = text.slice(0, text.indexOf("\n") === -1 ? text.length : text.indexOf("\n"));
+  const make = (
+    who: string,
+    kind: "agent" | "colleague",
+    project: string,
+    chatTitle: string | null,
+    level: AgentLevel | null,
+  ): TeamOutsideText | null =>
+    who.trim()
+      ? { name: who.trim(), kind, chatTitle, project: project.trim() || null, level, body }
+      : null;
+
+  const session = SESSION_BRIEF.exec(firstLine);
+  if (session) {
+    const agent = agentName(session[1]!);
+    const level = firstLine.includes("is Do tasks") ? "tasks" : null;
+    return make(
+      agent ?? session[1]!,
+      agent ? "agent" : "colleague",
+      session[2]!,
+      session[3] || null,
+      level,
+    );
+  }
+  if (!firstLine.startsWith(NOTE)) return null;
+  const rest = firstLine.slice(NOTE.length);
+  const message = COLLEAGUE_MESSAGE.exec(rest);
+  if (message) return make(message[1]!, "colleague", message[2]!, null, null);
+  const question = AGENT_QUESTION.exec(rest);
+  if (question) {
+    const level = rest.includes("is Answer questions") ? "answer" : "ask";
+    return make(question[1]!, "agent", question[2]!, question[3] || null, level);
+  }
+  const answer = REQUEST_ANSWER.exec(rest);
+  if (answer) {
+    const byAgent = rest.includes(`The answer is ${answer[1]!}'s agent's text`);
+    return make(answer[1]!, byAgent ? "agent" : "colleague", answer[2]!, null, null);
+  }
+  return null;
 }
 
 /** "Andrei's agent" / "Andrei": whose text the chat holds, by the latest such message. */

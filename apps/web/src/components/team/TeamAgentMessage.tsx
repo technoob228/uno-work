@@ -1,7 +1,7 @@
 /**
  * T51 (d): a message a colleague's agent (or a colleague, in a chat shared
  * with them) put into my chat. The daemon frames it as text from outside
- * with a first line `[Uno Work: from Andrei's agent, chat "…", …]`
+ * with the daemon's first line (`[Uno Work · team] Andrei's agent (…) asks …`, team.logic.ts)
  * (team.logic.ts `parseTeamOutsideText`). Here: who wrote it — their face
  * with the bot badge, their chat, the level it came in under — then their
  * words, never shown as mine.
