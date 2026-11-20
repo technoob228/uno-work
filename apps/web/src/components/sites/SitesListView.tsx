@@ -1,9 +1,9 @@
 /**
  * Apps & sites (sidebar D, 0.0.105): one place with two tabs.
  *
- * - Apps: every app of the computer with its one primary action — Open, Start,
- *   Open in Telegram / Waiting for token for a bot, Show on the internet (the
- *   list the sidebar's Apps mode had, SidebarAppsList), plus the app servers.
+ * - Apps: every app of the computer as a grid of icons with a search, like
+ *   Launchpad (`AppsGrid`, 28.10) — a click does its one primary action (Open,
+ *   Start, Open in Telegram…); plus the app servers.
  * - Sites: the person's sites on Uno Hosting, read by this computer's daemon
  *   (`uno.sites.list`, the console's `/api/v1/work/sites` with the machine's
  *   token), so it works on the computer's direct address too. Each site: its
@@ -40,8 +40,8 @@ import { usePreviewPane } from "../preview/PreviewPaneContext";
 import { openInNewTab } from "../../navigation/useOpenApp";
 import { selectEnvironmentState, useStore } from "../../store";
 import { useHomeLaunchers } from "../computer/useHomeLaunchers";
-import { SidebarAppsList } from "../sidebar/SidebarAppsList";
 import { SidebarShowButton } from "../sidebar/SidebarShowButton";
+import { AppsGrid } from "./AppsGrid";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -135,10 +135,15 @@ export function SitesListView() {
           </div>
         </header>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-4 sm:px-5">
-          <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
+          <div
+            className={cn(
+              "mx-auto flex w-full flex-1 flex-col",
+              tab === "apps" ? "max-w-5xl" : "max-w-3xl",
+            )}
+          >
             {tab === "apps" ? (
               <div className="flex flex-1 flex-col" data-testid="apps-list">
-                <SidebarAppsList variant="page" />
+                <AppsGrid />
               </div>
             ) : (
               <SitesList environmentId={environmentId} sites={sites} />
