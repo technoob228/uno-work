@@ -206,7 +206,9 @@ export function makeCommandGuard(
         },
         signal,
       );
-      return REFUSED_TIERS.has(verdict.tier) ? { deny: guardDenial(verdict.reason, plan.why) } : null;
+      return REFUSED_TIERS.has(verdict.tier)
+        ? { deny: guardDenial(verdict.reason, plan.why) }
+        : null;
     },
   };
 }

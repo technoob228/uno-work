@@ -68,8 +68,7 @@ export function countTool(counts: ToolCounts, itemType: unknown): ToolCounts {
   return { ...counts, other: counts.other + 1 };
 }
 
-const plural = (count: number, one: string, many: string) =>
-  `${count} ${count === 1 ? one : many}`;
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 /** "Ran 3 commands, edited 2 files, used 1 tool"; null when the turn used none. */
 export function activityLine(counts: ToolCounts): string | null {
@@ -166,7 +165,12 @@ export function rememberSent(
 
 const eventBytes = (event: MirrorEvent) =>
   Buffer.byteLength(
-    JSON.stringify({ message_id: event.messageId, role: event.role, text: event.text, at: event.at }),
+    JSON.stringify({
+      message_id: event.messageId,
+      role: event.role,
+      text: event.text,
+      at: event.at,
+    }),
     "utf8",
   );
 
@@ -201,7 +205,11 @@ export function threadStatusOf(shell: {
 }): TeamChatStatus {
   if (shell.hasPendingApprovals === true || shell.hasPendingUserInput === true) return "waiting";
   const status = shell.session?.status;
-  if (status === "running" || status === "starting" || (shell.session?.activeTurnId ?? null) !== null)
+  if (
+    status === "running" ||
+    status === "starting" ||
+    (shell.session?.activeTurnId ?? null) !== null
+  )
     return "running";
   return "idle";
 }

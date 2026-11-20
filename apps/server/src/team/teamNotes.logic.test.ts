@@ -106,7 +106,9 @@ describe("the question brief", () => {
 describe("Telegram", () => {
   it("a session: one line as code, signed, buttons line only with buttons", () => {
     const copy = telegramCopy(request(), { computerName: "MacBook", buttons: true });
-    expect(copy.text).toContain("Andrei's agent (a colleague in Shop) asks to start a session on MacBook");
+    expect(copy.text).toContain(
+      "Andrei's agent (a colleague in Shop) asks to start a session on MacBook",
+    );
     expect(copy.text).toContain("(text of Andrei's agent)");
     expect(copy.text).toContain("`");
     expect(copy.textWithoutButtons).toContain("Open Uno Work");

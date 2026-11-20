@@ -322,7 +322,8 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
             ...(entry.model ? { model: entry.model } : {}),
             // No wider than the chat that asked, nor than the project's chats here.
             // A colleague's: edits without asking at most, commands wait for a yes.
-            runtimeMode: team !== undefined ? TEAM_RUNTIME_MODE : (entry.runtimeMode ?? "full-access"),
+            runtimeMode:
+              team !== undefined ? TEAM_RUNTIME_MODE : (entry.runtimeMode ?? "full-access"),
             startedBy:
               team !== undefined
                 ? {
@@ -360,7 +361,10 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
         );
         yield* persist(next.store, next.record ? [next.record] : [], true);
         if (next.record) {
-          yield* journal(team?.auto === true && via === "here" ? "auto-started" : "started", next.record);
+          yield* journal(
+            team?.auto === true && via === "here" ? "auto-started" : "started",
+            next.record,
+          );
         }
         return { state: stateOf(next.store, nowMs()), threadId: result.threadId };
       });
@@ -469,11 +473,13 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
           }),
         ),
       threadStatus: (threadId) =>
-        host.status(threadId).pipe(
-          Effect.map((reply) =>
-            reply.status === 200 ? (reply.body as ManagerRemoteChatStatus) : null,
+        host
+          .status(threadId)
+          .pipe(
+            Effect.map((reply) =>
+              reply.status === 200 ? (reply.body as ManagerRemoteChatStatus) : null,
+            ),
           ),
-        ),
       records: io(() => readHostStore(stateDir)).pipe(
         Effect.map((store) => store.records.filter((entry) => entry.team !== undefined)),
       ),

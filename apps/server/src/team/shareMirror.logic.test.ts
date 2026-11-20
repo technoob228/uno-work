@@ -29,7 +29,15 @@ const message = (
 
 describe("the feed of a shared chat", () => {
   it("has what the person and the agent said, and one line per turn of what it did", () => {
-    const tools = new Map([["t1", countTool(countTool(countTool(NO_TOOLS, "command_execution"), "command_execution"), "file_change")]]);
+    const tools = new Map([
+      [
+        "t1",
+        countTool(
+          countTool(countTool(NO_TOOLS, "command_execution"), "command_execution"),
+          "file_change",
+        ),
+      ],
+    ]);
     const events = snapshotEvents(
       [
         message("m1", "user", "Fix the order form", "t1"),
@@ -50,7 +58,9 @@ describe("the feed of a shared chat", () => {
   });
 
   it("starts with the last 200 messages", () => {
-    const many = Array.from({ length: 250 }, (_, index) => message(`m${index}`, "user", `hi ${index}`));
+    const many = Array.from({ length: 250 }, (_, index) =>
+      message(`m${index}`, "user", `hi ${index}`),
+    );
     const events = snapshotEvents(many, new Map());
     expect(events).toHaveLength(200);
     expect(events[0]!.messageId).toBe("m50");

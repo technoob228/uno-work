@@ -21,7 +21,8 @@ const MIN_VALUE_CHARS = 8;
 /** A value this long is looked for even when it is only letters. */
 const PLAIN_VALUE_CHARS = 16;
 
-const PEM = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
+const PEM =
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 
 const TOKEN_PATTERNS: ReadonlyArray<RegExp> = [
   // OpenAI / Anthropic style keys (sk-…, sk-ant-…, sk-proj-…)

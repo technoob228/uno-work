@@ -97,7 +97,8 @@ export function outgoingNote(request: TeamRequest, nonce: string): string | null
   const project = label(request.projectName, "the project");
   const head = `${TEAM_NOTE_PREFIX} About this chat's request to ${who} (a colleague in ${project}) ${quoted(request)}: ${phrase}`;
   const reason =
-    request.reason && ["declined", "refused", "cancelled", "stopped", "expired"].includes(request.status)
+    request.reason &&
+    ["declined", "refused", "cancelled", "stopped", "expired"].includes(request.status)
       ? ` Why: ${label(request.reason, "", 300)}`
       : "";
   const answer = request.answer?.trim() ?? "";
@@ -163,7 +164,8 @@ export function telegramCopy(
   request: TeamRequest,
   input: { readonly computerName: string; readonly buttons: boolean },
 ): TelegramCopy {
-  const who = plain(request.from.username ?? request.from.email?.split("@")[0] ?? "") || "A colleague";
+  const who =
+    plain(request.from.username ?? request.from.email?.split("@")[0] ?? "") || "A colleague";
   const project = plain(request.projectName) || "a project";
   const computer = plain(input.computerName) || "your computer";
   const what = agentTextForMessenger(

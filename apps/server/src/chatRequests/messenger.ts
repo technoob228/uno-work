@@ -275,7 +275,8 @@ export async function answerChatRequestPress(
 ): Promise<ChatRequestPressReply> {
   if (action.requestId.startsWith(TEAM_REQUEST_ID_PREFIX)) {
     const team = teamDecider;
-    if (team === null) return chatRequestPressReply({ kind: "gone" }, action.decision, language, nowMs);
+    if (team === null)
+      return chatRequestPressReply({ kind: "gone" }, action.decision, language, nowMs);
     return team(action, language).catch(() =>
       chatRequestPressReply({ kind: "failed" }, action.decision, language, nowMs),
     );

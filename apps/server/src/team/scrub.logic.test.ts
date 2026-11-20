@@ -69,9 +69,7 @@ describe("scrubSecrets", () => {
     expect(scrubSecrets('{"api_key": "zz9-plural-z-alpha"}').text).toBe(
       `{"api_key": "${SCRUBBED}"}`,
     );
-    expect(scrubSecrets("DB_PASSWORD=correct-horse-battery").text).toBe(
-      `DB_PASSWORD=${SCRUBBED}`,
-    );
+    expect(scrubSecrets("DB_PASSWORD=correct-horse-battery").text).toBe(`DB_PASSWORD=${SCRUBBED}`);
   });
 
   it("leaves ordinary text alone", () => {

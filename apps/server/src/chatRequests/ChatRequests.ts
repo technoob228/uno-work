@@ -122,7 +122,9 @@ export const ChatRequestsLive = Layer.effect(
       // T51: a colleague's words, outside text (T49); without the record, no start.
       markOutside: (threadId) =>
         outside === null
-          ? Effect.fail(fail("Outside text can't be marked here, so a colleague's chat can't start."))
+          ? Effect.fail(
+              fail("Outside text can't be marked here, so a colleague's chat can't start."),
+            )
           : outside.mark(threadId),
     });
     const stateDir = config.stateDir;
