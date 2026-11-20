@@ -27,7 +27,13 @@ import {
   formatChannelNotifyText,
   pickPersonChats,
 } from "../connectorNotify.ts";
-import { buttonsAsText, chatHeaderLine } from "../connectorButtons.ts";
+import { chatHeaderLine } from "../connectorButtons.ts";
+import {
+  slackNumberHint,
+  slackOptionsText,
+  slackReplyHint,
+  slackReplyOptions,
+} from "../slackReplyRoutes.ts";
 import { escapeRichText } from "../telegramRichCard.ts";
 import { agentWidgetTitle } from "../telegramWidgetCard.ts";
 import { resolveConnectorOutgoingFile } from "../connectorOutgoingFiles.ts";
@@ -462,12 +468,30 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           if (sent.error !== null) note = sent.error;
           continue;
         }
-        // Slack: options as a line; the file goes after the text.
+        // Slack: options numbered (a number in the thread picks one); the
+        // file goes after the text. Another chat's message is answered in
+        // its thread, and the answer goes back to that chat.
         const target = parseSlackChatKey(chat.chatId);
         const tooBig = sizeOfFile > SLACK_UPLOAD_LIMIT_BYTES;
+        // A card's choice is numbered in its text already: only how to answer.
+        const cardOptions =
+          input.card?.kind === "choice"
+            ? input.card.options.map((option) => ({
+                label: option.label,
+                value: option.prompt ?? option.label,
+              }))
+            : null;
+        const options = cardOptions ?? (plainText === text ? slackReplyOptions(buttons) : []);
+        const routeReplies = !fromAssistant && input.approval !== true;
         const slackText = [
           plainText,
-          buttons.length > 0 && plainText === text ? buttonsAsText(buttons, language) : null,
+          cardOptions !== null && cardOptions.length > 0
+            ? slackNumberHint(language)
+            : options.length > 0
+              ? slackOptionsText(options, language)
+              : routeReplies
+                ? slackReplyHint(language)
+                : null,
           tooBig ? yield* largeFileLine("Slack") : null,
         ]
           .filter((part): part is string => part !== null)
@@ -483,11 +507,17 @@ const makeConnectorNotifyService = Effect.gen(function* () {
         const ok = yield* slack.sendText({
           ...place,
           text: slackText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
+          ...(routeReplies || options.length > 0
+            ? { routeReplies: { threadId: input.threadId, options } }
+            : {}),
         });
         if (ok) {
           delivered += 1;
           if (via === "none") via = "slack";
-          if (buttons.length > 0) note = "Slack got the buttons as a list of options.";
+          if (options.length > 0) {
+            note =
+              "Slack got the buttons as numbered options: the person's number (or the option) comes back as the button's value.";
+          }
           if (filePath !== null && !tooBig) {
             yield* slack.sendFile({ ...place, filePath });
           }

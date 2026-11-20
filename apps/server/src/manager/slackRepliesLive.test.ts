@@ -6,7 +6,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from "@effect/vitest";
-import { ASSISTANT_PROJECT_ID } from "@t3tools/contracts";
+import { ASSISTANT_PROJECT_ID, ThreadId } from "@t3tools/contracts";
 import { Clock, Effect, Layer, Option, Stream } from "effect";
 import * as fs from "node:fs";
 import * as http from "node:http";
@@ -26,7 +26,7 @@ import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurn
 import { ServerSettingsService } from "../serverSettings.ts";
 import { CONTROL_PLANE_URL_OVERRIDE_ENV } from "../workspaceRegistry/unoCloudParse.ts";
 import { fastClock, MINUTE, real, waitFor, World } from "./connectorRepliesTestkit.ts";
-import { ManagerSlackServiceLive } from "./Layers/SlackConnector.ts";
+import { ManagerSlackService, ManagerSlackServiceLive } from "./Layers/SlackConnector.ts";
 
 const SLR = "slr_" + "d".repeat(64);
 
@@ -42,7 +42,7 @@ let reactions: Array<{ readonly op: "add" | "remove"; readonly ts: string }> = [
 let nextCursor = 1;
 let server: http.Server;
 
-const dm = (text: string) => {
+const dm = (text: string, threadTs?: string) => {
   const cursor = nextCursor++;
   const ts = `1700000000.${String(cursor).padStart(6, "0")}`;
   queue.push({
@@ -50,7 +50,15 @@ const dm = (text: string) => {
     payload: {
       type: "event_callback",
       event_id: `Ev${cursor}`,
-      event: { type: "message", channel: "DOWNER", channel_type: "im", user: "UOWNER", text, ts },
+      event: {
+        type: "message",
+        channel: "DOWNER",
+        channel_type: "im",
+        user: "UOWNER",
+        text,
+        ts,
+        ...(threadTs !== undefined ? { thread_ts: threadTs } : {}),
+      },
     },
   });
   return ts;
@@ -115,12 +123,15 @@ let world = new World();
 let tmpDir = "";
 /** The DM's thread as the projection would show it. */
 let threadShell: { readonly id: string; readonly [key: string]: unknown } | null = null;
+/** Turn starts as dispatched: which chat, in which mode. */
+let turnStarts: Array<{ readonly threadId: string; readonly runtimeMode: string }> = [];
 
 beforeEach(() => {
   world.stop();
   world = new World();
   world.start();
   threadShell = null;
+  turnStarts = [];
   queue = [];
   posted = [];
   reactions = [];
@@ -151,6 +162,9 @@ const makeLayer = (dbPath: string) => {
                   runtimeMode: command.runtimeMode,
                   interactionMode: command.interactionMode,
                 };
+              }
+              if (command.type === "thread.turn.start") {
+                turnStarts.push({ threadId: command.threadId, runtimeMode: command.runtimeMode });
               }
               world.dispatch(command);
               return { sequence: 1 };
@@ -183,7 +197,10 @@ const makeLayer = (dbPath: string) => {
   );
 };
 
-const daemonRun = <A, E>(dbPath: string, body: Effect.Effect<A, E, ManagerConnectorRepository>) =>
+const daemonRun = <A, E>(
+  dbPath: string,
+  body: Effect.Effect<A, E, ManagerConnectorRepository | ManagerSlackService>,
+) =>
   Effect.gen(function* () {
     world.turns = yield* ProjectionTurnRepository;
     const repository = yield* ManagerConnectorRepository;
@@ -255,6 +272,56 @@ it.live(
             { text: "ответ: второй", threadTs: null, broadcast: false },
           ]);
           expect(world.turnCount).toBe(2);
+        }),
+      );
+    }),
+  90_000,
+);
+
+it.live(
+  "a reply in the thread of another chat's message goes to that chat; '1' picks its first option",
+  () =>
+    Effect.gen(function* () {
+      world.script = (text) => ({ durationMs: 30_000, answer: `ответ: ${text.split("\n")[0]}` });
+      const site = ThreadId.make("thread-site");
+      threadShell = {
+        id: site,
+        projectId: "proj-site",
+        archivedAt: null,
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+      };
+      yield* daemonRun(
+        nodePath.join(tmpDir, "state.sqlite"),
+        Effect.gen(function* () {
+          const slack = yield* ManagerSlackService;
+          let sent = false;
+          // The relay connection comes up on the first reconcile.
+          for (let attempt = 0; attempt < 300 && !sent; attempt += 1) {
+            sent = yield* slack.sendText({
+              projectId: ASSISTANT_PROJECT_ID,
+              channelId: "DOWNER",
+              text: "💬 Build the site\nDeploy now?\n1. Deploy\n2. Wait",
+              routeReplies: {
+                threadId: site,
+                options: [
+                  { label: "Deploy", value: "Deploy it" },
+                  { label: "Wait", value: "Wait" },
+                ],
+              },
+            });
+            if (!sent)
+              yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 50)));
+          }
+          expect(sent).toBe(true);
+          dm("1", "1700000099.000001");
+          expect(yield* waitFor(() => answers().length > 0, real(10 * MINUTE))).toBe(true);
+          expect(turnStarts).toEqual([{ threadId: site, runtimeMode: "approval-required" }]);
+          expect(world.dispatchedTexts[0]?.split("\n")[0]).toBe("Deploy it");
+          // The chat's answer lands in the same Slack thread.
+          expect(answers()).toEqual([
+            { text: "ответ: Deploy it", threadTs: "1700000099.000001", broadcast: false },
+          ]);
         }),
       );
     }),

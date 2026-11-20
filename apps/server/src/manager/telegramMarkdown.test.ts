@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   hidesLinkPreview,
   markdownLinksAsText,
+  boldForSlack,
   markdownLinksForSlack,
   renderTelegramHtml,
   telegramTextFields,
@@ -67,5 +68,13 @@ describe("a report link on its way to a messenger", () => {
     }
     expect(telegramTextFields("текст", true)).toEqual({ text: "текст", parse_mode: "HTML" });
     expect(telegramTextFields("текст", false)).toEqual({ text: "текст" });
+  });
+});
+
+describe("boldForSlack", () => {
+  it("turns Markdown **bold** into Slack's *bold*, leaves the rest", () => {
+    expect(boldForSlack("**Which design?**\n\n1. Light")).toBe("*Which design?*\n\n1. Light");
+    expect(boldForSlack("2 ** 3 and a*b")).toBe("2 ** 3 and a*b");
+    expect(boldForSlack("- Visits: **1 204** (week)")).toBe("- Visits: *1 204* (week)");
   });
 });
