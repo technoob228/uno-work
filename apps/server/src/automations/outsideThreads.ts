@@ -11,6 +11,11 @@
  * stops the run. The console caps outside runs at 100 a day, so the last 50,000
  * chats are over a year of them.
  *
+ * Only the person lifts a mark (`unmark`): "Trust this chat" in the chat,
+ * through an owner-session route (`automations/http.ts`), never a tool or an
+ * agent's token — the text the gate is for must not be able to open it. A
+ * file that can't be read stays as it is: every chat keeps asking.
+ *
  * @module automations/outsideThreads
  */
 import { promises as fs } from "node:fs";
@@ -27,6 +32,11 @@ export const OUTSIDE_THREADS_KEEP = 50_000;
 export interface OutsideThreadsShape {
   readonly has: (threadId: string) => Effect.Effect<boolean>;
   readonly mark: (threadId: string) => Effect.Effect<void>;
+  /**
+   * The person trusts the chat again. Same write as `mark`; a write that
+   * fails keeps the mark. Nothing changes while the file can't be read.
+   */
+  readonly unmark: (threadId: string) => Effect.Effect<void>;
 }
 
 export class OutsideThreads extends Context.Service<OutsideThreads, OutsideThreadsShape>()(
@@ -62,23 +72,34 @@ export const makeOutsideThreads = (file: string, keep = OUTSIDE_THREADS_KEEP) =>
     }
     const set = new Set(ids);
     const lock = yield* Semaphore.make(1);
+    /** Writes `next` (tmp + rename), then takes it as the list. */
+    const save = (next: string[]) =>
+      Effect.gen(function* () {
+        const snapshot = JSON.stringify({ threads: next });
+        yield* Effect.promise(async () => {
+          await fs.mkdir(path.dirname(file), { recursive: true });
+          const tmp = `${file}.${process.pid}.tmp`;
+          await fs.writeFile(tmp, snapshot, { mode: 0o600 });
+          await fs.rename(tmp, file);
+        });
+        ids.splice(0, ids.length, ...next);
+        set.clear();
+        for (const id of next) set.add(id);
+      });
     const shape: OutsideThreadsShape = {
       has: (threadId) => Effect.sync(() => unreadable || set.has(threadId)),
       mark: (threadId) =>
         lock.withPermits(1)(
           Effect.gen(function* () {
             if (set.has(threadId) || unreadable) return;
-            const next = [...ids, threadId].slice(-keep);
-            const snapshot = JSON.stringify({ threads: next });
-            yield* Effect.promise(async () => {
-              await fs.mkdir(path.dirname(file), { recursive: true });
-              const tmp = `${file}.${process.pid}.tmp`;
-              await fs.writeFile(tmp, snapshot, { mode: 0o600 });
-              await fs.rename(tmp, file);
-            });
-            ids.splice(0, ids.length, ...next);
-            set.clear();
-            for (const id of next) set.add(id);
+            yield* save([...ids, threadId].slice(-keep));
+          }),
+        ),
+      unmark: (threadId) =>
+        lock.withPermits(1)(
+          Effect.gen(function* () {
+            if (!set.has(threadId) || unreadable) return;
+            yield* save(ids.filter((id) => id !== threadId));
           }),
         ),
     };

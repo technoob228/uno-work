@@ -125,6 +125,7 @@ const connectorLayer = ManagerTelegramServiceLive.pipe(
       Layer.succeed(OutsideThreads, {
         has: (threadId) => Effect.succeed(marked.includes(threadId)),
         mark: (threadId) => Effect.sync(() => void marked.push(threadId)),
+        unmark: () => Effect.void,
       }),
       ServerSettingsService.layerTest({ uno: { apiKey: "sk-uno-test" } } as never),
       ServerConfig.layerTest(process.cwd(), { prefix: "uno-tg-groups-test-" }),

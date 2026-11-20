@@ -24,6 +24,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { AuthError } from "../auth/Services/ServerAuth.ts";
 import { authenticateOwnerSession, respondToAuthError } from "../manager/http.ts";
 import { AutomationsService, type AutomationsServiceShape } from "./AutomationsService.ts";
+import { OutsideThreads, type OutsideThreadsShape } from "./outsideThreads.ts";
 import { automationErrorBody, type AutomationClientError } from "./consoleClient.ts";
 
 const json = (body: unknown, status = 200) => HttpServerResponse.jsonUnsafe(body, { status });
@@ -190,6 +191,80 @@ export const automationsHookRotateRouteLayer = HttpRouter.add(
   ),
 );
 
+/** `:id` of a `/api/manager/threads/:id/…` path. */
+const threadIdParam = Effect.gen(function* () {
+  const params = yield* HttpRouter.params;
+  const raw = params.id?.trim() ?? "";
+  if (raw === "" || raw.length > 128) {
+    return yield* new AuthError({ message: "Unknown chat.", status: 400 });
+  }
+  return raw;
+});
+
+const outsideRoute = (
+  handler: (
+    threadId: string,
+    outside: OutsideThreadsShape,
+  ) => Effect.Effect<HttpServerResponse.HttpServerResponse>,
+) =>
+  Effect.gen(function* () {
+    // The person's own session: an agent holds a bridge or manager token,
+    // which is no session, so it gets 401 here.
+    yield* authenticateOwnerSession;
+    const threadId = yield* threadIdParam;
+    const outside = yield* Effect.serviceOption(OutsideThreads);
+    // Without the service nothing is marked, so nothing asks for this reason.
+    if (Option.isNone(outside)) return json({ holdsOutsideText: false });
+    return yield* handler(threadId, outside.value);
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError));
+
+export const threadOutsideTextRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/manager/threads/:id/outside-text",
+  outsideRoute((threadId, outside) =>
+    outside.has(threadId).pipe(Effect.map((holdsOutsideText) => json({ holdsOutsideText }))),
+  ),
+);
+
+export const threadTrustOutsideRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/manager/threads/:id/trust-outside",
+  outsideRoute((threadId, outside) =>
+    Effect.gen(function* () {
+      yield* outside.unmark(threadId);
+      if (yield* outside.has(threadId)) {
+        return json(
+          {
+            code: "OUTSIDE_MARKS_UNREADABLE",
+            error:
+              "Uno Work can't read its list of chats with outside text, so every chat asks first until it's repaired.",
+          },
+          409,
+        );
+      }
+      yield* Effect.logInfo("outside text: the person trusted a chat").pipe(
+        Effect.annotateLogs({ threadId }),
+      );
+      return json({ holdsOutsideText: false });
+    }).pipe(
+      // The write failed: the mark stays, and the person can try again.
+      Effect.catchDefect((defect) =>
+        Effect.logError("outside text: trusting a chat failed", { defect }).pipe(
+          Effect.as(
+            json(
+              {
+                code: "TRUST_NOT_SAVED",
+                error: "Couldn't save that. The chat still asks first — try again.",
+              },
+              500,
+            ),
+          ),
+        ),
+      ),
+    ),
+  ),
+);
+
 export const automationsRouteLayers = [
   automationsListRouteLayer,
   automationsCreateRouteLayer,
@@ -201,4 +276,6 @@ export const automationsRouteLayers = [
   automationsRunsRouteLayer,
   automationsHookRouteLayer,
   automationsHookRotateRouteLayer,
+  threadOutsideTextRouteLayer,
+  threadTrustOutsideRouteLayer,
 ] as const;
