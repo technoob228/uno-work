@@ -123,6 +123,11 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       stopAll: () => rpcClient.myComputer.stopAll(),
       resume: () => rpcClient.myComputer.resume(),
     },
+    chatRequests: {
+      state: () => rpcClient.chatRequests.state(),
+      decide: rpcClient.chatRequests.decide,
+      setAllowed: rpcClient.chatRequests.setAllowed,
+    },
     computers: {
       state: () => rpcClient.computers.state(),
       setPurpose: rpcClient.computers.setPurpose,

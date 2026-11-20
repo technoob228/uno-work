@@ -3510,3 +3510,66 @@ describe("github_pr_comment (Automations, 28.10)", () => {
     expect(readOnly.recorded.approvals).toEqual([]);
   });
 });
+
+describe("a chat started here at a cloud chat's request", () => {
+  it("keeps a few tools, the rest are refused before anything runs", async () => {
+    const { deps, recorded } = makeDeps({ runtimeMode: "full-access" });
+    const guarded: UnoWorkToolDeps = { ...deps, guardedChat: Effect.succeed(true) };
+    const refused = await run("chat_create", guarded, { text: "deploy it" });
+    expect(refused._tag).toBe("Failure");
+    if (refused._tag === "Failure") {
+      expect(refused.failure.message).toContain("started at a cloud chat's request");
+    }
+    const notifyOut = await run("notify", guarded, { title: "x", alsoMessenger: true });
+    expect(notifyOut._tag).toBe("Failure");
+    expect((await run("uno_guide", guarded, { topic: "apps" }))._tag).toBe("Success");
+    expect(recorded.approvals).toEqual([]);
+    // The person's own chats: as before.
+    const own = await run(
+      "uno_guide",
+      { ...deps, guardedChat: Effect.succeed(false) },
+      { topic: "apps" },
+    );
+    expect(own._tag).toBe("Success");
+  });
+});
+
+describe("my_computer_start_chat", () => {
+  const args = { title: "Check the form", gist: "Run it locally", brief: "Open the project." };
+  const out = {
+    ask: () => Promise.resolve({ requestId: "cr_1", status: "waiting" as const, message: "ok" }),
+    lookup: () => Promise.resolve([]),
+    tick: () => Promise.resolve(),
+    readStore: () => Promise.resolve([]),
+  };
+
+  it("is refused in an assistant's chat and in a chat holding outside text", async () => {
+    const { deps } = makeDeps({ runtimeMode: "full-access" });
+    const assistant = await run(
+      "my_computer_start_chat",
+      { ...deps, chatRequestsOut: out, callerAssistantName: Effect.succeed("Ada") },
+      args,
+    );
+    expect(assistant._tag).toBe("Failure");
+    if (assistant._tag === "Failure")
+      expect(assistant.failure.message).toContain("Ada is an assistant");
+    const outside = await run(
+      "my_computer_start_chat",
+      {
+        ...deps,
+        chatRequestsOut: out,
+        callerAssistantName: Effect.succeed(null),
+        outsideText: Effect.succeed(true),
+      },
+      args,
+    );
+    expect(outside._tag).toBe("Failure");
+    if (outside._tag === "Failure") expect(outside.failure.message).toContain("outside Uno");
+  });
+
+  it("says so where this Uno Work can't send requests", async () => {
+    const { deps } = makeDeps({ runtimeMode: "full-access" });
+    const result = await run("my_computer_start_chat", deps, args);
+    expect(result._tag).toBe("Failure");
+  });
+});

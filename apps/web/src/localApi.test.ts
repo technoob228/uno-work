@@ -81,6 +81,11 @@ const rpcClientMock = {
     stopAll: vi.fn(),
     resume: vi.fn(),
   },
+  chatRequests: {
+    state: vi.fn(),
+    decide: vi.fn(),
+    setAllowed: vi.fn(),
+  },
   computers: {
     state: vi.fn(),
     setPurpose: vi.fn(),

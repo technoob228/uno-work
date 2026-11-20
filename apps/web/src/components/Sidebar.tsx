@@ -378,6 +378,7 @@ import { chatProjectOffer, isSameFolder, turnChatIntoProject } from "../hooks/tu
 import { resolveHomeFolder } from "../hooks/useFolderChats";
 import { ChatInFolderDialog } from "./computer/ChatInFolderDialog";
 import { SidebarDraftsBlock } from "./sidebar/SidebarDraftsBlock";
+import { SidebarChatRequests } from "./sidebar/SidebarChatRequests";
 import { useSidebarChatDrag } from "./sidebar/useSidebarChatDrag";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
@@ -4873,6 +4874,8 @@ export default function Sidebar() {
   const dChatList = (inPanel: boolean) => (
     <SidebarContent className="min-h-full gap-0">
       <SidebarGroup className="min-h-full flex-1 px-[var(--sidebar-content-inset)] pt-1 pb-1">
+        {/* A cloud chat asks to start a chat here (chatRequests/): above everything else. */}
+        <SidebarChatRequests />
         <SidebarDraftsBlock />
         <TooltipProvider delay={150} closeDelay={0} timeout={400}>
           <ul

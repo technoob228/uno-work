@@ -293,7 +293,15 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
         : base;
     });
 
-  const create = (input: ManagerRemoteChatCreateInput): Effect.Effect<RemoteChatHostReply> =>
+  /**
+   * `options.threadId`: the new chat's id, chosen by the caller (a chat
+   * started at a cloud chat's request is held to the rules before its first
+   * turn: chatRequests/).
+   */
+  const create = (
+    input: ManagerRemoteChatCreateInput,
+    options?: { readonly threadId?: ThreadId },
+  ): Effect.Effect<RemoteChatHostReply> =>
     Effect.gen(function* () {
       const text = input.text.trim();
       if (text.length === 0 || text.length > MAX_TEXT_CHARS) {
@@ -310,7 +318,7 @@ export function makeRemoteChatHost(deps: RemoteChatHostDeps) {
         input.runtimeMode ?? "approval-required",
       );
       const title = (input.title?.trim() || defaultTitleFromText(text)).slice(0, MAX_TITLE_CHARS);
-      const threadId = ThreadId.make(crypto.randomUUID());
+      const threadId = options?.threadId ?? ThreadId.make(crypto.randomUUID());
       const createdAt = new Date(nowMs()).toISOString();
       const origin = systemCommandOrigin(
         REMOTE_CHAT_ORIGIN_COMPONENT,

@@ -33,6 +33,14 @@ export interface PathJudgement {
 /** Where agents' own browser keeps its profile: no personal logins in it. */
 export const AGENT_BROWSER_PROFILE = "~/.uno-work/agent-browser";
 
+/**
+ * Uno Work's request folder there (a cloud chat asks to start a chat:
+ * contracts chatRequests.ts): only Uno Work itself reads and writes it, and
+ * agents ask through `my_computer_start_chat` — a request written by hand
+ * would skip the rules of who may ask.
+ */
+export const CHAT_REQUESTS_FOLDER = ".uno-work/chat-requests";
+
 /** What Settings → My computer starts with. */
 export const DEFAULT_ALLOWED_FOLDERS: ReadonlyArray<string> = [
   "~/projects",
@@ -99,6 +107,7 @@ const SENSITIVE_ANY: ReadonlyArray<string> = [
   "Library/Application Support/com.apple.TCC",
   "Library/Application Support/AddressBook",
   "Library/Application Support/Uno Work",
+  CHAT_REQUESTS_FOLDER,
   "Library/Application Support/t3code",
   "/var/db",
   "/private/var/db",
@@ -250,6 +259,12 @@ export function judgePath(real: string | null, op: PathOp, ctx: PathJudgeContext
       : { tier: "always", reason: "changing a path that couldn't be checked" };
   }
   const path = normalizePosix(real);
+  if (isInside(path, underHome(CHAT_REQUESTS_FOLDER, ctx.home), ctx.caseInsensitive)) {
+    return {
+      tier: "blocked",
+      reason: "Uno Work's request folder (ask with my_computer_start_chat instead)",
+    };
+  }
   if (DEVICE_FREE.has(path) || path.startsWith("/dev/fd/")) {
     return { tier: "free", reason: "a device" };
   }

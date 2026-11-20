@@ -54,6 +54,11 @@ import {
   harnessCantUseComputerMessage,
   type ComputerWorkspaceDecision,
 } from "../Services/ComputerWorkspacePolicy.ts";
+import {
+  CommandGuardPolicy,
+  harnessNotGuardableMessage,
+  type CommandGuardPlan,
+} from "../Services/CommandGuardPolicy.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import {
@@ -260,6 +265,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     yield* Effect.serviceOption(ComputerWorkspacePolicy),
   );
   const computerSignatures = new Map<ThreadId, string>();
+  // Chats started here at a cloud chat's request: held to the rules of this
+  // computer by the adapter, or not run at all. Absent (tests): none is held.
+  const guardPolicy = Option.getOrUndefined(yield* Effect.serviceOption(CommandGuardPolicy));
 
   // Единая точка, через которую проходит всё, что отдают харнессы: вывод
   // инструментов, текст ассистента, ошибки. Маскируем секреты здесь — до
@@ -372,6 +380,29 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         computerId: decision.plan.computerId,
       });
       return decision;
+    });
+
+  /** The rules a chat is held to here, or the turn's error when its harness can't hold it. */
+  const resolveCommandGuard = (input: {
+    readonly threadId: ThreadId;
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+  }): Effect.Effect<{ readonly commandGuard?: CommandGuardPlan }, ProviderAdapterRequestError> =>
+    Effect.gen(function* () {
+      if (guardPolicy === undefined) return {};
+      const plan = yield* guardPolicy.decide({ threadId: input.threadId });
+      if (plan === null) return {};
+      if (input.adapter.capabilities.commandGuard !== true) {
+        return yield* new ProviderAdapterRequestError({
+          provider: input.adapter.provider,
+          method: "command-guard",
+          detail: harnessNotGuardableMessage(input.adapter.provider),
+        });
+      }
+      yield* Effect.logInfo("provider.session.command-guard", {
+        threadId: input.threadId,
+        provider: input.adapter.provider,
+      });
+      return { commandGuard: plan };
     });
 
   const computerStartFields = (decision: ComputerWorkspaceDecision) =>
@@ -547,6 +578,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         adapter,
         sandbox,
       });
+      const guard = yield* resolveCommandGuard({ threadId: input.binding.threadId, adapter });
       yield* enforceLiveProcessCap({
         threadId: input.binding.threadId,
         instanceId: bindingInstanceId,
@@ -565,6 +597,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         ),
         ...sandboxStartFields(sandbox),
         ...computerStartFields(computer),
+        ...guard,
       });
       sandboxSignatures.set(input.binding.threadId, harnessSandboxSignature(sandbox));
       computerSignatures.set(input.binding.threadId, computerWorkspaceSignature(computer));
@@ -825,6 +858,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
         const sandbox = yield* resolveHarnessSandbox({ threadId, cwd: effectiveCwd, adapter });
         const computer = yield* resolveComputerWorkspace({ threadId, adapter, sandbox });
+        const guard = yield* resolveCommandGuard({ threadId, adapter });
         yield* enforceLiveProcessCap({ threadId, instanceId: resolvedInstanceId, adapter });
         const session = yield* adapter.startSession({
           ...input,
@@ -834,6 +868,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
           ...sandboxStartFields(sandbox),
           ...computerStartFields(computer),
+          ...guard,
         });
         sandboxSignatures.set(threadId, harnessSandboxSignature(sandbox));
         computerSignatures.set(threadId, computerWorkspaceSignature(computer));

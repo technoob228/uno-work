@@ -122,6 +122,7 @@ import { CredentialsVaultService, type CredentialsVaultShape } from "./credentia
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
 import { ComputersLifecycle } from "./computers/ComputersLifecycle.ts";
+import { ChatRequests } from "./chatRequests/ChatRequests.ts";
 import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { DEFAULT_TRUST_SETTINGS } from "./myComputer/trust/trustStore.ts";
@@ -647,6 +648,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ChatImportService)({}),
+          Layer.mock(ChatRequests)({ outgoing: null }),
           Layer.mock(ComputersLifecycle)({
             state: Effect.succeed({ lifecycle: false, purposes: [] }),
           }),

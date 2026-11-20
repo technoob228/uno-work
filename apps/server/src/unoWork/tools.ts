@@ -127,6 +127,7 @@ import type { AutomationChatTools } from "../automations/AutomationsService.ts";
 import type { MyComputerShape } from "../myComputer/MyComputerService.ts";
 import type { CallTrust } from "../myComputer/myComputerCore.ts";
 import { myComputerTools } from "../myComputer/myComputerTools.ts";
+import type { Outgoing } from "../chatRequests/outgoing.ts";
 import { workspaceTools, type WorkspaceToolDeps } from "../myComputer/workspaceTools.ts";
 import { githubPrCommentTool } from "../automations/githubPrComment.ts";
 import type { ConsoleReply, ConsoleRequest } from "./consoleClient.ts";
@@ -305,6 +306,13 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
    * no such chats here.
    */
   readonly outsideText?: Effect.Effect<boolean>;
+  /**
+   * The calling chat was started on this computer at a cloud chat's request
+   * (chatRequests/): it keeps a few tools that only show things to the
+   * person here (GUARDED_CHAT_TOOLS); the rest — other chats, mail, sites,
+   * apps, the account — are refused. Absent: no such chats here.
+   */
+  readonly guardedChat?: Effect.Effect<boolean>;
   /**
    * The keys of the chat's project ("On all my computers": kept in the Uno
    * vault, written into its `.env` on every computer). `refusal`: the
@@ -553,6 +561,14 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
   };
   /** The person's own computers. Absent (tests, older wiring): the tools say they can't reach them. */
   readonly myComputer?: MyComputerShape;
+  /**
+   * Requests to start a chat on one of the person's computers
+   * (`my_computer_start_chat`, chatRequests/outgoing.ts). Absent: the tools
+   * say this Uno Work can't.
+   */
+  readonly chatRequestsOut?: Outgoing;
+  /** The calling chat is an assistant's: its name; null: the person's own chat. Absent: no assistants. */
+  readonly callerAssistantName?: Effect.Effect<string | null>;
   /** Set by the gate for a call it judged by trust tier: the journal line carries it. */
   readonly callTrust?: CallTrust;
   /**
@@ -5081,6 +5097,27 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
  * Validate → gate → run. The approval card names the chat's own words
  * (`approvalTitle`); a refusal comes back as a tool error the model reads.
  */
+/**
+ * What a chat started at a cloud chat's request may still call: guides and
+ * things it shows the person here. Starting or messaging other chats, mail,
+ * sites, apps and the account are out (it could pass its brief on to a chat
+ * that isn't held to the rules).
+ */
+export const GUARDED_CHAT_TOOLS: ReadonlySet<string> = new Set([
+  "uno_guide",
+  "show_card",
+  "html_render",
+  "html_preview",
+  "open_in_panel",
+  "file_open",
+  "notify",
+  "chat_call_person",
+  "chat_person_not_needed",
+]);
+
+export const guardedChatRefusal = (tool: string) =>
+  `${tool} isn't available in this chat: it was started at a cloud chat's request, so it keeps to its own folder here. Say what is needed in your answer and stop; the person or the cloud chat can do it.`;
+
 export function runUnoWorkTool(
   tool: UnoWorkTool,
   deps: UnoWorkToolDeps,
@@ -5088,6 +5125,15 @@ export function runUnoWorkTool(
 ): Effect.Effect<unknown, UnoWorkToolError> {
   return Effect.gen(function* () {
     const args = (rawArgs ?? {}) as Record<string, unknown>;
+    if (
+      deps.guardedChat &&
+      // A notify with a link or a copy to the messenger reaches past this computer.
+      (!GUARDED_CHAT_TOOLS.has(tool.name) ||
+        (tool.name === "notify" && outsideTextAsks(tool.name, args))) &&
+      (yield* deps.guardedChat)
+    ) {
+      return yield* toolError(guardedChatRefusal(tool.name));
+    }
     const problem =
       tool.lenientArgs === true
         ? typeof args === "object" && !Array.isArray(args)

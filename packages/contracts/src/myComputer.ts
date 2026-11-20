@@ -95,7 +95,8 @@ export const MyComputerDisconnectInput = Schema.Struct({
 });
 export type MyComputerDisconnectInput = typeof MyComputerDisconnectInput.Type;
 
-export const MyComputerActivityKind = Schema.Literals(["run", "read", "write", "list"]);
+/** `chat`: a request to start a chat there (chatRequests.ts), and how it ended. */
+export const MyComputerActivityKind = Schema.Literals(["run", "read", "write", "list", "chat"]);
 export type MyComputerActivityKind = typeof MyComputerActivityKind.Type;
 
 export const MyComputerActivityInput = Schema.Struct({

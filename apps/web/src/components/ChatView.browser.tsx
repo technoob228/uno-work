@@ -258,6 +258,7 @@ function createMockEnvironmentApi(input: {
     browserLive: {} as EnvironmentApi["browserLive"],
     workspace: {} as EnvironmentApi["workspace"],
     myComputer: {} as EnvironmentApi["myComputer"],
+    chatRequests: {} as EnvironmentApi["chatRequests"],
     computers: {} as EnvironmentApi["computers"],
     projectSync: {} as EnvironmentApi["projectSync"],
     unoCloud: {} as EnvironmentApi["unoCloud"],

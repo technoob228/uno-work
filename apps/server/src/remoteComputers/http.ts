@@ -32,7 +32,8 @@ import { readIncomingRemoteChats, recordIncomingRemoteChat } from "./remoteChatS
 
 export const STARTED_BY_PATH = "/api/manager/started-by";
 
-const makeHost = Effect.gen(function* () {
+/** The receiving side wired to this daemon's services (also chatRequests/ on the person's computer). */
+export const makeHost = Effect.gen(function* () {
   const engine = yield* OrchestrationEngineService;
   const projections = yield* ProjectionSnapshotQuery;
   const providers = yield* ProviderRegistry;

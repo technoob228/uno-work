@@ -400,6 +400,13 @@ import {
   MyComputerTrustState,
 } from "./myComputer.ts";
 import {
+  ChatRequestDecideInput,
+  ChatRequestDecideResult,
+  ChatRequestsError,
+  ChatRequestsSetAllowedInput,
+  ChatRequestsState,
+} from "./chatRequests.ts";
+import {
   ComputerInput,
   ComputersBringWorkInput,
   ComputersContinueInCloudInput,
@@ -595,6 +602,10 @@ export const WS_METHODS = {
   myComputerRevokeGrant: "myComputer.revokeGrant",
   myComputerStopAll: "myComputer.stopAll",
   myComputerResume: "myComputer.resume",
+  // A cloud chat asks to start a chat on this computer (chatRequests.ts).
+  chatRequestsState: "chatRequests.state",
+  chatRequestsDecide: "chatRequests.decide",
+  chatRequestsSetAllowed: "chatRequests.setAllowed",
 
   // Computers lifecycle (computers.ts): what a computer is for, its work, chats on it
   computersState: "computers.state",
@@ -969,6 +980,24 @@ export const WsMyComputerResumeRpc = Rpc.make(WS_METHODS.myComputerResume, {
   payload: Schema.Struct({}),
   success: MyComputerTrustState,
   error: MyComputerError,
+});
+
+export const WsChatRequestsStateRpc = Rpc.make(WS_METHODS.chatRequestsState, {
+  payload: Schema.Struct({}),
+  success: ChatRequestsState,
+  error: ChatRequestsError,
+});
+
+export const WsChatRequestsDecideRpc = Rpc.make(WS_METHODS.chatRequestsDecide, {
+  payload: ChatRequestDecideInput,
+  success: ChatRequestDecideResult,
+  error: ChatRequestsError,
+});
+
+export const WsChatRequestsSetAllowedRpc = Rpc.make(WS_METHODS.chatRequestsSetAllowed, {
+  payload: ChatRequestsSetAllowedInput,
+  success: ChatRequestsState,
+  error: ChatRequestsError,
 });
 
 export const WsComputersStateRpc = Rpc.make(WS_METHODS.computersState, {
@@ -2725,6 +2754,13 @@ export const WsMyComputerRpcGroup = RpcGroup.make(
   WsMyComputerResumeRpc,
 );
 
+/** Chat requests from the cloud (chatRequests.ts), apart from the main group for the same reason. */
+export const WsChatRequestsRpcGroup = RpcGroup.make(
+  WsChatRequestsStateRpc,
+  WsChatRequestsDecideRpc,
+  WsChatRequestsSetAllowedRpc,
+);
+
 /** Computers lifecycle (computers.ts), apart from the main group for the same reason. */
 export const WsComputersRpcGroup = RpcGroup.make(
   WsComputersStateRpc,
@@ -2988,6 +3024,7 @@ export const WsMainRpcGroup = RpcGroup.make(
 
 export const WsRpcGroup = WsMainRpcGroup.merge(
   WsMyComputerRpcGroup,
+  WsChatRequestsRpcGroup,
   WsComputersRpcGroup,
   WsPullRequestsRpcGroup,
 );

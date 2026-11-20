@@ -24,6 +24,7 @@ import type { Effect } from "effect";
 import type { Stream } from "effect";
 
 import type { HarnessSandboxPlan } from "../../sandbox/harnessSandbox.ts";
+import type { CommandGuardPlan } from "./CommandGuardPolicy.ts";
 import type { ComputerWorkspacePlan } from "./ComputerWorkspacePolicy.ts";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
@@ -53,6 +54,13 @@ export interface ProviderAdapterCapabilities {
    * chat is refused on this harness (`ProviderService`).
    */
   readonly computerWorkspace?: boolean;
+  /**
+   * The adapter holds a chat to the rules of the person's computer by code
+   * (`commandGuard` in `startSession`: ssh, deploys, push, sudo, installs and
+   * secrets refused before they run, in every mode). Absent: such a chat —
+   * started at a cloud chat's request — is refused on this harness.
+   */
+  readonly commandGuard?: boolean;
 }
 
 /**
@@ -64,6 +72,8 @@ export type ProviderAdapterStartSessionInput = ProviderSessionStartInput & {
   readonly harnessSandbox?: HarnessSandboxPlan;
   /** The chat's project is this folder on the person's computer (ComputerWorkspacePolicy). */
   readonly computerWorkspace?: ComputerWorkspacePlan;
+  /** The chat is held to the rules of this computer (CommandGuardPolicy). */
+  readonly commandGuard?: CommandGuardPlan;
 };
 
 export interface ProviderThreadTurnSnapshot {

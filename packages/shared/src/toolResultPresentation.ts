@@ -406,6 +406,21 @@ const UNO_WORK_TOOL_LABELS: Readonly<Record<string, ToolLabels>> = {
     "Looked through a folder on your computer",
     "Couldn't look through the folder on your computer",
   ],
+  my_computer_start_chat: [
+    "Asking to start a chat on your computer…",
+    (c) => {
+      const title = text(c.args, "title");
+      return title
+        ? `Asked to start “${title}” on your computer`
+        : "Asked to start a chat on your computer";
+    },
+    "Couldn't ask to start a chat on your computer",
+  ],
+  my_computer_chat_request: [
+    "Checking the chat request on your computer…",
+    "Checked the chat request on your computer",
+    "Couldn't check the chat request on your computer",
+  ],
   // The project on the person's computer: a chat whose folder is there
   // (computers lifecycle, full mode) works through these.
   workspace_bash: [
