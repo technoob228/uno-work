@@ -8,6 +8,25 @@
 
 ---
 
+## v0.0.190 — 2026-11-20
+
+- Models by role in one place. Uno picks models for your subscriptions (hard work goes to a strong model, simple steps to a fast one) and never changes a model you chose yourself. The assistant no longer silently moves to a weaker model.
+- "Only mine" keeps the chats that are yours: ones you started and ones you wrote in during the last 24 hours, even if an agent started them. Your coordinator chat is always there.
+- "Trust this chat". A chat that got text from a form, a webhook or a pull request shows a grey line above the input with Trust this chat. After you confirm, tools stop asking Allow, and Goal, moving to Hermes and the previous mode come back.
+- A cloud chat can ask to start a chat on your Mac. The request shows up in Uno Work on the Mac (Needs you and the sidebar) and in Telegram, and the chat starts only after you press Start. It is off until you turn it on in Settings → Computer on the Mac.
+- Pull request automations have "Ask me first". Untick it for your own repositories, and a PR review in a chat runs without an Allow on every step. A PR automation can't be saved on an assistant; the window says so right away and offers a chat instead.
+- The text of someone else's pull request no longer gives the agent orders: it counts as outside text, like a form or a webhook. The desktop installer trusts only Uno's own addresses.
+- Apps & sites → Apps is one grid of big icons with search on top, like Launchpad. Enter opens the first match, Esc clears the search.
+- Settings → Security: who signed in to your computers and what is open to the internet. Until protection is on for your account, the screen says so and offers to write to support.
+- The agent can share an app with a teammate: the teammate signs in with their own Uno account, and the agent can take the access back the same way. No public link and no tunnels.
+- An app link opens the app on the computer where it runs, whichever computer is picked at the top. An app that crashed starts again by itself; one you stopped stays stopped.
+- A red dot means the computer can't be reached again. A cloud computer whose 30-day pass ran out gets a new one by itself instead of staying on "No connection", Remove always removes, and a chat shows the name of its computer.
+- A second chat in the same folder waits instead of overwriting the first one's work when a separate copy of the folder can't be made (for example, low disk), and says so.
+- The agent can roll a Spark app back to an earlier version in seconds and tells you what a rollback doesn't bring back (variables, timers).
+- A new computer opens 0.4–0.75 s faster: one sign-in request instead of four.
+- When a Telegram voice message can't be transcribed, the assistant gives the real reason (a problem on Uno's side, or a limit, file or silence on yours), says what to do, and offers to type instead.
+- Slack on the desktop: Add to Slack from the Uno Work app on your laptop, and several computers and Uno accounts in one Slack workspace. The laptop answers while Uno Work is open.
+
 ## v0.0.189 — 2026-11-14
 
 - Move my projects here. A new cloud computer's first screen has "Move my projects here" next to "Add a project": sign in to Claude Code or Codex (or use Uno AI), connect your laptop with one command, tick the projects and the keys they need, and open a chat in one of them. Uno Work finds git projects in `~/projects`, `~/code`, `~/Developer`, `~/GitHub`, `~/source/repos` and the other usual places, and reads key names from `.env` and `.env.local`. Only the keys you tick come over, into the project's keys; no `.env` file is copied.
