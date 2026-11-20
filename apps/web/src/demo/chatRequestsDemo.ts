@@ -10,13 +10,13 @@
  * walkthrough); `.fresh()` is the first open after the update: switched off
  * (the default) and nothing asked yet.
  */
-import { WS_METHODS } from "@t3tools/contracts";
+import { WS_METHODS, type ChatRequestTeam } from "@t3tools/contracts";
 
 import { demoHooks } from "./demoFlag";
 
 type Status = "waiting" | "started" | "declined" | "expired" | "refused";
 
-interface DemoRequest {
+export interface DemoRequest {
   id: string;
   status: Status;
   createdAt: string;
@@ -32,6 +32,8 @@ interface DemoRequest {
   decidedVia?: "here" | "telegram";
   threadId: string | null;
   threadState: string | null;
+  /** T51: from a colleague in a project (teamCollabDemo.ts). */
+  team?: ChatRequestTeam;
 }
 
 export interface ChatRequestsDemoHooks {
@@ -163,6 +165,11 @@ function snapshot() {
       .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
       .map((q) => ({ ...q, from: { ...q.from } })),
   };
+}
+
+/** Another demo's request (T51: a colleague's session, teamCollabDemo.ts). */
+export function addDemoChatRequest(request: DemoRequest): void {
+  requests.push(request);
 }
 
 export function installChatRequestsDemo(environmentId: string): void {

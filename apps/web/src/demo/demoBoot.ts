@@ -26,6 +26,7 @@ import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarne
 import { demoHooks } from "./demoFlag";
 import { deployApprovalHandlers } from "./deployApprovalsDemo";
 import { answerChatRequestsRpc, installChatRequestsDemo } from "./chatRequestsDemo";
+import { answerTeamCollabRpc, installTeamCollabDemo } from "./teamCollabDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
 import { answerThreadSearchRpc } from "./threadSearchDemo";
 import { demoTraceDiagnostics } from "./demoTraceDiagnostics";
@@ -318,7 +319,9 @@ function resolveUnary(machine: DemoMachine, body: NormalizedWsRpcRequestBody): u
   const tag = body._tag;
   // Computers lifecycle: the MacBook's pairing, import, projects (assist/lifecycle.ts).
   if (DEMO_ASSIST) {
-    const lcAnswer = answerLifecycleRpc(machine, String(tag), body);
+    const lcAnswer = // T51: landing on all computers, with its team (teamCollabDemo.ts).
+      answerTeamCollabRpc(machine.key, String(tag), body) ??
+      answerLifecycleRpc(machine, String(tag), body);
     if (lcAnswer !== undefined) return lcAnswer;
   }
   // p4/p8: reading files of seeded tabs, links and Cloud storage (demoFiles.ts).
@@ -1860,6 +1863,7 @@ function startRequestedChat(
 function startAssist() {
   startLinks();
   installChatRequestsDemo(MACHINES.mac.environmentId);
+  installTeamCollabDemo();
   startLifecycle(lifecycleOps);
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
