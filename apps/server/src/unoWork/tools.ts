@@ -5244,6 +5244,7 @@ const WORKER_TOOLS: ReadonlySet<string> = new Set([
   "app_hide_from_internet",
   "app_add_widget",
   "spark_deploy",
+  "spark_rollback",
   "spark_delete",
   "db_create",
   "computer_create",

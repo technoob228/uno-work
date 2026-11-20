@@ -200,6 +200,8 @@ describe("spark tools: levels", () => {
     expect(toolLevel(tool("spark_list"), {})).toBe("safe");
     expect(toolLevel(tool("spark_logs"), {})).toBe("safe");
     expect(toolLevel(tool("spark_delete"), {})).toBe("sensitive");
+    expect(toolLevel(tool("spark_versions"), {})).toBe("safe");
+    expect(toolLevel(tool("spark_rollback"), {})).toBe("safe");
   });
 });
 
@@ -461,6 +463,114 @@ describe("spark_list, spark_logs, spark_delete", () => {
     const call = gatewayCalls(allowed.fake.calls)[0]!;
     expect(call.method).toBe("DELETE");
     expect(call.url).toBe(`${SPARK_API_BASE}/apps/cafe-bot`);
+  });
+});
+
+describe("spark_versions, spark_rollback", () => {
+  const notFound = (message: string, error = "not_found") => ({
+    status: 404,
+    body: JSON.stringify({ error, message }),
+  });
+
+  it("lists the kept versions", async () => {
+    const { deps, fake } = makeDeps({
+      respond: (call) =>
+        call.url.endsWith("/spark/token")
+          ? { status: 0 }
+          : {
+              status: 200,
+              body: JSON.stringify({
+                name: "cafe-bot",
+                versions: [
+                  { version: 4, current: true },
+                  { version: 3, current: false },
+                ],
+                keep: 5,
+                how: "POST …",
+              }),
+            },
+    });
+    expect(okValue(await run("spark_versions", deps, { name: "cafe-bot" }))).toEqual({
+      name: "cafe-bot",
+      versions: [
+        { version: 4, current: true },
+        { version: 3, current: false },
+      ],
+      keep: 5,
+    });
+    expect(gatewayCalls(fake.calls)[0]!.url).toBe(`${SPARK_API_BASE}/apps/cafe-bot/versions`);
+  });
+
+  it("a gateway from before rollback says so, not that the app is missing", async () => {
+    const { deps } = makeDeps({
+      respond: (call) =>
+        call.url.endsWith("/spark/token")
+          ? { status: 0 }
+          : notFound("no API at /v1/apps/cafe-bot/versions"),
+    });
+    expect(failMessage(await run("spark_versions", deps, { name: "cafe-bot" }))).toMatch(
+      /doesn't keep versions yet/,
+    );
+  });
+
+  it("rolls back with a POST and hands the gateway's notes on", async () => {
+    const { deps, fake } = makeDeps({
+      respond: (call) =>
+        call.url.endsWith("/spark/token")
+          ? { status: 0 }
+          : {
+              status: 200,
+              body: JSON.stringify({
+                name: "cafe-bot",
+                version: 5,
+                rolled_back_from: 3,
+                how: "resigned",
+                env_gone_since: ["OLD_FLAG"],
+                timers: 2,
+                notes: ["the code of version 3, not its data"],
+              }),
+            },
+    });
+    const value = okValue(await run("spark_rollback", deps, { name: "cafe-bot", to: 3 }));
+    expect(value).toMatchObject({
+      name: "cafe-bot",
+      url: "https://cafe-bot.spark.uno4.me/",
+      version: 5,
+      rolled_back_from: 3,
+      env_gone_since: ["OLD_FLAG"],
+      timers: 2,
+    });
+    const call = gatewayCalls(fake.calls)[0]!;
+    expect(call.method).toBe("POST");
+    expect(call.url).toBe(`${SPARK_API_BASE}/apps/cafe-bot/rollback`);
+    expect(JSON.parse(String(call.body))).toEqual({ to: 3 });
+  });
+
+  it("explains a version no longer kept and a rollback to the current one", async () => {
+    const gone = makeDeps({
+      respond: (call) =>
+        call.url.endsWith("/spark/token")
+          ? { status: 0 }
+          : notFound('"cafe-bot" has no version 1 kept;', "no_version"),
+    });
+    expect(failMessage(await run("spark_rollback", gone.deps, { name: "cafe-bot", to: 1 }))).toMatch(
+      /keeps only the last few versions.*spark_versions/,
+    );
+    const same = makeDeps({
+      respond: (call) =>
+        call.url.endsWith("/spark/token")
+          ? { status: 0 }
+          : {
+              status: 409,
+              body: JSON.stringify({
+                error: "already_current",
+                message: "version 4 is the current one; nothing changed",
+              }),
+            },
+    });
+    const message = failMessage(await run("spark_rollback", same.deps, { name: "cafe-bot", to: 4 }));
+    expect(message).toMatch(/Nothing changed: version 4 is the current one/);
+    expect(message).not.toMatch(/app limit/);
   });
 });
 

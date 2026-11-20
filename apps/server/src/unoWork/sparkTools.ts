@@ -93,6 +93,15 @@ export function sparkReplyMessage(
   if (lower === "name_taken") {
     return `The name “${name}” belongs to another Uno account. Pick another name and deploy again.`;
   }
+  if (lower === "not_found" && detail.startsWith("no API at")) {
+    return "This Spark server doesn't keep versions yet (it isn't updated to the release with rollback). Tell the person in one line: to go back, deploy the old code again with spark_deploy.";
+  }
+  if (lower === "no_version") {
+    return `Spark keeps only the last few versions of “${name}”, and not that one: ${detail} spark_versions lists the kept ones.`;
+  }
+  if (lower === "already_current") {
+    return `Nothing changed: ${detail}.`;
+  }
   if (reply.status === 404) {
     return `There is no Spark app “${name}” on this account (spark_list shows them).`;
   }
@@ -454,6 +463,75 @@ export function sparkTools(kit: SparkToolKit): ReadonlyArray<UnoWorkTool> {
         return callSpark(kit, deps, { method: "GET", path: appPath(name, `/logs?n=${n}`) }).pipe(
           Effect.flatMap((reply) => ensureOk(kit, reply, { name, what: "read its log" })),
           Effect.map((reply) => ({ name, logs: reply.json ?? reply.text })),
+        );
+      },
+    },
+    {
+      name: "spark_versions",
+      group: "sites",
+      description:
+        "The versions of a Spark app Spark still keeps (the newest first): number, when deployed, code size, which is current. Spark keeps the last few (usually 5). Use it before spark_rollback, or when the person asks what changed or wants the old one back.",
+      inputSchema: {
+        type: "object",
+        properties: { name: nameArg },
+        required: ["name"],
+        additionalProperties: false,
+      },
+      level: "safe",
+      run: (deps, args) => {
+        const name = String(args.name);
+        return callSpark(kit, deps, { method: "GET", path: appPath(name, "/versions") }).pipe(
+          Effect.flatMap((reply) => ensureOk(kit, reply, { name, what: "list its versions" })),
+          Effect.map((reply) => {
+            const json = (reply.json ?? {}) as Record<string, unknown>;
+            return {
+              name,
+              versions: Array.isArray(json.versions) ? json.versions : [],
+              keep: json.keep ?? null,
+            };
+          }),
+        );
+      },
+    },
+    {
+      name: "spark_rollback",
+      group: "sites",
+      description:
+        "Put back the code of an earlier kept version of a Spark app (spark_versions lists them), as a new version, in a few seconds and without the code on this computer. Only the code goes back: env.KV, variables, secrets and timers stay as they are now — the result says which variables differ and how many timers are set; tell the person. To undo, roll back again to the version that was current.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: nameArg,
+          to: {
+            type: "integer",
+            minimum: 1,
+            description: "The version to bring back (a number from spark_versions).",
+          },
+        },
+        required: ["name", "to"],
+        additionalProperties: false,
+      },
+      // Like spark_deploy: it puts code up, and another rollback undoes it.
+      level: "safe",
+      approvalTitle: (args) =>
+        `Put version ${String(args.to ?? "")} of ${sparkAppUrl(String(args.name ?? ""))} back`,
+      run: (deps, args) => {
+        const name = String(args.name);
+        const to = Number(args.to);
+        return callSpark(kit, deps, {
+          method: "POST",
+          path: appPath(name, "/rollback"),
+          json: { to },
+        }).pipe(
+          Effect.flatMap((reply) => ensureOk(kit, reply, { name, what: `roll back to version ${to}` })),
+          Effect.map((reply) => {
+            const json = (reply.json ?? {}) as Record<string, unknown>;
+            return {
+              ...json,
+              name,
+              url: sparkAppUrl(name, json.url),
+            };
+          }),
         );
       },
     },
