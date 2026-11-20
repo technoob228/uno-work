@@ -25,6 +25,11 @@ export interface CommandGuardPlan {
    * chats, settings and sign-ins) and the request folder.
    */
   readonly blockedRoots: ReadonlyArray<string>;
+  /**
+   * T51: the chat only reads (it answers a colleague's agent's question):
+   * reading tools only — no edits, no commands, no MCP, no web.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface CommandGuardPolicyShape {

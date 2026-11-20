@@ -14,6 +14,9 @@
  * - MCP servers other than uno-work are refused (they carry the person's
  *   keys); uno-work itself holds such a chat to a few tools (unoWork/tools.ts).
  *
+ * - T51: a chat that only reads (a colleague's agent's question answered
+ *   here) may use the reading tools and nothing else.
+ *
  * A command can still hide what it does (a script written first, then run):
  * the tiers read what is written. That is the T47 bar, not a sandbox.
  *
@@ -34,6 +37,15 @@ const RESOLVER_TIMEOUT_MS = 10_000;
 const RESOLVER_OUTPUT_BYTES = 256 * 1024;
 const REFUSED_TIERS: ReadonlySet<MyComputerTier> = new Set(["always", "blocked"]);
 const UNO_WORK_MCP_PREFIX = "mcp__uno-work__";
+/** What a read-only chat may call: reading files, and its own to-do list. */
+export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "NotebookRead",
+  "TodoWrite",
+]);
 
 /** The resolver (trust/resolver.ts) run here, as it runs on the person's computer through the tunnel. */
 export const localResolver = (
@@ -116,8 +128,12 @@ const absoluteFrom = (raw: string, cwd: string, home: string) => {
 };
 
 /** The sentence the agent reads, and acts on: say it and stop. */
-export const guardDenial = (what: string) =>
-  `Blocked here: ${what}. This chat was started at a cloud chat's request, so on this computer it can't ssh to other machines, deploy, push, use sudo, install, read secrets or change things outside the project folders. Don't look for another way: say what is needed and stop, so the person can do it.`;
+export const guardDenial = (what: string, why = "started at a cloud chat's request") =>
+  `Blocked here: ${what}. This chat was ${why}, so on this computer it can't ssh to other machines, deploy, push, use sudo, install, read secrets or change things outside the project folders. Don't look for another way: say what is needed and stop, so the person can do it.`;
+
+/** T51: the sentence for a read-only chat. */
+export const readOnlyDenial = (toolName: string) =>
+  `Blocked here: ${toolName}. This chat only reads: it answers a colleague's agent's question, so it can't edit files, run commands or use other tools. Answer from what you can read; if the question needs more, say so in your answer and stop.`;
 
 export function makeCommandGuard(
   plan: CommandGuardPlan,
@@ -164,16 +180,21 @@ export function makeCommandGuard(
 
   return {
     check: async ({ toolName, toolInput, cwd, signal }) => {
+      if (plan.readOnly === true && !READ_ONLY_TOOLS.has(toolName)) {
+        return { deny: readOnlyDenial(toolName) };
+      }
       if (toolName.startsWith("mcp__")) {
         return toolName.startsWith(UNO_WORK_MCP_PREFIX)
           ? null
-          : { deny: guardDenial(`the tool ${toolName} (the person's own connections)`) };
+          : { deny: guardDenial(`the tool ${toolName} (the person's own connections)`, plan.why) };
       }
       const here = cwd ?? home;
       const operation = operationOf(toolName, toolInput, here);
       if (operation === null) return null;
       const inBlocked = touchesBlocked(operation, here);
-      if (inBlocked !== null) return { deny: guardDenial(`Uno Work's own folder ${inBlocked}`) };
+      if (inBlocked !== null) {
+        return { deny: guardDenial(`Uno Work's own folder ${inBlocked}`, plan.why) };
+      }
       const verdict = await judge.judge(
         {
           computerId: LOCAL,
@@ -185,7 +206,7 @@ export function makeCommandGuard(
         },
         signal,
       );
-      return REFUSED_TIERS.has(verdict.tier) ? { deny: guardDenial(verdict.reason) } : null;
+      return REFUSED_TIERS.has(verdict.tier) ? { deny: guardDenial(verdict.reason, plan.why) } : null;
     },
   };
 }
