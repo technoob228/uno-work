@@ -1,13 +1,14 @@
 // Who a chat answers to right now: the person or an agent (Misha 28.10, the
 // sidebar's "Only mine" filter).
-// A chat the person started is theirs, except while agents talk in it
-// (Misha 13.11): the last message that started a turn is another chat's
-// agent's, nobody called the person in and nothing asks them anything —
-// "waiting on agents": no Ready, no badge, the agent's in Only mine. The
-// safety net: their request waited for the chats this one started and the
-// last of them is done, which makes it theirs again (Ready). And the answer
-// to their message holds: until they open the chat, write there or press
-// Done, the agents' turns after it don't take the chat from them.
+// A chat the person started is always theirs (Misha 14.11: their coordinator
+// stays in Only mine even while agents talk in it). While agents talk there
+// — the last message that started a turn is another chat's agent's, nobody
+// called the person in and nothing asks them anything — it is "waiting on
+// agents": no Ready, no badge (Sidebar.yourTurn). The safety net: their
+// request waited for the chats this one started and the last of them is
+// done, which makes it Ready. And the answer to their message holds: until
+// they open the chat, write there or press Done, the agents' turns after it
+// don't take the Ready from them (T42, 13.11).
 // A chat an agent, Uno or an app started is the person's while it needs them:
 // - it asks them something (an approval or a question);
 // - an agent called them into it (`chat_call_person`) and they have not
@@ -16,6 +17,8 @@
 //   that answer.
 // Otherwise it is the agent's. Opening a chat does not hand it back, like
 // "Your turn": one accidental click should not hide it.
+// A chat the person handed to its agent (Hand to agent, 14.11) is the
+// agent's, except while it needs them.
 import { isLatestTurnSettled } from "../session-logic";
 import { isTurnRead } from "../threadReadMarks";
 import type { SidebarThreadSummary } from "../types";
@@ -37,6 +40,7 @@ export type ThreadOwnerInput = Pick<
       | "spawnedByThreadId"
       | "assistantRole"
       | "controller"
+      | "controlChangedAt"
       | "startedBy"
       | "latestPersonMessageAt"
       | "personCalledAt"
@@ -156,7 +160,14 @@ export function threadOwnerWithStarter(
 }
 
 export function threadOwner(thread: ThreadOwnerInput): ThreadOwner {
-  if (!isAgentStartedChat(thread)) return isWaitingOnAgents(thread) ? "agent" : "you";
+  if (!isAgentStartedChat(thread)) {
+    // The person handed it to its agent (Misha 14.11): the agent's until it
+    // needs them or they take it back (writing there does).
+    if (thread.controller === "agent" && thread.controlChangedAt != null) {
+      return threadNeedsUser(thread) || isPersonCallPending(thread) ? "you" : "agent";
+    }
+    return "you";
+  }
   if (threadNeedsUser(thread)) return "you";
   // A server from before 28.10 knows neither the person's messages nor calls:
   // a chat stays the agent's until the person writes in it.

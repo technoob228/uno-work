@@ -100,6 +100,7 @@ describe("orchestration projector", () => {
         settledOverride: null,
         settledAt: null,
         spawnedByThreadId: null,
+        spawnKind: null,
         controller: "human",
         controlChangedAt: null,
         agentsClosedAt: null,

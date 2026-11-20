@@ -23,6 +23,7 @@ import type {
   ThreadComputerWait,
   ProjectComputer,
   ThreadController,
+  ThreadSpawnKind,
   ThreadPullRequest,
 } from "@t3tools/contracts";
 
@@ -239,6 +240,8 @@ export interface SidebarThreadSummary {
   modelSelection?: { readonly instanceId: string; readonly model: string } | undefined;
   /** Thread whose agent created this one; absent/null for human-created threads. */
   spawnedByThreadId?: ThreadId | null | undefined;
+  /** What that agent started it for (a subagent or a thread); absent: a thread. */
+  spawnKind?: ThreadSpawnKind | null | undefined;
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;

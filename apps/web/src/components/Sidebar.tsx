@@ -87,7 +87,11 @@ import {
 import { AGENTS_ACCESS_COPY, describeSpawnedThreadOrigin } from "../agentThreads.logic";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { isElectron } from "../env";
-import { useEnvironmentSupportsAgentThreads } from "../environments/agentThreadsSupport";
+import {
+  readEnvironmentSupportsAgentThreads,
+  readEnvironmentSupportsChatHandoff,
+  useEnvironmentSupportsAgentThreads,
+} from "../environments/agentThreadsSupport";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
@@ -190,6 +194,20 @@ import {
   type SidebarSection,
 } from "./Sidebar.sections";
 import { threadOwnerWithStarter } from "./Sidebar.owner";
+import {
+  AGENT_CHAT_KIND_LABEL,
+  SIDEBAR_INLINE_AGENT_THREADS_KEY,
+  SIDEBAR_INLINE_SUBAGENTS_KEY,
+  agentChatKind,
+  agentChatsShelfLabel,
+  agentTaskDescendants,
+  archiveWithTasksPrompt,
+  groupAgentChats,
+  handoffAction,
+  sidebarAgentPlacement,
+} from "../agentTasks.logic";
+import { setThreadHandler } from "../agentsAccess";
+
 import { isYourTurn, yourTurnKind } from "./Sidebar.yourTurn";
 import { getThreadSortTimestamp, toSortableTimestamp } from "../lib/threadSort";
 import {
@@ -371,6 +389,8 @@ const SETTLED_TAIL_PAGE_COUNT = 25;
 // Shelves start collapsed; the choice persists per device like upstream.
 const SETTLED_SHELF_EXPANDED_KEY = "uno-work:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "uno-work:sidebar:snoozed-expanded";
+/** The "Agents' chats" button under the list, unfolded or not (this device). */
+const AGENTS_SHELF_EXPANDED_KEY = "uno-work:sidebar:agents-expanded";
 // The project scope survives routes that unmount the sidebar and restarts.
 const PROJECT_SCOPE_KEY = "uno-work:sidebar:project-scope";
 /** Scope value for the Helper (assistant) chats, which stay out of "All projects". */
@@ -552,7 +572,7 @@ function SnoozeMenuButton(props: {
 
 // Structural shelf header: label, hairline, chevron. Snoozed reads blue.
 function SidebarSectionHeader(props: {
-  kind: "snoozed" | "settled";
+  kind: "snoozed" | "settled" | "agents";
   label: string;
   className?: string;
   expanded: boolean;
@@ -2215,53 +2235,113 @@ export default function Sidebar() {
 
   // ── Sections ──────────────────────────────────────────────────────────
   const now = useMinuteClock();
-  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads } = useMemo(() => {
-    const visible = threads.filter((thread) => {
-      if (thread.archivedAt !== null) return false;
-      // A chat Uno opened by itself that nobody wrote in yet is noise.
-      if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
-      const byAssistant =
-        dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
-      // The Uno chat is pinned on top of the sidebar, never in the list.
-      if (assistantChatId !== null && thread.id === assistantChatId) return false;
-      const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
-      if (isHelperScope) return isOlderUnoChat;
-      // The assistant's other chats (older ones, Telegram / Slack chats) live
-      // behind the "Older Uno chats" scope; the open one stays visible.
-      if (!isRegularListChat(thread, assistantChatId)) {
-        // A conversation with Uno shows under the Uno row (unfolded while
-        // it is open), never twice.
-        if (showAssistantRow && isTeamConversation(thread)) return false;
-        // A chat an assistant started in its own folder: in the list, "started by".
-        if (byAssistant) return true;
-        return threadKeyOf(thread) === routeThreadKey;
-      }
-      // The open chat stays listed even when the scope is another project.
-      return (
-        scopedProjectKeys === null ||
-        scopedProjectKeys.has(projectKeyOf(thread)) ||
-        threadKeyOf(thread) === routeThreadKey
-      );
-    });
-    const sections = partitionSidebarThreads(visible, { now, sortOrder: sidebarThreadSortOrder });
-    return {
-      pinnedThreads: sections.pinned,
-      activeThreads: sections.active,
-      snoozedThreads: sections.snoozed,
-      settledThreads: sections.settled,
-    };
-  }, [
-    assistantChatId,
-    dStartedByInList,
-    isHelperScope,
-    now,
-    routeThreadKey,
-    showAssistantRow,
-    scopedProjectKeys,
-    sidebarThreadSortOrder,
-    startedBy.byKey,
-    threads,
-  ]);
+  // Agents' chats (Misha 13.11, v2 14.11): a chat an agent handles is not in
+  // the list but behind the "Agents' chats" button — threads, then subagents
+  // — unless it needs the person or is pinned; the view menu's switches put
+  // threads and/or subagents back inline (this device). Without the view menu
+  // (or in the rail layout) there is no button: inline, as before.
+  const [dInlineAgentThreadsChoice, setDInlineAgentThreads] = useLocalStorage<boolean, boolean>(
+    SIDEBAR_INLINE_AGENT_THREADS_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const [dInlineSubagentsChoice, setDInlineSubagents] = useLocalStorage<boolean, boolean>(
+    SIDEBAR_INLINE_SUBAGENTS_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const dAgentsShelfOff = !sidebarViewMenu || railLayout;
+  const dInlineAgentChats = useMemo(
+    () => ({
+      threads: dInlineAgentThreadsChoice || dAgentsShelfOff,
+      subagents: dInlineSubagentsChoice || dAgentsShelfOff,
+    }),
+    [dAgentsShelfOff, dInlineAgentThreadsChoice, dInlineSubagentsChoice],
+  );
+  const threadByKey = useMemo(
+    () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
+    [threads],
+  );
+  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, agentChats } =
+    useMemo(() => {
+      const agentHandled: SidebarThreadSummary[] = [];
+      const visible = threads.filter((thread) => {
+        if (thread.archivedAt !== null) return false;
+        if (
+          thread.controller === "agent" &&
+          sidebarAgentPlacement({
+            thread,
+            parent:
+              thread.spawnedByThreadId == null
+                ? undefined
+                : threadByKey.get(
+                    threadKeyOf({
+                      environmentId: thread.environmentId,
+                      id: thread.spawnedByThreadId,
+                    }),
+                  ),
+            assistantChatId,
+            inline: dInlineAgentChats,
+          }) === "agents"
+        ) {
+          // Behind the button, in the scope the list is in.
+          if (
+            !isHelperScope &&
+            (scopedProjectKeys === null ||
+              scopedProjectKeys.has(projectKeyOf(thread)) ||
+              threadKeyOf(thread) === routeThreadKey)
+          ) {
+            agentHandled.push(thread);
+          }
+          return false;
+        }
+        // A chat Uno opened by itself that nobody wrote in yet is noise.
+        if (isEmptyAutoChat(thread) && threadKeyOf(thread) !== routeThreadKey) return false;
+        const byAssistant =
+          dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
+        // The Uno chat is pinned on top of the sidebar, never in the list.
+        if (assistantChatId !== null && thread.id === assistantChatId) return false;
+        const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
+        if (isHelperScope) return isOlderUnoChat;
+        // The assistant's other chats (older ones, Telegram / Slack chats) live
+        // behind the "Older Uno chats" scope; the open one stays visible.
+        if (!isRegularListChat(thread, assistantChatId)) {
+          // A conversation with Uno shows under the Uno row (unfolded while
+          // it is open), never twice.
+          if (showAssistantRow && isTeamConversation(thread)) return false;
+          // A chat an assistant started in its own folder: in the list, "started by".
+          if (byAssistant) return true;
+          return threadKeyOf(thread) === routeThreadKey;
+        }
+        // The open chat stays listed even when the scope is another project.
+        return (
+          scopedProjectKeys === null ||
+          scopedProjectKeys.has(projectKeyOf(thread)) ||
+          threadKeyOf(thread) === routeThreadKey
+        );
+      });
+      const sections = partitionSidebarThreads(visible, { now, sortOrder: sidebarThreadSortOrder });
+      return {
+        pinnedThreads: sections.pinned,
+        activeThreads: sections.active,
+        snoozedThreads: sections.snoozed,
+        settledThreads: sections.settled,
+        agentChats: groupAgentChats(agentHandled),
+      };
+    }, [
+      assistantChatId,
+      dInlineAgentChats,
+      dStartedByInList,
+      isHelperScope,
+      now,
+      routeThreadKey,
+      showAssistantRow,
+      scopedProjectKeys,
+      sidebarThreadSortOrder,
+      startedBy.byKey,
+      threadByKey,
+      threads,
+    ]);
 
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
   const settledResetKey = projectScopeKey ?? ALL_SCOPE;
@@ -2280,6 +2360,19 @@ export default function Sidebar() {
     false,
     Schema.Boolean,
   );
+  const [agentsShelfExpanded, setAgentsShelfExpanded] = useLocalStorage(
+    AGENTS_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
+  const agentChatCount = agentChats.threads.length + agentChats.subagents.length;
+  // Folded, the button still shows the open chat, like the shelves below.
+  const renderedAgentChats = useMemo(() => {
+    if (agentsShelfExpanded) return agentChats;
+    const open = (list: ReadonlyArray<SidebarThreadSummary>) =>
+      list.filter((thread) => threadKeyOf(thread) === routeThreadKey);
+    return { threads: open(agentChats.threads), subagents: open(agentChats.subagents) };
+  }, [agentChats, agentsShelfExpanded, routeThreadKey]);
   const visibleSettledThreads = useMemo(() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
@@ -2643,10 +2736,19 @@ export default function Sidebar() {
           startedBy.byKey.has(startedByKey(thread.environmentId, thread.id)),
         ) === "you" ||
         thread.pinnedAt !== null ||
-        threadKeyOf(thread) === routeThreadKey,
+        threadKeyOf(thread) === routeThreadKey ||
+        // Agents' chats the person asked to see in the list (view menu) stay there.
+        (!dAgentsShelfOff &&
+          thread.controller === "agent" &&
+          (agentChatKind(thread) === "subagent"
+            ? dInlineSubagentsChoice
+            : dInlineAgentThreadsChoice)),
     );
     return { dShownChats: mine, dHiddenAgentChats: placed.length - mine.length };
   }, [
+    dAgentsShelfOff,
+    dInlineAgentThreadsChoice,
+    dInlineSubagentsChoice,
     dComputerPicks,
     dGroupOf,
     dLiveChats,
@@ -2949,10 +3051,6 @@ export default function Sidebar() {
   const orderedThreadKeys = useMemo(() => orderedThreads.map(threadKeyOf), [orderedThreads]);
   const orderedThreadKeysRef = useRef(orderedThreadKeys);
   orderedThreadKeysRef.current = orderedThreadKeys;
-  const threadByKey = useMemo(
-    () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
-    [threads],
-  );
   const threadByKeyRef = useRef(threadByKey);
   threadByKeyRef.current = threadByKey;
   const sectionByKey = useMemo(
@@ -3101,7 +3199,7 @@ export default function Sidebar() {
   );
 
   // ── Thread actions ────────────────────────────────────────────────────
-  const { archiveThread, deleteThread } = useThreadActions();
+  const { archiveThread, archiveAgentTasks, deleteThread } = useThreadActions();
   const dispatch = useCallback(
     async (
       threadRef: ScopedThreadRef,
@@ -3531,6 +3629,12 @@ export default function Sidebar() {
         const supportsSnooze = readEnvironmentSupportsThreadSnooze(thread.environmentId);
         const supportsAgentsAccess = readEnvironmentSupportsAgentsCloseChat(thread.environmentId);
         const agentsClosed = thread.agentsClosedAt != null;
+        // Who handles it (Misha 14.11): Join / Hand to agent.
+        const handoff = readEnvironmentSupportsAgentThreads(thread.environmentId)
+          ? handoffAction(thread, {
+              ownChats: readEnvironmentSupportsChatHandoff(thread.environmentId),
+            })
+          : null;
         const status = resolveSidebarThreadStatus(thread);
         const snoozePresets = resolveSnoozePresets(nowDate);
         const projectOffer = chatProjectOffer({
@@ -3612,6 +3716,15 @@ export default function Sidebar() {
               ...(isElectron
                 ? [{ id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action }]
                 : []),
+              ...(handoff
+                ? [
+                    {
+                      id: "handoff",
+                      label:
+                        handoff.nextController === "human" ? "Join chat" : "Hand chat to agent",
+                    },
+                  ]
+                : []),
               ...(supportsAgentsAccess
                 ? [
                     {
@@ -3668,6 +3781,15 @@ export default function Sidebar() {
           case "mark-read":
             setThreadReadAt(threadRef, new Date().toISOString());
             return;
+          case "handoff":
+            if (handoff) {
+              void setThreadHandler({
+                environmentId: thread.environmentId,
+                threadId: thread.id,
+                controller: handoff.nextController,
+              });
+            }
+            return;
           case "mark-unread":
             setThreadReadAt(threadRef, null);
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
@@ -3699,11 +3821,25 @@ export default function Sidebar() {
             });
             return;
           case "archive": {
-            if (confirmThreadArchive) {
-              const confirmed = await api.dialogs.confirm(`Archive chat "${thread.title}"?`);
+            // Its agent tasks go with it; asked first while some still work.
+            const tasks = agentTaskDescendants(
+              thread.id,
+              selectSidebarThreadsForEnvironment(useStore.getState(), thread.environmentId),
+            );
+            const tasksPrompt = archiveWithTasksPrompt(thread.title, tasks);
+            if (tasksPrompt !== null || confirmThreadArchive) {
+              const confirmed = await api.dialogs.confirm(
+                tasksPrompt ?? `Archive chat "${thread.title}"?`,
+              );
               if (!confirmed) return;
             }
             try {
+              // A running chat refuses to archive: then its tasks stay too.
+              const parentRunning =
+                thread.session?.status === "running" && thread.session.activeTurnId != null;
+              if (!parentRunning && tasks.length > 0) {
+                await archiveAgentTasks(thread.environmentId, tasks);
+              }
               await archiveThread(threadRef);
             } catch (error) {
               showErrorToast("Failed to archive chat", error);
@@ -3729,6 +3865,7 @@ export default function Sidebar() {
       })();
     },
     [
+      archiveAgentTasks,
       archiveThread,
       attemptSettle,
       attemptSnooze,
@@ -4818,6 +4955,10 @@ export default function Sidebar() {
                 onComputersChange={setDComputerPicks}
                 onlyMine={dOnlyMine}
                 onOnlyMineChange={setDOnlyMine}
+                inlineAgentThreads={dInlineAgentThreadsChoice}
+                onInlineAgentThreadsChange={setDInlineAgentThreads}
+                inlineSubagents={dInlineSubagentsChoice}
+                onInlineSubagentsChange={setDInlineSubagents}
                 onOpenSettings={() => {
                   if (isMobile) setOpenMobile(false);
                   void router.navigate({ to: "/settings" });
@@ -4860,6 +5001,35 @@ export default function Sidebar() {
                   Show
                 </button>
               </li>
+            ) : null}
+            {agentChatCount > 0 ? (
+              // The chats agents handle (Misha 14.11): one button, threads
+              // and subagents apart; Join in a chat brings it into the list.
+              <>
+                <SidebarSectionHeader
+                  kind="agents"
+                  className="mt-2"
+                  label={agentChatsShelfLabel(agentChatCount, agentsShelfExpanded)}
+                  expanded={agentsShelfExpanded}
+                  onToggle={() => setAgentsShelfExpanded((value) => !value)}
+                />
+                {(["threads", "subagents"] as const).map((group) =>
+                  renderedAgentChats[group].length > 0 ? (
+                    <li key={group} className="list-none" data-testid={`sidebar-agents-${group}`}>
+                      <ul role="list" className="flex flex-col gap-px">
+                        {agentsShelfExpanded ? (
+                          <SidebarDSectionLabel
+                            label={`${AGENT_CHAT_KIND_LABEL[group === "threads" ? "thread" : "subagent"]} · ${agentChats[group].length}`}
+                          />
+                        ) : null}
+                        {renderedAgentChats[group].map((thread) =>
+                          renderRow(thread, "active", { d: true, place: dRowPlace(thread) }),
+                        )}
+                      </ul>
+                    </li>
+                  ) : null,
+                )}
+              </>
             ) : null}
             <ProjectInvites environmentId={projectSyncHereStatus?.environmentId ?? null} />
             {projectSyncHereStatus?.status ? (

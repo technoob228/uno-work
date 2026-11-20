@@ -299,6 +299,8 @@ describe("agentMessageEnvelope", () => {
       text: "next",
     });
     expect(text).toContain("просто ответь здесь");
+    // A task reports to its parent; the parent calls the person (Misha 13.11).
+    expect(text).toContain("Человека не зови");
     expect(text).not.toContain("/messages");
   });
 

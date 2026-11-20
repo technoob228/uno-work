@@ -169,6 +169,97 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
         "h-copy",
       ],
       ["assistant", "Good. Waiting for the copy check, then the checkout."],
+      [
+        "user",
+        "Launch check done: all 14 links answer 200, the page loads in 1.1 s on 4G, Lighthouse 96. The OG image is missing on /pricing — added a ticket.",
+        "h-launch-check",
+      ],
+      [
+        "assistant",
+        "The launch check is in. The checkout task needs your Stripe sign-in once; the copy is almost done.",
+      ],
+    ],
+  },
+  // Its other tasks (Misha 13.11: tasks inside the coordinator, not the sidebar).
+  {
+    id: "h-launch-check",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Launch check: links, speed, Lighthouse",
+    minutesAgo: 2,
+    state: "read",
+    role: "helper",
+    parent: "w-launch",
+    kind: "subagent",
+    messages: [
+      ["user", "From the pricing page chat: check every link, the load time on 4G and Lighthouse."],
+      [
+        "assistant",
+        "All 14 links answer 200, 1.1 s on 4G, Lighthouse 96. The OG image is missing on /pricing.",
+      ],
+    ],
+  },
+  {
+    id: "h-checkout",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Checkout: Stripe test mode",
+    minutesAgo: 2,
+    state: "read",
+    role: "helper",
+    parent: "w-launch",
+    call: "Sign in to Stripe once so the checkout can create test prices.",
+    messages: [
+      ["user", "From the pricing page chat: wire the three plans to Stripe Checkout in test mode."],
+      [
+        "assistant",
+        "The checkout page and the webhook are ready. Stripe needs the person's sign-in once to create the test prices.",
+      ],
+    ],
+  },
+  {
+    id: "h-og-image",
+    machine: "work",
+    project: "p-work-landing",
+    title: "OG image for /pricing",
+    minutesAgo: 1,
+    state: "failed",
+    role: "helper",
+    parent: "w-launch",
+    kind: "subagent",
+    error: "The image service timed out twice.",
+    errorClass: "provider_error",
+    messages: [["user", "From the pricing page chat: make the OG image for /pricing, 1200×630."]],
+  },
+  // A short helper on another harness (Misha 14.11: subagents of any harness).
+  {
+    id: "h-copy-review",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Codex review of the pricing copy",
+    minutesAgo: 2,
+    state: "read",
+    role: "helper",
+    parent: "w-launch",
+    kind: "subagent",
+    messages: [
+      ["user", "From the pricing page chat: a second opinion on the headline and the three plans."],
+      ["assistant", "Clear and short. One fix: “per seat” reads better than “per user” on Team."],
+    ],
+  },
+  // A chat of the person's they handed to its agent (Misha 14.11): out of the list.
+  {
+    id: "w-seo-weekly",
+    machine: "work",
+    project: "p-work-landing",
+    title: "Weekly SEO report for the landing",
+    minutesAgo: 30,
+    state: "read",
+    role: "solo",
+    handler: "agent",
+    messages: [
+      ["user", "Every Monday check the landing's search positions and tell me what moved."],
+      ["assistant", "This week: “pricing for small teams” up from 14 to 9; nothing dropped."],
     ],
   },
   {
@@ -238,6 +329,7 @@ const PERSON_NEEDED_CHATS: ChatSpec[] = [
     state: "read",
     role: "helper",
     parent: "w-backup",
+    kind: "subagent",
     messages: [
       [
         "user",

@@ -623,6 +623,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             readAt: null,
             readStateUpdatedAt: null,
             spawnedByThreadId: event.payload.spawnedByThreadId ?? null,
+            spawnKind: event.payload.spawnKind ?? null,
             controller: event.payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
             agentsClosedAt: null,

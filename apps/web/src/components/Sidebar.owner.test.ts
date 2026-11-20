@@ -89,7 +89,8 @@ describe("threadOwner", () => {
     ).toBe("you");
   });
 
-  it("the person's chat is the agent's while agents talk in it (Misha 13.11)", () => {
+  it("the person's own chat stays theirs while agents talk in it (Misha 14.11)", () => {
+    // Their coordinator: another chat's agent wrote last, nothing asks them.
     const talking = agentChat({
       startedBy: null,
       spawnedByThreadId: null,
@@ -97,18 +98,16 @@ describe("threadOwner", () => {
       latestPersonMessageAt: at(60),
       latestUserMessageAt: at(20),
     });
-    expect(threadOwner(talking)).toBe("agent");
-    // Called in, asked something, or the chats started for the request are done: theirs.
-    expect(threadOwner({ ...talking, personCalledAt: at(5) })).toBe("you");
-    expect(threadOwner({ ...talking, hasPendingUserInput: true })).toBe("you");
-    expect(threadOwner({ ...talking, childWork: { working: 0, latestStartedAt: at(50) } })).toBe(
+    expect(threadOwner(talking)).toBe("you");
+    expect(threadOwner({ ...talking, childWork: { working: 1, latestStartedAt: at(50) } })).toBe(
       "you",
     );
-    expect(threadOwner({ ...talking, childWork: { working: 1, latestStartedAt: at(50) } })).toBe(
+    expect(threadOwner({ ...talking, session: session("running") })).toBe("you");
+    expect(threadOwner({ ...talking, startedBy: undefined })).toBe("you");
+    // Only handing it to its agent takes it out of Only mine.
+    expect(threadOwner({ ...talking, controller: "agent", controlChangedAt: at(30) })).toBe(
       "agent",
     );
-    // An older daemon: the person's, as before.
-    expect(threadOwner({ ...talking, startedBy: undefined })).toBe("you");
   });
 
   it("an agent's chat working on its own is the agent's", () => {
@@ -183,6 +182,21 @@ describe("threadOwnerWithStarter (Misha 29.10: assistants' chats under Only mine
     const old = { ...quiet, startedBy: undefined };
     expect(threadOwnerWithStarter(old, true)).toBe("agent");
     expect(threadOwnerWithStarter({ ...old, controller: "human" as const }, true)).toBe("you");
+  });
+
+  it("a chat the person handed to its agent is the agent's until it needs them (14.11)", () => {
+    const handed = agentChat({
+      startedBy: null,
+      spawnedByThreadId: null,
+      controller: "agent",
+      controlChangedAt: at(5),
+      latestPersonMessageAt: at(20),
+    });
+    expect(threadOwner(handed)).toBe("agent");
+    expect(threadOwner({ ...handed, hasPendingApprovals: true })).toBe("you");
+    expect(threadOwner({ ...handed, personCalledAt: at(1) })).toBe("you");
+    // Taken back (Join, or a message there): the person's again.
+    expect(threadOwner({ ...handed, controller: "human" })).toBe("you");
   });
 
   it("the Uno chat itself is never hidden", () => {

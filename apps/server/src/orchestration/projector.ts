@@ -310,6 +310,7 @@ export function projectEvent(
             readAt: null,
             readStateUpdatedAt: null,
             spawnedByThreadId: payload.spawnedByThreadId ?? null,
+            spawnKind: payload.spawnKind ?? null,
             controller: payload.spawnedByThreadId !== undefined ? "agent" : "human",
             controlChangedAt: null,
             agentsClosedAt: null,

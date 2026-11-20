@@ -655,6 +655,15 @@ export function SidebarDChatsBar(props: {
   /** Only the chats that are the person's now; off — every chat (the default). */
   onlyMine: boolean;
   onOnlyMineChange: (onlyMine: boolean) => void;
+  /**
+   * The chats agents handle, in the list too (Misha 14.11): their threads,
+   * their subagents. Off — behind the "Agents' chats" button under the list.
+   * Absent: no switch.
+   */
+  inlineAgentThreads?: boolean;
+  onInlineAgentThreadsChange?: (inline: boolean) => void;
+  inlineSubagents?: boolean;
+  onInlineSubagentsChange?: (inline: boolean) => void;
   onClearFilters: () => void;
   onNewChat: (event: ReactMouseEvent) => void;
   /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
@@ -765,6 +774,24 @@ export function SidebarDChatsBar(props: {
             >
               Only mine
             </MenuCheckboxItem>
+            {props.onInlineAgentThreadsChange ? (
+              <MenuCheckboxItem
+                checked={props.inlineAgentThreads === true}
+                onCheckedChange={(checked) => props.onInlineAgentThreadsChange?.(checked)}
+                data-testid="sidebar-d-inline-agent-threads"
+              >
+                Agents' threads
+              </MenuCheckboxItem>
+            ) : null}
+            {props.onInlineSubagentsChange ? (
+              <MenuCheckboxItem
+                checked={props.inlineSubagents === true}
+                onCheckedChange={(checked) => props.onInlineSubagentsChange?.(checked)}
+                data-testid="sidebar-d-inline-subagents"
+              >
+                Subagents
+              </MenuCheckboxItem>
+            ) : null}
             <PickSubmenu
               label="Projects"
               allLabel="All projects"

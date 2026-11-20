@@ -1,6 +1,6 @@
 import type { EnvironmentId, ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 
-import { usePrimaryEnvironmentDescriptor } from "./primary";
+import { readPrimaryEnvironmentDescriptor, usePrimaryEnvironmentDescriptor } from "./primary";
 import { useSavedEnvironmentRuntimeStore } from "./runtime";
 
 /**
@@ -29,4 +29,27 @@ export function useEnvironmentSupportsAgentThreads(
     return descriptorSupportsAgentThreads(primary);
   }
   return saved;
+}
+
+/** Non-hook read (menus): whether the daemon tracks agent-spawned threads. */
+export function readEnvironmentSupportsAgentThreads(environmentId: EnvironmentId): boolean {
+  const primary = readPrimaryEnvironmentDescriptor();
+  if (primary?.environmentId === environmentId) return descriptorSupportsAgentThreads(primary);
+  return descriptorSupportsAgentThreads(
+    useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.descriptor,
+  );
+}
+
+/**
+ * Whether the person may hand a chat of theirs to its agent there (Misha
+ * 14.11, `chatHandoff`). Joining a chat an agent started works on any daemon
+ * with `agentThreads`.
+ */
+export function readEnvironmentSupportsChatHandoff(environmentId: EnvironmentId): boolean {
+  const primary = readPrimaryEnvironmentDescriptor();
+  const descriptor =
+    primary?.environmentId === environmentId
+      ? primary
+      : useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.descriptor;
+  return descriptor?.capabilities.chatHandoff === true;
 }
