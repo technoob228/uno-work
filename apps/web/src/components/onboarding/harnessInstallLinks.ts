@@ -4,6 +4,7 @@ export const HARNESS_INSTALL_LINKS: Record<string, string> = {
   uno: "",
   codex: "https://github.com/openai/codex",
   claudeAgent: "https://docs.claude.com/en/docs/claude-code/overview",
+  gemini: "https://github.com/google-gemini/gemini-cli",
   opencode: "https://opencode.ai",
   cursor: "https://docs.cursor.com/cli",
 };

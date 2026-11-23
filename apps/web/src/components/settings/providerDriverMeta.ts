@@ -2,6 +2,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  GeminiSettings,
   HermesSettings,
   OpenCodeSettings,
   ProviderDriverKind,
@@ -10,6 +11,7 @@ import type { Schema } from "effect";
 import {
   ClaudeAI,
   CursorIcon,
+  Gemini,
   HermesIcon,
   type Icon,
   OpenAI,
@@ -69,6 +71,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
+  },
+  {
+    value: ProviderDriverKind.make("gemini"),
+    label: "Gemini CLI",
+    icon: Gemini,
+    settingsSchema: GeminiSettings,
   },
   {
     value: ProviderDriverKind.make("cursor"),

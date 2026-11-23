@@ -15,6 +15,7 @@ export const JOURNAL_MAX = 8;
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
   claudeAgent: "Claude Code",
   codex: "Codex",
+  gemini: "Gemini CLI",
   uno: "Uno AI",
 };
 

@@ -49,6 +49,8 @@ export const MULTIPLE_ACCOUNTS_WARNING =
 const PROVIDER_LABEL: Readonly<Record<ProviderAuthDriver, string>> = {
   claudeAgent: "Claude",
   codex: "ChatGPT",
+  // Never offered here: Gemini CLI has one account per computer.
+  gemini: "Gemini",
 };
 
 export { isSecondAccountInstance };

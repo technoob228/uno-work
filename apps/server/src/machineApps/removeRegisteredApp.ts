@@ -155,6 +155,7 @@ const NEVER_STOP = new Set([
   "claude",
   "hermes",
   "cursor-agent",
+  "gemini",
 ]);
 
 /**

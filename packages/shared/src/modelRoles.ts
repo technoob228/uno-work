@@ -8,6 +8,9 @@
  *   simple tasks on its quick model, replies on Uno Fast.
  * - Both plans: complex work on Claude, simple tasks on Codex's quick model
  *   (it saves the Claude limit), replies on Uno Fast.
+ * - Gemini CLI signed in and neither of those (20.11, T58): complex work on
+ *   Gemini's own Auto router, simple tasks on a Flash model, replies on Uno
+ *   Fast. With Claude or ChatGPT here, Gemini is not part of the set.
  *
  * Which model is strongest comes from the harness (modelStrength.ts, the
  * CLI's recommendation); which one is quick, from the gateway's catalog
@@ -26,15 +29,17 @@ import {
 } from "@t3tools/contracts";
 
 import type { RoutingRule } from "./assistantMemory.ts";
-import { isWeakModel, strongestReadySelection } from "./modelStrength.ts";
+import { isWeakModel, strongestListedModel, strongestReadySelection } from "./modelStrength.ts";
 
-export type PlanSource = "claude" | "codex" | "uno";
+export type PlanSource = "claude" | "codex" | "gemini" | "uno";
 
 export interface PlanSources {
   /** Claude Code on the person's own sign-in (not on Uno credits). */
   readonly claude: ServerProvider | null;
   /** Codex signed in (ChatGPT plan or an API key). */
   readonly codex: ServerProvider | null;
+  /** Gemini CLI signed in (a Google account, a Gemini key, Vertex AI). */
+  readonly gemini: ServerProvider | null;
   /** Uno AI (the `uno` harness: Smart / Fast in the plan's AI hours). */
   readonly uno: ServerProvider | null;
 }
@@ -54,6 +59,7 @@ export function detectPlanSources(
         provider.driver === "claudeAgent" && signedIn(provider) && provider.auth.type !== "unoAi",
     ),
     codex: find((provider) => provider.driver === "codex" && signedIn(provider)),
+    gemini: find((provider) => provider.driver === "gemini" && signedIn(provider)),
     uno: find((provider) => provider.driver === "uno"),
   };
 }
@@ -119,6 +125,9 @@ export function suggestRoles(input: {
   const sources: PlanSource[] = [];
   if (found.claude) sources.push("claude");
   if (found.codex) sources.push("codex");
+  // Gemini counts only where there is no Claude or ChatGPT plan.
+  const gemini = found.claude || found.codex ? null : found.gemini;
+  if (gemini) sources.push("gemini");
   if (found.uno || input.unoReplies) sources.push("uno");
   const replies = input.unoReplies
     ? ({ provider: "uno", model: UNO_FAST_GATEWAY_MODEL } as const)
@@ -129,12 +138,14 @@ export function suggestRoles(input: {
   const strongest = strongestReadySelection(plans, () => true)?.selection ?? null;
   const unoSmart = found.uno ? pick(found.uno, unoIncluded(found.uno, "smart")) : null;
   const unoFast = found.uno ? pick(found.uno, quickModel(found.uno)) : null;
-  const complex = strongest ?? unoSmart;
+  const geminiPick = gemini ? pick(gemini, strongestListedModel("gemini", gemini.models)) : null;
+  const complex = strongest ?? geminiPick ?? unoSmart;
   // Simple tasks: Codex's quick model when there is Codex (with Claude too it
   // saves the Claude limit), else Claude's, else Uno Fast; else complex's.
   const quickOf = (provider: ServerProvider | null) =>
     provider === null ? null : pick(provider, quickModel(provider));
-  const simple = quickOf(found.codex) ?? quickOf(found.claude) ?? unoFast ?? complex;
+  const simple =
+    quickOf(found.codex) ?? quickOf(found.claude) ?? quickOf(gemini) ?? unoFast ?? complex;
 
   const complexName = nameOf(complex, providers);
   const simpleName = nameOf(simple, providers);
@@ -146,6 +157,8 @@ export function suggestRoles(input: {
     const plan = found.claude ? "Claude" : "ChatGPT";
     const cli = found.claude ? "Claude Code" : "Codex";
     why = `Your ${plan} plan here: complex work on ${complexName} (${cli}'s pick), simple tasks on its quick ${simpleName}${repliesPart}.`;
+  } else if (gemini) {
+    why = `Gemini CLI signed in here: complex work on ${complexName} (Gemini CLI picks the model per task), simple tasks on ${simpleName}${repliesPart}.`;
   } else if (found.uno) {
     why = `Only Uno AI here: complex work on Smart, simple tasks${replies ? " and replies" : ""} on Fast — both in your AI hours.`;
   } else {
@@ -210,7 +223,7 @@ export interface AutoRolesPlan {
   readonly preset: ModelRolesPreset;
 }
 
-const OWN_PLAN_SOURCES: ReadonlySet<string> = new Set<PlanSource>(["claude", "codex"]);
+const OWN_PLAN_SOURCES: ReadonlySet<string> = new Set<PlanSource>(["claude", "codex", "gemini"]);
 const sameReply = (
   a: { readonly provider: string; readonly model: string } | undefined | null,
   b: { readonly provider: string; readonly model: string } | undefined | null,

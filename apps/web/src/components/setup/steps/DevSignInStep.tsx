@@ -16,7 +16,7 @@ import { useServerProviders } from "../../../rpc/serverState";
 import { HarnessSignInPanel } from "../../harness/HarnessSignInDialog";
 import { isJobActive, progressLine } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
-import { ClaudeAI, OpenAI, type Icon } from "../../Icons";
+import { ClaudeAI, Gemini, OpenAI, type Icon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { withAnswer } from "../goals";
 import {
@@ -36,6 +36,8 @@ import { useSetupProgress, useUpdateSetupProgress } from "../useSetupProgress";
 const AGENT_ROW: Readonly<Record<ProviderAuthDriver, { icon: Icon; plan: string }>> = {
   claudeAgent: { icon: ClaudeAI, plan: "Your Claude Pro or Max plan, or an Anthropic API key." },
   codex: { icon: OpenAI, plan: "Your ChatGPT Plus or Pro plan, or an OpenAI API key." },
+  // Not a row of this step (DEV_AGENTS); here for the exhaustive table.
+  gemini: { icon: Gemini, plan: "Your Google account, or a Gemini API key." },
 };
 
 type RowStatus = "checking" | "notInstalled" | "needsSignIn" | "signedIn";

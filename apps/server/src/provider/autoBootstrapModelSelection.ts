@@ -57,6 +57,7 @@ const DRIVER_PREFERENCE: ReadonlyArray<string> = [
   "uno",
   "codex",
   "claudeAgent",
+  "gemini",
   "opencode",
   "cursor",
 ];

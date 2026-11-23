@@ -145,6 +145,7 @@ describe("row list", () => {
       "uno",
       "claudeAgent",
       "codex",
+      "gemini",
       "opencode",
       "hermes",
       "cursor",

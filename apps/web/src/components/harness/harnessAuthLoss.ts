@@ -35,7 +35,7 @@ import {
 } from "@t3tools/shared/assistantLlm";
 
 export type HarnessAuthLossKind =
-  /** Claude / Codex: the in-app sign-in dialog (account or API key). */
+  /** Claude / Codex / Gemini CLI: the in-app sign-in dialog (account or API key). */
   | "signIn"
   /** OpenCode: paste a new provider key. */
   | "updateKey"
@@ -124,6 +124,7 @@ export const HARNESS_REAUTH_COPY = {
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
   claudeAgent: "Claude",
   codex: "Codex",
+  gemini: "Gemini CLI",
   opencode: "OpenCode",
   uno: "Uno AI",
   cursor: "Cursor",
@@ -159,6 +160,18 @@ const AUTH_LOSS_PATTERNS: Readonly<Record<string, ReadonlyArray<RegExp>>> = {
   uno: [HTTP_401, INVALID_API_KEY, UNAUTHORIZED],
   hermes: [HTTP_401, INVALID_API_KEY, UNAUTHORIZED],
   cursor: [/not authenticated/i, /agent login/i],
+  // Gemini CLI 0.70's own words, and Uno Work's refusal before a start that
+  // would wait for a sign-in (GeminiAcpSupport.geminiPreflight).
+  gemini: [
+    /gemini api key is missing/i,
+    /api key not valid/i,
+    INVALID_API_KEY,
+    /manual authorization is required/i,
+    /invalid_grant/i,
+    /not signed in to google/i,
+    HTTP_401,
+    UNAUTHORIZED,
+  ],
 };
 
 /** An assistant on the person's own key: the provider turned the key down. */
@@ -295,6 +308,7 @@ function build(
 const KIND_BY_DRIVER: Readonly<Record<string, HarnessAuthLossKind>> = {
   claudeAgent: "signIn",
   codex: "signIn",
+  gemini: "signIn",
   opencode: "updateKey",
   cursor: "cursorCli",
   uno: "unoAccount",

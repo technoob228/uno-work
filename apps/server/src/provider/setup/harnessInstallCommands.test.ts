@@ -23,7 +23,7 @@ const baseContext = {
 
 describe("isInstallableDriver", () => {
   it("covers every harness we ship an installer for", () => {
-    for (const value of ["codex", "claudeAgent", "opencode", "hermes", "cursor"]) {
+    for (const value of ["codex", "claudeAgent", "gemini", "opencode", "hermes", "cursor"]) {
       expect(isInstallableDriver(driver(value))).toBe(true);
     }
     expect(isInstallableDriver(driver("uno"))).toBe(false);
@@ -71,6 +71,7 @@ describe("resolveInstallPlan", () => {
     };
     expect(packageFor("codex")).toBe("@openai/codex@latest");
     expect(packageFor("claudeAgent")).toBe("@anthropic-ai/claude-code@latest");
+    expect(packageFor("gemini")).toBe("@google/gemini-cli@latest");
     expect(packageFor("opencode")).toBe(`opencode-ai@${UNO_OPENCODE_VERSION}`);
   });
 

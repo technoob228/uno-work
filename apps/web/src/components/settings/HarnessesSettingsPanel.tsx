@@ -427,8 +427,8 @@ export function HarnessesSettingsPanel({
         <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <p className="max-w-xl text-xs leading-relaxed text-muted-foreground">
             Bring your own agent: anything on this machine that speaks the Agent Client Protocol
-            (ACP) — your own agent, Gemini CLI, opencode, Kimi Code… It appears in the model picker
-            with its own chats, Approve / Deny cards and stop/resume.
+            (ACP) — your own agent, Goose, Kimi Code, Qwen Code… It appears in the model picker with
+            its own chats, Approve / Deny cards and stop/resume.
           </p>
           <Button
             size="sm"
@@ -477,7 +477,7 @@ export function HarnessesSettingsPanel({
             <code className="text-foreground">
               {list?.guidePath ?? "~/.uno/docs/custom-harness.md"}
             </code>{" "}
-            and add Gemini CLI to Uno Work.”
+            and add Goose to Uno Work.”
           </p>
           <p>API keys never go into the file — you enter them here.</p>
         </div>

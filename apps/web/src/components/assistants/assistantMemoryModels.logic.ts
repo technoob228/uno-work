@@ -155,6 +155,7 @@ export function autoWorkChoice(
 const HARNESS_NAMES: Readonly<Record<string, string>> = {
   claudeAgent: "Claude",
   codex: "Codex",
+  gemini: "Gemini CLI",
   opencode: "OpenCode",
   cursor: "Cursor",
   uno: "Uno AI",
