@@ -71,17 +71,22 @@ export const SidebarPinned = memo(function SidebarPinned({
   const empty = listed.length === 0 && !hasPinnedChats;
 
   return (
-    <section aria-label="Pinned" className="flex flex-col gap-px">
+    <section aria-label="Pinned" className="group/pinned flex flex-col gap-px">
       <div className="flex h-6 items-center justify-between pr-1 pl-2.5">
         <span className="text-xs font-medium text-sidebar-muted-foreground/70">Pinned</span>
+        {/* T53 (Misha 20.11): a bare "+" right above New chat read as "new chat".
+            Now it says what it adds and shows only while the pointer is on
+            Pinned (always on touch screens, and when focused from the keyboard). */}
         <button
           type="button"
           aria-label="Pin a link"
           title="Pin a link"
           onClick={() => setLinkOpen(true)}
-          className="inline-flex size-5 cursor-pointer items-center justify-center rounded text-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-foreground"
+          data-testid="sidebar-pin-link"
+          className="inline-flex h-5 cursor-pointer items-center gap-0.5 rounded px-1 text-[11px] text-muted-foreground/80 opacity-0 transition-opacity group-hover/pinned:opacity-100 group-focus-within/pinned:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
         >
-          <PlusIcon className="size-3.5" />
+          <PlusIcon className="size-3" />
+          Link
         </button>
       </div>
       {empty ? (

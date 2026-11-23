@@ -27,7 +27,9 @@
  *
  * New chat came back here on 15.10 (Misha): 0.0.133 took the icon off the
  * header to give the account name room, and people lost the obvious way to
- * start a chat. Its tooltip names the person's own shortcut (chat.new).
+ * start a chat. Its tooltip names the person's own shortcut (chat.new). Since
+ * 20.11 (T53) it opens the picker of computer and folder (NewChatPicker.tsx);
+ * ⇧-click starts in the open chat's folder as before.
  */
 import {
   ArrowDownIcon,
@@ -55,6 +57,7 @@ import {
 import { create } from "zustand";
 
 import { cn } from "../../lib/utils";
+import { NewChatPickerButton } from "./NewChatPicker";
 import {
   filterSidebarProjectScopeItems,
   reduceSidebarProjectScopeMenuState,
@@ -162,14 +165,14 @@ export function LegacySidebarDChatsBar(props: {
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
         Chats
       </span>
-      <BarButton
-        label="New chat"
+      <NewChatPickerButton
         tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
         testId="sidebar-d-new-chat"
-        onClick={props.onNewChat}
+        className={BAR_BUTTON_CLASS}
+        onShiftClick={props.onNewChat}
       >
         <SquarePenIcon className="size-3.5" />
-      </BarButton>
+      </NewChatPickerButton>
       <BarButton
         label="Add a project"
         tooltip="Add a project"
@@ -859,14 +862,14 @@ export function SidebarDChatsBar(props: {
       >
         <FolderPlusIcon className="size-3.5" />
       </BarButton>
-      <BarButton
-        label="New chat"
+      <NewChatPickerButton
         tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
         testId="sidebar-d-new-chat"
-        onClick={props.onNewChat}
+        className={BAR_BUTTON_CLASS}
+        onShiftClick={props.onNewChat}
       >
         <SquarePenIcon className="size-3.5" />
-      </BarButton>
+      </NewChatPickerButton>
     </li>
   );
 }
