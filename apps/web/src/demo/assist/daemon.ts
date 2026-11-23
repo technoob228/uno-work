@@ -31,6 +31,7 @@ import {
 } from "../heavyFixtures";
 import { automationHandlers, resetAutomations } from "./automations";
 import { securityDemoHandlers } from "./securityDemo";
+import { teamCollabHandlers } from "../teamCollabDemo";
 import { type DemoPersona, assistantsOn } from "./fixtures";
 import {
   demoMachineClass,
@@ -1183,6 +1184,8 @@ export function accountHandlers(): HttpHandler[] {
     ...ownComputerHandlers(),
     // Settings → Security: Protection off / on / after the red button (?security=).
     ...securityDemoHandlers(),
+    // T51: the project team of landing and its collab routes (?t51=on|off, ?as=andrei).
+    ...teamCollabHandlers(),
     http.get("*/_account/auth/me", () =>
       HttpResponse.json({
         id: 1001,

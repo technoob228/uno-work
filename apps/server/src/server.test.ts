@@ -122,7 +122,10 @@ import { CredentialsVaultService, type CredentialsVaultShape } from "./credentia
 import { ProjectSyncService } from "./projectSync/ProjectSyncService.ts";
 import { ChatImportService } from "./myComputer/import/ChatImportService.ts";
 import { ComputersLifecycle } from "./computers/ComputersLifecycle.ts";
-import { ChatRequests } from "./chatRequests/ChatRequests.ts";
+import { ChatRequests, type ChatRequestsShape } from "./chatRequests/ChatRequests.ts";
+import { TeamCollab, type TeamCollabShape } from "./team/TeamCollab.ts";
+import { makePartsCache } from "./team/teamCloud.ts";
+import { NO_PARTS } from "./team/teamCloud.logic.ts";
 import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { DEFAULT_TRUST_SETTINGS } from "./myComputer/trust/trustStore.ts";
@@ -648,7 +651,16 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mergeAll(
           Layer.mock(ChatImportService)({}),
-          Layer.mock(ChatRequests)({ outgoing: null }),
+          Layer.mock(ChatRequests)({
+            outgoing: null,
+            team: {} as ChatRequestsShape["team"],
+            isOwnComputer: Effect.succeed(true),
+          }),
+          Layer.mock(TeamCollab)({
+            cloud: {} as TeamCollabShape["cloud"],
+            parts: makePartsCache({ fetch: () => Promise.resolve(NO_PARTS) }),
+            state: Effect.die("TeamCollab.state not mocked"),
+          }),
           Layer.mock(ComputersLifecycle)({
             state: Effect.succeed({ lifecycle: false, purposes: [] }),
           }),

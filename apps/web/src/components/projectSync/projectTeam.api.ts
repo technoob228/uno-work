@@ -15,6 +15,9 @@ import {
 
 const ROOT = "/api/v1/work/team";
 
+/** The react-query key of `loadTeams` (Project settings, invites, T51's team/ store). */
+export const projectTeamsQueryKey = ["projectTeams"] as const;
+
 /** The teams and invitations; null when teams aren't on for this account. */
 export async function loadTeams(): Promise<TeamList | null> {
   if (accountTransport() === "none") return null;

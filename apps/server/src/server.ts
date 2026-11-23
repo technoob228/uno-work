@@ -129,6 +129,7 @@ import { MyComputerServiceLive } from "./myComputer/MyComputerService.ts";
 import { ComputersLifecycleLive } from "./myComputer/ComputersLifecycleLive.ts";
 import { ComputerWorkspacePolicyLive } from "./myComputer/ComputerWorkspaces.ts";
 import { ChatRequestsLive } from "./chatRequests/ChatRequests.ts";
+import { TeamCollabLive } from "./team/TeamCollab.ts";
 import { CommandGuardPolicyLive } from "./chatRequests/commandGuardPolicy.ts";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver.ts";
@@ -547,8 +548,12 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       Layer.mergeAll(
         ChatImportServiceLive,
         // A cloud chat asks to start a chat on the person's computer: the
-        // request folder there, Start / Decline here (chatRequests/).
-        ChatRequestsLive,
+        // request folder there, Start / Decline here (chatRequests/). T51:
+        // the people of a project — shared chats, colleagues' requests (team/).
+        TeamCollabLive.pipe(
+          Layer.provide(ProjectSyncServiceLive),
+          Layer.provideMerge(ChatRequestsLive),
+        ),
         // computers lifecycle: the backend's live layer (CONTRACT.md §2, §7):
         // purposes at the console, open a folder there, continue in the
         // cloud, bring work over (myComputer/ComputersLifecycleLive.ts).

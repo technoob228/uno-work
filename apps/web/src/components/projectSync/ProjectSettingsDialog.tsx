@@ -38,6 +38,9 @@ import { ProjectTeam, ProjectTeamNeedsSync } from "./ProjectTeam";
 import { ProjectVersions } from "./ProjectVersions";
 import { conflictLine, hostLine, mineWasReplaced, syncLabel } from "./projectSync.logic";
 import { projectSyncQueryKey, useRefreshProjectSync } from "./useProjectSync";
+import { ProjectTeamAgents } from "../team/ProjectTeamAgents";
+import { anyPart } from "../../team/teamApi.logic";
+import { useTeamParts } from "../../team/teamStore";
 
 export interface ProjectSettingsTarget {
   readonly environmentId: EnvironmentId;
@@ -78,6 +81,8 @@ const fail = (title: string, error: unknown) =>
 function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: () => void }) {
   const { target } = props;
   const devMode = useDevMode();
+  // T51: a wider dialog for Team (agents, shared chats, the journal).
+  const teamParts = useTeamParts();
   const api = readEnvironmentApi(target.environmentId);
   const refresh = useRefreshProjectSync();
   const queryClient = useQueryClient();
@@ -150,7 +155,10 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
   };
 
   return (
-    <DialogPopup className="max-w-lg" data-testid="project-settings-dialog">
+    <DialogPopup
+      className={anyPart(teamParts) ? "max-w-xl" : "max-w-lg"}
+      data-testid="project-settings-dialog"
+    >
       <DialogHeader>
         <DialogTitle>{target.name}</DialogTitle>
         <DialogDescription>{target.cwd}</DialogDescription>
@@ -264,7 +272,10 @@ function ProjectSettingsBody(props: { target: ProjectSettingsTarget; onClose: ()
             <ProjectVersions target={target} onRestored={syncRefreshed} />
             <ProjectFiles target={target} keyCount={keys.data?.secrets.length ?? 0} />
             {entry?.name ? (
-              <ProjectTeam syncName={entry.name} teamId={entry.team?.id ?? null} />
+              <>
+                <ProjectTeam syncName={entry.name} teamId={entry.team?.id ?? null} />
+                <ProjectTeamAgents syncName={entry.name} teamId={entry.team?.id ?? null} />
+              </>
             ) : null}
           </>
         ) : (

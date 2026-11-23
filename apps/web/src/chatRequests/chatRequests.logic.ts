@@ -6,6 +6,8 @@
  */
 import type { ChatRequestStatus, ChatRequestView, ChatRequestsState } from "@t3tools/contracts";
 
+import { teamSessionHeadline } from "../team/team.logic";
+
 /** The folder line: as asked, or the server's choice. */
 export const LAST_PROJECT_LABEL = "the project used last";
 
@@ -28,6 +30,28 @@ export function waitingRequests(
   return state.requests.filter(
     (request) => request.status === "waiting" && !expiredBy(request, nowMs),
   );
+}
+
+/**
+ * T51: a request carrying `team` comes from a colleague (or their agent) in a
+ * team project; it shows under "From your team", not "Chats from the cloud".
+ */
+export const isTeamRequest = (request: ChatRequestView) => request.team !== undefined;
+
+/** The person's own cloud chats asking (Chats from the cloud, the sidebar). */
+export function ownWaitingRequests(
+  state: ChatRequestsState | null,
+  nowMs: number = Date.now(),
+): ReadonlyArray<ChatRequestView> {
+  return waitingRequests(state, nowMs).filter((request) => !isTeamRequest(request));
+}
+
+/** A colleague's session requests (From your team). */
+export function teamWaitingRequests(
+  state: ChatRequestsState | null,
+  nowMs: number = Date.now(),
+): ReadonlyArray<ChatRequestView> {
+  return waitingRequests(state, nowMs).filter(isTeamRequest);
 }
 
 export function waitingCount(state: ChatRequestsState | null, nowMs: number = Date.now()): number {
@@ -54,6 +78,7 @@ export function newlyWaiting(
 
 /** «<thread> on <computer> wants to start a chat here» — the card's and the notification's title. */
 export function requestTitle(request: ChatRequestView): string {
+  if (request.team) return teamSessionHeadline(request.team);
   return `${fromTitle(request)} on ${computerName(request)} wants to start a chat here`;
 }
 

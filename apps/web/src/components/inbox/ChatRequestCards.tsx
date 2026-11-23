@@ -14,7 +14,7 @@ import {
   folderLabel,
   harnessLabel,
   requestTitle,
-  waitingRequests,
+  ownWaitingRequests,
   waitsUntilLabel,
 } from "../../chatRequests/chatRequests.logic";
 import { openChatRequestBrief, useChatRequestsStore } from "../../chatRequests/chatRequestsStore";
@@ -32,7 +32,7 @@ export const ChatRequestCards = memo(function ChatRequestCards(props: {
   const busy = useChatRequestsStore((store) => store.busy);
   // "waits until" and requests running out.
   useMinuteClock();
-  const requests = waitingRequests(state);
+  const requests = ownWaitingRequests(state);
   const actions = useChatRequestActions(props.onOpened ? { onDone: props.onOpened } : undefined);
   if (requests.length === 0) return null;
   return (

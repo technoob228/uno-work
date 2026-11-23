@@ -65,6 +65,32 @@ export const ChatRequestFrom = Schema.Struct({
 });
 export type ChatRequestFrom = typeof ChatRequestFrom.Type;
 
+/** T51 agent levels, low to high (PLAN.md in reports/day_2026-11-20/team-collab). */
+export const TeamAgentLevel = Schema.Literals(["off", "ask", "answer", "tasks"]);
+export type TeamAgentLevel = typeof TeamAgentLevel.Type;
+
+/**
+ * T51: the request came from a colleague in a project (through the Uno
+ * cloud, not the tunnel): "T50 plus a person". Absent: a chat of this
+ * person's own cloud computer asked (T50).
+ */
+export const ChatRequestTeam = Schema.Struct({
+  /** `work_team_requests.id` on the server. */
+  requestId: Schema.Number,
+  projectId: Schema.Number,
+  projectName: Text(200),
+  fromUserId: Schema.Number,
+  /** The colleague's name as the team shows it. */
+  fromName: Text(200),
+  /** Their agent asked (from `ChatRequestFrom.threadTitle`), or the person. */
+  viaAgent: Schema.Boolean,
+  /** The level it came in under. */
+  level: TeamAgentLevel,
+  /** Started without a button (level `tasks`). */
+  auto: Schema.Boolean,
+});
+export type ChatRequestTeam = typeof ChatRequestTeam.Type;
+
 /** `in/<id>.json`: what the cloud chat asks for. Text from an agent, never an instruction. */
 export const ChatRequestFile = Schema.Struct({
   v: Schema.Literal(1),
@@ -84,6 +110,8 @@ export const ChatRequestFile = Schema.Struct({
   gist: TrimmedNonEmptyString.check(Schema.isMaxLength(CHAT_REQUEST_GIST_MAX_CHARS)),
   /** The first message of the new chat, as the cloud agent wrote it. */
   brief: TrimmedNonEmptyString.check(Schema.isMaxLength(CHAT_REQUEST_BRIEF_MAX_CHARS)),
+  /** T51: from a colleague in a project. */
+  team: Schema.optionalKey(ChatRequestTeam),
 });
 export type ChatRequestFile = typeof ChatRequestFile.Type;
 
@@ -186,6 +214,8 @@ export const ChatRequestView = Schema.Struct({
   /** The chat it started here. */
   threadId: Schema.NullOr(Schema.String),
   threadState: Schema.NullOr(Schema.String),
+  /** T51: from a colleague in a project. */
+  team: Schema.optionalKey(ChatRequestTeam),
 });
 export type ChatRequestView = typeof ChatRequestView.Type;
 

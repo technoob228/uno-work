@@ -53,7 +53,8 @@ import { makeHost } from "../remoteComputers/http.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { parseSettingsBoxId } from "../unoBoxIdentity.ts";
 import { UnoCloudService } from "../workspaceRegistry/UnoCloudService.ts";
-import { makeChatRequestsHost } from "./host.ts";
+import { OutsideThreads } from "../automations/outsideThreads.ts";
+import { makeChatRequestsHost, type TeamHostShape } from "./host.ts";
 import {
   chatRequestButtons,
   chatRequestMessageText,
@@ -83,6 +84,10 @@ export interface ChatRequestsShape {
   ) => Effect.Effect<ChatRequestsState, ChatRequestsError>;
   /** The sending side (a cloud computer with "Connect my computer"); null elsewhere. */
   readonly outgoing: Outgoing | null;
+  /** T51: a colleague's requests, for the team bridge (team/bridge.ts). */
+  readonly team: TeamHostShape;
+  /** A laptop or desktop (no machine token): the person's own computer. */
+  readonly isOwnComputer: Effect.Effect<boolean>;
 }
 
 export class ChatRequests extends Context.Service<ChatRequests, ChatRequestsShape>()(
@@ -103,6 +108,7 @@ export const ChatRequestsLive = Layer.effect(
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     const cloud = Option.getOrNull(yield* Effect.serviceOption(UnoCloudService));
     const notify = Option.getOrNull(yield* Effect.serviceOption(ConnectorNotifyService));
+    const outside = Option.getOrNull(yield* Effect.serviceOption(OutsideThreads));
     // A laptop or desktop: the person's own computer, where requests arrive.
     const isOwnComputerNow = settings.getSettings.pipe(
       Effect.map((value) => readWorkMachineIdentity(value.uno) === null),
@@ -113,6 +119,13 @@ export const ChatRequestsLive = Layer.effect(
       host,
       isOwnComputer: isOwnComputerNow,
       app: `uno-work ${packageJson.version}`,
+      // T51: a colleague's words, outside text (T49); without the record, no start.
+      markOutside: (threadId) =>
+        outside === null
+          ? Effect.fail(
+              fail("Outside text can't be marked here, so a colleague's chat can't start."),
+            )
+          : outside.mark(threadId),
     });
     const stateDir = config.stateDir;
     const io = <A>(run: () => Promise<A>) =>
@@ -307,6 +320,8 @@ export const ChatRequestsLive = Layer.effect(
       decide: hostSide.decide,
       setAllowed: hostSide.setAllowed,
       outgoing,
+      team: hostSide.team,
+      isOwnComputer: isOwnComputerNow,
     } satisfies ChatRequestsShape;
   }),
 );

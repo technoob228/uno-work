@@ -176,7 +176,15 @@ export type JournalEvent =
   | "turned-off"
   | "start-failed"
   /** A Start / Decline from Telegram that came too late or found it decided. */
-  | "telegram-dropped";
+  | "telegram-dropped"
+  /** T51: started without a button (level Do tasks). */
+  | "auto-started"
+  /** T51: a colleague's request the cloud says is over (cancelled, expired there). */
+  | "retired"
+  /** T51: stopped at the colleague's or the project's request. */
+  | "stopped"
+  /** T51: a read-only chat answering a colleague's agent's question. */
+  | "answering";
 
 /** One line of the journal of requests and decisions (who asked, what, how it ended). */
 export async function appendJournal(

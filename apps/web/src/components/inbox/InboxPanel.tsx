@@ -54,6 +54,7 @@ import {
 } from "./InboxItemActions";
 import { DeployApprovalCards } from "./DeployApprovalCards";
 import { ChatRequestCards } from "./ChatRequestCards";
+import { TeamRequestCards } from "../team/TeamRequestCards";
 import { useChatRequestsWaitingCount } from "../../chatRequests/chatRequestsStore";
 import { MyComputerActivityBanner } from "./MyComputerActivityBanner";
 
@@ -189,6 +190,7 @@ export const InboxPanel = memo(function InboxPanel(props: {
       <MyComputerActivityBanner />
       {filter === "all" || filter === "needs-you" ? (
         <>
+          <TeamRequestCards />
           <ChatRequestCards />
           <DeployApprovalCards liveOnly={filter === "needs-you"} />
         </>
@@ -519,6 +521,7 @@ export const InboxNeedsYouList = memo(function InboxNeedsYouList() {
           Needs you
         </span>
       </div>
+      <TeamRequestCards />
       <ChatRequestCards />
       <DeployApprovalCards liveOnly />
       {needsYou.length === 0 && chatRequestsWaiting === 0 ? (

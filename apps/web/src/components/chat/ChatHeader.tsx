@@ -56,6 +56,7 @@ import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantCh
 import { ComputerChip } from "../computer/home/ComputerChip";
 import { useNameAmongComputers } from "../computerSwitcher/useComputerSwitcher";
 import { ChatDoneButton } from "./ChatDoneButton";
+import { ChatShareButton } from "../team/ChatShareButton";
 import { ChatAutomationsButton } from "../automations/ChatAutomations";
 import { useAssistantChat } from "../../assistant/useAssistantChat";
 import { AssistantSettingsButton } from "../assistants/AssistantSettingsButton";
@@ -116,6 +117,8 @@ interface ChatHeaderProps {
   draftId?: DraftId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  /** The chat's project here: T51's Share finds its team through it. */
+  activeProjectId?: string | undefined;
   /**
    * Computers lifecycle: the project stands for a folder on the person's own
    * computer — the header says "on MacBook" instead of the cloud computer.
@@ -165,6 +168,7 @@ export const ChatHeader = memo(function ChatHeader({
   draftId,
   activeThreadTitle,
   activeProjectName,
+  activeProjectId,
   activeProjectComputerName = null,
   activeProjectCwd,
   hideDraftFolderChip = false,
@@ -353,6 +357,16 @@ export const ChatHeader = memo(function ChatHeader({
             <SquarePenIcon className="size-3.5" />
           </button>
         ) : null}
+        {/* T51: share this chat with people of its project's team. */}
+        {draftId ? null : (
+          <ChatShareButton
+            environmentId={activeThreadEnvironmentId}
+            threadId={activeThreadId}
+            projectId={activeProjectId}
+            title={activeThreadTitle}
+            computerName={computerName}
+          />
+        )}
         {draftId ? null : (
           <ChatDoneButton
             environmentId={activeThreadEnvironmentId}

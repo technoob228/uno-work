@@ -406,6 +406,7 @@ import {
   ChatRequestsSetAllowedInput,
   ChatRequestsState,
 } from "./chatRequests.ts";
+import { TeamError, TeamLetAgentAnswerInput, TeamLetAgentAnswerResult, TeamState } from "./team.ts";
 import {
   ComputerInput,
   ComputersBringWorkInput,
@@ -606,6 +607,10 @@ export const WS_METHODS = {
   chatRequestsState: "chatRequests.state",
   chatRequestsDecide: "chatRequests.decide",
   chatRequestsSetAllowed: "chatRequests.setAllowed",
+  // T51: what this computer does for the people of a project (team.ts).
+  teamState: "team.state",
+  teamRefresh: "team.refresh",
+  teamLetAgentAnswer: "team.letAgentAnswer",
 
   // Computers lifecycle (computers.ts): what a computer is for, its work, chats on it
   computersState: "computers.state",
@@ -998,6 +1003,26 @@ export const WsChatRequestsSetAllowedRpc = Rpc.make(WS_METHODS.chatRequestsSetAl
   payload: ChatRequestsSetAllowedInput,
   success: ChatRequestsState,
   error: ChatRequestsError,
+});
+
+export const WsTeamStateRpc = Rpc.make(WS_METHODS.teamState, {
+  payload: Schema.Struct({}),
+  success: TeamState,
+  error: TeamError,
+});
+
+/** The interface shared a chat (or stopped): look at the shared chats now, not in 30 s. */
+export const WsTeamRefreshRpc = Rpc.make(WS_METHODS.teamRefresh, {
+  payload: Schema.Struct({}),
+  success: TeamState,
+  error: TeamError,
+});
+
+/** "Let my agent answer" on a colleague's agent's question. */
+export const WsTeamLetAgentAnswerRpc = Rpc.make(WS_METHODS.teamLetAgentAnswer, {
+  payload: TeamLetAgentAnswerInput,
+  success: TeamLetAgentAnswerResult,
+  error: TeamError,
 });
 
 export const WsComputersStateRpc = Rpc.make(WS_METHODS.computersState, {
@@ -2761,6 +2786,13 @@ export const WsChatRequestsRpcGroup = RpcGroup.make(
   WsChatRequestsSetAllowedRpc,
 );
 
+/** T51: the team's methods (team.ts), apart from the main group for the same reason. */
+export const WsTeamRpcGroup = RpcGroup.make(
+  WsTeamStateRpc,
+  WsTeamRefreshRpc,
+  WsTeamLetAgentAnswerRpc,
+);
+
 /** Computers lifecycle (computers.ts), apart from the main group for the same reason. */
 export const WsComputersRpcGroup = RpcGroup.make(
   WsComputersStateRpc,
@@ -3025,6 +3057,7 @@ export const WsMainRpcGroup = RpcGroup.make(
 export const WsRpcGroup = WsMainRpcGroup.merge(
   WsMyComputerRpcGroup,
   WsChatRequestsRpcGroup,
+  WsTeamRpcGroup,
   WsComputersRpcGroup,
   WsPullRequestsRpcGroup,
 );

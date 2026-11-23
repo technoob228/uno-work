@@ -10,6 +10,7 @@ import { InboxListener } from "../inbox/InboxListener";
 import { DockBadgeListener } from "../inbox/DockBadgeListener";
 import { DeployApprovalsListener } from "../deployApprovals/DeployApprovalsListener";
 import { ChatRequestsListener } from "../chatRequests/ChatRequestsListener";
+import { TeamInboxListener } from "../team/TeamInboxListener";
 import { ChatRequestBriefDialog } from "./chatRequests/ChatRequestBriefDialog";
 import { PaymentNoticeBanner } from "./billing/PaymentNoticeBanner";
 import { useNavLayout } from "../navigation/useNavLayout";
@@ -168,6 +169,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         <InboxListener />
         <DeployApprovalsListener />
         <ChatRequestsListener />
+        <TeamInboxListener />
         <ChatRequestBriefDialog />
         <DockBadgeListener />
       </SidebarProvider>
