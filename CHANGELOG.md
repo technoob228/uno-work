@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.191 — 2026-11-23
+
+- Gemini CLI joins Claude Code and Codex. Settings → AI has a Gemini CLI row with Install and Sign in: a Google account (open the link, paste the code) or a Gemini API key, kept as a secret. Once signed in, Gemini models (Auto by default) show up in the model picker, on Home and in the model roles.
+- New chat opens a small picker right on the button: computer and folder, with your last choice already selected. Enter or one click opens the chat there, Tab switches the computer, and ⌘N opens the same picker. The chat keeps the worktree mode it would have had before. The "+" next to Pinned shows only on hover, so it no longer looks like a second New chat.
+- Telegram groups without your own bot: add @uno_work_bot to a group, press Add in Settings → Telegram → Groups, and Uno answers there for the people you picked. In groups it hears only messages that mention @uno_work_bot or reply to it. Where groups aren't on yet, Settings shows a "Connect your own bot" card instead of a grey line.
+
 ## v0.0.190 — 2026-11-20
 
 - Models by role in one place. Uno picks models for your subscriptions (hard work goes to a strong model, simple steps to a fast one) and never changes a model you chose yourself. The assistant no longer silently moves to a weaker model.
