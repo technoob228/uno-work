@@ -33,12 +33,21 @@ import { useShallow } from "zustand/react/shallow";
 import { useActiveMachine } from "../../hooks/useActiveMachine";
 import {
   HOME_FOLDER_TITLE,
+  ensureFolderProjectOn,
+  resolveHomeFolder,
   useChatOnComputer,
   useHomeFolderPath,
 } from "../../hooks/useFolderChats";
-import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
+import { useHandleNewThread } from "../../hooks/useHandleNewThread";
 import { useSwitchEnvironment } from "../../hooks/useSwitchEnvironment";
+import { useCommandPaletteStore } from "../../commandPaletteStore";
+import {
+  type ChatThreadActionContext,
+  startNewThreadFromContext,
+  startNewThreadInPickedProject,
+} from "../../lib/chatThreadActions";
 import { cn } from "../../lib/utils";
+import { newChatEnvMode } from "../../newChatDefaults";
 import { normalizeProjectPathForComparison } from "../../lib/projectPaths";
 import { currentStaleBundlePage, switchReloadUrl } from "../../staleBundle";
 import { readStaleBundleMachine } from "../../staleBundleMachine";
@@ -156,7 +165,7 @@ function useStartableFolders(environmentId: string | null): ReadonlyArray<Starta
 
 /** Starts the chat where the picker says and remembers the choice. */
 function useStartNewChat() {
-  const { handleNewThread } = useNewThreadHandler();
+  const context = useHandleNewThread();
   const { chatIn } = useChatOnComputer();
   const switchEnvironment = useSwitchEnvironment();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -169,13 +178,36 @@ function useStartNewChat() {
       switchEnvironment(env);
       return;
     }
+    // The open chat lends its worktree to a new chat in its own project; any
+    // other project starts in its own default mode (project, then computer).
+    const actionContext: ChatThreadActionContext = {
+      activeDraftThread: context.activeDraftThread,
+      activeThread: context.activeThread ?? undefined,
+      defaultProjectRef: context.defaultProjectRef,
+      defaultThreadEnvMode: newChatEnvMode,
+      handleNewThread: context.handleNewThread,
+      activeEnvironmentId: env,
+      createStarterProject: context.createStarterProject,
+      onMissingProject: () => useCommandPaletteStore.getState().openAddProject(),
+    };
     try {
       if ("projectId" in folder && folder.projectId !== null) {
-        await handleNewThread(scopeProjectRef(env, folder.projectId), { envMode: "local" });
-      } else {
-        const home = "key" in folder && folder.key === "home";
-        await chatIn(env, home ? null : folder.cwd);
+        await startNewThreadInPickedProject(actionContext, scopeProjectRef(env, folder.projectId));
+        return;
       }
+      if ("key" in folder && folder.key === "home") {
+        // The home folder, as New chat always did ("local": it's rarely a repo).
+        // Unreachable home: the old fallback — the open chat's project, or a
+        // starter project on an empty computer.
+        if (await resolveHomeFolder(env)) await chatIn(env, null);
+        else await startNewThreadFromContext(actionContext);
+        return;
+      }
+      if (folder.cwd === null) return;
+      await startNewThreadInPickedProject(
+        actionContext,
+        await ensureFolderProjectOn(env, folder.cwd),
+      );
     } catch (error) {
       toastManager.add({
         type: "error",

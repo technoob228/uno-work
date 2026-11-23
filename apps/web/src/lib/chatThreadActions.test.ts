@@ -5,6 +5,7 @@ import {
   resolveThreadActionProjectRef,
   startNewLocalThreadFromContext,
   startNewThreadFromContext,
+  startNewThreadInPickedProject,
   type ChatThreadActionContext,
 } from "./chatThreadActions";
 
@@ -195,5 +196,74 @@ describe("chatThreadActions", () => {
       expect(onMissingProject).toHaveBeenCalled();
       expect(handleNewThread).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("startNewThreadInPickedProject (the New chat picker)", () => {
+  const OTHER_ENVIRONMENT_ID = EnvironmentId.make("environment-2");
+  const openThread = {
+    environmentId: ENVIRONMENT_ID,
+    projectId: PROJECT_ID,
+    branch: "feature/existing",
+    worktreePath: "/repo/.t3/worktrees/existing",
+  };
+
+  it("the open chat's project keeps its branch and worktree", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    await startNewThreadInPickedProject(
+      createContext({ activeThread: openThread, handleNewThread, defaultThreadEnvMode: "local" }),
+      scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+    );
+    expect(handleNewThread).toHaveBeenCalledWith(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), {
+      branch: "feature/existing",
+      worktreePath: "/repo/.t3/worktrees/existing",
+      envMode: "worktree",
+    });
+  });
+
+  it("the open draft's mode carries over", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    await startNewThreadInPickedProject(
+      createContext({
+        activeDraftThread: { ...openThread, worktreePath: null, branch: null, envMode: "worktree" },
+        handleNewThread,
+      }),
+      scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID),
+    );
+    expect(handleNewThread).toHaveBeenCalledWith(scopeProjectRef(ENVIRONMENT_ID, PROJECT_ID), {
+      branch: null,
+      worktreePath: null,
+      envMode: "worktree",
+    });
+  });
+
+  it("another project starts in its own default mode, without the open chat's worktree", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    const defaultThreadEnvMode = vi.fn(() => "worktree" as const);
+    await startNewThreadInPickedProject(
+      createContext({ activeThread: openThread, handleNewThread, defaultThreadEnvMode }),
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+    );
+    expect(defaultThreadEnvMode).toHaveBeenCalledWith(
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+    );
+    expect(handleNewThread).toHaveBeenCalledWith(
+      scopeProjectRef(ENVIRONMENT_ID, FALLBACK_PROJECT_ID),
+      { envMode: "worktree" },
+    );
+  });
+
+  it("the same project id on another computer doesn't borrow the worktree", async () => {
+    const handleNewThread = vi.fn<ChatThreadActionContext["handleNewThread"]>(async () => {});
+    await startNewThreadInPickedProject(
+      createContext({ activeThread: openThread, handleNewThread, defaultThreadEnvMode: "local" }),
+      scopeProjectRef(OTHER_ENVIRONMENT_ID, PROJECT_ID),
+    );
+    expect(handleNewThread).toHaveBeenCalledWith(
+      scopeProjectRef(OTHER_ENVIRONMENT_ID, PROJECT_ID),
+      {
+        envMode: "local",
+      },
+    );
   });
 });
