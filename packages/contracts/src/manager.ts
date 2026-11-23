@@ -418,9 +418,15 @@ export const ManagerTelegramGroupView = Schema.Struct({
 });
 export type ManagerTelegramGroupView = typeof ManagerTelegramGroupView.Type;
 
+/** The assistant's own bot, or Uno's (@uno_work_bot: in groups only calls reach it, T57). */
+export const ManagerTelegramGroupsBot = Schema.Literals(["own", "shared"]);
+export type ManagerTelegramGroupsBot = typeof ManagerTelegramGroupsBot.Type;
+
 export const ManagerTelegramGroupsResult = Schema.Struct({
-  /** False: Uno's shared bot, which only takes private chats. */
+  /** False: groups don't work through this bot (Uno's, groups off); the page offers an own bot. */
   supported: Schema.Boolean,
+  /** Absent from older daemons (own bot or private-only shared bot). */
+  bot: Schema.optional(ManagerTelegramGroupsBot),
   botUsername: Schema.NullOr(Schema.String),
   groups: Schema.Array(ManagerTelegramGroupView),
   /** Groups the owner wrote to the bot in that are not added yet. */

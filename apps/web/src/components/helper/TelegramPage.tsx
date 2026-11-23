@@ -10,7 +10,7 @@
  * Every read and write is bound to the environment named by the caller; while
  * that environment is not confirmed live the page is read-only.
  */
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   BrainIcon,
@@ -134,6 +134,14 @@ export function TelegramPage({
   // Connect card.
   const [botToken, setBotToken] = useState("");
   const [howToOpen, setHowToOpen] = useState(false);
+  const connectRef = useRef<HTMLDivElement>(null);
+  const tokenInputRef = useRef<HTMLInputElement>(null);
+  // "Connect your own bot" (Groups): the Connect card, opened and focused.
+  const handleConnectOwnBot = useCallback(() => {
+    setHowToOpen(true);
+    connectRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    tokenInputRef.current?.focus({ preventScroll: true });
+  }, []);
   // Allowed chats (working copy; every add/remove saves immediately).
   const [allowedChatIds, setAllowedChatIds] = useState<ReadonlyArray<string>>([]);
   const [newChatId, setNewChatId] = useState("");
@@ -455,64 +463,68 @@ export function TelegramPage({
       ) : null}
 
       {/* a. Connect Telegram */}
-      <SettingsSection
-        title={helperCopy.connect.title}
-        icon={<SendIcon className="size-3.5" />}
-        headerAction={
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={!canMutate || saving || (botToken.trim().length === 0 && !connected)}
-            onClick={handleSaveToken}
-          >
-            {saving ? helperCopy.connect.saving : helperCopy.connect.save}
-          </Button>
-        }
-      >
-        <SettingsRow
-          title={<span className={STATUS_TONE_CLASS[status.tone]}>{status.text}</span>}
-          description={connected ? helperCopy.connect.description : helperCopy.pageIntro}
-        />
-        <SettingsRow
-          title={helperCopy.connect.tokenLabel}
-          description={
-            <span className="flex flex-col gap-1">
-              <span>{connected ? helperCopy.connect.tokenKeepHint : ""}</span>
-              <Collapsible open={howToOpen} onOpenChange={setHowToOpen}>
-                <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
-                  {howToOpen ? (
-                    <ChevronDownIcon className="size-3" />
-                  ) : (
-                    <ChevronRightIcon className="size-3" />
-                  )}
-                  {helperCopy.connect.howToTitle}
-                </CollapsibleTrigger>
-                <CollapsiblePanel>
-                  <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
-                    {helperCopy.connect.howToSteps.map((step) => (
-                      <li key={step}>{step}</li>
-                    ))}
-                  </ol>
-                </CollapsiblePanel>
-              </Collapsible>
-            </span>
+      <div ref={connectRef} className="scroll-mt-4">
+        <SettingsSection
+          title={helperCopy.connect.title}
+          icon={<SendIcon className="size-3.5" />}
+          headerAction={
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={!canMutate || saving || (botToken.trim().length === 0 && !connected)}
+              onClick={handleSaveToken}
+            >
+              {saving ? helperCopy.connect.saving : helperCopy.connect.save}
+            </Button>
           }
-          control={
-            <Input
-              type="password"
-              value={botToken}
-              onChange={(event) => setBotToken(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") handleSaveToken();
-              }}
-              placeholder={helperCopy.connect.tokenPlaceholder}
-              aria-label={helperCopy.connect.tokenLabel}
-              className="w-full sm:w-72"
-              size="sm"
-            />
-          }
-        />
-      </SettingsSection>
+        >
+          <SettingsRow
+            title={<span className={STATUS_TONE_CLASS[status.tone]}>{status.text}</span>}
+            description={connected ? helperCopy.connect.description : helperCopy.pageIntro}
+          />
+          <SettingsRow
+            title={helperCopy.connect.tokenLabel}
+            description={
+              <span className="flex flex-col gap-1">
+                <span>{connected ? helperCopy.connect.tokenKeepHint : ""}</span>
+                <Collapsible open={howToOpen} onOpenChange={setHowToOpen}>
+                  <CollapsibleTrigger className="inline-flex items-center gap-1 text-xs text-primary hover:underline">
+                    {howToOpen ? (
+                      <ChevronDownIcon className="size-3" />
+                    ) : (
+                      <ChevronRightIcon className="size-3" />
+                    )}
+                    {helperCopy.connect.howToTitle}
+                  </CollapsibleTrigger>
+                  <CollapsiblePanel>
+                    <ol className="mt-1 list-decimal space-y-0.5 pl-5 text-xs text-muted-foreground">
+                      {helperCopy.connect.howToSteps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                  </CollapsiblePanel>
+                </Collapsible>
+              </span>
+            }
+            control={
+              <Input
+                type="password"
+                value={botToken}
+                onChange={(event) => setBotToken(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") handleSaveToken();
+                }}
+                placeholder={helperCopy.connect.tokenPlaceholder}
+                aria-label={helperCopy.connect.tokenLabel}
+                className="w-full sm:w-72"
+                size="sm"
+                ref={tokenInputRef}
+                data-testid="telegram-bot-token"
+              />
+            }
+          />
+        </SettingsSection>
+      </div>
 
       {connected ? (
         <>
@@ -596,6 +608,7 @@ export function TelegramPage({
               onTitles={setGroupTitles}
               onError={setError}
               onNotice={setNotice}
+              onConnectOwnBot={handleConnectOwnBot}
             />
           ) : null}
 

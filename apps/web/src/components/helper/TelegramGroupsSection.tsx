@@ -7,6 +7,10 @@
  * owner called the bot in shows up here as waiting, added with one button.
  * A daemon that does not know the route yet (older computer) answers 404 and
  * the section is not shown.
+ *
+ * Through Uno's assistant bot groups work when the console has them on for
+ * the account (T57, 20.11); otherwise the section says so plainly and offers
+ * the assistant's own bot — the page's Connect Telegram token field.
  */
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, UsersRoundIcon } from "lucide-react";
@@ -54,6 +58,7 @@ export function TelegramGroupsSection({
   onTitles,
   onError,
   onNotice,
+  onConnectOwnBot,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
@@ -68,6 +73,8 @@ export function TelegramGroupsSection({
   readonly onTitles: (titles: Readonly<Record<string, string>>) => void;
   readonly onError: (message: string) => void;
   readonly onNotice: (message: string) => void;
+  /** Open the page's own-bot connect flow (token field + how to get one). */
+  readonly onConnectOwnBot: () => void;
 }) {
   // null: loading, or a daemon without the route (the section stays hidden).
   const [view, setView] = useState<ManagerTelegramGroupsResult | null>(null);
@@ -139,9 +146,42 @@ export function TelegramGroupsSection({
   return (
     <SettingsSection title={helperCopy.groups.title} icon={<UsersRoundIcon className="size-3.5" />}>
       {!view.supported ? (
-        <SettingsRow title={helperCopy.groups.unsupported} description="" />
+        <div
+          className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+          data-testid="telegram-groups-unsupported"
+        >
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <UsersRoundIcon className="size-4" />
+            </span>
+            <div className="min-w-0 space-y-1">
+              <h3 className="text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+                {helperCopy.groups.unsupportedTitle}
+              </h3>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {helperCopy.groups.unsupportedBody}
+              </p>
+            </div>
+          </div>
+          <Button
+            size="sm"
+            className="shrink-0 self-start sm:self-center"
+            disabled={!canMutate}
+            data-testid="telegram-groups-connect-own-bot"
+            onClick={onConnectOwnBot}
+          >
+            {helperCopy.groups.connectOwnBot}
+          </Button>
+        </div>
       ) : view.groups.length === 0 && view.pending.length === 0 ? (
-        <SettingsRow title={helperCopy.groups.intro} description={helperCopy.groups.empty(bot)} />
+        <>
+          <SettingsRow title={helperCopy.groups.intro} description={helperCopy.groups.empty(bot)} />
+          {view.bot === "shared" ? (
+            <div className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+              {helperCopy.groups.sharedHint(bot)}
+            </div>
+          ) : null}
+        </>
       ) : (
         <>
           {view.groups.map((group) => (
@@ -175,7 +215,9 @@ export function TelegramGroupsSection({
             />
           ))}
           <div className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-            {helperCopy.groups.privacyHint}
+            {view.bot === "shared"
+              ? helperCopy.groups.sharedHint(bot)
+              : helperCopy.groups.privacyHint}
           </div>
         </>
       )}

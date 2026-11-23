@@ -133,6 +133,14 @@ import {
   withTelegramGroupAccess,
   type TelegramGroupDirectory,
 } from "../telegramGroups.ts";
+import {
+  decodeSharedGroupsInfo,
+  SHARED_GROUPS_INFO_TTL_MS,
+  sharedGroupAccessBody,
+  sharedGroupAccessPushes,
+  type SharedGroupsInfo,
+  withSharedGroups,
+} from "../telegramSharedGroups.ts";
 import { OutsideThreads } from "../../automations/outsideThreads.ts";
 import { executeConnectorCommand } from "../connectorCommandHandler.ts";
 import { currentAssistantModelSelection } from "../assistantEngineSelection.ts";
@@ -827,6 +835,69 @@ const makeTelegramConnector = Effect.gen(function* () {
       Effect.map((row) => (Option.isSome(row) ? decodeRow(row.value.config) : null)),
       Effect.orElseSucceed(() => null),
     );
+
+  // --- Groups through Uno's assistant bot (telegramSharedGroups.ts): what the
+  // console says about them, at most once a minute per assistant.
+  const sharedGroupsRef = yield* Ref.make(
+    new Map<string, { readonly atMs: number; readonly info: SharedGroupsInfo | null }>(),
+  );
+  const sharedGroupsInfo = (
+    projectId: ProjectId,
+    botToken: string,
+    options?: { readonly fresh?: boolean },
+  ): Effect.Effect<SharedGroupsInfo | null> =>
+    Effect.gen(function* () {
+      if (!isAssistantBotRelay(botToken)) return null;
+      const cached = (yield* Ref.get(sharedGroupsRef)).get(projectId);
+      const nowMs = Date.now();
+      if (
+        options?.fresh !== true &&
+        cached !== undefined &&
+        nowMs - cached.atMs < SHARED_GROUPS_INFO_TTL_MS
+      ) {
+        return cached.info;
+      }
+      const answer = yield* Effect.promise(() =>
+        callTelegramBotMethod(botToken, "unoGroupsInfo", {}),
+      );
+      // No answer at all (network): keep what was known.
+      if (!answer.ok && answer.error_code === undefined) return cached?.info ?? null;
+      // A console that does not know the method answers 403/404: not supported.
+      const info = answer.ok ? decodeSharedGroupsInfo(answer.result) : null;
+      yield* Ref.update(sharedGroupsRef, (map) =>
+        new Map(map).set(projectId, { atMs: nowMs, info }),
+      );
+      return info;
+    });
+  /** Push the owner's "who is heard" to the console where it differs. */
+  const syncSharedGroups = (
+    projectId: ProjectId,
+    config: ManagerTelegramConnectorConfig,
+    info: SharedGroupsInfo,
+  ) =>
+    Effect.gen(function* () {
+      const pushes = sharedGroupAccessPushes(config, info);
+      if (pushes.length === 0) return;
+      for (const push of pushes) {
+        const answer = yield* Effect.promise(() =>
+          callTelegramBotMethod(config.botToken, "unoSetGroupAccess", sharedGroupAccessBody(push)),
+        );
+        if (!answer.ok) {
+          yield* Effect.logWarning("telegram shared group access sync failed").pipe(
+            Effect.annotateLogs({
+              projectId,
+              chatId: push.chatId,
+              description: answer.description,
+            }),
+          );
+        }
+      }
+      yield* Ref.update(sharedGroupsRef, (map) => {
+        const next = new Map(map);
+        next.delete(projectId);
+        return next;
+      });
+    });
 
   /**
    * Rows of other assistants of this computer that talk through `holder`'s
@@ -3262,8 +3333,25 @@ const makeTelegramConnector = Effect.gen(function* () {
       // --- Who writes in groups (telegramGroups.ts). In a group the bot
       // answers in: everyone, so the owner can pick people by name. In any
       // other group: only the owner, so the group can be added with a button.
-      // Uno's shared bot never takes groups.
+      // Uno's shared bot (@get_uno_bot) never takes groups; Uno's assistant
+      // bot delivers a group only when the console has groups on for the
+      // account, and then only what is addressed to it (telegramSharedGroups.ts).
       const inGroup = !isPrivateTelegramChat(message.chat);
+      const groupsHere =
+        !isRelayCredential(config.botToken) || isAssistantBotRelay(config.botToken);
+      if (
+        inGroup &&
+        isAssistantBotRelay(config.botToken) &&
+        access.allowedChatIds.includes(chatId)
+      ) {
+        // The console's rule follows the owner's (at most once a minute).
+        yield* sharedGroupsInfo(projectId, config.botToken).pipe(
+          Effect.flatMap((info) =>
+            info === null ? Effect.void : syncSharedGroups(projectId, config, info),
+          ),
+          Effect.forkDetach,
+        );
+      }
       const fromOwner =
         message.from?.id !== undefined &&
         message.from.is_bot !== true &&
@@ -3271,7 +3359,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (
         inGroup &&
         message.from !== undefined &&
-        !isRelayCredential(config.botToken) &&
+        groupsHere &&
         (access.allowedChatIds.includes(chatId) || fromOwner)
       ) {
         const from = message.from;
@@ -3291,7 +3379,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         );
         // The owner called the bot in a group that is not added yet: say
         // where to add it (at most every few minutes), instead of silence.
-        if (inGroup && fromOwner && !isRelayCredential(config.botToken)) {
+        if (inGroup && fromOwner && groupsHere) {
           const called = toNormalizedMessage({
             message,
             botUsername: (yield* getRuntime(projectId)).botUsername,
@@ -4179,16 +4267,32 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (row === null) {
         return { supported: true, botUsername: null, groups: [], pending: [] };
       }
-      // Uno's shared bot (held here or routed through another assistant)
-      // only takes private chats.
-      const supported = !isRelayCredential(row.botToken) && !isRouteCredential(row.botToken);
       const directory = yield* Ref.get(groupsRef);
-      return telegramGroupsView({
+      const botUsername = (yield* getRuntime(projectId)).botUsername;
+      // Uno's assistant bot: groups when the console has them on (T57).
+      if (isAssistantBotRelay(row.botToken)) {
+        const info = yield* sharedGroupsInfo(projectId, row.botToken);
+        const supported = info?.enabled === true;
+        const view = telegramGroupsView({
+          config: row,
+          seen: supported ? (directory.connectors[projectId] ?? []) : [],
+          botUsername,
+          supported,
+        });
+        if (info === null || !supported) return { ...view, bot: "shared" as const };
+        yield* syncSharedGroups(projectId, row, info);
+        return withSharedGroups(view, info);
+      }
+      // Uno's older shared bot, or an assistant routed through another one's
+      // bot: private chats only.
+      const supported = !isRelayCredential(row.botToken) && !isRouteCredential(row.botToken);
+      const view = telegramGroupsView({
         config: row,
         seen: supported ? (directory.connectors[projectId] ?? []) : [],
-        botUsername: (yield* getRuntime(projectId)).botUsername,
+        botUsername,
         supported,
       });
+      return { ...view, bot: supported ? ("own" as const) : ("shared" as const) };
     });
 
   const setGroupAccess: ManagerTelegramServiceShape["setGroupAccess"] = (input) =>
@@ -4197,7 +4301,16 @@ const makeTelegramConnector = Effect.gen(function* () {
       if (row === null) {
         return { ok: false as const, error: "This assistant has no Telegram bot yet." };
       }
-      if (isRelayCredential(row.botToken) || isRouteCredential(row.botToken)) {
+      if (isAssistantBotRelay(row.botToken)) {
+        const info = yield* sharedGroupsInfo(input.projectId, row.botToken, { fresh: true });
+        if (info?.enabled !== true) {
+          return {
+            ok: false as const,
+            error:
+              "Groups through Uno's bot aren't on for this account yet. To use a group now, connect the assistant's own bot.",
+          };
+        }
+      } else if (isRelayCredential(row.botToken) || isRouteCredential(row.botToken)) {
         return {
           ok: false as const,
           error:

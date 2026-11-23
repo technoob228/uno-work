@@ -732,6 +732,12 @@ export function assistantGroupsAnswer(view: ManagerTelegramGroupsResult) {
               `Waiting to be added: ${view.pending.map((group) => group.title ?? group.chatId).join(", ")}. Say who the assistant should listen to there: only you, people you pick, or everyone.`,
             ]
           : [],
+    // Uno's assistant bot keeps Group Privacy on: only calls reach it.
+    ...(view.bot === "shared"
+      ? {
+          hears: `In groups the assistant hears only messages that mention ${bot} or reply to its messages, not its name without @.`,
+        }
+      : {}),
   };
 }
 
@@ -4047,7 +4053,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             groups: [],
             waiting: [],
             tellThePerson: [
-              "Groups need the assistant's own bot: Uno's shared bot only answers in private chats. Create its own bot first (assistant_connect with open: \"telegram\").",
+              "Groups don't work through Uno's shared bot for this account yet: they need the assistant's own bot. Create it first (assistant_connect with open: \"telegram\").",
             ],
           };
         }

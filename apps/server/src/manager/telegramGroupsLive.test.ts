@@ -10,7 +10,9 @@
  *   marked as holding a stranger's text, with a line saying who writes;
  * - a group the owner called the bot in is offered as waiting and the bot
  *   says where to add it; a stranger's group is never remembered;
- * - Uno's shared bot takes no groups.
+ * - Uno's older shared bot takes no groups; Uno's assistant bot takes them
+ *   when the console has them on (T57): its bound groups wait to be added,
+ *   and the owner's choice is pushed to the console (`unoSetGroupAccess`).
  */
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { afterEach, beforeEach, expect, it, vi } from "@effect/vitest";
@@ -40,6 +42,9 @@ const projectId = ASSISTANT_PROJECT_ID;
 
 let queued: Array<unknown> = [];
 let sent: Array<{ readonly chatId: string; readonly text: string }> = [];
+/** The console's `unoGroupsInfo` result; null: an older console (404). */
+let groupsInfo: unknown = null;
+let accessPushes: Array<Record<string, unknown>> = [];
 const marked: Array<string> = [];
 const dispatched: Array<OrchestrationCommand> = [];
 
@@ -48,6 +53,8 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 beforeEach(() => {
   queued = [];
   sent = [];
+  groupsInfo = null;
+  accessPushes = [];
   marked.length = 0;
   dispatched.length = 0;
   vi.stubGlobal(
@@ -70,6 +77,13 @@ beforeEach(() => {
         return json({ ok: true, result: { message_id: 1 } });
       }
       if (path.endsWith("/sendChatAction")) return json({ ok: true, result: true });
+      if (path.endsWith("/unoGroupsInfo") && groupsInfo !== null) {
+        return json({ ok: true, result: groupsInfo });
+      }
+      if (path.endsWith("/unoSetGroupAccess") && groupsInfo !== null) {
+        accessPushes.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        return json({ ok: true, result: true });
+      }
       return new Response("not found", { status: 404 });
     }),
   );
@@ -314,4 +328,86 @@ it.live("Uno's shared bot takes no groups", () =>
     });
     expect(outcome).toEqual({ ok: false, error: expect.stringContaining("own bot") });
   }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live("Uno's assistant bot with groups off at the console: the own bot is offered", () =>
+  Effect.gen(function* () {
+    groupsInfo = { enabled: false, bot_username: "uno_work_bot", groups: [] };
+    yield* saveRow(`unorelay:${TGA}`, [String(OWNER), String(FAMILY)]);
+    const telegram = yield* ManagerTelegramService;
+    const view = yield* telegram.groups(projectId);
+    expect(view).toMatchObject({ supported: false, bot: "shared", pending: [] });
+    const outcome = yield* telegram.setGroupAccess({
+      projectId,
+      chatId: String(FAMILY),
+      members: "anyone",
+    });
+    expect(outcome).toEqual({ ok: false, error: expect.stringContaining("own bot") });
+    expect(accessPushes).toEqual([]);
+  }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live(
+  "Uno's assistant bot with groups on: bound groups wait, the choice reaches the console",
+  () =>
+    Effect.gen(function* () {
+      groupsInfo = {
+        enabled: true,
+        bot_username: "uno_work_bot",
+        groups: [
+          {
+            chat_id: String(FAMILY),
+            title: "Family",
+            members: "owners",
+            user_ids: [],
+            host: true,
+            accounts: 1,
+          },
+          {
+            chat_id: String(BOOK_CLUB),
+            title: "Book club",
+            members: "owners",
+            user_ids: [],
+            host: true,
+            accounts: 2,
+          },
+        ],
+      };
+      yield* saveRow(`unorelay:${TGA}`, [String(OWNER), String(FAMILY)]);
+      const telegram = yield* ManagerTelegramService;
+
+      // The console bound both groups (the owner added the bot there); one is
+      // added here already, the other waits — with Telegram's names.
+      const view = yield* telegram.groups(projectId);
+      expect(view).toMatchObject({
+        supported: true,
+        bot: "shared",
+        groups: [{ chatId: String(FAMILY), title: "Family", members: "owners" }],
+        pending: [{ chatId: String(BOOK_CLUB), title: "Book club" }],
+      });
+      // Same rule on both sides: nothing to push.
+      expect(accessPushes).toEqual([]);
+
+      // The owner picks Anna in Family: the console hears it.
+      const changed = yield* telegram.setGroupAccess({
+        projectId,
+        chatId: String(FAMILY),
+        members: "selected",
+        userIds: [String(ANNA)],
+      });
+      expect(changed.ok).toBe(true);
+      expect(accessPushes).toEqual([
+        { chat_id: String(FAMILY), members: "selected", user_ids: [String(ANNA)] },
+      ]);
+
+      // What the console delivers is still checked here: Anna is heard (a chat
+      // apart, approval-only), Dima — if he ever got through — is not.
+      queued.push(groupUpdate(family, dima, "@my_bot and me?"));
+      queued.push(groupUpdate(family, anna, "@my_bot what's for dinner?"));
+      expect(yield* waitUntil(() => turns().length === 1)).toBe(true);
+      yield* settle;
+      expect(turns()).toHaveLength(1);
+      expect(turns()[0]!.message.text).toContain("a member of the Telegram group");
+      expect(turns()[0]!.runtimeMode).toBe("approval-required");
+    }).pipe(Effect.provide(connectorLayer)),
 );
