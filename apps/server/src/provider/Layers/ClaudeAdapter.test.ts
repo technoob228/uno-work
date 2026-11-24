@@ -1267,6 +1267,112 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect(
+    "a background agent working after the turn ended leaves the chat idle; Claude's own wake-up is a turn (T71)",
+    () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+
+        let completedTurns = 0;
+        const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed" && ++completedTurns === 2),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        const turn = yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "start a background agent and tell me when it is done",
+          attachments: [],
+        });
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-bg",
+          uuid: "result-root-1",
+        } as unknown as SDKMessage);
+
+        // The root turn is over; the background agent keeps going.
+        harness.query.emit({
+          type: "system",
+          subtype: "status",
+          status: "requesting",
+          session_id: "sdk-session-bg",
+          uuid: "status-subagent-1",
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "assistant",
+          session_id: "sdk-session-bg",
+          uuid: "assistant-subagent-1",
+          parent_tool_use_id: "toolu_agent_1",
+          message: {
+            id: "assistant-subagent-message-1",
+            content: [{ type: "text", text: "Now implement the narrow-case changes." }],
+          },
+        } as unknown as SDKMessage);
+
+        // It finished: Claude itself wakes up, answers, and ends that turn.
+        harness.query.emit({
+          type: "assistant",
+          session_id: "sdk-session-bg",
+          uuid: "assistant-root-wake",
+          parent_tool_use_id: null,
+          message: {
+            id: "assistant-root-wake-message",
+            content: [{ type: "text", text: "The agent is done." }],
+          },
+        } as unknown as SDKMessage);
+        harness.query.emit({
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          errors: [],
+          session_id: "sdk-session-bg",
+          uuid: "result-root-wake",
+        } as unknown as SDKMessage);
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        const firstCompleted = runtimeEvents.findIndex((event) => event.type === "turn.completed");
+        const wakeStarted = runtimeEvents.findIndex(
+          (event, index) => index > firstCompleted && event.type === "turn.started",
+        );
+        assert.equal(String(runtimeEvents[firstCompleted]?.turnId), String(turn.turnId));
+        // Between the root's result and its wake-up: nothing that makes the chat busy.
+        assert.deepEqual(
+          runtimeEvents
+            .slice(firstCompleted + 1, wakeStarted)
+            .map((event) => event.type)
+            .filter((type) => type === "turn.started" || type === "session.state.changed"),
+          [],
+        );
+        // The subagent's text is not the chat's answer.
+        assert.equal(
+          runtimeEvents.some(
+            (event) =>
+              event.type === "content.delta" && event.payload.delta.includes("narrow-case"),
+          ),
+          false,
+        );
+        const wakeTurnId = runtimeEvents[wakeStarted]?.turnId;
+        assert.notEqual(String(wakeTurnId), String(turn.turnId));
+        const lastEvent = runtimeEvents[runtimeEvents.length - 1];
+        assert.equal(lastEvent?.type, "turn.completed");
+        assert.equal(String(lastEvent?.turnId), String(wakeTurnId));
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    },
+  );
+
   it.effect("closes the session when the Claude stream aborts after a turn starts", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

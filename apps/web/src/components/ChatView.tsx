@@ -5313,6 +5313,7 @@ export default function ChatView(props: ChatViewProps) {
                       <QueuedMessagesList
                         messages={queuedMessages}
                         pause={queuedPause}
+                        waitingForPerson={queueWaitingForPerson}
                         onSendNow={onSendQueuedNow}
                         onEdit={onEditQueued}
                         onDelete={onDeleteQueued}

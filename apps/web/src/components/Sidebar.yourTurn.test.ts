@@ -311,6 +311,16 @@ describe("the person's own chat where agents talk (Misha 13.11)", () => {
     );
   });
 
+  it("a turn that left work running in the background is not Ready yet (T71)", () => {
+    const answered = mine({ ...agentSpokeLast, unreadAnswerAt: ago(HOUR_MS) });
+    expect(isYourTurn(answered, NOW)).toBe(true);
+    const background = { ...answered, backgroundWork: { count: 1, since: ago(40 * MINUTE_MS) } };
+    expect(isYourTurn(background, NOW)).toBe(false);
+    expect(countChatsWaitingOnYou([background], NOW)).toBe(0);
+    // Done: Ready again.
+    expect(isYourTurn({ ...answered, backgroundWork: null }, NOW)).toBe(true);
+  });
+
   it("asked, answered, three agent turns: Ready holds until the person opens the chat", () => {
     // Asked 3 h ago, answered at 2 h 50 m; then agents wrote three times, the
     // last at 1 h 1 m, and the last turn (theirs) ended an hour ago.

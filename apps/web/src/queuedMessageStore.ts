@@ -39,11 +39,22 @@ export interface QueuedChatMessage {
    * agent (they want control), or sending it failed.
    */
   readonly hold?: boolean;
+  /**
+   * Goes at once, into the running turn if there is one (as "Send now"): an
+   * answer from a `show_card` card (T71, 24.11). Misha: "especially an answer
+   * to a form" must never wait in "Up next". It still waits for a reply the
+   * agent asks of the person (an approval) and for a send already on its way.
+   */
+  readonly steer?: boolean;
 }
 
 interface QueuedMessageStoreState {
   readonly queuesByThreadKey: Readonly<Record<string, ReadonlyArray<QueuedChatMessage>>>;
-  enqueue: (threadKey: string, text: string) => QueuedChatMessage;
+  enqueue: (
+    threadKey: string,
+    text: string,
+    options?: { readonly steer?: boolean },
+  ) => QueuedChatMessage;
   /** Removes one message and returns it; null when someone already took it. */
   take: (threadKey: string, id: string) => QueuedChatMessage | null;
   /**
@@ -137,11 +148,12 @@ export const useQueuedMessageStore = create<QueuedMessageStoreState>()(
   persist(
     (set, get) => ({
       queuesByThreadKey: {},
-      enqueue: (threadKey, text) => {
+      enqueue: (threadKey, text, options) => {
         const entry: QueuedChatMessage = {
           id: randomUUID(),
           text,
           createdAt: new Date().toISOString(),
+          ...(options?.steer ? { steer: true } : {}),
         };
         set((state) => ({
           queuesByThreadKey: withQueue(state.queuesByThreadKey, threadKey, [
@@ -310,6 +322,12 @@ type QueuePhase = "disconnected" | "connecting" | "ready" | "running";
  * session go (idle 15 min, a restart) — the message starts it again, like a
  * typed one. Before T48 only "ready" counted, so anything still waiting 15
  * minutes after the turn waited for good, under "Sends when the agent is done".
+ *
+ * A card's answer (`steer`) doesn't wait for the turn, an error or the
+ * messages ahead of it: it goes at once, into the running turn if there is
+ * one, as "Send now" does (T71). "running" is the agent really working: a
+ * background agent or command left running after the turn no longer counts
+ * (the Claude adapter, T71).
  */
 export function nextQueuedMessageToSend(input: {
   readonly queue: ReadonlyArray<QueuedChatMessage>;
@@ -318,10 +336,12 @@ export function nextQueuedMessageToSend(input: {
   readonly waitingForPerson: boolean;
   readonly hasError: boolean;
 }): QueuedChatMessage | null {
+  if (input.busy || input.waitingForPerson || input.phase === "connecting") return null;
+  const steer = input.queue.find((message) => message.steer && !message.hold);
+  if (steer) return steer;
   const first = input.queue[0];
   if (!first || first.hold) return null;
-  if (input.phase === "running" || input.phase === "connecting") return null;
-  if (input.busy || input.waitingForPerson || input.hasError) return null;
+  if (input.phase === "running" || input.hasError) return null;
   return first;
 }
 

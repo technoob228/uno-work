@@ -32,6 +32,7 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   reduceSidebarProjectScopeMenuState,
+  isInBackground,
   resolveSidebarThreadStatus,
   resolveWorkingStartedAt,
   searchSidebarThreads,
@@ -1344,6 +1345,71 @@ describe("resolveSidebarThreadStatus", () => {
         },
       }),
     ).toBe("failed");
+  });
+});
+
+describe("a turn that ended with work left in the background (T71)", () => {
+  const ready = {
+    provider: ProviderDriverKind.make("claudeAgent"),
+    status: "ready" as const,
+    orchestrationStatus: "ready" as const,
+    createdAt: "2026-03-09T10:00:00.000Z",
+    updatedAt: "2026-03-09T10:00:00.000Z",
+  };
+  const idle = { hasPendingApprovals: false, hasPendingUserInput: false };
+  const backgroundWork = { count: 1, since: "2026-03-09T10:00:00.000Z" };
+
+  it("is Working, not Ready, while the background work runs", () => {
+    expect(isInBackground({ ...idle, session: ready, backgroundWork })).toBe(true);
+    expect(resolveSidebarThreadStatus({ ...idle, session: ready, backgroundWork })).toBe("working");
+  });
+
+  it("is plain Ready once the work is done", () => {
+    expect(isInBackground({ ...idle, session: ready, backgroundWork: null })).toBe(false);
+    expect(
+      isInBackground({ ...idle, session: ready, backgroundWork: { ...backgroundWork, count: 0 } }),
+    ).toBe(false);
+    expect(resolveSidebarThreadStatus({ ...idle, session: ready, backgroundWork: null })).not.toBe(
+      "working",
+    );
+  });
+
+  it("a running turn, a question, an error or a closed session say so instead", () => {
+    const running = {
+      ...ready,
+      status: "running" as const,
+      orchestrationStatus: "running" as const,
+    };
+    expect(isInBackground({ ...idle, session: running, backgroundWork })).toBe(false);
+    expect(
+      isInBackground({ ...idle, hasPendingUserInput: true, session: ready, backgroundWork }),
+    ).toBe(false);
+    expect(
+      resolveSidebarThreadStatus({
+        ...idle,
+        hasPendingApprovals: true,
+        session: ready,
+        backgroundWork,
+      }),
+    ).toBe("approval");
+    const failed = { ...ready, status: "error" as const, orchestrationStatus: "error" as const };
+    expect(isInBackground({ ...idle, session: failed, backgroundWork })).toBe(false);
+    expect(isInBackground({ ...idle, session: null, backgroundWork })).toBe(false);
+  });
+
+  it("shows a quiet In background pill, not Ready", () => {
+    const pill = resolveThreadStatusPill({
+      thread: {
+        ...idle,
+        hasActionableProposedPlan: false,
+        interactionMode: "default" as const,
+        latestTurn: null,
+        lastVisitedAt: undefined,
+        session: ready,
+        backgroundWork,
+      },
+    });
+    expect(pill).toMatchObject({ label: "In background", pulse: false });
   });
 });
 

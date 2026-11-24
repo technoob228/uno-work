@@ -262,6 +262,12 @@ export interface ClaudeAdapterLiveOptions {
   readonly customMcpServers?: CustomMcpServersGetter;
 }
 
+/** A frame of a subagent's own run (the Agent tool), not of the root conversation. */
+export function isSubagentFrame(message: SDKMessage): boolean {
+  const parent = (message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
+  return typeof parent === "string" && parent.length > 0;
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -2020,7 +2026,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     // Auto-start a synthetic turn for assistant messages that arrive without
-    // an active turn (e.g., background agent/subagent responses between user prompts).
+    // an active turn: Claude itself woke up (a background command or agent
+    // finished and Claude Code answers its notification), and its `result`
+    // ends that turn.
+    //
+    // Not for a subagent's own frames (`parent_tool_use_id` set): a
+    // background agent keeps working after the root turn ended, and its
+    // frames never get a `result` of their own. A turn started for them stayed
+    // "running" until the person's next message, so the chat looked busy and
+    // everything typed (or answered on a card) waited in "Up next" for a
+    // manual "Send now" (T71, 24.11). Upstream's rule is the same ("background
+    // child frames can stream while the root is idle", ClaudeAdapterV2).
+    if (!context.turnState && isSubagentFrame(message)) {
+      context.lastAssistantUuid = message.uuid;
+      yield* updateResumeCursor(context);
+      return;
+    }
     if (!context.turnState) {
       const turnId = TurnId.make(yield* Random.nextUUIDv4);
       const startedAt = yield* nowIso;
@@ -2180,6 +2201,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
         return;
       case "status":
+        // "requesting" also comes for a background agent's own model calls
+        // after the root turn ended. With no turn of ours it says nothing
+        // about the chat, and "running" here had no turn.completed to undo
+        // it: the chat stayed busy and "Up next" waited (T71, 24.11). A real
+        // wake-up starts its turn with Claude's first message.
+        if (!context.turnState) {
+          return;
+        }
         yield* offerRuntimeEvent({
           ...base,
           type: "session.state.changed",

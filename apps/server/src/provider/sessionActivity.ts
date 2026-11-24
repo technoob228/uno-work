@@ -43,6 +43,8 @@ export interface SessionActivity {
   /** Last runtime event of the harness (ms since epoch), if any this run. */
   readonly lastEventMs: number | undefined;
   readonly backgroundTaskCount: number;
+  /** When the oldest live background task started (ms since epoch), if any. */
+  readonly oldestBackgroundTaskMs?: number | undefined;
 }
 
 /** The parts of a runtime event this module looks at. */
@@ -111,7 +113,17 @@ export function getSessionActivity(threadId: string, nowMs: number = Date.now())
   for (const [taskId, startedMs] of entry.backgroundTasks) {
     if (nowMs - startedMs > BACKGROUND_TASK_MAX_AGE_MS) entry.backgroundTasks.delete(taskId);
   }
-  return { lastEventMs: entry.lastEventMs, backgroundTaskCount: entry.backgroundTasks.size };
+  let oldestBackgroundTaskMs: number | undefined;
+  for (const startedMs of entry.backgroundTasks.values()) {
+    if (oldestBackgroundTaskMs === undefined || startedMs < oldestBackgroundTaskMs) {
+      oldestBackgroundTaskMs = startedMs;
+    }
+  }
+  return {
+    lastEventMs: entry.lastEventMs,
+    backgroundTaskCount: entry.backgroundTasks.size,
+    oldestBackgroundTaskMs,
+  };
 }
 
 /**

@@ -2,9 +2,11 @@
  * A page in the chat answers the agent (`uno.send`, `data-uno-send`). Where it
  * goes depends on who drew the page, as the daemon recorded it at publish
  * (`HtmlRenderReference.source`), never on what the page says (Misha, 05.11):
- * - a `show_card` card ("card": Uno's own renderer) goes the way the person's
- *   own Enter does, through "Up next": at once when the agent is free, after
- *   its turn when it works, visible and editable while it waits;
+ * - a `show_card` card ("card": Uno's own renderer) goes at once: as a new
+ *   turn when the agent is free, into its turn when it works (as "Send now";
+ *   T71, 24.11 — it used to wait in "Up next" for the turn to end). It passes
+ *   through "Up next" only to be sent by whoever sends this chat's messages
+ *   (the open chat or the app-wide sender), so it is never lost;
  * - any other page (the agent's own HTML could hide a script that "presses"
  *   on the person's next click) only puts the text into this chat's message
  *   box, focused; it goes when the person presses Enter. Text already in the
@@ -148,7 +150,7 @@ export function deliverPageMessage(
   const text = withHtmlRenderMessageMarker(verdict.text, input);
   if (input.source === "card") {
     usePageMessagesStore.getState().record(input.attachmentId, { at: now, text: verdict.text });
-    useQueuedMessageStore.getState().enqueue(input.threadKey, text);
+    useQueuedMessageStore.getState().enqueue(input.threadKey, text, { steer: true });
     return { ok: true };
   }
   if (!input.toComposer(text)) {

@@ -18,22 +18,30 @@ function queuedMessageText(text: string): string {
   return own ? `${own}\n+ ${count}` : count;
 }
 
-/** The line under a waiting message: what it waits for, truthfully (T48). */
+/** The line under a waiting message: what it waits for, truthfully (T48, T71). */
 export function queuedMessageStatus(input: {
   readonly hold: boolean;
   readonly index: number;
   readonly pause: QueuePause;
+  /** A card's answer: it goes at once, not after the turn (T71). */
+  readonly steer?: boolean;
+  /** The agent asks the person something (an approval, a question). */
+  readonly waitingForPerson?: boolean;
 }): string {
   if (input.hold) return "Waiting for you to send it";
+  if (input.steer) {
+    return input.waitingForPerson ? "Sends once you answer the agent above" : "Sending…";
+  }
   if (input.index > 0) return "Sends after the one above";
   if (input.pause === "error") return "Paused: the last turn didn't finish. Send now to go on";
   if (input.pause === "person") return "Sends once you answer the agent above";
-  return "Sends when the agent is done";
+  return "The agent is still working: this goes by itself the moment it's done";
 }
 
 export const QueuedMessagesList = memo(function QueuedMessagesList({
   messages,
   pause = null,
+  waitingForPerson = false,
   onSendNow,
   onEdit,
   onDelete,
@@ -41,6 +49,7 @@ export const QueuedMessagesList = memo(function QueuedMessagesList({
   messages: ReadonlyArray<QueuedChatMessage>;
   /** Why the first message isn't going though the agent is done (queuePause). */
   pause?: QueuePause;
+  waitingForPerson?: boolean;
   onSendNow: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete: (id: string) => void;
@@ -60,7 +69,13 @@ export const QueuedMessagesList = memo(function QueuedMessagesList({
           </p>
           <div className="mt-1.5 flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span className="mr-auto">
-              {queuedMessageStatus({ hold: message.hold === true, index, pause })}
+              {queuedMessageStatus({
+                hold: message.hold === true,
+                index,
+                pause,
+                steer: message.steer === true,
+                waitingForPerson,
+              })}
             </span>
             <button
               type="button"

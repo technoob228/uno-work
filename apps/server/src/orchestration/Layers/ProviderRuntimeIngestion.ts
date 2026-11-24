@@ -17,6 +17,7 @@ import {
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
+  type ThreadBackgroundWork,
 } from "@t3tools/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -42,6 +43,8 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { isDaemonStopping } from "../../daemonStopping.ts";
+import { getSessionActivity } from "../../provider/sessionActivity.ts";
+import { systemCommandOrigin } from "../commandOrigin.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { redactSecretsInText } from "../../secretRedaction.ts";
 import {
@@ -53,6 +56,29 @@ import {
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
   CommandId.make(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
+
+/** Runtime events after which the background work of a chat may have changed. */
+const BACKGROUND_WORK_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "turn.started",
+  "turn.completed",
+  "task.started",
+  "task.completed",
+  "session.exited",
+]);
+
+/** What a chat's agent left running, from the harness's task events; null: nothing. */
+export function backgroundWorkOf(activity: {
+  readonly backgroundTaskCount: number;
+  readonly oldestBackgroundTaskMs?: number | undefined;
+}): ThreadBackgroundWork | null {
+  if (activity.backgroundTaskCount <= 0 || activity.oldestBackgroundTaskMs === undefined) {
+    return null;
+  }
+  return {
+    count: activity.backgroundTaskCount,
+    since: new Date(activity.oldestBackgroundTaskMs).toISOString(),
+  };
+}
 
 function toOrchestrationSessionErrorClass(
   value: string | undefined,
@@ -1833,8 +1859,47 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;
 
+  /**
+   * "In the background" (T71, Misha 24.11: "it told me Ready though it hasn't
+   * finished the work"): what the agent left running after its turn —
+   * background agents, commands, monitors — as the harness's own task events
+   * say (sessionActivity). Written on the chat when it changes, so the
+   * sidebar shows it under Working, not Ready, and a message still goes in
+   * at once (the turn is over). The last value written per chat is kept here:
+   * a chat's first event after a start reads what is on it.
+   */
+  const backgroundWorkWritten = new Map<string, string>();
+  const backgroundWorkKey = (work: ThreadBackgroundWork | null) =>
+    work === null ? "none" : `${work.count}|${work.since}`;
+  const syncBackgroundWork = (event: ProviderRuntimeEvent) =>
+    Effect.gen(function* () {
+      if (!BACKGROUND_WORK_EVENT_TYPES.has(event.type)) return;
+      const backgroundWork = backgroundWorkOf(getSessionActivity(event.threadId));
+      const key = backgroundWorkKey(backgroundWork);
+      let written = backgroundWorkWritten.get(event.threadId);
+      if (written === undefined) {
+        const thread = yield* resolveThreadShell(event.threadId);
+        if (!thread) return;
+        written = backgroundWorkKey(thread.backgroundWork ?? null);
+      }
+      if (written === key) return;
+      backgroundWorkWritten.set(event.threadId, key);
+      yield* orchestrationEngine.dispatch(
+        {
+          type: "thread.background-work.set",
+          commandId: providerCommandId(event, "background-work-set"),
+          threadId: event.threadId,
+          backgroundWork,
+          createdAt: new Date().toISOString(),
+        },
+        { origin: systemCommandOrigin("provider-runtime-ingestion", "background work") },
+      );
+    });
+
   const processInput = (input: RuntimeIngestionInput) =>
-    input.source === "runtime" ? processRuntimeEvent(input.event) : processDomainEvent(input.event);
+    input.source === "runtime"
+      ? processRuntimeEvent(input.event).pipe(Effect.andThen(syncBackgroundWork(input.event)))
+      : processDomainEvent(input.event);
 
   const processInputSafely = (input: RuntimeIngestionInput) =>
     processInput(input).pipe(
@@ -1856,6 +1921,36 @@ const make = Effect.gen(function* () {
   const start: ProviderRuntimeIngestionShape["start"] = () =>
     Effect.gen(function* () {
       yield* turnAutoRetry.start();
+      // No harness outlives the daemon, and its background work goes with it:
+      // a mark still on a chat at start is left over (T71). Cleared once, in
+      // the background.
+      yield* projectionSnapshotQuery.getShellSnapshot().pipe(
+        Effect.flatMap((shell) =>
+          Effect.forEach(
+            shell.threads.filter((thread) => thread.backgroundWork != null),
+            (thread) =>
+              orchestrationEngine
+                .dispatch(
+                  {
+                    type: "thread.background-work.set",
+                    commandId: CommandId.make(`background-work-cleared:${crypto.randomUUID()}`),
+                    threadId: thread.id,
+                    backgroundWork: null,
+                    createdAt: new Date().toISOString(),
+                  },
+                  { origin: systemCommandOrigin("provider-runtime-ingestion", "daemon start") },
+                )
+                .pipe(Effect.ignore),
+            { discard: true },
+          ),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider runtime ingestion: couldn't clear leftover background work", {
+            cause: Cause.pretty(cause),
+          }),
+        ),
+        Effect.forkScoped,
+      );
       yield* Effect.forkScoped(
         // A stopping daemon takes the agents with it: their exits say nothing
         // about the turn, which the next daemon picks up (selfUpdateTurns.ts).

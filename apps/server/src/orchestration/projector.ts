@@ -20,6 +20,7 @@ import {
   ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
   ThreadComputerWaitSetPayload,
+  ThreadBackgroundWorkSetPayload,
   ThreadControlChangedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -420,6 +421,22 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             computerWait: payload.computerWait,
+          }),
+        })),
+      );
+
+    // Nor is work left running in the background (T71).
+    case "thread.background-work-set":
+      return decodeForEvent(
+        ThreadBackgroundWorkSetPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            backgroundWork: payload.backgroundWork,
           }),
         })),
       );
