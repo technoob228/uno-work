@@ -65,12 +65,25 @@ describe("SidebarDChatsBar (Sidebar view menu on)", () => {
     expect(html.split(">Chats · landing<").length - 1).toBe(1);
   });
 
-  it("Only mine counts as a filter: × clears it", () => {
+  it("Only mine alone has no × — it changes in the menu only (T65)", () => {
     const html = renderToStaticMarkup(
       <SidebarDChatsBar {...base} title="My chats" onlyMine={true} />,
     );
-    expect(html).toContain('data-testid="sidebar-d-clear-filter"');
+    expect(html).not.toContain("sidebar-d-clear-filter");
     expect(html).toContain("My chats");
+  });
+
+  it("with Only mine on, × clears the project filter and says it keeps mine", () => {
+    const html = renderToStaticMarkup(
+      <SidebarDChatsBar
+        {...base}
+        title="My chats · landing"
+        onlyMine={true}
+        pickedProjects={["landing"]}
+      />,
+    );
+    expect(html).toContain('data-testid="sidebar-d-clear-filter"');
+    expect(html).toContain('aria-label="Show all my chats"');
   });
 
   it("has the funnel by the title only with something to filter", () => {

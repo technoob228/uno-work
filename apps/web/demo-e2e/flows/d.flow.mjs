@@ -697,8 +697,10 @@ export const flows = [
       if (left > 0) throw new Error(`${left} assistants' chats still listed`);
     });
     await shot("hidden-filter");
-    await step("× shows them again", async () => {
-      await page.getByTestId("sidebar-d-clear-filter").click();
+    await step("the switch shows them again (the title's × leaves Only mine, T65)", async () => {
+      await page.getByTestId("sidebar-d-view-trigger").click();
+      await page.getByTestId("sidebar-d-only-mine").click();
+      await page.keyboard.press("Escape");
       await startedBy("Uno").first().waitFor();
     });
   }),

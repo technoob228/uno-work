@@ -2660,8 +2660,9 @@ export default function Sidebar() {
   // on their own — the one filter of its kind (29.10: 0.0.161's "Chats
   // assistants started" switch went into it).
   // On by default (Misha 13.11, again 24.11 in T65), for everyone who never
-  // switched it either way — the key is written only by the switch and the
-  // title's ×, so an untouched device has none and gets the default. Only
+  // switched it either way — the key is written only by the switch (and the
+  // "Show" under the list), so an untouched device has none and gets the
+  // default; the title's × leaves it alone since T65. Only
   // the view menu shows the switch, so without it nothing is hidden.
   const [dOnlyMineChoice, setDOnlyMine] = useLocalStorage<boolean, boolean>(
     SIDEBAR_D_ONLY_MINE_KEY,
@@ -4986,9 +4987,9 @@ export default function Sidebar() {
                 }}
                 onOpenArchive={() => void router.navigate({ to: "/settings/archived" })}
                 onClearFilters={() => {
+                  // Only mine stays: it changes in the ▾ menu only (T65, 24.11).
                   setDProjectPicks(null);
                   setDComputerPicks(null);
-                  setDOnlyMine(false);
                 }}
                 onAddProject={handleAddProject}
               />

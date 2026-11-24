@@ -12,7 +12,8 @@
  * submenus with checkboxes; Only mine (Misha 28.10) hides the chats agents,
  * Uno, assistants or apps run on their own (Sidebar.owner; 29.10: 0.0.161's
  * "Chats assistants started" went into it). A filter is said in the title
- * only, with × next to it to clear.
+ * only, with × next to it to clear the projects and computers picked; Only
+ * mine is a view, not a filter — it changes in the menu only (T65, 24.11).
  *
  * The funnel by the title (Misha 31.10, as in T3 Code) is the short way to
  * the same project filter: two clicks to one project in any grouping. It and
@@ -659,8 +660,9 @@ export function SidebarDChatsBar(props: {
   const open = useSidebarDViewMenu((state) => state.open);
   const setOpen = useSidebarDViewMenu((state) => state.setOpen);
   const showComputers = props.multiComputer && props.computers.length > 1;
-  const filtered =
-    props.onlyMine || props.pickedProjects !== null || props.pickedComputers !== null;
+  // Only mine isn't one: a stray × turned it off for good (T65, Misha 24.11).
+  const filtered = props.pickedProjects !== null || props.pickedComputers !== null;
+  const clearLabel = props.onlyMine ? "Show all my chats" : "Show all chats";
   const levels = props.multiComputer
     ? props.levels
     : props.levels.filter((level) => level !== "computer");
@@ -825,7 +827,7 @@ export function SidebarDChatsBar(props: {
                 <button
                   type="button"
                   onClick={props.onClearFilters}
-                  aria-label="Show all chats"
+                  aria-label={clearLabel}
                   data-testid="sidebar-d-clear-filter"
                   className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                 />
@@ -833,7 +835,7 @@ export function SidebarDChatsBar(props: {
             >
               <XIcon className="size-3" />
             </TooltipTrigger>
-            <TooltipPopup side="top">Show all chats</TooltipPopup>
+            <TooltipPopup side="top">{clearLabel}</TooltipPopup>
           </Tooltip>
         ) : null}
       </div>
