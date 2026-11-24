@@ -38,7 +38,10 @@ const machine = (authJson?: string) =>
   Effect.promise(async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "uno-grok-status-"));
     await mkdir(path.join(root, "bin"));
-    await writeFile(path.join(root, "bin", "grok"), "#!/bin/sh\necho 1.0.92\n");
+    await writeFile(
+      path.join(root, "bin", "grok"),
+      '#!/bin/sh\necho "grok 1.0.92 (b06756fd6256)"\n',
+    );
     await chmod(path.join(root, "bin", "grok"), 0o755);
     const home = path.join(root, ".grok");
     await mkdir(home);

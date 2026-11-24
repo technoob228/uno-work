@@ -157,6 +157,41 @@ describe("suggestRoles: a set by the plans connected here", () => {
     expect(withClaude.sources).toEqual(["claude", "uno"]);
   });
 
+  it("only Grok: its recommended model for complex work, Uno Fast for simple tasks (T59)", () => {
+    const grok = provider(
+      "grok",
+      [
+        { slug: "grok-4.6", name: "Grok 4.6", isDefault: true },
+        { slug: "grok-4.5", name: "Grok 4.5" },
+      ],
+      { auth: { status: "authenticated", type: "xai-account" } },
+    );
+    const roles = suggestRoles({ providers: [uno, grok], isReady: ready, unoReplies: true });
+    expect(roles.complex).toEqual(sel("grok", "grok-4.6"));
+    expect(roles.simple).toEqual(sel("uno", "uno/uno/fast"));
+    expect(roles.sources).toEqual(["grok", "uno"]);
+    expect(roles.why).toMatch(/^Grok signed in here/);
+    // Without Uno AI, simple tasks stay on Grok's own pick.
+    const alone = suggestRoles({ providers: [grok], isReady: ready, unoReplies: false });
+    expect(alone.simple).toEqual(sel("grok", "grok-4.6"));
+    // Gemini goes first; Claude or ChatGPT take over both.
+    const gemini = provider("gemini", [{ slug: "auto", name: "Auto", isDefault: true }], {
+      auth: { status: "authenticated", type: "oauth-personal" },
+    });
+    const withGemini = suggestRoles({
+      providers: [grok, gemini, uno],
+      isReady: ready,
+      unoReplies: true,
+    });
+    expect(withGemini.sources).toEqual(["gemini", "uno"]);
+    const withCodex = suggestRoles({
+      providers: [grok, codex, uno],
+      isReady: ready,
+      unoReplies: true,
+    });
+    expect(withCodex.sources).toEqual(["codex", "uno"]);
+  });
+
   it("a plan that isn't ready here doesn't count", () => {
     const signedOut = provider("codex", codex.models, { auth: { status: "unknown" } });
     const roles = suggestRoles({ providers: [signedOut, uno], isReady: ready, unoReplies: true });

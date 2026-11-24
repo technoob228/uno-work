@@ -1,6 +1,6 @@
 # Custom harnesses — bring your own agent into Uno Work
 
-Uno Work can run **your own agent** in its chat, next to the built-in ones (Uno, Claude, Codex, Gemini CLI, OpenCode, Hermes…): an agent you wrote, or a third-party CLI such as Goose, Kimi Code, Qwen Code — anything installed on the machine that speaks the **Agent Client Protocol (ACP)**.
+Uno Work can run **your own agent** in its chat, next to the built-in ones (Uno, Claude, Codex, Gemini CLI, Grok, OpenCode, Hermes…): an agent you wrote, or a third-party CLI such as Goose, Kimi Code, Qwen Code — anything installed on the machine that speaks the **Agent Client Protocol (ACP)**.
 
 You get the same chat UI as the built-in agents: streaming answers, tool calls with diffs, plans, Approve / Deny cards, the model picker, per-chat sessions, stop/resume.
 

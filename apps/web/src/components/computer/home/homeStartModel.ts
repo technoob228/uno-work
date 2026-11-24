@@ -147,6 +147,7 @@ export function ownAgentStartSelection(input: {
     "claudeAgent",
     "codex",
     "gemini",
+    "grok",
   ];
   for (const driver of order) {
     const provider = byDriver(driver);

@@ -161,7 +161,7 @@ export function AccountPlanSettings() {
 
 /**
  * The agents a person can use, as rows of Settings → AI. Claude, ChatGPT and
- * Gemini sign in here (their own account); OpenCode and Cursor are installed
+ * Gemini and Grok sign in here (their own account); OpenCode and Cursor are installed
  * here and take a key or a terminal login. Anything else is a custom harness.
  */
 const AGENTS = [
@@ -183,6 +183,12 @@ const AGENTS = [
     plans: "a Google account or a Gemini API key",
     description:
       "Google's Gemini CLI on your Google account (free tier, Google AI Pro or Ultra) or a Gemini API key",
+  },
+  {
+    driver: "grok",
+    label: "Grok",
+    plans: "an xAI account or an xAI API key",
+    description: "xAI's Grok CLI on your grok.com account or an xAI API key",
   },
   {
     driver: "opencode",
@@ -324,9 +330,12 @@ export function AiSettings() {
 
       <SettingsSection title="Agents">
         {agents.map(({ agent, entry, row }) => {
-          // Claude, ChatGPT and Gemini sign in (and out) with the person's own account here.
+          // Claude, ChatGPT, Gemini and Grok sign in (and out) with the person's own account here.
           const authDriver =
-            agent.driver === "claudeAgent" || agent.driver === "codex" || agent.driver === "gemini"
+            agent.driver === "claudeAgent" ||
+            agent.driver === "codex" ||
+            agent.driver === "gemini" ||
+            agent.driver === "grok"
               ? agent.driver
               : null;
           const ownAccount = authDriver !== null;

@@ -35,7 +35,7 @@ import {
 } from "@t3tools/shared/assistantLlm";
 
 export type HarnessAuthLossKind =
-  /** Claude / Codex / Gemini CLI: the in-app sign-in dialog (account or API key). */
+  /** Claude / Codex / Gemini CLI / Grok: the in-app sign-in dialog (account or API key). */
   | "signIn"
   /** OpenCode: paste a new provider key. */
   | "updateKey"
@@ -125,6 +125,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   claudeAgent: "Claude",
   codex: "Codex",
   gemini: "Gemini CLI",
+  grok: "Grok",
   opencode: "OpenCode",
   uno: "Uno AI",
   cursor: "Cursor",
@@ -169,6 +170,17 @@ const AUTH_LOSS_PATTERNS: Readonly<Record<string, ReadonlyArray<RegExp>>> = {
     /manual authorization is required/i,
     /invalid_grant/i,
     /not signed in to google/i,
+    HTTP_401,
+    UNAUTHORIZED,
+  ],
+  // Grok CLI 1.0.92 on a refused key ("API error (status 400 Bad Request):
+  // invalid-argument: Incorrect API key provided"), a session started without
+  // a sign-in, and Uno Work's refusal (GrokAcpSupport.grokPreflight).
+  grok: [
+    INCORRECT_API_KEY,
+    INVALID_API_KEY,
+    /grok is not signed in/i,
+    /authentication required/i,
     HTTP_401,
     UNAUTHORIZED,
   ],
@@ -309,6 +321,7 @@ const KIND_BY_DRIVER: Readonly<Record<string, HarnessAuthLossKind>> = {
   claudeAgent: "signIn",
   codex: "signIn",
   gemini: "signIn",
+  grok: "signIn",
   opencode: "updateKey",
   cursor: "cursorCli",
   uno: "unoAccount",

@@ -99,6 +99,10 @@ describe("resolveHarnessAction", () => {
       "signIn",
     );
     expect(resolveHarnessAction({ driver: driver("codex"), status: "attention" })).toBe("signIn");
+    expect(resolveHarnessAction({ driver: driver("grok"), status: "needsSignIn" })).toBe("signIn");
+    expect(resolveHarnessAction({ driver: driver("grok"), status: "notInstalled" })).toBe(
+      "install",
+    );
     expect(resolveHarnessAction({ driver: driver("cursor"), status: "needsSignIn" })).toBe("none");
   });
 
@@ -146,6 +150,7 @@ describe("row list", () => {
       "claudeAgent",
       "codex",
       "gemini",
+      "grok",
       "opencode",
       "hermes",
       "cursor",

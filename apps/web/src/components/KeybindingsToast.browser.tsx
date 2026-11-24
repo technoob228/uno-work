@@ -121,6 +121,7 @@ function createBaseServerConfig(): ServerConfig {
         },
         cursor: { enabled: true, binaryPath: "", apiEndpoint: "", customModels: [] },
         gemini: { enabled: true, binaryPath: "", customModels: [] },
+        grok: { enabled: true, binaryPath: "", customModels: [] },
         hermes: { enabled: false, binaryPath: "", customModels: [] },
         opencode: {
           enabled: true,

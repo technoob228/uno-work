@@ -21,6 +21,7 @@ export const AUTHABLE_DRIVERS: ReadonlyArray<ProviderAuthDriver> = [
   "claudeAgent",
   "codex",
   "gemini",
+  "grok",
 ];
 
 export type HarnessStatus =
@@ -191,6 +192,7 @@ export const HARNESS_ROW_DRIVERS: ReadonlyArray<ProviderDriverKind> = [
   "claudeAgent",
   "codex",
   "gemini",
+  "grok",
   "opencode",
   "hermes",
   "cursor",

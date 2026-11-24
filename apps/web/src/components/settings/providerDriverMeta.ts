@@ -3,6 +3,7 @@ import {
   CodexSettings,
   CursorSettings,
   GeminiSettings,
+  GrokSettings,
   HermesSettings,
   OpenCodeSettings,
   ProviderDriverKind,
@@ -12,6 +13,7 @@ import {
   ClaudeAI,
   CursorIcon,
   Gemini,
+  GrokIcon,
   HermesIcon,
   type Icon,
   OpenAI,
@@ -77,6 +79,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Gemini CLI",
     icon: Gemini,
     settingsSchema: GeminiSettings,
+  },
+  {
+    value: ProviderDriverKind.make("grok"),
+    label: "Grok",
+    icon: GrokIcon,
+    settingsSchema: GrokSettings,
   },
   {
     value: ProviderDriverKind.make("cursor"),
