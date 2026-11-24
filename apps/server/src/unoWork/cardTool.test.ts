@@ -102,6 +102,53 @@ describe("show_card", () => {
     expect(recorded.pages[0]!.source).toBe("card");
   });
 
+  it("waits in the person's list: card_id back, what still waits and what they hid", async () => {
+    const { deps, recorded } = makeDeps({ fromMessenger: false });
+    const item = (id: string, title: string) => ({
+      id: `card:${id}`,
+      kind: "card" as const,
+      title,
+      createdAt: "2026-11-23T10:00:00.000Z",
+      answersYou: false,
+      broughtByThreadId: null,
+      messageId: null,
+      activityId: `act-${id}`,
+      attachmentId: id,
+      links: [],
+    });
+    const withPending = {
+      ...deps,
+      pendingForYou: Effect.succeed({
+        items: [item("c-old", "Banner copy"), item("c-price", "Pricing")],
+        hidden: [item("c-logo", "Logo colour")],
+        replacedActivityIds: [],
+      }),
+    } as UnoWorkToolDeps;
+    const exit = await run(withPending, {
+      kind: "choice",
+      question: "Banner copy v2?",
+      options: ["A", "B"],
+      replaces: "c-old",
+    });
+    expect(Exit.isSuccess(exit), errorOf(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    const result = exit.value as { card_id: string; waiting: string };
+    expect(result.card_id).toBe("a1");
+    expect(result.waiting).toContain("«Pricing» (card_id c-price)");
+    expect(result.waiting).not.toContain("c-old");
+    expect(result.waiting).toContain("not needed: the card «Logo colour»");
+    expect(recorded.pages[0]).toMatchObject({ waitsForAnswer: true, replaces: "c-old" });
+  });
+
+  it("a report without buttons does not wait; no list, no note", async () => {
+    const { deps, recorded } = makeDeps({ fromMessenger: false });
+    const exit = await run(deps, { kind: "report", title: "Site checked", summary: "All good" });
+    expect(Exit.isSuccess(exit), errorOf(exit)).toBe(true);
+    if (!Exit.isSuccess(exit)) return;
+    expect(exit.value).not.toHaveProperty("waiting");
+    expect(recorded.pages[0]).toMatchObject({ waitsForAnswer: false });
+  });
+
   it("a turn from Telegram: the card goes there, drawn natively", async () => {
     const { deps, recorded } = makeDeps({ fromMessenger: true });
     const exit = await run(deps, JSON.parse(CARD_EXAMPLES.quiz));

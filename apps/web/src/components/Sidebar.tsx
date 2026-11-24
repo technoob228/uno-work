@@ -221,6 +221,7 @@ import {
   threadNeedsUser,
 } from "./Sidebar.snooze";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
+import { SidebarPendingCount } from "./chat/SidebarPendingCount";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -1491,6 +1492,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   {ageLabel}
                 </span>
               ) : null}
+              <SidebarPendingCount count={thread.pendingForYouCount ?? 0} />
               <SidebarDMark mark={mark} callReason={thread.personCallReason ?? null} />
             </span>
           </div>

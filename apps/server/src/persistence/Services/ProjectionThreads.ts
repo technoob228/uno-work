@@ -82,6 +82,10 @@ export const ProjectionThread = Schema.Struct({
   // A turn waiting for the person's own computer (migration 060). Optional
   // for the same reason; absent persists as NULL.
   computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
+  // "Waiting for you" (migration 062): the fold's state as JSON
+  // (`@t3tools/shared/pendingForYou`); NULL: not tracked yet (a chat from
+  // before it starts empty on its next event).
+  pendingForYou: Schema.optional(Schema.NullOr(Schema.String)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

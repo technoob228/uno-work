@@ -21,6 +21,7 @@ import {
   type PersonCard,
 } from "@t3tools/shared/personCard";
 import { renderPersonCardHtml } from "@t3tools/shared/personCardHtml";
+import type { ThreadPendingForYou, ThreadPendingItem } from "@t3tools/contracts";
 import { Effect } from "effect";
 
 import { HtmlRenderProblem, preparePage } from "../htmlRender/htmlRender.ts";
@@ -153,6 +154,11 @@ export const SHOW_CARD_INPUT_SCHEMA = {
       items: { type: "string" },
       description: "report: files to hand over (same paths).",
     },
+    replaces: {
+      type: "string",
+      description:
+        "Optional: the card_id of your earlier card this one is a new version of; the old one leaves the person's “Waiting for you”.",
+    },
     actions: {
       type: "array",
       description:
@@ -182,6 +188,7 @@ export const SHOW_CARD_DESCRIPTION = [
   "- a check of knowledge, a lesson, a game move with a right answer → kind quiz;",
   "- you finished a task with a result worth seeing (numbers, a comparison, findings, files) → kind report with 2–4 actions for what to do next.",
   "Their pick comes back to this chat as their next message: after show_card END YOUR TURN. Plain conversational answers stay text.",
+  "A card waits in the person's “Waiting for you” until they answer it. Don't post the same question again: a card with the same title replaces the old one, or pass replaces with the old card_id.",
   `Examples: ${CARD_EXAMPLES.choice} · ${CARD_EXAMPLES.quiz} · ${CARD_EXAMPLES.report}`,
 ].join("\n");
 
@@ -223,7 +230,7 @@ const estimateHeight = (card: PersonCard): number => {
 /** Reads the args into a card; the paths of a report resolved and checked. */
 const readCard = (deps: Deps, args: Record<string, unknown>, kit: CardToolKit) =>
   Effect.gen(function* () {
-    const { where: _where, ...fields } = args;
+    const { where: _where, replaces: _replaces, ...fields } = args;
     const checked = validatePersonCard(fields);
     if (!checked.ok) return yield* kit.fail(cardErrorText(checked.error, args));
     const card = checked.card;
@@ -263,7 +270,7 @@ const readCard = (deps: Deps, args: Record<string, unknown>, kit: CardToolKit) =
   });
 
 /** The card as a page in this chat, published like `html_render`. */
-const showInChat = (deps: Deps, card: PersonCard, kit: CardToolKit) =>
+const showInChat = (deps: Deps, card: PersonCard, kit: CardToolKit, replaces: string | undefined) =>
   Effect.gen(function* () {
     if (!deps.htmlRender) return null;
     const prepared = yield* Effect.tryPromise({
@@ -285,28 +292,63 @@ const showInChat = (deps: Deps, card: PersonCard, kit: CardToolKit) =>
         `show_card: these pictures could not be read: ${prepared.missing.join(", ")}. Use image files (png, jpg, webp, gif) or leave them out.`,
       );
     }
-    yield* deps.htmlRender.publish({
+    const reference = yield* deps.htmlRender.publish({
       html: prepared.html,
       title: pageTitle(card),
       height: estimateHeight(card),
       // Our renderer, no agent script: a press answers at once. The only
       // place a page gets it (html_render's pages fill the message box).
       source: "card",
+      waitsForAnswer: cardWaits(card),
+      ...(replaces !== undefined ? { replaces } : {}),
     });
-    return true;
+    return { cardId: reference.attachmentId };
   });
+
+/**
+ * What else waits for the person in this chat (T52), for the agent: so it
+ * doesn't ask again, and knows what they hid. Null when nothing does.
+ */
+export const waitingNote = (
+  pending: ThreadPendingForYou | null,
+  replaces: string | undefined,
+): string | null => {
+  if (pending === null) return null;
+  const describe = (item: ThreadPendingItem) =>
+    item.kind === "card"
+      ? `the card «${item.title}» (card_id ${item.attachmentId})`
+      : `links «${item.title}»`;
+  const waiting = pending.items.filter(
+    (item) => replaces === undefined || item.attachmentId !== replaces,
+  );
+  const parts: string[] = [];
+  if (waiting.length > 0) {
+    parts.push(
+      `Still waiting for the person in this chat: ${waiting.slice(0, 6).map(describe).join("; ")}. Don't ask them again; if this card is a new version of one of those, next time pass replaces with its card_id.`,
+    );
+  }
+  if (pending.hidden.length > 0) {
+    parts.push(
+      `They marked as not needed: ${pending.hidden.slice(0, 6).map(describe).join("; ")}. Don't bring those back.`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
+};
 
 /**
  * What the model is told after the card is up. `answering`: this turn
  * answers their Telegram / Slack message — its final text would go there
  * too ("Done." when empty), so it ends with NO_REPLY (connectorReplies).
  */
+/** A choice, a quiz, a report with buttons: it waits for the person's answer. */
+const cardWaits = (card: PersonCard) => card.kind !== "report" || (card.actions?.length ?? 0) > 0;
+
 const shownResult = (
   card: PersonCard,
   shown: "chat" | "telegram" | "slack" | "uno-bot",
   answering = false,
 ) => {
-  const waits = card.kind !== "report" || (card.actions?.length ?? 0) > 0;
+  const waits = cardWaits(card);
   const where =
     shown === "chat"
       ? "Shown in the chat above your reply. Don't repeat the card in text."
@@ -368,7 +410,13 @@ export const personCardTools = (kit: CardToolKit): ReadonlyArray<UnoWorkTool> =>
             );
           }
         }
-        const inChat = yield* showInChat(deps, card, kit);
+        const replaces =
+          typeof args.replaces === "string" && args.replaces.trim().length > 0
+            ? args.replaces.trim()
+            : undefined;
+        // Read before the card is up: what waited already.
+        const pending = deps.pendingForYou ? yield* deps.pendingForYou : null;
+        const inChat = yield* showInChat(deps, card, kit, replaces);
         if (inChat === null) {
           return {
             ok: false,
@@ -376,8 +424,11 @@ export const personCardTools = (kit: CardToolKit): ReadonlyArray<UnoWorkTool> =>
             text: personCardToMarkdown(card),
           };
         }
+        const waiting = waitingNote(pending, replaces);
         return {
           ...shownResult(card, "chat"),
+          card_id: inChat.cardId,
+          ...(waiting !== null ? { waiting } : {}),
           ...(messengerNote !== null
             ? {
                 note: `Telegram didn't take it (${messengerNote}); it is in the chat instead. Your reply still goes to Telegram: write the question and options in it as text.`,

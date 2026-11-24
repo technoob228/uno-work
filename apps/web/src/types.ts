@@ -21,6 +21,7 @@ import type {
   ThreadStartedBy,
   ThreadSource,
   ThreadComputerWait,
+  ThreadPendingForYou,
   ProjectComputer,
   ThreadController,
   ThreadSpawnKind,
@@ -169,6 +170,8 @@ export interface Thread {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** "Waiting for you" (T52): what in it still waits for the person. */
+  pendingForYou?: ThreadPendingForYou | null | undefined;
 }
 
 export interface ThreadShell {
@@ -200,6 +203,8 @@ export interface ThreadShell {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** "Waiting for you" (T52): what in it still waits for the person. */
+  pendingForYou?: ThreadPendingForYou | null | undefined;
 }
 
 export interface ThreadTurnState {
@@ -261,6 +266,8 @@ export interface SidebarThreadSummary {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** "Waiting for you" (T52): how many things in it wait for the person. */
+  pendingForYouCount?: number | undefined;
   /**
    * The chats this chat's agent started (derived in the store from their own
    * summaries, see childChatWork.ts); absent when it started none.

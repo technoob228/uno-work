@@ -41,6 +41,14 @@ import { ServerConfig } from "../../config.ts";
 import { isOnPersonsBehalf, startedByFromOrigin } from "../commandOrigin.ts";
 import { laterIso } from "../projector.ts";
 import {
+  applyPendingActionJson,
+  initialPendingForYouJson,
+  pendingMessageEntry,
+  pendingPageEntry,
+  rebuildPendingForYouJson,
+  stepPendingForYouJson,
+} from "../pendingForYouProjection.ts";
+import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
@@ -634,6 +642,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             personCalledByThreadId: null,
             personCallReason: null,
             source: event.payload.source ?? null,
+            pendingForYou: initialPendingForYouJson(event.payload.createdAt),
             latestUserMessageAt: null,
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
@@ -859,6 +868,25 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.pending-for-you-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // Doesn't touch updatedAt: hiding a card never reorders the sidebar.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            pendingForYou: applyPendingActionJson(
+              existingRow.value.pendingForYou,
+              event.payload,
+              event.occurredAt,
+            ),
+          });
+          return;
+        }
+
         case "thread.person-called": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
@@ -959,8 +987,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             event.payload.role === "user" &&
             isOnPersonsBehalf(event.metadata.origin) &&
             (existingRow.value.latestPersonMessageAt ?? "") < event.payload.createdAt;
+          // "Waiting for you": a finished message (the messages projection
+          // has its whole text by now), not every streamed delta.
+          let pendingForYou = existingRow.value.pendingForYou;
+          if (event.payload.role === "user" || !event.payload.streaming) {
+            const message = yield* projectionThreadMessageRepository.getByMessageId({
+              messageId: event.payload.messageId,
+            });
+            if (Option.isSome(message) && !message.value.isStreaming) {
+              pendingForYou = stepPendingForYouJson(
+                pendingForYou,
+                pendingMessageEntry(message.value),
+              );
+            }
+          }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            pendingForYou,
             ...(personWrote ? { latestPersonMessageAt: event.payload.createdAt } : {}),
             updatedAt: event.occurredAt,
             latestUserMessageAt:
@@ -982,8 +1025,15 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          const page =
+            event.type === "thread.activity-appended"
+              ? pendingPageEntry(event.payload.activity)
+              : null;
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            ...(page !== null
+              ? { pendingForYou: stepPendingForYouJson(existingRow.value.pendingForYou, page) }
+              : {}),
             updatedAt: event.occurredAt,
           });
           if (shouldRefreshThreadShellSummary(event)) {
@@ -1072,9 +1122,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             }
           }
 
+          const [keptMessages, keptActivities] = yield* Effect.all([
+            projectionThreadMessageRepository.listByThreadId({ threadId: event.payload.threadId }),
+            projectionThreadActivityRepository.listByThreadId({ threadId: event.payload.threadId }),
+          ]);
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             latestTurnId,
+            pendingForYou: rebuildPendingForYouJson(existingRow.value.pendingForYou, {
+              messages: keptMessages,
+              activities: keptActivities,
+            }),
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);

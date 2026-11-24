@@ -1124,6 +1124,39 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.pending-for-you.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      // Ids and hrefs only; a few at a time (one press, one click).
+      const clean = (list: ReadonlyArray<string> | undefined) =>
+        (list ?? [])
+          .filter((value) => typeof value === "string" && value.length > 0 && value.length <= 2048)
+          .slice(0, 50);
+      const dismiss = clean(command.dismiss);
+      const restore = clean(command.restore);
+      const opened = clean(command.opened);
+      if (dismiss.length + restore.length + opened.length === 0) return [];
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: nowIso(),
+          commandId: command.commandId,
+        }),
+        type: "thread.pending-for-you-updated",
+        payload: {
+          threadId: command.threadId,
+          dismiss,
+          restore,
+          opened,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.unsettle": {
       const thread = yield* requireThreadNotArchived({
         readModel,

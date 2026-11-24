@@ -2,6 +2,7 @@ import {
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EventId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -9,6 +10,7 @@ import {
   type OrchestrationEvent,
   ProviderInstanceId,
 } from "@t3tools/contracts";
+import { htmlRenderMessageMarker } from "@t3tools/shared/htmlRender";
 import { Effect, Layer, ManagedRuntime, Metric, Option, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -62,6 +64,7 @@ async function createOrchestrationSystem() {
   return {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
+    snapshotQuery,
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   };
@@ -1074,6 +1077,113 @@ describe("OrchestrationEngine", () => {
         }),
       ),
     ).rejects.toThrow("already exists");
+
+    await system.dispose();
+  });
+
+  it("keeps what waits for the person (T52): a card, hidden, then answered", async () => {
+    const system = await createOrchestrationSystem();
+    const { engine } = system;
+    const threadId = ThreadId.make("thread-pending");
+    const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" };
+    const createdAt = now();
+    await system.run(
+      engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-pending-project"),
+        projectId: asProjectId("project-pending"),
+        title: "Pending",
+        workspaceRoot: "/tmp/project-pending",
+        defaultModelSelection: modelSelection,
+        createdAt,
+      }),
+    );
+    await system.run(
+      engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-pending-thread"),
+        threadId,
+        projectId: asProjectId("project-pending"),
+        title: "Pending",
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    );
+    const pending = async () =>
+      (await system.readModel()).threads.find((thread) => thread.id === threadId)?.pendingForYou;
+    const shellPending = async () =>
+      Option.getOrUndefined(await system.run(system.snapshotQuery.getThreadShellById(threadId)))
+        ?.pendingForYou;
+    const appendCard = (id: string, title: string, waitsForAnswer: boolean) =>
+      system.run(
+        engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(`cmd-pending-${id}`),
+          threadId,
+          activity: {
+            id: EventId.make(`act-${id}`),
+            tone: "info",
+            kind: "html.render",
+            summary: title,
+            payload: {
+              attachmentId: id,
+              path: `/p/${id}.html`,
+              title,
+              height: 300,
+              source: "card",
+              waitsForAnswer,
+            },
+            turnId: null,
+            createdAt: now(),
+          },
+          createdAt: now(),
+        }),
+      );
+
+    await appendCard("c-report", "Done", false);
+    await appendCard("c-ship", "Ship on Thursday?", true);
+    expect((await pending())?.items.map((item) => item.id)).toEqual(["card:c-ship"]);
+    expect((await shellPending())?.items.map((item) => item.activityId)).toEqual(["act-c-ship"]);
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.pending-for-you.update",
+        commandId: CommandId.make("cmd-pending-dismiss"),
+        threadId,
+        dismiss: ["card:c-ship"],
+        createdAt: now(),
+      }),
+    );
+    expect((await shellPending())?.items).toEqual([]);
+    expect((await shellPending())?.hidden.map((item) => item.id)).toEqual(["card:c-ship"]);
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.pending-for-you.update",
+        commandId: CommandId.make("cmd-pending-restore"),
+        threadId,
+        restore: ["card:c-ship"],
+        createdAt: now(),
+      }),
+    );
+    expect((await shellPending())?.items).toHaveLength(1);
+
+    await system.run(
+      engine.dispatch({
+        type: "thread.message.user.append",
+        commandId: CommandId.make("cmd-pending-answer"),
+        threadId,
+        messageId: asMessageId("msg-pending-answer"),
+        text: `${htmlRenderMessageMarker({ source: "card", title: "Ship on Thursday?" })}\nThursday`,
+        createdAt: now(),
+      }),
+    );
+    expect((await shellPending())?.items).toEqual([]);
+    expect((await pending())?.hidden).toEqual([]);
 
     await system.dispose();
   });

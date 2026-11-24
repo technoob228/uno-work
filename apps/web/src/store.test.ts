@@ -1481,3 +1481,36 @@ describe("unread answers from the Inbox (Misha 13.11)", () => {
     expect(selectSidebarThreadSummaryByRef(read, ref)?.unreadAnswerAt).toBeUndefined();
   });
 });
+
+describe("Waiting for you (T52)", () => {
+  it("the open chat's own stream keeps the computer's newer list", () => {
+    const thread = makeThread({ id: ThreadId.make("thread-pending") });
+    const base = localEnvironmentStateOf(makeState(thread));
+    const pending = {
+      items: [],
+      hidden: [],
+      replacedActivityIds: ["act-old"],
+    };
+    const state = withActiveEnvironmentState(base, {
+      threadShellById: {
+        ...base.threadShellById,
+        [thread.id]: { ...base.threadShellById[thread.id]!, pendingForYou: pending },
+      },
+    });
+    const next = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.message-sent", {
+        threadId: thread.id,
+        messageId: MessageId.make("message-pending"),
+        role: "assistant",
+        text: "Done",
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-11-23T10:00:00.000Z",
+        updatedAt: "2026-11-23T10:00:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(next).threadShellById[thread.id]?.pendingForYou).toBe(pending);
+  });
+});

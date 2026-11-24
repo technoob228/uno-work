@@ -529,6 +529,10 @@ const makeDeps = (input: {
             return { redactions };
           }),
       },
+      pendingForYou: projections.getThreadShellById(ThreadId.make(input.threadId)).pipe(
+        Effect.map((found) => Option.getOrNull(found)?.pendingForYou ?? null),
+        Effect.orElseSucceed(() => null),
+      ),
       htmlRender: {
         publish: (page) =>
           Effect.gen(function* () {
@@ -547,6 +551,12 @@ const makeDeps = (input: {
               height: clampHtmlRenderHeight(page.height),
               // Only show_card passes it (cardTool.ts); html_render never does.
               ...(page.source === "card" ? { source: "card" as const } : {}),
+              ...(page.source === "card" && page.waitsForAnswer !== undefined
+                ? { waitsForAnswer: page.waitsForAnswer }
+                : {}),
+              ...(page.source === "card" && page.replaces !== undefined
+                ? { replaces: page.replaces }
+                : {}),
             };
             const createdAt = new Date().toISOString();
             // From the daemon, not from the harness's tool events: the same

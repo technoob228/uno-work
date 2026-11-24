@@ -38,6 +38,7 @@ import type {
   ServerProvider,
   ServerSettings,
   StorageCleanupReport,
+  ThreadPendingForYou,
   UnoBoxCreateJobStatus,
   UnoCloudCreateBoxResult,
   UnoCloudState,
@@ -276,6 +277,10 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
        * person's message box (`HtmlRenderReference.source`).
        */
       readonly source?: HtmlRenderSource;
+      /** show_card only (T52): it waits for the person's answer. */
+      readonly waitsForAnswer?: boolean;
+      /** show_card only: the page (card_id) of an earlier card this one replaces. */
+      readonly replaces?: string;
     }) => Effect.Effect<HtmlRenderReference, UnoWorkToolError>;
     readonly capture: (input: {
       readonly html: string;
@@ -283,6 +288,11 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
       readonly appearance: "dark" | "light";
     }) => Effect.Effect<HtmlPageCapture, UnoWorkToolError>;
   };
+  /**
+   * What waits for the person in this chat (T52 "Waiting for you"), for
+   * show_card's note to the agent. Absent: not on this daemon.
+   */
+  readonly pendingForYou?: Effect.Effect<ThreadPendingForYou | null>;
   /** A letter to support as a card in this chat (`support_draft`). Absent: not on this daemon. */
   readonly supportDraft?: {
     readonly publish: (input: {
