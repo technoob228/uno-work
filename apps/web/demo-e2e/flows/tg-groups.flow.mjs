@@ -142,11 +142,16 @@ export const flows = [
     });
   }),
   flow("tg-groups-shared-on", async ({ page, url, step, shot }) => {
-    await step("groups on for Uno's bot: the usual section, calls only", async () => {
+    await step("groups on for Uno's bot: added at once, hear everything per group", async () => {
       await openGroups(page, url, { tgbot: "shared-on" });
       await group(page, FAMILY).waitFor({ timeout: 30_000 });
-      await seeText(page, "In groups Uno hears only messages that mention @uno_work_bot");
-      await seeText(page, "Book club");
+      await seeText(page, "In groups Uno hears messages that mention @uno_work_bot");
+      // 23.11: a group the bot was added to is answered at once — no Add button.
+      await group(page, BOOK_CLUB).waitFor({ timeout: 10_000 });
+      await expectPressed(option(page, BOOK_CLUB, "owners"), true, "Book club: Only me");
+      if ((await page.getByTestId(`telegram-group-add-${BOOK_CLUB}`).count()) !== 0) {
+        throw new Error("an Add button for a group of Uno's bot");
+      }
       await dismissToasts(page);
       if ((await page.getByText("turn off Group Privacy").count()) !== 0) {
         throw new Error("the BotFather hint is shown for Uno's bot");
@@ -160,6 +165,32 @@ export const flows = [
         .locator("xpath=ancestor::section[1]")
         .screenshot({ path: join(SHOTS, "tg-groups-shared-on-section.png") });
     });
+    await step(
+      "Hear everything: on for one group, waits for Uno's bot to read groups",
+      async () => {
+        const hear = page.getByTestId(`telegram-group-${FAMILY}-hear-all`);
+        if ((await hear.getAttribute("aria-checked")) === "true") {
+          throw new Error("Hear everything is on before the owner turned it on");
+        }
+        await hear.click();
+        await page
+          .getByTestId(`telegram-group-${FAMILY}-hear-all-waiting`)
+          .waitFor({ timeout: 10_000 });
+        await seeText(page, "Uno now hears everything in");
+        if (
+          (await page
+            .getByTestId(`telegram-group-${ACME}-hear-all`)
+            .getAttribute("aria-checked")) === "true"
+        ) {
+          throw new Error("Hear everything turned on for another group too");
+        }
+        await dismissToasts(page);
+        await group(page, FAMILY).scrollIntoViewIfNeeded();
+        await page.waitForTimeout(400);
+        await group(page, FAMILY).screenshot({ path: join(SHOTS, "tg-groups-hear-all.png") });
+        await shot("hear-all");
+      },
+    );
   }),
   flow("tg-groups-no-telegram", async ({ page, url, step }) => {
     await step("without Telegram there is no Groups section", async () => {

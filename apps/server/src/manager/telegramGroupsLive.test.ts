@@ -81,7 +81,18 @@ beforeEach(() => {
         return json({ ok: true, result: groupsInfo });
       }
       if (path.endsWith("/unoSetGroupAccess") && groupsInfo !== null) {
-        accessPushes.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+        const push = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        accessPushes.push(push);
+        // The console keeps what it was told.
+        const info = groupsInfo as { groups?: Array<Record<string, unknown>> };
+        const bound = info.groups?.find((group) => group.chat_id === push.chat_id);
+        if (bound !== undefined) {
+          Object.assign(bound, {
+            members: push.members,
+            user_ids: push.user_ids,
+            hear_all: push.hear_all,
+          });
+        }
         return json({ ok: true, result: true });
       }
       return new Response("not found", { status: 404 });
@@ -348,7 +359,7 @@ it.live("Uno's assistant bot with groups off at the console: the own bot is offe
 );
 
 it.live(
-  "Uno's assistant bot with groups on: bound groups wait, the choice reaches the console",
+  "Uno's assistant bot with groups on: bound groups are added at once, the choice reaches the console",
   () =>
     Effect.gen(function* () {
       groupsInfo = {
@@ -376,14 +387,18 @@ it.live(
       yield* saveRow(`unorelay:${TGA}`, [String(OWNER), String(FAMILY)]);
       const telegram = yield* ManagerTelegramService;
 
-      // The console bound both groups (the owner added the bot there); one is
-      // added here already, the other waits — with Telegram's names.
+      // The console bound both groups (the owner added the bot there); the one
+      // not added here yet is added at once with "only me" (23.11), with
+      // Telegram's names.
       const view = yield* telegram.groups(projectId);
       expect(view).toMatchObject({
         supported: true,
         bot: "shared",
-        groups: [{ chatId: String(FAMILY), title: "Family", members: "owners" }],
-        pending: [{ chatId: String(BOOK_CLUB), title: "Book club" }],
+        groups: [
+          { chatId: String(FAMILY), title: "Family", members: "owners" },
+          { chatId: String(BOOK_CLUB), title: "Book club", members: "owners" },
+        ],
+        pending: [],
       });
       // Same rule on both sides: nothing to push.
       expect(accessPushes).toEqual([]);
@@ -397,7 +412,23 @@ it.live(
       });
       expect(changed.ok).toBe(true);
       expect(accessPushes).toEqual([
-        { chat_id: String(FAMILY), members: "selected", user_ids: [String(ANNA)] },
+        { chat_id: String(FAMILY), members: "selected", user_ids: [String(ANNA)], hear_all: false },
+      ]);
+
+      // "Hear everything" in Book club: only that group, pushed to the console.
+      accessPushes = [];
+      const heard = yield* telegram.setGroupAccess({
+        projectId,
+        chatId: String(BOOK_CLUB),
+        members: "owners",
+        hearAll: true,
+      });
+      expect(heard.ok && heard.result.groups.map((group) => group.hearAll === true)).toEqual([
+        false,
+        true,
+      ]);
+      expect(accessPushes).toEqual([
+        { chat_id: String(BOOK_CLUB), members: "owners", user_ids: [], hear_all: true },
       ]);
 
       // What the console delivers is still checked here: Anna is heard (a chat
@@ -410,4 +441,26 @@ it.live(
       expect(turns()[0]!.message.text).toContain("a member of the Telegram group");
       expect(turns()[0]!.runtimeMode).toBe("approval-required");
     }).pipe(Effect.provide(connectorLayer)),
+);
+
+it.live("Uno's assistant bot: the owner calling it in a new group is answered at once", () =>
+  Effect.gen(function* () {
+    groupsInfo = { enabled: true, bot_username: "uno_work_bot", reads_all: false, groups: [] };
+    yield* saveRow(`unorelay:${TGA}`, [String(OWNER)]);
+    const telegram = yield* ManagerTelegramService;
+    const bookClub = { id: BOOK_CLUB, title: "Book club" };
+    queued.push(groupUpdate(bookClub, owner, "@my_bot plan the next meeting"));
+    expect(yield* waitUntil(() => turns().length === 1)).toBe(true);
+    yield* settle;
+    expect(sent.filter((entry) => entry.text.includes("I don't answer in this group yet"))).toEqual(
+      [],
+    );
+    // Listed with "only me"; nobody else is heard there until the owner says so.
+    const view = yield* telegram.groups(projectId);
+    expect(view.groups).toMatchObject([{ chatId: String(BOOK_CLUB), members: "owners" }]);
+    expect(view.readsAll).toBe(false);
+    queued.push(groupUpdate(bookClub, dima, "@my_bot me too"));
+    yield* settle;
+    expect(turns()).toHaveLength(1);
+  }).pipe(Effect.provide(connectorLayer)),
 );

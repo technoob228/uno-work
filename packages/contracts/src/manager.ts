@@ -391,6 +391,7 @@ export const ManagerTelegramGroupAccess = Schema.Struct({
   members: ManagerTelegramGroupMembers,
   /** Telegram user ids let in when `members` is `selected` (kept otherwise). */
   userIds: Schema.Array(TrimmedNonEmptyString),
+  hearAll: Schema.optionalKey(Schema.Boolean), // Uno's bot: also messages that don't call it (T57)
 });
 export type ManagerTelegramGroupAccess = typeof ManagerTelegramGroupAccess.Type;
 
@@ -415,6 +416,7 @@ export const ManagerTelegramGroupView = Schema.Struct({
   title: Schema.NullOr(Schema.String),
   members: ManagerTelegramGroupMembers,
   people: Schema.Array(ManagerTelegramGroupPerson),
+  hearAll: Schema.optional(Schema.Boolean),
 });
 export type ManagerTelegramGroupView = typeof ManagerTelegramGroupView.Type;
 
@@ -427,6 +429,7 @@ export const ManagerTelegramGroupsResult = Schema.Struct({
   supported: Schema.Boolean,
   /** Absent from older daemons (own bot or private-only shared bot). */
   bot: Schema.optional(ManagerTelegramGroupsBot),
+  readsAll: Schema.optional(Schema.Boolean), // Uno's bot gets whole groups (Group Privacy off)
   botUsername: Schema.NullOr(Schema.String),
   groups: Schema.Array(ManagerTelegramGroupView),
   /** Groups the owner wrote to the bot in that are not added yet. */

@@ -71,7 +71,16 @@ export const helperCopy = {
     privacyHint:
       "To be called by name without @, turn off Group Privacy for the bot in @BotFather.",
     sharedHint: (bot: string) =>
-      `In groups Uno hears only messages that mention ${bot} or reply to it.`,
+      `In groups Uno hears messages that mention ${bot} or reply to it. To let Uno follow a whole group, turn on Hear everything for that group.`,
+    sharedEmpty: (bot: string) =>
+      `Add ${bot} to a Telegram group. The group shows up here, and Uno answers you there right away.`,
+    hearAll: "Hear everything in the group",
+    hearAllBody: (bot: string) =>
+      `Uno follows the whole conversation here, not only messages that mention ${bot}. Only for this group.`,
+    hearAllWaiting:
+      "Starts working once Uno's bot can read whole groups. Until then Uno hears mentions and replies only.",
+    hearAllOn: (group: string) => `Uno now hears everything in ${group}.`,
+    hearAllOff: (group: string) => `Uno hears only mentions and replies in ${group}.`,
     saved: (group: string) => `Saved for ${group}.`,
     added: (group: string) => `Uno now answers in ${group}.`,
   },

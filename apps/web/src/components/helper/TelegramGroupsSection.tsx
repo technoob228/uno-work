@@ -10,7 +10,10 @@
  *
  * Through Uno's assistant bot groups work when the console has them on for
  * the account (T57, 20.11); otherwise the section says so plainly and offers
- * the assistant's own bot — the page's Connect Telegram token field.
+ * the assistant's own bot — the page's Connect Telegram token field. With
+ * Uno's bot a group the owner added the bot to is listed at once, and each
+ * group has "Hear everything" (Misha 23.11): the console then passes the
+ * group's other messages too, once Telegram sends them (`readsAll`).
  */
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, UsersRoundIcon } from "lucide-react";
@@ -30,6 +33,7 @@ import {
 import { cn } from "../../lib/utils";
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { helperCopy } from "./helperCopy";
 import {
@@ -105,6 +109,7 @@ export function TelegramGroupsSection({
       members: ManagerTelegramGroupMembers,
       userIds: ReadonlyArray<string> | undefined,
       added: boolean,
+      hearAll?: boolean,
     ) => {
       if (!canMutate) return;
       setBusyChatId(target.chatId);
@@ -114,11 +119,20 @@ export function TelegramGroupsSection({
         chatId: target.chatId,
         members,
         ...(userIds !== undefined ? { userIds } : {}),
+        ...(hearAll !== undefined ? { hearAll } : {}),
       })
         .then((next) => {
           setView(next);
           const name = groupDisplayName(target, chatLabels);
-          onNotice(added ? helperCopy.groups.added(name) : helperCopy.groups.saved(name));
+          onNotice(
+            added
+              ? helperCopy.groups.added(name)
+              : hearAll === true
+                ? helperCopy.groups.hearAllOn(name)
+                : hearAll === false
+                  ? helperCopy.groups.hearAllOff(name)
+                  : helperCopy.groups.saved(name),
+          );
           if (added) onGroupAdded();
         })
         .catch((cause: unknown) =>
@@ -175,7 +189,14 @@ export function TelegramGroupsSection({
         </div>
       ) : view.groups.length === 0 && view.pending.length === 0 ? (
         <>
-          <SettingsRow title={helperCopy.groups.intro} description={helperCopy.groups.empty(bot)} />
+          <SettingsRow
+            title={helperCopy.groups.intro}
+            description={
+              view.bot === "shared"
+                ? helperCopy.groups.sharedEmpty(bot)
+                : helperCopy.groups.empty(bot)
+            }
+          />
           {view.bot === "shared" ? (
             <div className="border-t border-border/60 px-4 py-3 text-xs text-muted-foreground sm:px-5">
               {helperCopy.groups.sharedHint(bot)}
@@ -191,7 +212,10 @@ export function TelegramGroupsSection({
               name={groupDisplayName(group, chatLabels)}
               bot={bot}
               disabled={!canMutate || busyChatId === group.chatId}
+              shared={view.bot === "shared"}
+              readsAll={view.readsAll}
               onMembers={(members) => change(group, members, undefined, false)}
+              onHearAll={(on) => change(group, group.members, undefined, false, on)}
               onToggle={(personId) =>
                 change(group, "selected", togglePerson(group, personId), false)
               }
@@ -230,14 +254,22 @@ function GroupRow({
   name,
   bot,
   disabled,
+  shared,
+  readsAll,
   onMembers,
+  onHearAll,
   onToggle,
 }: {
   readonly group: ManagerTelegramGroupView;
   readonly name: string;
   readonly bot: string;
   readonly disabled: boolean;
+  /** Uno's bot: the group has "Hear everything". */
+  readonly shared: boolean;
+  /** Telegram gives Uno's bot whole groups; undefined — not known. */
+  readonly readsAll: boolean | undefined;
   readonly onMembers: (members: ManagerTelegramGroupMembers) => void;
+  readonly onHearAll: (on: boolean) => void;
   readonly onToggle: (personId: string) => void;
 }) {
   const people = pickablePeople(group);
@@ -307,6 +339,31 @@ function GroupRow({
       ) : null}
       {group.members === "anyone" || (group.members === "selected" && picked.length > 0) ? (
         <p className="mt-2 text-xs text-muted-foreground">{helperCopy.groups.othersNote}</p>
+      ) : null}
+      {shared ? (
+        <div className="mt-3 flex items-start justify-between gap-4 rounded-lg bg-muted/40 px-3 py-2.5">
+          <div className="min-w-0 space-y-0.5">
+            <p className="text-xs font-medium text-foreground">{helperCopy.groups.hearAll}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {helperCopy.groups.hearAllBody(bot)}
+            </p>
+            {readsAll === false && group.hearAll === true ? (
+              <p
+                className="text-xs leading-relaxed text-muted-foreground"
+                data-testid={`telegram-group-${group.chatId}-hear-all-waiting`}
+              >
+                {helperCopy.groups.hearAllWaiting}
+              </p>
+            ) : null}
+          </div>
+          <Switch
+            checked={group.hearAll === true}
+            disabled={disabled}
+            aria-label={`${helperCopy.groups.hearAll}: ${name}`}
+            data-testid={`telegram-group-${group.chatId}-hear-all`}
+            onCheckedChange={(on) => onHearAll(on)}
+          />
+        </div>
       ) : null}
     </div>
   );

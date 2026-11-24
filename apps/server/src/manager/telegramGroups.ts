@@ -272,7 +272,13 @@ export const telegramGroupsView = (input: {
       const rank = (person: ManagerTelegramGroupPerson) =>
         person.owner ? 0 : access.userIds.includes(person.id) ? 1 : 2;
       const people = [...known.values()].toSorted((a, b) => rank(a) - rank(b));
-      return { chatId, title: seen?.title ?? null, members: access.members, people };
+      return {
+        chatId,
+        title: seen?.title ?? null,
+        members: access.members,
+        people,
+        ...(access.hearAll === true ? { hearAll: true } : {}),
+      };
     });
   const pending = input.supported
     ? input.seen
@@ -301,6 +307,8 @@ export const withTelegramGroupAccess = (
     readonly chatId: string;
     readonly members: ManagerTelegramGroupMembers;
     readonly userIds?: ReadonlyArray<string> | undefined;
+    /** Uno's bot only: also hear messages that don't call it. Absent: kept. */
+    readonly hearAll?: boolean | undefined;
   },
 ): GroupAccessChange => {
   const chatId = input.chatId.trim();
@@ -326,7 +334,14 @@ export const withTelegramGroupAccess = (
       allowedChatIds: config.allowedChatIds.includes(chatId)
         ? config.allowedChatIds
         : [...config.allowedChatIds, chatId],
-      groups: { ...config.groups, [chatId]: { members: input.members, userIds: cleaned } },
+      groups: {
+        ...config.groups,
+        [chatId]: {
+          members: input.members,
+          userIds: cleaned,
+          ...((input.hearAll ?? previous?.hearAll) === true ? { hearAll: true } : {}),
+        },
+      },
     },
   };
 };
