@@ -80,7 +80,7 @@ export type MyComputerToolsShown = "none" | "list" | "all";
 
 /** What an agent hears when the person has no computer connected: what to tell them. */
 export const NO_COMPUTER_CONNECTED =
-  "No computer of the person is connected to this Uno account, so nothing can run or start there yet. They connect one in Uno Work: Add computer → Your own computer (one command in a terminal on that computer, about a minute). If Uno Work runs on that computer too, cloud agents stay off there until they turn on Settings → Computer → Cloud agents in it. Tell them this in a line or two; don't try another way.";
+  "No computer of the person is connected to this Uno account, so nothing can run or start there yet. They connect one in Uno Work: Add computer → Your own computer (one command in a terminal on that computer, about a minute). If Uno Work runs on that computer too, cloud agents stay off there until they turn on Settings → Computer → Cloud agents in it. If they already connected it, its helper may be linked to another Uno account: Settings → Computer on that computer shows which one, and Reconnect to my account fixes it. Tell them this in a line or two; don't try another way.";
 
 export type MyComputerFailureKind =
   | "off"

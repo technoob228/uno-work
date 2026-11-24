@@ -477,6 +477,9 @@ describe("what the agent reads back", () => {
     expect(answer).toMatchObject({ enabled: true, computers: [] });
     expect(answer.note).toContain("Add computer → Your own computer");
     expect(answer.note).toContain("Settings → Computer → Cloud agents");
+    // T70: a helper linked to another account is the other common reason.
+    expect(answer.note).toContain("another Uno account");
+    expect(answer.note).toContain("Reconnect to my account");
   });
 
   it("tools/list: everything with a computer, the list alone without one, nothing with the feature off", () => {

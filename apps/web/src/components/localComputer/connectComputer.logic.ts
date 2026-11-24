@@ -426,3 +426,27 @@ export function activityTimeLabel(
     ? formatTime(at)
     : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+// ── This Mac linked to another account (T70) ──────────────────────────
+
+/** The line under "Settings → Computer" when the helper isn't on the signed-in account. */
+export const MAC_LINK_MISMATCH_LINE =
+  "Этот Мак подключён к другому аккаунту (не к тому, под которым вы вошли в Uno Work) — облако его не видит.";
+
+/**
+ * The helper here exists, but the account's own computers don't list it: it is
+ * linked to another account (or was revoked). Nothing is decided before the
+ * account's list has answered, and nothing is guessed without a helper's id.
+ */
+export function macLinkedElsewhere(input: {
+  readonly desktop: boolean;
+  readonly helper: { readonly installed: boolean; readonly computerId: string | null };
+  readonly settled: boolean;
+  readonly enabled: boolean;
+  readonly computers: ReadonlyArray<Pick<MyComputer, "id">>;
+}): boolean {
+  if (!input.desktop || !input.settled || !input.enabled) return false;
+  if (!input.helper.installed || input.helper.computerId === null) return false;
+  const id = input.helper.computerId;
+  return !input.computers.some((computer) => computer.id === id);
+}
