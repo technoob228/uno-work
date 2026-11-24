@@ -8,9 +8,10 @@
  * the message's thread. The sent message's `ts` maps to the chat; a thread
  * reply under it is that chat's message, not the assistant's.
  *
- * Slack gets buttons as numbered options (no interactivity in Uno's app):
- * "2" or the option's label in the thread stands for pressing it, and the
- * chat gets the button's value, as a Telegram press sends it.
+ * Slack gets a choice's buttons as numbered options: "2" or the option's
+ * label in the thread stands for pressing it, and the chat gets the button's
+ * value, as a Telegram press sends it. Allow / Decline of an approval are
+ * real Slack buttons (slackButtons.ts, 23.11).
  *
  * Plain values: the connector keeps the state in a Ref and on disk
  * (`slack-reply-routes.json`), so a daemon update keeps them working.

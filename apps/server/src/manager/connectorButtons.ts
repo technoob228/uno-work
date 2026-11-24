@@ -103,6 +103,8 @@ export interface ButtonGroup {
   readonly chatId: string;
   /** Set once Telegram accepted the message. */
   readonly messageId: number | null;
+  /** A Slack group (slackButtons.ts): the `ts` of its message, once Slack accepted it. */
+  readonly slackTs?: string;
   /** The chat the buttons answer. */
   readonly threadId: string;
   readonly rows: ReadonlyArray<ReadonlyArray<ConnectorButton>>;

@@ -147,7 +147,7 @@ describe("a chat writes to the person in Slack", () => {
     expect(slack[0]!.routeReplies).toBeUndefined();
   });
 
-  it("an approval keeps 'open Uno Work' and no route (Allow stays in Uno Work)", async () => {
+  it("an approval goes with Allow / Deny buttons; 'open Uno Work' if Slack refuses them", async () => {
     const { slack, run } = setup();
     await run((service) =>
       service.sendToPerson({
@@ -165,8 +165,11 @@ describe("a chat writes to the person in Slack", () => {
         approval: true,
       }),
     );
-    expect(slack[0]!.text).toContain("open Uno Work to Allow");
+    expect(slack[0]!.text).toContain("Publish the site");
     expect(slack[0]!.text).not.toContain("1. Allow");
     expect(slack[0]!.routeReplies).toBeUndefined();
+    expect(slack[0]!.buttons?.rows.flat().map((button) => button.label)).toEqual(["Allow"]);
+    expect(slack[0]!.buttons?.threadId).toBe(SITE_CHAT);
+    expect(slack[0]!.buttons?.fallbackText).toContain("open Uno Work to Allow");
   });
 });
