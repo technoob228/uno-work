@@ -56,6 +56,30 @@ export interface PageToolsMainDeps {
   };
 }
 
+/**
+ * The panel browser speaks as plain Chrome: drop the `Electron/x` and app-name
+ * tokens, keep the real `Chrome/<version>` (as Brave, Arc and Vivaldi do), so
+ * Google sign-in does not refuse an "embedded" browser.
+ */
+export function browserUserAgent(userAgent: string): string {
+  return userAgent
+    .replace(/\sElectron\/\S+/g, "")
+    .replace(/(\(KHTML, like Gecko\))\s+.*?\s*(Chrome\/)/, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function setBrowserUserAgent(guestSession: Session): void {
+  try {
+    if (typeof guestSession.getUserAgent !== "function") return;
+    const current = guestSession.getUserAgent();
+    const clean = browserUserAgent(current);
+    if (clean && clean !== current) guestSession.setUserAgent(clean);
+  } catch {
+    // keep the default
+  }
+}
+
 /** The panel browser's partitions — not app widgets (`persist:uno-apps`) or anything else. */
 export function isPageToolsPartition(partition: unknown): partition is string {
   return (
@@ -240,6 +264,7 @@ export function createPageToolsMain(deps: PageToolsMainDeps) {
       if (!isPageToolsPartition(partition)) return;
       webPreferences.preload = deps.preloadPath;
       const guestSession = deps.sessionFromPartition(partition);
+      if (!previewSessions.has(guestSession)) setBrowserUserAgent(guestSession);
       previewSessions.add(guestSession);
       const src = params.src?.trim();
       const queue = firstLoads.get(guestSession) ?? [];
