@@ -78,6 +78,7 @@ import {
   formatElapsed,
 } from "../session-logic";
 import { type LegendListRef } from "@legendapp/list/react";
+import { createTimelineFollowController } from "./chat/timelineFollow";
 import {
   buildPendingUserInputAnswers,
   derivePendingUserInputProgress,
@@ -916,6 +917,8 @@ export default function ChatView(props: ChatViewProps) {
     LastInvokedScriptByProjectSchema,
   );
   const legendListRef = useRef<LegendListRef | null>(null);
+  // Whether the feed follows the newest text: the reader's move up lets go (T67).
+  const [timelineFollow] = useState(createTimelineFollowController);
   const isAtEndRef = useRef(true);
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
@@ -1562,9 +1565,10 @@ export default function ChatView(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const hasLatestTurn = activeLatestTurn !== null;
   const workLogEntries = useMemo(
-    () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
-    [activeLatestTurn?.turnId, threadActivities],
+    () => deriveWorkLogEntries(threadActivities, hasLatestTurn ? "every-turn" : undefined),
+    [hasLatestTurn, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -2803,9 +2807,13 @@ export default function ChatView(props: ChatViewProps) {
   );
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
-  const scrollToEnd = useCallback((animated = false) => {
-    legendListRef.current?.scrollToEnd?.({ animated });
-  }, []);
+  const scrollToEnd = useCallback(
+    (animated = false) => {
+      timelineFollow.followEnd();
+      legendListRef.current?.scrollToEnd?.({ animated });
+    },
+    [timelineFollow],
+  );
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
   // thread switches.  LegendList fires scroll events with isAtEnd=false while
@@ -2827,9 +2835,10 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     setPullRequestDialogState(null);
     isAtEndRef.current = true;
+    timelineFollow.followEnd();
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-  }, [activeThread?.id]);
+  }, [activeThread?.id, timelineFollow]);
 
   // Вкладка задач в правой панели читает план отсюда: панель живёт вне ChatView.
   useEffect(() => {
@@ -3683,6 +3692,7 @@ export default function ChatView(props: ChatViewProps) {
         },
       });
       isAtEndRef.current = true;
+      timelineFollow.followEnd();
       setThreadError(threadIdForSend, null);
       useComposerQuotesStore.getState().take(activeThread.id);
       promptRef.current = "";
@@ -3809,6 +3819,7 @@ export default function ChatView(props: ChatViewProps) {
     // This sets LegendList's internal isAtEnd=true so maintainScrollAtEnd
     // automatically pins to the new item when the data changes.
     isAtEndRef.current = true;
+    timelineFollow.followEnd();
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     await legendListRef.current?.scrollToEnd?.({ animated: false });
@@ -4508,6 +4519,7 @@ export default function ChatView(props: ChatViewProps) {
 
       // Scroll to the current end *before* adding the optimistic message.
       isAtEndRef.current = true;
+      timelineFollow.followEnd();
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
       await legendListRef.current?.scrollToEnd?.({ animated: false });
@@ -4583,6 +4595,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     },
     [
+      timelineFollow,
       activeThread,
       activeProposedPlan,
       beginLocalDispatch,
@@ -4655,6 +4668,7 @@ export default function ChatView(props: ChatViewProps) {
       beginLocalDispatch({ preparingWorktree: false });
       setThreadError(threadIdForSend, null);
       isAtEndRef.current = true;
+      timelineFollow.followEnd();
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, threadIdForSend),
         selection,
@@ -4685,6 +4699,7 @@ export default function ChatView(props: ChatViewProps) {
       }
     },
     [
+      timelineFollow,
       activeThread,
       beginLocalDispatch,
       environmentId,
@@ -4726,6 +4741,7 @@ export default function ChatView(props: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: false });
     setThreadError(threadIdForSend, null);
     isAtEndRef.current = true;
+    timelineFollow.followEnd();
     setOptimisticUserMessages((existing) => [
       ...existing,
       {
@@ -4766,6 +4782,7 @@ export default function ChatView(props: ChatViewProps) {
       resetLocalDispatch();
     }
   }, [
+    timelineFollow,
     activeThread,
     composerActiveProvider,
     beginLocalDispatch,
@@ -5282,6 +5299,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeTurnId={activeLatestTurn?.turnId ?? null}
                   activeTurnStartedAt={activeWorkStartedAt}
                   listRef={legendListRef}
+                  follow={timelineFollow}
                   timelineEntries={visibleTimelineEntries}
                   completionDividerBeforeEntryId={completionDividerBeforeEntryId}
                   completionSummary={completionSummary}
@@ -5378,7 +5396,7 @@ export default function ChatView(props: ChatViewProps) {
                     className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 py-1 text-foreground/80 text-xs shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
+                    {isWorking ? "New text" : "Jump to latest"}
                   </button>
                 </div>
               )}

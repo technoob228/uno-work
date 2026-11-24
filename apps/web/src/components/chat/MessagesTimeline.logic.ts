@@ -115,6 +115,8 @@ export type MessagesTimelineRow =
       createdAt: string | null;
       /** The agent's latest thought, one line (upstream 95ccbf4066); null: plain "Thinking". */
       thought: string | null;
+      /** The turn ended: the line keeps its room, empty, so the answer above stays put (T67). */
+      idle?: boolean;
     };
 
 export interface StableMessagesTimelineRowsState {
@@ -322,6 +324,53 @@ export function deriveTurnFolds(input: {
   return foldsByAnchorEntryId;
 }
 
+function withoutHeldFolds(
+  folds: ReadonlyMap<string, TurnFold>,
+  heldOpenTurnIds: ReadonlySet<TurnId> | undefined,
+): ReadonlyMap<string, TurnFold> {
+  if (!heldOpenTurnIds || heldOpenTurnIds.size === 0) return folds;
+  const kept = new Map<string, TurnFold>();
+  for (const [anchorId, fold] of folds) {
+    if (!heldOpenTurnIds.has(fold.turnId)) kept.set(anchorId, fold);
+  }
+  return kept;
+}
+
+/**
+ * A held-open turn may fold once nothing it would hide is in view: the last
+ * row the fold would take sits wholly above the top of the viewport. Returns
+ * that row's index in `rows`, or -1 when the turn would fold nothing.
+ */
+export function lastFoldableRowIndex(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+  fold: Pick<TurnFold, "hiddenEntryIds">,
+): number {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row && fold.hiddenEntryIds.has(row.id)) return index;
+  }
+  return -1;
+}
+
+/** Folds of finished turns, by turn: what each would hide (for held-open turns). */
+export function deriveSettledTurnFolds(input: {
+  timelineEntries: ReadonlyArray<TimelineEntry>;
+  latestTurn: TimelineLatestTurn | null;
+}): ReadonlyMap<TurnId, TurnFold> {
+  const folds = deriveTurnFolds({
+    timelineEntries: input.timelineEntries,
+    terminalAssistantMessageIds: deriveTerminalAssistantMessageIds(input.timelineEntries),
+    latestTurn: input.latestTurn,
+    unsettledTurnId: deriveUnsettledTurnId(input.latestTurn),
+  });
+  return new Map([...folds.values()].map((fold) => [fold.turnId, fold]));
+}
+
+/** The turn that is still being written, if any (its lifecycle, not the busy flag). */
+export function unsettledTurnIdOf(latestTurn: TimelineLatestTurn | null): TurnId | null {
+  return deriveUnsettledTurnId(latestTurn);
+}
+
 export interface AgentTalkFold {
   /** The answer to the person's message: its turn's last answer before agents wrote. */
   answerEntryId: string;
@@ -409,6 +458,13 @@ export function deriveMessagesTimelineRows(input: {
   pendingApprovals?: ReadonlyArray<PendingApproval>;
   /** The agents' talk after the answer to the person is open. */
   agentTalkExpanded?: boolean;
+  /**
+   * Finished turns the person watched being written: they stay open as they
+   * were (no fold, no divider) until scrolled out of view (T67).
+   */
+  heldOpenTurnIds?: ReadonlySet<TurnId>;
+  /** A turn was written on screen: its wait line keeps its room after the turn ends. */
+  keepWorkingSlot?: boolean;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -416,12 +472,15 @@ export function deriveMessagesTimelineRows(input: {
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
   const unsettledTurnId = deriveUnsettledTurnId(input.latestTurn ?? null);
-  const foldsByAnchorEntryId = deriveTurnFolds({
-    timelineEntries: input.timelineEntries,
-    terminalAssistantMessageIds,
-    latestTurn: input.latestTurn ?? null,
-    unsettledTurnId,
-  });
+  const foldsByAnchorEntryId = withoutHeldFolds(
+    deriveTurnFolds({
+      timelineEntries: input.timelineEntries,
+      terminalAssistantMessageIds,
+      latestTurn: input.latestTurn ?? null,
+      unsettledTurnId,
+    }),
+    input.heldOpenTurnIds,
+  );
   const foldedTurnIds = new Set<TurnId>();
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
@@ -561,11 +620,16 @@ export function deriveMessagesTimelineRows(input: {
       message: timelineEntry.message,
       durationStart:
         durationStartByMessageId.get(timelineEntry.message.id) ?? timelineEntry.message.createdAt,
-      // A folded turn says "Worked for …" on its fold row already.
+      // A folded turn says "Worked for …" on its fold row already; a held one
+      // gets no line pushed in above the answer the person is reading.
       showCompletionDivider:
         timelineEntry.message.role === "assistant" &&
         input.completionDividerBeforeEntryId === timelineEntry.id &&
-        !(timelineEntry.message.turnId && foldedTurnIds.has(timelineEntry.message.turnId)),
+        !(
+          timelineEntry.message.turnId &&
+          (foldedTurnIds.has(timelineEntry.message.turnId) ||
+            input.heldOpenTurnIds?.has(timelineEntry.message.turnId))
+        ),
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
@@ -599,6 +663,14 @@ export function deriveMessagesTimelineRows(input: {
       createdAt: input.activeTurnStartedAt,
       thought: deriveLiveThought(input.timelineEntries, unsettledTurnId),
     });
+  } else if (input.keepWorkingSlot && !pendingApproval) {
+    nextRows.push({
+      kind: "working",
+      id: "working-indicator-row",
+      createdAt: null,
+      thought: null,
+      idle: true,
+    });
   }
 
   return nextRows;
@@ -631,7 +703,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   switch (a.kind) {
     case "working": {
       const bw = b as typeof a;
-      return a.createdAt === bw.createdAt && a.thought === bw.thought;
+      return a.createdAt === bw.createdAt && a.thought === bw.thought && a.idle === bw.idle;
     }
 
     case "pending-approval": {

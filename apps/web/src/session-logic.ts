@@ -618,13 +618,20 @@ export function hasActionableProposedPlan(
   return proposedPlan !== null && proposedPlan.implementedAt === null;
 }
 
+/**
+ * The steps of the chat's turns. `"every-turn"` keeps each turn's own steps
+ * (they fold with their turn into "Worked for …"), so a turn's steps stay put
+ * when the next turn starts (T67); a turn id keeps only that turn's.
+ */
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
+  scope: TurnId | "every-turn" | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+    .filter((activity) =>
+      scope === "every-turn" ? activity.turnId != null : scope ? activity.turnId === scope : true,
+    )
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started")
     // The chat's own error notice says it (ThreadErrorBanner), in words for a person.

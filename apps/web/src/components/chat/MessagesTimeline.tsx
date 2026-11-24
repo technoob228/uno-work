@@ -87,18 +87,23 @@ import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
-  computeStableMessagesTimelineRows,
   MAX_VISIBLE_WORK_LOG_ENTRIES,
   deriveMessagesTimelineRows,
   changedFilesSummaryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
-  type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   type TimelineLatestTurn,
 } from "./MessagesTimeline.logic";
-import { summarizeToolGroup, toolGroupAction, workEntryIsStep } from "./workLogSummary";
+import type { TimelineFollowController } from "./timelineFollow";
+import {
+  useCalmTimeline,
+  useHeldOpenTurns,
+  useStableRows,
+  useTimelineOpening,
+} from "./useCalmTimeline";
+import { summarizeToolGroup, toolGroupAction } from "./workLogSummary";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -231,6 +236,8 @@ interface MessagesTimelineProps {
   /** "Waiting for you" (T52): rows to mark; an entry to bring into view and light. */
   pendingMarks?: ReadonlyMap<string, "waiting" | "replaced">;
   jumpTo?: { readonly entryId: string; readonly navigationId: number } | null;
+  /** Following the newest text, shared with the chat (send, "Jump to latest"). */
+  follow?: TimelineFollowController;
 }
 
 /** Shown only if loading takes a noticeable moment: a quick load stays blank. */
@@ -296,6 +303,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   openAtAnswer = false,
   pendingMarks = EMPTY_PENDING_MARKS,
   jumpTo = null,
+  follow,
 }: MessagesTimelineProps) {
   // Folded turns the person opened (the list is keyed per chat in ChatView).
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(() => new Set());
@@ -340,6 +348,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const latestTurnState = latestTurn?.state ?? null;
   const latestTurnStartedAt = latestTurn?.startedAt ?? null;
   const latestTurnCompletedAt = latestTurn?.completedAt ?? null;
+  const { heldOpenTurnIds, releaseHeldTurns, watchedLive } = useHeldOpenTurns(latestTurn);
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -361,6 +370,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedTurnIds,
         pendingApprovals,
         agentTalkExpanded,
+        heldOpenTurnIds,
+        keepWorkingSlot: watchedLive,
       }),
     [
       timelineEntries,
@@ -376,6 +387,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       expandedTurnIds,
       pendingApprovals,
       agentTalkExpanded,
+      heldOpenTurnIds,
+      watchedLive,
     ],
   );
   const rows = useStableRows(rawRows);
@@ -416,42 +429,25 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     setExpandedTurnIds,
   });
 
-  const handleScroll = useCallback(() => {
-    const state = listRef.current?.getState?.();
-    if (state) {
-      onIsAtEndChange(state.isAtEnd);
-    }
-  }, [listRef, onIsAtEndChange]);
-
-  const previousRowCountRef = useRef(rows.length);
-  useEffect(() => {
-    const previousRowCount = previousRowCountRef.current;
-    previousRowCountRef.current = rows.length;
-
-    if (previousRowCount > 0 || rows.length === 0) {
-      return;
-    }
-
-    // Opened for an answer agents talked after: start at "Your answer".
-    const answerIndex = openedAtAnswer ? rows.findIndex((row) => row.kind === "answer-anchor") : -1;
-    if (answerIndex < 0) onIsAtEndChange(true);
-    const frameId = window.requestAnimationFrame(() => {
-      if (answerIndex >= 0) {
-        void listRef.current?.scrollToIndex?.({
-          index: answerIndex,
-          animated: false,
-          viewOffset: 12,
-        });
-        return;
-      }
-      void listRef.current?.scrollToEnd?.({ animated: false });
-    });
-    return () => {
-      window.cancelAnimationFrame(frameId);
-    };
-    // Only the first rows decide where the chat opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [listRef, onIsAtEndChange, rows.length]);
+  const { following, handleScroll, releaseFollow } = useCalmTimeline({
+    listRef,
+    follow,
+    rows,
+    timelineEntries,
+    latestTurn,
+    heldOpenTurnIds,
+    releaseHeldTurns,
+    findActive: findQuery.length > 0,
+    jumpKey: jumpTo ? `${jumpTo.navigationId}:${jumpTo.entryId}` : null,
+    onIsAtEndChange,
+  });
+  useTimelineOpening({
+    listRef,
+    rows,
+    openAtAnswer: openedAtAnswer,
+    onIsAtEndChange,
+    releaseFollow,
+  });
 
   const latestTaskReportIds = useLatestTaskReportIds(timelineEntries);
   // Memoised context value — only changes on state transitions, NOT on
@@ -540,7 +536,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         renderItem={renderItem}
         estimatedItemSize={90}
         initialScrollAtEnd
-        maintainScrollAtEnd
+        // Only while the reader is at the end: a move up lets go (T67).
+        maintainScrollAtEnd={following}
         maintainScrollAtEndThreshold={0.1}
         maintainVisibleContentPosition
         onScroll={handleScroll}
@@ -946,7 +943,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       )}
 
       {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
+        <div className={cn("py-0.5 pl-1.5", row.idle && "invisible")} aria-hidden={row.idle}>
           <div className="flex min-w-0 items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
             <span className="inline-flex shrink-0 items-center gap-[3px]">
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
@@ -1076,9 +1073,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
     );
   };
 
-  // One step (with or without notes around it) stays its own row: a phrase
-  // would say less than the row itself.
-  if (groupedEntries.filter(workEntryIsStep).length < 2) {
+  // One entry stays its own row. More read as one line of the same height
+  // from the second on, so a run that grows never folds under the reader (T67).
+  if (groupedEntries.length < 2) {
     return <div className="space-y-0.5">{groupedEntries.map(renderEntry)}</div>;
   }
 
@@ -1104,7 +1101,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
           data-scroll-anchor-ignore
           data-testid="work-group-summary"
           aria-expanded={isExpanded}
-          className="group/summary flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-0.5 pl-1 pr-1.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="group/summary flex max-w-full min-w-0 items-center gap-1.5 rounded-md py-1 pl-1 pr-1.5 text-left text-xs leading-5 text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => {
             onDisclosureToggle();
             setIsExpanded((value) => !value);
@@ -1533,26 +1530,6 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     </div>
   );
 });
-
-// ---------------------------------------------------------------------------
-// Structural sharing — reuse old row references when data hasn't changed
-// so LegendList (and React) can skip re-rendering unchanged items.
-// ---------------------------------------------------------------------------
-
-/** Returns a structurally-shared copy of `rows`: for each row whose content
- *  hasn't changed since last call, the previous object reference is reused. */
-function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
-  const prevState = useRef<StableMessagesTimelineRowsState>({
-    byId: new Map<string, MessagesTimelineRow>(),
-    result: [],
-  });
-
-  return useMemo(() => {
-    const nextState = computeStableMessagesTimelineRows(rows, prevState.current);
-    prevState.current = nextState;
-    return nextState.result;
-  }, [rows]);
-}
 
 // ---------------------------------------------------------------------------
 // Pure helpers
