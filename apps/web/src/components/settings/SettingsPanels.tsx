@@ -87,7 +87,7 @@ function UpdateEverythingRow() {
   return (
     <SettingsRow
       title="Update everything"
-      description="Uno Work and your agents, on all your computers."
+      description="Uno Work and your agents on your computers. You choose which."
       control={
         <>
           <Button

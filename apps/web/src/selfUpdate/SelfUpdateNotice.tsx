@@ -140,8 +140,15 @@ export function useSelfUpdate(environmentId: EnvironmentId | null): SelfUpdateCo
     cancelWaiting: () => cancelMutation.mutate(),
     dismiss,
     reload,
-    // Mounted only when open: it asks every computer what it needs.
-    dialog: dialogOpen ? <UpdateEverythingDialog open onOpenChange={setDialogOpen} /> : null,
+    // Mounted only when open. Update is about this computer (and this app);
+    // the other computers are one click further, never the default.
+    dialog: dialogOpen ? (
+      <UpdateEverythingDialog
+        open
+        onOpenChange={setDialogOpen}
+        focusEnvironmentId={environmentId}
+      />
+    ) : null,
   };
 }
 
