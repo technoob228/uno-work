@@ -21,6 +21,10 @@
  *     person's `~/.grok/config.toml` `permission_mode` could answer prompts
  *     without us; the argv `--permission-mode default` overrides them, so
  *     every edit and command asks and Uno Work answers by the chat's mode.
+ *     Its slash commands `/always-approve` ("skip all permission prompts")
+ *     and `/yolo` run inside `session/prompt` (checked live 24.11: answered
+ *     at once, no model call), so Uno Work never sends them
+ *     (`grokRefusePrompt`).
  *
  * @module GrokAcpSupport
  */
@@ -174,6 +178,20 @@ export async function grokPreflight(env: NodeJS.ProcessEnv): Promise<string | un
 /* ------------------------------------------------------------------ *
  * Permissions
  * ------------------------------------------------------------------ */
+
+/** Grok slash commands that turn its permission prompts off for the session. */
+const PERMISSION_SKIPPING_COMMAND = /^\/(always-approve|yolo)(\s|$)/i;
+
+/**
+ * A message Grok must not get: `/always-approve` or `/yolo` at its start
+ * would let Grok edit and run commands without asking, past the chat's mode
+ * and a restricted chat's rules. Returns the reason shown in the chat.
+ */
+export function grokRefusePrompt(text: string): string | undefined {
+  const match = PERMISSION_SKIPPING_COMMAND.exec(text.trimStart());
+  if (!match) return undefined;
+  return `Grok's /${match[1]!.toLowerCase()} is turned off in Uno Work: the chat's mode decides what Grok may do without asking. To let it work without asking, switch the chat to Full access.`;
+}
 
 /**
  * Grok names MCP tools "<server>__<tool>" (docs: 07-mcp-servers,

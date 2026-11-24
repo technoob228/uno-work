@@ -154,6 +154,11 @@ export interface AcpAgentProfile {
   readonly autoApprove?: (request: EffectAcpSchema.RequestPermissionRequest) => string | undefined;
   /** Agent text chunks that are the agent's bookkeeping, never shown. */
   readonly dropAgentText?: (text: string) => boolean;
+  /**
+   * A message the agent must not get (Grok: a slash command that would turn
+   * its permission prompts off). Returns why, shown as the turn's error.
+   */
+  readonly refusePrompt?: (text: string) => string | undefined;
 }
 
 export interface AcpAgentAdapterOptions {
@@ -804,6 +809,14 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
     const sendTurn: AcpAgentAdapterShape["sendTurn"] = (input) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(input.threadId);
+        const refused = profile.refusePrompt?.(input.input ?? "");
+        if (refused !== undefined) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/prompt",
+            detail: refused,
+          });
+        }
         const turnId = TurnId.make(crypto.randomUUID());
         const turnModelSelection =
           input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;

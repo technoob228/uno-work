@@ -5,7 +5,8 @@
  * chat's own folder, `--permission-mode default` so every edit and command
  * comes to Uno Work for an answer, a sign-in check before start (Grok would
  * wait forever on a missing one), the sign-in or API key to authenticate
- * with, a start deadline and a `session/load` deadline.
+ * with, a start deadline and a `session/load` deadline, and no slash command
+ * that would turn Grok's permission prompts off.
  *
  * @module GrokAdapter
  */
@@ -23,6 +24,7 @@ import {
   grokAuthMethodFor,
   grokAutoApprove,
   grokPreflight,
+  grokRefusePrompt,
 } from "../acp/GrokAcpSupport.ts";
 import {
   type AcpAgentAdapterOptions,
@@ -54,6 +56,7 @@ export function grokProfile(settings: Pick<GrokSettings, "binaryPath">): AcpAgen
     startTimeoutMs: GROK_START_TIMEOUT_MS,
     startTimeoutMessage: `Grok did not start in time. If its sign-in has expired: ${GROK_SIGN_IN_HINT}`,
     autoApprove: grokAutoApprove,
+    refusePrompt: grokRefusePrompt,
   };
 }
 

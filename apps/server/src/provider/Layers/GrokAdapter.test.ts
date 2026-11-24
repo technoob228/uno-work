@@ -147,31 +147,33 @@ const start = (
     ...(extra.resumeCursor !== undefined ? { resumeCursor: extra.resumeCursor } : {}),
   });
 
-it.effect("with an API key: extension client, default permission mode, MCP goes through, a shell command asks", () =>
-  Effect.gen(function* () {
-    const machine = yield* makeMachine({ signedIn: false });
-    yield* withAdapter({ ...machine.env, XAI_API_KEY: "test-key" }, (adapter) =>
-      Effect.gen(function* () {
-        const threadId = ThreadId.make("grok-key");
-        yield* start(adapter, threadId, "approval-required");
-        const first = yield* runTurn(adapter, threadId, "hello");
-        assert.equal(
-          first.text,
-          "client=extension auth=xai.api_key model=grok-4.6 permission=default cancel=none",
-        );
-        const mcp = yield* runTurn(adapter, threadId, "DO_MCP");
-        assert.equal(mcp.asked, 0);
-        assert.match(mcp.text, /^mcp allowed; /);
-        const declined = yield* runTurn(adapter, threadId, "DO_SHELL", "decline");
-        assert.equal(declined.asked, 1);
-        assert.match(declined.text, /^shell denied; /);
-        const accepted = yield* runTurn(adapter, threadId, "DO_SHELL", "accept");
-        assert.equal(accepted.asked, 1);
-        assert.match(accepted.text, /^shell allowed; /);
-        yield* adapter.stopSession(threadId);
-      }),
-    );
-  }),
+it.effect(
+  "with an API key: extension client, default permission mode, MCP goes through, a shell command asks",
+  () =>
+    Effect.gen(function* () {
+      const machine = yield* makeMachine({ signedIn: false });
+      yield* withAdapter({ ...machine.env, XAI_API_KEY: "test-key" }, (adapter) =>
+        Effect.gen(function* () {
+          const threadId = ThreadId.make("grok-key");
+          yield* start(adapter, threadId, "approval-required");
+          const first = yield* runTurn(adapter, threadId, "hello");
+          assert.equal(
+            first.text,
+            "client=extension auth=xai.api_key model=grok-4.6 permission=default cancel=none",
+          );
+          const mcp = yield* runTurn(adapter, threadId, "DO_MCP");
+          assert.equal(mcp.asked, 0);
+          assert.match(mcp.text, /^mcp allowed; /);
+          const declined = yield* runTurn(adapter, threadId, "DO_SHELL", "decline");
+          assert.equal(declined.asked, 1);
+          assert.match(declined.text, /^shell denied; /);
+          const accepted = yield* runTurn(adapter, threadId, "DO_SHELL", "accept");
+          assert.equal(accepted.asked, 1);
+          assert.match(accepted.text, /^shell allowed; /);
+          yield* adapter.stopSession(threadId);
+        }),
+      );
+    }),
 );
 
 it.effect("signed in to xAI: authenticates with the stored sign-in, picks the chosen model", () =>
@@ -224,6 +226,29 @@ it.effect("a refused API key comes back as a failed turn with xAI's own words", 
   }),
 );
 
+it.effect("never sends Grok a slash command that turns its permission prompts off", () =>
+  Effect.gen(function* () {
+    const machine = yield* makeMachine({ signedIn: false });
+    yield* withAdapter({ ...machine.env, XAI_API_KEY: "key" }, (adapter) =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make("grok-always-approve");
+        yield* start(adapter, threadId, "approval-required");
+        const sent = yield* Effect.exit(
+          adapter.sendTurn({ threadId, input: "  /always-approve", attachments: [] }),
+        );
+        assert.ok(Exit.isFailure(sent));
+        const failure = Cause.findErrorOption(sent.cause);
+        assert.ok(Option.isSome(failure), Cause.pretty(sent.cause));
+        assert.match(String(failure.value.message), /turned off in Uno Work/);
+        // The session still works, and the agent never saw the command.
+        const after = yield* runTurn(adapter, threadId, "hello");
+        assert.match(after.text, /permission=default/);
+        yield* adapter.stopSession(threadId);
+      }),
+    );
+  }),
+);
+
 it.effect("a thought streams as reasoning, apart from the reply", () =>
   Effect.gen(function* () {
     const machine = yield* makeMachine({ signedIn: false });
@@ -235,7 +260,8 @@ it.effect("a thought streams as reasoning, apart from the reply", () =>
         assert.equal(textOf(turn.events, "reasoning_text"), "Weighing the options. ");
         assert.match(turn.text, /^client=extension /);
         const thought = turn.events.find(
-          (event) => event.type === "content.delta" && event.payload.streamKind === "reasoning_text",
+          (event) =>
+            event.type === "content.delta" && event.payload.streamKind === "reasoning_text",
         );
         assert.ok(thought?.itemId, "a thought needs an item id to become the live thought line");
         yield* adapter.stopSession(threadId);
@@ -273,7 +299,10 @@ it.effect("Stop: Grok gets ctrl_c, the running tool is closed as failed", () =>
           }),
         );
         const completed = events.find((event) => event.type === "turn.completed");
-        assert.equal(completed?.type === "turn.completed" ? completed.payload.state : "", "cancelled");
+        assert.equal(
+          completed?.type === "turn.completed" ? completed.payload.state : "",
+          "cancelled",
+        );
         const closed = events.find(
           (event) => event.type === "item.completed" && String(event.itemId) === "long-1",
         );

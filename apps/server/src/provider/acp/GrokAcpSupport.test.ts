@@ -11,6 +11,7 @@ import {
   grokAutoApprove,
   grokHomeDir,
   grokPreflight,
+  grokRefusePrompt,
   hasGrokSignIn,
 } from "./GrokAcpSupport.ts";
 
@@ -62,6 +63,15 @@ describe("Grok permissions", () => {
   it("runs in Grok's default permission mode, never one that skips the prompts", () => {
     expect(GROK_ACP_ARGS).toEqual(["--permission-mode", "default", "agent", "stdio"]);
     expect(GROK_ACP_ARGS.join(" ")).not.toMatch(/always-approve|bypass|auto|dontAsk/);
+  });
+
+  it("never lets /always-approve or /yolo through, and only those", () => {
+    expect(grokRefusePrompt("/always-approve")).toMatch(/always-approve is turned off/);
+    expect(grokRefusePrompt("  /YOLO please")).toMatch(/\/yolo is turned off/);
+    expect(grokRefusePrompt("/yolo\nthen fix the tests")).toBeDefined();
+    expect(grokRefusePrompt("/compact")).toBeUndefined();
+    expect(grokRefusePrompt("/yolo-mode")).toBeUndefined();
+    expect(grokRefusePrompt("explain what /always-approve does")).toBeUndefined();
   });
 
   const request = (title: string, kind?: string) =>
