@@ -32,7 +32,15 @@ export interface UpdateTarget {
   readonly selfUpdate: SelfUpdateStatus | null | undefined;
   readonly agents: ReadonlyArray<AgentUpdateStatus> | null | undefined;
   readonly runningChats: number;
+  /**
+   * When the person last used it: this browser's last connection or the
+   * console's `last_active_at`, whichever is later. Null: never, as far as we know.
+   */
+  readonly lastUsedAt?: string | null | undefined;
 }
+
+/** Not used this long: out of the list unless the person opens "Other computers". */
+export const STALE_AFTER_MS = 14 * 24 * 60 * 60_000;
 
 export interface PlanRow {
   readonly key: string;
@@ -50,11 +58,27 @@ export interface PlanRow {
   readonly runningChats: number;
   /** Agents the computer itself counts; 0 on one too old to wait for them. */
   readonly workingAgents: number;
+  /**
+   * In use: this page's computer, one on the line now, or one used in the
+   * last two weeks. The rest sit folded under "Other computers" and nothing
+   * asks to update them.
+   */
+  readonly recent: boolean;
 }
 
-export function buildUpdatePlan(targets: ReadonlyArray<UpdateTarget>): ReadonlyArray<PlanRow> {
+export function isRecentlyUsed(target: UpdateTarget, now: number): boolean {
+  if (target.isPrimary || target.reach === "online") return true;
+  const at = target.lastUsedAt ? Date.parse(target.lastUsedAt) : Number.NaN;
+  return Number.isFinite(at) && now - at < STALE_AFTER_MS;
+}
+
+export function buildUpdatePlan(
+  targets: ReadonlyArray<UpdateTarget>,
+  now: number = Date.now(),
+): ReadonlyArray<PlanRow> {
   const rows = targets.map((target): PlanRow => {
     const base = {
+      recent: isRecentlyUsed(target, now),
       key: target.key,
       label: target.label,
       environmentId: target.environmentId,
@@ -153,7 +177,7 @@ export function isUpdatableBox(box: {
  * twenty machines for one click is what made "Update" hang.
  */
 export function isSelectedByDefault(row: PlanRow): boolean {
-  return planNeedsWork(row) && !row.wakes;
+  return planNeedsWork(row) && !row.wakes && row.recent;
 }
 
 /** What a row says before the run, given whether it's ticked. */

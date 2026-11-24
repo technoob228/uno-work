@@ -48,6 +48,8 @@ interface Box {
   readonly name: string;
   readonly status: string;
   readonly workMachine: boolean;
+  /** Days since the person last used it; absent: never. */
+  readonly usedDaysAgo?: number;
 }
 
 const ARCHIVED = [3811, 3269, 2520, 2385, 1924, 1725, 1724, 1723, 1722, 1721, 1177, 1019, 129, 76];
@@ -58,10 +60,10 @@ const BOXES: ReadonlyArray<Box> = [
   { id: 9363, name: "mover-e2e-laptop", status: "running", workMachine: false },
   { id: 9360, name: "mover-e2e-ssh", status: "running", workMachine: false },
   { id: 6777, name: "network-test-exit", status: "running", workMachine: false },
-  { id: 3273, name: "kinship", status: "sleeping", workMachine: true },
+  { id: 3273, name: "kinship", status: "sleeping", workMachine: true, usedDaysAgo: 0 },
   { id: 2539, name: "work-build", status: "running", workMachine: false },
-  { id: 2534, name: "work-canary", status: "running", workMachine: true },
-  { id: 2531, name: "stage-work", status: "sleeping", workMachine: true },
+  { id: 2534, name: "work-canary", status: "running", workMachine: true, usedDaysAgo: 0 },
+  { id: 2531, name: "stage-work", status: "sleeping", workMachine: true, usedDaysAgo: 39 },
   { id: 2292, name: "kaiki-sandbox", status: "running", workMachine: true },
   ...ARCHIVED.map((id) => ({ id, name: `box-${id}`, status: "archived", workMachine: false })),
   { id: 46, name: "box-46", status: "archived", workMachine: false },
@@ -91,6 +93,10 @@ const boxTarget = (box: Box): UpdateTarget => ({
   selfUpdate: null,
   agents: null,
   runningChats: 0,
+  lastUsedAt:
+    box.usedDaysAgo === undefined
+      ? null
+      : new Date(Date.now() - box.usedDaysAgo * 86_400_000 - 3_600_000).toISOString(),
 });
 
 /** After: the hook's filter (useUpdateEverything) on the same account. */
@@ -176,12 +182,20 @@ describe("Update (24.11)", () => {
     );
     await userEvent.click(page.getByTestId("update-everything-others"));
     await expect.element(page.getByRole("heading", { name: "Update everything" })).toBeVisible();
-    // 1 + kinship, work-canary, stage-work, kaiki-sandbox; no archived, no servers.
-    expect(page.getByTestId("update-everything-row").elements()).toHaveLength(5);
+    // In use: this one, kinship, work-canary. No archived boxes, no servers;
+    // stage-work (39 days) and kaiki-sandbox (never opened) are folded away.
+    expect(page.getByTestId("update-everything-row").elements()).toHaveLength(3);
+    await expect.element(page.getByText("Other computers (2)")).toBeVisible();
+    expect(page.getByText("stage-work").elements()).toHaveLength(0);
     expect(page.getByText("box-3811").elements()).toHaveLength(0);
     expect(page.getByText("work-build").elements()).toHaveLength(0);
     await expect.element(page.getByText("Update 1 item")).toBeVisible();
     await shot("after-3-everything-list");
+    await userEvent.click(page.getByText("Other computers (2)"));
+    await expect.element(page.getByText("stage-work")).toBeVisible();
+    expect(page.getByTestId("update-everything-row").elements()).toHaveLength(5);
+    await shot("after-3b-other-computers-open");
+    await userEvent.click(page.getByText("Other computers (2)"));
 
     // Ticking a sleeping one: it wakes for this, and a computer that never
     // wakes fails its own row (here quickly; for real after 3 min).

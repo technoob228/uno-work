@@ -14,6 +14,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import {
   CheckIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
   HourglassIcon,
   MonitorIcon,
   RefreshCwIcon,
@@ -68,10 +70,10 @@ export const UPDATE_COPY = {
     `${count === 1 ? "1 chat is" : `${count} chats are`} working now. They stop once when Uno Work restarts, and you can continue them after.`,
   upToDate: "Everything is up to date.",
   thisUpToDate: "This computer is up to date.",
-  others: (count: number) =>
-    count > 0
-      ? `Other computers (${count} ${count === 1 ? "has" : "have"} updates)`
-      : "Other computers",
+  otherComputers: "Update other computers…",
+  /** The folded line in the full list: not used for two weeks, or never opened. */
+  unused: (count: number) => `Other computers (${count})`,
+  unusedHint: "Not used for 2 weeks or never opened here. They stay as they are.",
   canClose: "You can close this window: the update goes on and this list keeps its result.",
   thisApp: "This app",
   appRestarts: (version: string | null) =>
@@ -164,6 +166,7 @@ export function UpdateEverythingDialog(props: {
   const [scope, setScope] = useState<"this" | "all">(props.focusEnvironmentId ? "this" : "all");
   /** What the person ticked or unticked; the rest follows the defaults. */
   const [picked, setPicked] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [showUnused, setShowUnused] = useState(false);
 
   // Only the computer the notice is about: never another one in its place.
   const focusRow = useMemo(
@@ -184,11 +187,17 @@ export function UpdateEverythingDialog(props: {
   );
 
   // The plan runs this page's computer last; the list shows it first.
-  const shownRows = scope === "this" ? (focusRow ? [focusRow] : []) : primaryFirst(rows);
+  // Computers not used for two weeks (or never opened) fold away: nothing
+  // asks to update them, and a tick there is the person's own choice.
+  const unusedRows = scope === "all" ? primaryFirst(rows.filter((row) => !row.recent)) : [];
+  const listedRows =
+    scope === "this"
+      ? focusRow
+        ? [focusRow]
+        : []
+      : primaryFirst(rows.filter((row) => row.recent));
+  const shownRows = showUnused ? [...listedRows, ...unusedRows] : listedRows;
   const chosen = shownRows.filter(isSelected);
-  const otherCount = focusRow
-    ? rows.filter((row) => row.key !== focusRow.key && planNeedsWork(row) && !row.wakes).length
-    : 0;
   const count = chosen.length + (app ? 1 : 0);
   const stopped = planStoppedChats(chosen);
   const waitable = planWaitableAgents(chosen);
@@ -251,6 +260,33 @@ export function UpdateEverythingDialog(props: {
       ? UPDATE_COPY.thisDescription
       : UPDATE_COPY.allDescription;
 
+  const renderPick = (row: PlanRow) => {
+    const selected = isSelected(row);
+    const selectable = scope === "all" && planNeedsWork(row);
+    return (
+      <Row
+        key={row.key}
+        label={row.label}
+        text={planRowLine(row, selected)}
+        mark={
+          selectable ? (
+            <Checkbox
+              aria-label={`Update ${row.label}`}
+              data-testid="update-everything-pick"
+              checked={selected}
+              onCheckedChange={(checked) =>
+                setPicked((current) => new Map(current).set(row.key, checked === true))
+              }
+            />
+          ) : (
+            <MonitorIcon className="size-3.5 text-muted-foreground" />
+          )
+        }
+        quiet={!selected}
+      />
+    );
+  };
+
   return (
     <Dialog
       open={props.open}
@@ -281,34 +317,7 @@ export function UpdateEverythingDialog(props: {
                     />
                   );
                 })
-              : shownRows.map((row) => {
-                  const selected = isSelected(row);
-                  const selectable = scope === "all" && planNeedsWork(row);
-                  return (
-                    <Row
-                      key={row.key}
-                      label={row.label}
-                      text={planRowLine(row, selected)}
-                      mark={
-                        selectable ? (
-                          <Checkbox
-                            aria-label={`Update ${row.label}`}
-                            data-testid="update-everything-pick"
-                            checked={selected}
-                            onCheckedChange={(checked) =>
-                              setPicked((current) =>
-                                new Map(current).set(row.key, checked === true),
-                              )
-                            }
-                          />
-                        ) : (
-                          <MonitorIcon className="size-3.5 text-muted-foreground" />
-                        )
-                      }
-                      quiet={!selected}
-                    />
-                  );
-                })}
+              : listedRows.map(renderPick)}
             {(inRun ? run.app : app) ? (
               <Row
                 label={UPDATE_COPY.thisApp}
@@ -322,6 +331,32 @@ export function UpdateEverythingDialog(props: {
               />
             ) : null}
           </ul>
+          {!inRun && unusedRows.length > 0 ? (
+            <div data-testid="update-everything-unused">
+              <Button
+                variant="ghost"
+                size="xs"
+                className="-ml-2 text-muted-foreground"
+                aria-expanded={showUnused}
+                onClick={() => setShowUnused((open) => !open)}
+              >
+                {showUnused ? (
+                  <ChevronDownIcon className="size-3.5" />
+                ) : (
+                  <ChevronRightIcon className="size-3.5" />
+                )}
+                {UPDATE_COPY.unused(unusedRows.length)}
+              </Button>
+              {showUnused ? (
+                <>
+                  <p className="text-xs text-muted-foreground/80">{UPDATE_COPY.unusedHint}</p>
+                  <ul className="flex flex-col divide-y divide-border/60">
+                    {unusedRows.map(renderPick)}
+                  </ul>
+                </>
+              ) : null}
+            </div>
+          ) : null}
           {!inRun && count > 0 ? (
             <div className="space-y-1 text-sm text-muted-foreground">
               <p>
@@ -350,7 +385,7 @@ export function UpdateEverythingDialog(props: {
               data-testid="update-everything-others"
               onClick={() => setScope("all")}
             >
-              {UPDATE_COPY.others(otherCount)}
+              {UPDATE_COPY.otherComputers}
             </Button>
           ) : null}
           {!inRun ? (

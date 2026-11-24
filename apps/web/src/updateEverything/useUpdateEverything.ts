@@ -13,7 +13,10 @@ import { useEffect, useMemo } from "react";
 
 import { resolveClient } from "../components/harness/useHarnessSetup";
 import { isElectron } from "../env";
-import { ensureEnvironmentConnectionBootstrapped } from "../environments/runtime";
+import {
+  ensureEnvironmentConnectionBootstrapped,
+  useSavedEnvironmentRegistryStore,
+} from "../environments/runtime";
 import { refreshEnvironmentProviders } from "../environments/settings/serverSettings";
 import { useMachineRows } from "../hooks/useMachineRows";
 import { usePrimaryEnvironmentId } from "../environments/primary/context";
@@ -50,6 +53,16 @@ const WORK_TIMEOUT_MS = 12 * 60_000;
 const AGENT_TIMEOUT_MS = 10 * 60_000;
 /** Pairing a woken box; the run's own limit for waking is a bit longer. */
 const BOOTSTRAP_TIMEOUT_MS = 60_000;
+
+/** The later of two ISO times; null when neither parses. */
+function latest(...values: ReadonlyArray<string | null | undefined>): string | null {
+  let best: { at: number; value: string } | null = null;
+  for (const value of values) {
+    const at = value ? Date.parse(value) : Number.NaN;
+    if (value && Number.isFinite(at) && (best === null || at > best.at)) best = { at, value };
+  }
+  return best?.value ?? null;
+}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -104,6 +117,7 @@ export function useUpdateEverything() {
   const machines = useMachineRows();
   const desktop = useDesktopUpdateState().data ?? null;
   const threadsByEnvironment = useStore((state) => state.environmentStateById);
+  const savedById = useSavedEnvironmentRegistryStore((state) => state.byId);
 
   const online = useMemo(
     () =>
@@ -150,11 +164,15 @@ export function useUpdateEverything() {
           selfUpdate: isOnline ? selfUpdates[index]?.data : null,
           agents: isOnline ? agentUpdates[index]?.data : null,
           runningChats,
+          lastUsedAt: latest(
+            environmentId ? savedById[environmentId]?.lastConnectedAt : null,
+            row.box?.lastActiveAt,
+          ),
         },
       ];
     });
     return buildUpdatePlan(targets);
-  }, [agentUpdates, machines, online, selfUpdates, threadsByEnvironment]);
+  }, [agentUpdates, machines, online, savedById, selfUpdates, threadsByEnvironment]);
 
   const appAction = isElectron && desktop ? resolveDesktopUpdateButtonAction(desktop) : "none";
   const appVersion = desktop?.downloadedVersion ?? desktop?.availableVersion ?? null;

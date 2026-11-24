@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { SelfUpdateStatus } from "../selfUpdate/selfUpdate";
 import {
   buildUpdatePlan,
+  isRecentlyUsed,
   isSelectedByDefault,
   isUpdatableBox,
   planRowLine,
@@ -359,5 +360,28 @@ describe("the result is what each computer reports", () => {
       { workMs: 20 },
     );
     expect(last.get("a")).toEqual({ kind: "done", note: "Updated · Uno Work 0.0.170" });
+  });
+});
+
+describe("computers not in use stay out of the way (Misha 24.11)", () => {
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
+
+  it("counts this computer, one on the line, and one used in the last two weeks", () => {
+    expect(isRecentlyUsed(target({ isPrimary: true, reach: "asleep" }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "online" }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: daysAgo(3) }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: daysAgo(15) }), now)).toBe(false);
+    // Never opened.
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: null }), now)).toBe(false);
+  });
+
+  it("never ticks a computer that isn't in use", () => {
+    const rows = buildUpdatePlan(
+      [target({ key: "old", reach: "asleep", environmentId: null, lastUsedAt: daysAgo(40) })],
+      now,
+    );
+    expect(rows[0]).toMatchObject({ recent: false, wakes: true });
+    expect(isSelectedByDefault(rows[0]!)).toBe(false);
   });
 });
