@@ -336,9 +336,18 @@ function getModelPickerListText() {
   return getModelPickerListElement().textContent ?? "";
 }
 
+/** The row's visible name, without the provider named for screen readers. */
+function modelNameText(element: Element) {
+  const copy = element.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+  return copy.textContent?.trim() ?? "";
+}
+
 function getVisibleModelNames() {
-  return Array.from(getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"))
-    .map((element) => element.textContent?.replace(/New$/u, "").trim() ?? "")
+  return Array.from(
+    getModelPickerListElement().querySelectorAll<HTMLDivElement>("[data-model-picker-model-name]"),
+  )
+    .map((element) => modelNameText(element))
     .filter((text) => text.length > 0);
 }
 
@@ -1121,7 +1130,8 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const listText = getModelPickerListText();
-        expect(listText).toContain("OpenCode · GitHub Copilot");
+        // Upstream's one-line row: the name, then the sub-provider as muted trailing text.
+        expect(listText).toContain("GitHub Copilot");
         expect(listText).toContain("Claude");
         expect(listText).not.toContain("OpenCodeClaude Opus 4.6");
       });
@@ -1199,8 +1209,10 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(async () => {
         const favoritedModelRows = Array.from(
-          getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"),
-        ).filter((element) => element.textContent?.trim() === "Claude Opus 4.6");
+          getModelPickerListElement().querySelectorAll<HTMLDivElement>(
+            "[data-model-picker-model-name]",
+          ),
+        ).filter((element) => modelNameText(element) === "Claude Opus 4.6");
         expect(favoritedModelRows.length).toBe(1);
       });
     } finally {

@@ -51,13 +51,14 @@ export function modelPickerRailLabel(displayName: string): string {
 }
 
 const RAIL_BUTTON_CLASS =
-  "relative isolate flex w-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded px-0.5 pt-1.5 pb-1 transition-colors hover:bg-muted";
+  "relative isolate flex w-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded-md px-0.5 pt-1.5 pb-1 transition-colors hover:bg-foreground/10 focus-visible:bg-foreground/10 focus-visible:outline-none";
 const RAIL_LABEL_CLASS =
   "block w-full truncate text-center text-[9px] leading-tight text-muted-foreground";
 
-const SELECTED_BUTTON_CLASS = "bg-background text-foreground shadow-sm";
+// T3's rail (upstream `ModelPickerSidebar.tsx`): no card on the selected agent, a bar at its edge.
+const SELECTED_BUTTON_CLASS = "text-foreground";
 const SELECTED_INDICATOR_CLASS =
-  "pointer-events-none absolute -right-1 top-1/2 z-10 h-5 w-0.5 -translate-y-1/2 rounded-l-full bg-primary";
+  "pointer-events-none absolute right-0 top-1/2 z-10 h-5 w-0.75 -translate-y-1/2 rounded-full bg-primary";
 const BADGE_BASE_CLASS =
   "pointer-events-none absolute -right-0.5 top-0.5 z-10 flex size-3.5 items-center justify-center rounded-full bg-transparent shadow-sm ";
 const NEW_BADGE_CLASS = `${BADGE_BASE_CLASS} text-amber-600  dark:text-amber-300 `;
@@ -122,10 +123,39 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
     <ScrollArea
       hideScrollbars
       scrollFade
-      className="w-15 shrink-0 border-r bg-muted/30"
+      className="w-15 shrink-0 bg-muted/30"
       data-model-picker-sidebar="true"
     >
-      <div className="flex min-h-full flex-col gap-1 p-1">
+      <div
+        className="flex min-h-full flex-col gap-1 p-1"
+        role="toolbar"
+        aria-orientation="vertical"
+        aria-label="Agents"
+        // As T3's rail: Up and Down walk the agents, Right goes back to the search.
+        onKeyDown={(event) => {
+          if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+          const buttons = Array.from(
+            event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+          );
+          const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          if (event.key === "ArrowRight") {
+            const search = event.currentTarget
+              .closest("[data-model-picker-content]")
+              ?.querySelector<HTMLInputElement>("input");
+            if (!search) return;
+            event.preventDefault();
+            search.focus();
+            return;
+          }
+          if (index < 0 || (event.key !== "ArrowDown" && event.key !== "ArrowUp")) return;
+          event.preventDefault();
+          const next =
+            buttons[
+              (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length
+            ];
+          next?.focus();
+        }}
+      >
         {/* Favorites section */}
         {showFavorites ? (
           <div className="pb-1 mb-1 border-b">
@@ -145,6 +175,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                       type="button"
                       data-model-picker-provider="favorites"
                       aria-label="Favorites"
+                      aria-pressed={props.selectedInstanceId === "favorites"}
                     >
                       <StarIcon className="size-5 fill-current shrink-0" aria-hidden />
                       <span className={RAIL_LABEL_CLASS} aria-hidden>
@@ -200,6 +231,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               onClick={() => !isDisabled && handleSelect(entry.instanceId)}
               disabled={isDisabled}
               type="button"
+              aria-pressed={isSelected}
               aria-label={
                 isDisabled
                   ? tooltip

@@ -1,6 +1,7 @@
 import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
 import { memo } from "react";
 import {
+  CheckIcon,
   EyeIcon,
   ImagePlusIcon,
   type LucideIcon,
@@ -12,8 +13,8 @@ import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
   type ModelEsque,
-  PROVIDER_ICON_BY_PROVIDER,
 } from "./providerIconUtils";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
   modelCannotRunCodingAgent,
   modelSupportsImageInput,
@@ -65,15 +66,16 @@ export const ModelListRow = memo(function ModelListRow(props: {
   instanceId: ProviderInstanceId;
   /** Driver kind of the instance — used for the provider icon glyph. */
   driverKind: ProviderDriverKind;
-  /**
-   * Display name to show in the secondary line (provider footer). Usually
-   * the instance's configured `displayName` so custom instances like
-   * "Codex Personal" render with their user-authored label.
-   */
+  /** The instance's configured name, for screen readers (the logo names it on screen). */
   providerDisplayName: string;
   providerAccentColor?: string | undefined;
+  providerIconText?: string | undefined;
+  /** Marks this instance apart from another of the same provider. */
+  showInstanceBadge?: boolean;
   isFavorite: boolean;
-  showProvider: boolean;
+  /** In Favorites every row is starred, so the star shows only on hover. */
+  favoriteStarOnHover?: boolean;
+  isSelected: boolean;
   preferShortName?: boolean;
   useTriggerLabel?: boolean;
   showNewBadge?: boolean;
@@ -82,15 +84,11 @@ export const ModelListRow = memo(function ModelListRow(props: {
   disabledReason?: string | null;
   onToggleFavorite: () => void;
 }) {
-  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
-  const providerLabel =
-    props.model.subProvider && props.model.subProvider !== props.providerDisplayName
-      ? `${props.providerDisplayName} · ${props.model.subProvider}`
-      : props.providerDisplayName;
   const metadata = props.model.capabilities?.metadata;
-  // Uno AI hours: Smart / Fast and the premium models read short — the real
-  // model in small text, one line about it, no tier / price chips.
+  // Uno AI time: Smart / Fast and the premium models name the real model after theirs.
   const curated = metadata?.unoGroup === "included" || metadata?.unoGroup === "premium";
+  // The full Uno gateway catalog keeps its tier, price and capability line under the name.
+  const showCatalogLine = Boolean(metadata) && !curated;
   const tierLabel =
     metadata?.tier === "frontier"
       ? "Frontier"
@@ -129,90 +127,73 @@ export const ModelListRow = memo(function ModelListRow(props: {
       ? "This model cannot run coding-agent turns because it does not support tools."
       : null);
   const disabled = props.disabled === true || disabledReason !== null;
+  const name = props.useTriggerLabel
+    ? getTriggerDisplayModelLabel(props.model)
+    : getDisplayModelName(
+        props.model,
+        props.preferShortName ? { preferShortName: true } : undefined,
+      );
+  const aside =
+    curated && !props.useTriggerLabel ? metadata?.underlyingModel : props.model.subProvider;
+  const title = disabledReason ?? (curated ? metadata?.description : undefined);
 
+  // T3's row (upstream `ModelListRow.tsx` f99ef08b): logo, name, a check on the
+  // selected model, the star on hover at the end.
   return (
     <ComboboxItem
       disabled={disabled}
       hideIndicator
       index={props.index}
       value={`${props.instanceId}:${props.model.slug}`}
-      contentClassName="flex w-full items-start gap-2"
-      title={disabledReason ?? undefined}
+      contentClassName="flex w-full min-w-0 items-center gap-2"
+      title={title ?? undefined}
       className={cn(
-        "w-full cursor-pointer rounded px-3 py-2 transition-colors group",
-        "data-highlighted:bg-muted data-selected:bg-accent data-selected:text-foreground",
+        "group relative w-full !min-w-0 max-w-full cursor-pointer px-2 py-1",
+        "hover:bg-foreground/[0.09] data-highlighted:bg-foreground/[0.09] data-selected:bg-transparent [&[data-highlighted][data-selected]]:bg-foreground/[0.09]",
         disabled && "cursor-not-allowed opacity-55",
       )}
     >
-      <button
-        className="mt-0.5 shrink-0 cursor-pointer opacity-40 transition-opacity group-hover:opacity-100"
-        onClick={(event) => {
-          event.stopPropagation();
-          props.onToggleFavorite();
-        }}
-        onKeyDown={(event) => {
-          event.stopPropagation();
-        }}
-        type="button"
-        aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
-        title={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
-      >
-        <StarIcon className={cn("size-4", props.isFavorite && "fill-current text-yellow-500")} />
-      </button>
-
+      <ProviderInstanceIcon
+        driverKind={props.driverKind}
+        iconText={props.providerIconText}
+        displayName={props.providerDisplayName}
+        accentColor={props.providerAccentColor}
+        showBadge={props.showInstanceBadge === true}
+        className={cn("size-4", showCatalogLine && "self-start mt-0.5")}
+        iconClassName="size-4"
+        badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-[7px]"
+      />
       <div className="min-w-0 flex-1 text-left">
-        <div className="flex items-center justify-between gap-2 min-w-0">
-          <div className="text-xs font-medium leading-snug flex items-center gap-2 min-w-0">
-            <span className="truncate">
-              {props.useTriggerLabel
-                ? getTriggerDisplayModelLabel(props.model)
-                : getDisplayModelName(
-                    props.model,
-                    props.preferShortName ? { preferShortName: true } : undefined,
-                  )}
-            </span>
-            {curated && metadata?.underlyingModel && !props.useTriggerLabel ? (
-              <span className="shrink-0 text-[11px] font-normal text-muted-foreground">
-                ({metadata.underlyingModel})
-              </span>
-            ) : null}
-            {props.showNewBadge ? (
-              <span
-                className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
-                aria-label="New model"
-              >
-                New
-              </span>
-            ) : null}
+        <div className="flex min-w-0 items-center gap-2">
+          <div
+            className="min-w-0 truncate text-sm font-normal leading-snug"
+            data-model-picker-model-name
+            // Names the row in full on hover only when it is cut off (upstream).
+            onPointerEnter={(event) => {
+              const element = event.currentTarget;
+              element.title = element.scrollWidth > element.clientWidth ? name : "";
+            }}
+          >
+            {name}
+            {/* The logo is decorative, so name the provider for screen readers. */}
+            <span className="sr-only">, {props.providerDisplayName}</span>
           </div>
-          {props.jumpLabel ? (
-            <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px]">
-              {props.jumpLabel}
-            </Kbd>
+          {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+          {aside ? (
+            <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
+              {aside}
+            </span>
+          ) : null}
+          {props.showNewBadge ? (
+            <span
+              className="shrink-0 rounded border border-amber-500/35 bg-amber-500/15 px-0.5 py-px text-[10px] font-bold uppercase leading-none tracking-wide text-amber-800 dark:border-amber-400/30 dark:bg-amber-400/12 dark:text-amber-200"
+              aria-label="New model"
+            >
+              New
+            </span>
           ) : null}
         </div>
-        {props.showProvider && (
-          <div className="flex items-center gap-1 mt-0.5">
-            {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
-            {props.providerAccentColor ? (
-              <span
-                className="size-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: props.providerAccentColor }}
-                aria-hidden
-              />
-            ) : null}
-            <span className="text-xs font-normal leading-snug text-muted-foreground/70 truncate">
-              {providerLabel}
-            </span>
-          </div>
-        )}
-        {curated ? (
-          metadata?.description ? (
-            <div className="mt-0.5 truncate text-[11px] leading-snug text-muted-foreground/80">
-              {metadata.description}
-            </div>
-          ) : null
-        ) : metadata ? (
+        {showCatalogLine ? (
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-[10px] leading-none text-muted-foreground/75">
             {tierLabel ? (
               <span className={cn("rounded border px-1 py-0.5", tierClassName)}>{tierLabel}</span>
@@ -283,6 +264,37 @@ export const ModelListRow = memo(function ModelListRow(props: {
               </span>
             ) : null}
           </div>
+        ) : null}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          className="inline-flex size-5 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+          onClick={(event) => {
+            event.stopPropagation();
+            props.onToggleFavorite();
+          }}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+          }}
+          type="button"
+          disabled={disabled}
+          aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+          title={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+        >
+          <StarIcon
+            className={cn(
+              "size-3.5 sm:size-3",
+              props.isFavorite && "fill-current text-yellow-500",
+              (!props.isFavorite || props.favoriteStarOnHover) &&
+                "opacity-0 group-hover:opacity-100 group-data-highlighted:opacity-100 pointer-coarse:opacity-100",
+            )}
+          />
+        </button>
+        {props.jumpLabel ? (
+          <Kbd className="h-4 min-w-0 shrink-0 rounded-sm px-1.5 text-[10px]">
+            {props.jumpLabel}
+          </Kbd>
         ) : null}
       </div>
     </ComboboxItem>
