@@ -5396,7 +5396,7 @@ export default function ChatView(props: ChatViewProps) {
                     className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 py-1 text-foreground/80 text-xs shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    {isWorking ? "New text" : "Jump to latest"}
+                    Scroll to end
                   </button>
                 </div>
               )}
