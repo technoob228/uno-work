@@ -6,6 +6,7 @@ import {
   agentChatsShelfLabel,
   agentTaskDescendants,
   agentTaskReportLabel,
+  agentTasksChip,
   agentTasksOf,
   agentTasksSummary,
   agentTaskStatus,
@@ -335,5 +336,25 @@ describe("a task's report in the coordinator's feed", () => {
     expect(latest.get(a)).toBe("m4");
     expect(latest.get(b)).toBe("m3");
     expect(latest.size).toBe(2);
+  });
+});
+
+describe("agentTasksChip (T63: the Tasks chip above the composer)", () => {
+  const rows = (...statuses: string[]) =>
+    statuses.map((status) => ({ status })) as unknown as Parameters<typeof agentTasksChip>[0];
+  it("says the most urgent thing; only 'needs you' is warm", () => {
+    expect(agentTasksChip(rows("done", "needs-you", "working"))).toEqual({
+      label: "1 needs you",
+      tone: "needs-you",
+    });
+    expect(agentTasksChip(rows("done", "working", "working"))).toEqual({
+      label: "2 working",
+      tone: "working",
+    });
+    expect(agentTasksChip(rows("done", "error"))).toEqual({ label: "1 failed", tone: "quiet" });
+    expect(agentTasksChip(rows("done", "done", "done"))).toEqual({
+      label: "3 done",
+      tone: "quiet",
+    });
   });
 });

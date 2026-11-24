@@ -40,8 +40,12 @@ export const PendingForYouStrip = memo(function PendingForYouStrip(props: {
   readonly onOpenLink: (item: ThreadPendingItem, link: ThreadPendingLink) => void;
   readonly onDismiss: (item: ThreadPendingItem) => void;
   readonly onRestoreHidden: () => void;
+  /** The list alone, inside the "Waiting for you" chip's popover (T63). */
+  readonly embedded?: boolean;
 }) {
-  const { environmentId, items, hidden, folded } = props;
+  const { environmentId, items, hidden } = props;
+  const embedded = props.embedded === true;
+  const folded = embedded ? false : props.folded;
   const shells = useStore((state) => selectEnvironmentState(state, environmentId).threadShellById);
   const fromTitle = useMemo(() => {
     const titles = new Map<string, string>();
@@ -60,39 +64,50 @@ export const PendingForYouStrip = memo(function PendingForYouStrip(props: {
     <div
       data-testid="pending-for-you"
       data-folded={folded ? "true" : undefined}
-      className="mx-auto mb-2 max-w-208 rounded-lg border border-warning/40 bg-warning/6 text-xs"
+      className={
+        embedded
+          ? "text-xs"
+          : "mx-auto mb-2 max-w-208 rounded-lg border border-warning/40 bg-warning/6 text-xs"
+      }
     >
-      <button
-        type="button"
-        aria-expanded={!folded}
-        onClick={() => props.onFoldedChange(!folded)}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        data-testid="pending-for-you-toggle"
-      >
-        <span className="relative flex size-2 shrink-0">
-          <span className="absolute inline-flex size-full rounded-full bg-warning opacity-60 motion-safe:animate-ping [animation-iteration-count:2]" />
-          <span className="relative inline-flex size-2 rounded-full bg-warning" />
-        </span>
-        <span className="shrink-0 font-medium text-foreground">
-          Waiting for you · <span data-testid="pending-for-you-count">{items.length}</span>
-        </span>
-        {folded ? (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {pendingForYouSummary(items)}
+      {embedded ? null : (
+        <button
+          type="button"
+          aria-expanded={!folded}
+          onClick={() => props.onFoldedChange(!folded)}
+          className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          data-testid="pending-for-you-toggle"
+        >
+          <span className="relative flex size-2 shrink-0">
+            <span className="absolute inline-flex size-full rounded-full bg-warning opacity-60 motion-safe:animate-ping [animation-iteration-count:2]" />
+            <span className="relative inline-flex size-2 rounded-full bg-warning" />
           </span>
-        ) : (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">in this chat</span>
-        )}
-        <ChevronDownIcon
-          aria-hidden
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            !folded && "rotate-180",
+          <span className="shrink-0 font-medium text-foreground">
+            Waiting for you · <span data-testid="pending-for-you-count">{items.length}</span>
+          </span>
+          {folded ? (
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {pendingForYouSummary(items)}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">in this chat</span>
           )}
-        />
-      </button>
+          <ChevronDownIcon
+            aria-hidden
+            className={cn(
+              "size-3.5 shrink-0 text-muted-foreground transition-transform",
+              !folded && "rotate-180",
+            )}
+          />
+        </button>
+      )}
       {folded ? null : (
-        <div className="max-h-[min(14rem,40vh)] overflow-y-auto border-t border-warning/25 py-1">
+        <div
+          className={cn(
+            "max-h-[min(14rem,40vh)] overflow-y-auto py-1",
+            !embedded && "border-t border-warning/25",
+          )}
+        >
           <ul role="list">
             {items.map((item) => {
               const from = fromTitle.get(item.id);

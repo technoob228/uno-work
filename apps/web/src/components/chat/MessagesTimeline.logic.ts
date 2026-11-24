@@ -73,12 +73,17 @@ export type MessagesTimelineRow =
       createdAt: string;
     }
   | {
-      /** What agents said in the chat after the answer to the person: "Agents talked after this (3)". */
+      /**
+       * A run of other chats' agents talking here, folded to one line:
+       * "Agents talked · 6 messages · Release checks, Hero banners · Show" (T63).
+       */
       kind: "agent-talk-fold";
       id: string;
       createdAt: string;
       agentMessageCount: number;
       expanded: boolean;
+      /** The chats whose agents wrote in this run, in order of their first word. */
+      senderThreadIds: ReadonlyArray<string>;
     }
   | {
       /** The chat moved to another agent: a quiet line. */
@@ -375,6 +380,101 @@ export function deriveAgentTalkFold(
   };
 }
 
+export interface AgentTalkRun {
+  /** Stable while the run grows: keyed by the message that opened it. */
+  id: string;
+  firstEntryId: string;
+  hiddenEntryIds: ReadonlySet<string>;
+  /** How many messages other chats' agents sent in it. */
+  agentMessageCount: number;
+  senderThreadIds: ReadonlyArray<string>;
+}
+
+const isPersonMessage = (entry: TimelineEntry) =>
+  entry.kind === "message" && entry.message.role === "user" && entry.message.sentByThreadId == null;
+
+/** Something the chat shows the person: a page, a plan, a letter to send. */
+const isShownToPerson = (entry: TimelineEntry) =>
+  entry.kind === "html-render" || entry.kind === "proposed-plan" || entry.kind === "support-draft";
+
+/**
+ * Quiet agents (T63, Misha 24.11: "I see their talk only when I need it"):
+ * every run of other chats' agents talking here folds into one line. A run
+ * starts at a message another chat's agent sent and takes this chat's
+ * replies to it, until the person writes or the chat shows the person
+ * something. What stays in sight: the person's messages, the answer to them
+ * (the chat's first reply after the person wrote, even if an agent wrote in
+ * between), a card / plan / letter and the sentence that introduces it,
+ * anything the person still has to deal with (`keepInSight`: "Waiting for
+ * you"), and the task an agent opened this chat with.
+ */
+export function deriveAgentTalkRuns(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  keepInSight?: ReadonlySet<string>,
+): AgentTalkRun[] {
+  const runs: AgentTalkRun[] = [];
+  const firstMessageIndex = timelineEntries.findIndex((entry) => entry.kind === "message");
+  let awaitingAnswer = false;
+  let index = 0;
+  while (index < timelineEntries.length) {
+    const entry = timelineEntries[index]!;
+    if (isPersonMessage(entry)) awaitingAnswer = true;
+    else if (entry.kind === "message" && entry.message.role === "assistant") awaitingAnswer = false;
+    // A chat an agent started opens with its task: that one stays in sight.
+    if (!isAgentSentMessage(entry) || index === firstMessageIndex) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    let end = index + 1;
+    while (end < timelineEntries.length) {
+      const next = timelineEntries[end]!;
+      if (isPersonMessage(next) || isShownToPerson(next) || keepInSight?.has(next.id)) break;
+      if (next.kind === "message" && next.message.role === "assistant" && awaitingAnswer) break;
+      end += 1;
+    }
+    let hiddenEnd = end;
+    // The sentence that introduces a card stays with the card.
+    const stop = timelineEntries[end];
+    if (stop && isShownToPerson(stop)) {
+      for (let back = end - 1; back > start; back -= 1) {
+        const candidate = timelineEntries[back];
+        if (candidate?.kind === "message" && candidate.message.role === "assistant") {
+          hiddenEnd = back;
+          break;
+        }
+      }
+    }
+    const hidden = timelineEntries.slice(start, hiddenEnd);
+    const senders: string[] = [];
+    for (const item of hidden) {
+      if (item.kind === "message" && item.message.sentByThreadId != null) {
+        const sender = String(item.message.sentByThreadId);
+        if (!senders.includes(sender)) senders.push(sender);
+      }
+    }
+    runs.push({
+      id: `agent-run:${entry.id}`,
+      firstEntryId: entry.id,
+      hiddenEntryIds: new Set(hidden.map((item) => item.id)),
+      agentMessageCount: hidden.filter(isAgentSentMessage).length,
+      senderThreadIds: senders,
+    });
+    index = hiddenEnd;
+  }
+  return runs;
+}
+
+/** The run an entry is folded into, if any (Find opens it). */
+export function agentTalkRunIdOf(
+  timelineEntries: ReadonlyArray<TimelineEntry>,
+  entryId: string,
+): string | null {
+  return (
+    deriveAgentTalkRuns(timelineEntries).find((run) => run.hiddenEntryIds.has(entryId))?.id ?? null
+  );
+}
+
 /**
  * The live line's thought: the latest reasoning row of the running turn
  * (after the person's last message), as one sentence.
@@ -406,8 +506,12 @@ export function deriveMessagesTimelineRows(input: {
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
   latestTurn?: TimelineLatestTurn | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
+  /** Runs of agents' talk the person opened (T63). */
+  expandedAgentRunIds?: ReadonlySet<string>;
+  /** Entries no fold of agents' talk may hide: what waits for the person. */
+  keepInSightEntryIds?: ReadonlySet<string>;
   pendingApprovals?: ReadonlyArray<PendingApproval>;
-  /** The agents' talk after the answer to the person is open. */
+  /** All of the agents' talk is open ("Waiting for you" jumped into it). */
   agentTalkExpanded?: boolean;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
@@ -429,10 +533,20 @@ export function deriveMessagesTimelineRows(input: {
     if (input.expandedTurnIds?.has(fold.turnId)) continue;
     for (const entryId of fold.hiddenEntryIds) collapsedEntryIds.add(entryId);
   }
+  const agentRuns = deriveAgentTalkRuns(input.timelineEntries, input.keepInSightEntryIds);
+  const agentRunByFirstEntryId = new Map(agentRuns.map((run) => [run.firstEntryId, run]));
+  const isRunOpen = (run: AgentTalkRun) =>
+    input.agentTalkExpanded === true || (input.expandedAgentRunIds?.has(run.id) ?? false);
+  const agentTalkCollapsed = new Set<string>();
+  for (const run of agentRuns) {
+    if (isRunOpen(run)) continue;
+    for (const entryId of run.hiddenEntryIds) {
+      agentTalkCollapsed.add(entryId);
+      collapsedEntryIds.add(entryId);
+    }
+  }
+  // "Your answer" marks the answer when agents talked after it (13.11).
   const agentTalk = deriveAgentTalkFold(input.timelineEntries);
-  const agentTalkCollapsed =
-    agentTalk !== null && input.agentTalkExpanded !== true ? agentTalk.hiddenEntryIds : null;
-  if (agentTalkCollapsed) for (const entryId of agentTalkCollapsed) collapsedEntryIds.add(entryId);
   // The answer stays in sight even when its turn went on after an agent
   // wrote (one turn, folded to its last answer — which is the agents').
   if (agentTalk !== null) collapsedEntryIds.delete(agentTalk.answerEntryId);
@@ -446,19 +560,19 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (agentTalk !== null) {
-      if (timelineEntry.id === agentTalk.firstHiddenEntryId) {
-        nextRows.push({
-          kind: "agent-talk-fold",
-          id: "agent-talk-fold",
-          createdAt: timelineEntry.createdAt,
-          agentMessageCount: agentTalk.agentMessageCount,
-          expanded: input.agentTalkExpanded === true,
-        });
-      }
-      // Folded with the agents' talk, a turn's own fold row goes too.
-      if (agentTalkCollapsed?.has(timelineEntry.id)) continue;
+    const agentRun = agentRunByFirstEntryId.get(timelineEntry.id);
+    if (agentRun) {
+      nextRows.push({
+        kind: "agent-talk-fold",
+        id: agentRun.id,
+        createdAt: timelineEntry.createdAt,
+        agentMessageCount: agentRun.agentMessageCount,
+        expanded: isRunOpen(agentRun),
+        senderThreadIds: agentRun.senderThreadIds,
+      });
     }
+    // Folded with the agents' talk, a turn's own fold row goes too.
+    if (agentTalkCollapsed.has(timelineEntry.id)) continue;
 
     const turnFold = foldsByAnchorEntryId.get(timelineEntry.id);
     if (turnFold) {
@@ -662,7 +776,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return (
         a.createdAt === bf.createdAt &&
         a.agentMessageCount === bf.agentMessageCount &&
-        a.expanded === bf.expanded
+        a.expanded === bf.expanded &&
+        a.senderThreadIds.join("\n") === bf.senderThreadIds.join("\n")
       );
     }
 

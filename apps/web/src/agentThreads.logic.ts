@@ -34,12 +34,12 @@ export function describeAgentSentMessage(senderTitle: string | null | undefined)
   return title ? `From the agent in ${quoteTitle(title)}` : "From an agent";
 }
 
-/** Wording of the "Don't let agents write here" switch, one place for the menu and the bar. */
+/** Wording of the "Keep other agents out" switch (T63), one place for the menu and the chip. */
 export const AGENTS_ACCESS_COPY = {
-  close: "Don't let agents write here",
+  close: "Keep other agents out",
   open: "Let agents write here",
-  closedStatus: "Agents can't write here",
-  closedToast: "Agents can't write in this chat now",
+  closedStatus: "Agents kept out",
+  closedToast: "Other chats' agents can't write in this chat now",
   openedToast: "Agents can write in this chat again",
   failed: "Could not change who can write here",
 } as const;
@@ -235,4 +235,45 @@ function resolveLegacyControlBarState(
     action: { kind: "handoff", label: "Hand back to agent", nextController: "agent" },
     secondaryAction: null,
   };
+}
+
+/**
+ * The chip about where a chat came from and who handles it, in the line
+ * above the composer (T63, Misha 24.11): "From “…”", "Handled by its agent"
+ * or "Agents kept out"; what the old strip said goes in its popover with the
+ * same buttons. The person's own chat where agents talk gets no chip: the
+ * fold lines in the feed say it, the menu keeps "Keep other agents out".
+ */
+export interface ComposerOriginChip {
+  readonly kind: "from" | "handled" | "closed";
+  readonly label: string;
+  /** The parent's title, quoted, for the popover's link (null: none loaded). */
+  readonly parentLinkText: string | null;
+  readonly state: ThreadControlBarState;
+}
+
+export function resolveComposerOriginChip(
+  input: Parameters<typeof resolveThreadControlBarState>[0],
+): ComposerOriginChip | null {
+  const state = resolveThreadControlBarState(input);
+  if (!state) return null;
+  const spawned = Boolean(input.spawnedByThreadId);
+  const title = cleanTitle(input.parentTitle);
+  const parentLinkText = spawned && title ? quoteTitle(title) : null;
+  const from = parentLinkText ? `From ${parentLinkText}` : "From an agent";
+  if (state.closedToAgents) {
+    return {
+      kind: "closed",
+      label: spawned ? from : AGENTS_ACCESS_COPY.closedStatus,
+      parentLinkText,
+      state,
+    };
+  }
+  if (spawned) return { kind: "from", label: from, parentLinkText, state };
+  // The person handed their own chat to its agent.
+  if (normalizeThreadController(input.controller) === "agent") {
+    return { kind: "handled", label: "Handled by its agent", parentLinkText, state };
+  }
+  // Agents talk in the person's own chat: no chip (T63).
+  return null;
 }

@@ -261,6 +261,28 @@ export function agentTasksSummary(rows: ReadonlyArray<AgentTaskRow>): string {
 }
 
 /**
+ * The "Tasks" chip above the composer (T63): the one thing that matters most,
+ * "1 needs you" (warm) before "2 working" before "1 failed" before "3 done".
+ */
+export function agentTasksChip(rows: ReadonlyArray<AgentTaskRow>): {
+  readonly label: string;
+  readonly tone: "needs-you" | "working" | "quiet";
+} {
+  const count = (status: AgentTaskStatus) => rows.filter((row) => row.status === status).length;
+  const needs = count("needs-you");
+  if (needs > 0) return { label: `${needs} needs you`, tone: "needs-you" };
+  const working = count("working");
+  if (working > 0) return { label: `${working} working`, tone: "working" };
+  const failed = count("error");
+  if (failed > 0) return { label: `${failed} failed`, tone: "quiet" };
+  const waiting = count("waiting");
+  if (waiting > 0) return { label: `${waiting} waiting`, tone: "quiet" };
+  const done = count("done");
+  if (done === rows.length) return { label: `${done} done`, tone: "quiet" };
+  return { label: `${rows.length}`, tone: "quiet" };
+}
+
+/**
  * Every live task under a chat, its tasks' tasks too (what archiving the
  * chat archives), nearest first. Safe on a cycle.
  */
