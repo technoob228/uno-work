@@ -24,6 +24,10 @@ const LOGIN_SHELL_ENV_NAMES = [
   "HOMEBREW_REPOSITORY",
   "XDG_CONFIG_HOME",
   "XDG_DATA_HOME",
+  // Usage events switch (TELEMETRY.md): an export in ~/.zshrc reaches the
+  // backend even when the app is started from the Dock.
+  "UNO_WORK_TELEMETRY_ENABLED",
+  "DO_NOT_TRACK",
 ] as const;
 
 function logShellEnvironmentWarning(message: string, error?: unknown): void {
@@ -98,6 +102,8 @@ export function syncShellEnvironment(
       "HOMEBREW_REPOSITORY",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+      "UNO_WORK_TELEMETRY_ENABLED",
+      "DO_NOT_TRACK",
     ] as const) {
       if (!env[name] && shellEnvironment[name]) {
         env[name] = shellEnvironment[name];
