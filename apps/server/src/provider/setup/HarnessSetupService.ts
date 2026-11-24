@@ -610,6 +610,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     const cli = await (instanceId
       ? deps.resolveCliEnvironment(driver, instanceId)
       : deps.resolveCliEnvironment(driver));
+    // Cancelled (or signed out) while it was still queued: start nothing, or
+    // the login would wait on its stdin until the timeout with no one to answer.
+    if (auths.get(job.jobId)?.state !== "queued") return;
     auths.markRunning(job.jobId);
     auths.appendLog(job.jobId, `$ ${cli.binaryPath} ${input.args.join(" ")}\n`);
     const stopWatching = input.parsePrompt ? await watchForSignInElsewhere(job) : () => {};

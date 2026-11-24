@@ -154,6 +154,15 @@ describe("Antigravity setup", () => {
     expect(h.processes).toHaveLength(0);
   });
 
+  it("starts no login when the sign-in is cancelled before it began", async () => {
+    const h = makeAntigravity();
+    const { jobId } = h.runner.authStart({ driver: "antigravity", method: "oauth" });
+    h.runner.authCancel({ driver: "antigravity" });
+    await h.runner.drain();
+    expect(h.runner.authStatus({ jobId }).state).toBe("failed");
+    expect(h.processes).toHaveLength(0);
+  });
+
   it("has no second account", () => {
     const h = makeAntigravity();
     expect(() =>
