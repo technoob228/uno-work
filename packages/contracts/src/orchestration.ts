@@ -424,6 +424,31 @@ export const ThreadController = Schema.Literals(["human", "agent"]);
 export type ThreadController = typeof ThreadController.Type;
 
 /**
+ * Who handles a chat the person handed off ("Hand to…", T63 24.11): another
+ * chat (a coordinator) or an assistant's conversation. It gets a brief, then
+ * this chat's Ready and questions instead of the person, and may write here
+ * and answer with text; approvals, secrets, payments and sign-ins stay with
+ * the person. "Take back" clears it; so does deleting or archiving the
+ * handler. Absent / null: nobody, the person handles it.
+ */
+export const ThreadHandlerKind = Schema.Literals(["chat", "assistant"]);
+export type ThreadHandlerKind = typeof ThreadHandlerKind.Type;
+
+export const ThreadHandler = Schema.Struct({
+  threadId: ThreadId,
+  kind: ThreadHandlerKind,
+  // The handler's title when handed (the sidebar shows the live one).
+  title: Schema.optional(Schema.NullOr(Schema.String)),
+  // What the person told the handler ("take it to launch, ask me only about money").
+  note: Schema.optional(Schema.NullOr(Schema.String)),
+  handedAt: IsoDateTime,
+});
+export type ThreadHandler = typeof ThreadHandler.Type;
+
+/** How a chat can be handed: at most this many handlers in a chain (A → B → C). */
+export const THREAD_HANDLER_MAX_DEPTH = 3;
+
+/**
  * How a chat relates to the assistant ("Uno"):
  * - `chat`    — THE assistant chat: one per computer, pinned on top of the
  *               sidebar. Its workspace is the assistant's (instructions,
@@ -746,6 +771,8 @@ export const OrchestrationThread = Schema.Struct({
   // chat: every agent's message is refused (409 agents_closed) until they
   // turn it off. Null / absent: agents may write when the chat is free.
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See ThreadHandler. Absent or null: the person handles the chat.
+  handler: Schema.optional(Schema.NullOr(ThreadHandler)),
   // See ThreadAssistantRole. Optional so pre-assistant-chat servers decode.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   // See ThreadStartedBy and the note under it.
@@ -839,6 +866,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   controlChangedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // See OrchestrationThread.agentsClosedAt.
   agentsClosedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // See ThreadHandler.
+  handler: Schema.optional(Schema.NullOr(ThreadHandler)),
   // See ThreadAssistantRole.
   assistantRole: Schema.optional(Schema.NullOr(ThreadAssistantRole)),
   // See ThreadStartedBy and the note under it.
@@ -1152,6 +1181,28 @@ const ThreadControlSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// "Hand to…" (T63): the person hands a chat to another chat or an assistant
+// (`handler`), or takes it back (null). The handler itself may only give it
+// back (null). Refused: the chat itself, a chat it started, a loop
+// (A → B → A, 409 handler_loop) or a chain deeper than
+// THREAD_HANDLER_MAX_DEPTH.
+const ThreadHandlerSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.handler.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  handler: Schema.NullOr(
+    Schema.Struct({
+      threadId: ThreadId,
+      kind: ThreadHandlerKind,
+      title: Schema.optional(Schema.NullOr(Schema.String)),
+      note: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+  ),
+  // Why it is cleared: the person took it back (default) or the handler is gone.
+  reason: Schema.optional(Schema.Literals(["taken-back", "handler-gone"])),
+  createdAt: IsoDateTime,
+});
+
 const ThreadRuntimeModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.runtime-mode.set"),
   commandId: CommandId,
@@ -1295,6 +1346,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadReadCommand,
   ThreadPendingForYouUpdateCommand,
   ThreadControlSetCommand,
+  ThreadHandlerSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
@@ -1328,6 +1380,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadReadCommand,
   ThreadPendingForYouUpdateCommand,
   ThreadControlSetCommand,
+  ThreadHandlerSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
@@ -1515,6 +1568,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.read",
   "thread.pending-for-you-updated",
   "thread.control-changed",
+  "thread.handler-changed",
   "thread.person-called",
   "thread.person-released",
   "thread.runtime-mode-set",
@@ -1715,6 +1769,16 @@ export const ThreadControlChangedPayload = Schema.Struct({
   // into an agent-driven thread and the decider took control for them.
   reason: Schema.Literals(["handoff", "human-message"]),
   changedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadHandlerChangedPayload = Schema.Struct({
+  threadId: ThreadId,
+  handler: Schema.NullOr(ThreadHandler),
+  previousHandler: Schema.NullOr(ThreadHandler),
+  // "handed": Hand to… "taken-back": the person (or the handler) gave it
+  // back. "handler-gone": the handler was deleted or archived.
+  reason: Schema.Literals(["handed", "taken-back", "handler-gone"]),
   updatedAt: IsoDateTime,
 });
 
@@ -2074,6 +2138,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.control-changed"),
     payload: ThreadControlChangedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.handler-changed"),
+    payload: ThreadHandlerChangedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

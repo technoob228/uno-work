@@ -21,6 +21,7 @@ import {
   ThreadArchivedPayload,
   ThreadComputerWaitSetPayload,
   ThreadControlChangedPayload,
+  ThreadHandlerChangedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -549,6 +550,17 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             controller: payload.controller,
             controlChangedAt: payload.changedAt,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.handler-changed":
+      return decodeForEvent(ThreadHandlerChangedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            handler: payload.handler,
             updatedAt: payload.updatedAt,
           }),
         })),

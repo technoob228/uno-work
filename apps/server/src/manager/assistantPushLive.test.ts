@@ -25,6 +25,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationThread,
 } from "@t3tools/contracts";
+import { HANDED_BRIEF_PREFIX, HANDED_NOTE_PREFIX } from "@t3tools/shared/handedChat";
 import { Clock, Effect, Layer, Option, PubSub, Stream } from "effect";
 import * as fs from "node:fs";
 import * as http from "node:http";
@@ -177,6 +178,7 @@ let world = new World();
 let child = makeChild();
 let events = Effect.runSync(PubSub.unbounded<OrchestrationEvent>());
 let dispatchedOrigins: Array<{ text: string; origin: OrchestrationCommandOrigin | undefined }> = [];
+let dispatchedCommands: Array<OrchestrationCommand> = [];
 let workspaceRoot = "";
 let tmpDir = "";
 
@@ -274,6 +276,7 @@ const makeLayer = (dbPath: string) => {
     },
     dispatch: (command: OrchestrationCommand, options) =>
       Effect.sync(() => {
+        dispatchedCommands.push(command);
         if (command.type === "thread.turn.start") {
           dispatchedOrigins.push({ text: command.message.text, origin: options?.origin });
         }
@@ -397,6 +400,7 @@ beforeEach(() => {
   child = makeChild();
   events = Effect.runSync(PubSub.unbounded<OrchestrationEvent>());
   dispatchedOrigins = [];
+  dispatchedCommands = [];
   updates = [];
   sent = [];
   tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "uno-push-live-"));
@@ -542,4 +546,150 @@ it.live("late Allow from the desktop: no chat, the caller tells the conversation
       expect(told).toBe(false);
     }),
   ),
+);
+
+it.live(
+  "Hand to… (T63): the handler gets the brief, the chat's Ready and the person's line",
+  () =>
+    run(
+      nodePath.join(tmpDir, "state.sqlite"),
+      Effect.gen(function* () {
+        world.script = (text) =>
+          text.startsWith(HANDED_BRIEF_PREFIX)
+            ? { durationMs: 2_000, answer: "Took it: asking where checkout stands." }
+            : { durationMs: 2_000, answer: "ok" };
+        // Let the service subscribe to the events first.
+        yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 200)));
+        const handedAt = iso();
+        const handler = {
+          threadId: mainThreadId,
+          kind: "assistant",
+          title: "Uno",
+          handedAt,
+        };
+        child.shell = { ...child.shell, title: "Pricing page", handler };
+        child.messages.push({
+          id: MessageId.make("child-first"),
+          role: "user",
+          text: "Build the /pricing page with Stripe checkout",
+          turnId: null,
+          streaming: false,
+          createdAt: handedAt,
+          updatedAt: handedAt,
+        });
+        yield* publish({
+          sequence: 1,
+          eventId: EventId.make("evt-handed"),
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          occurredAt: handedAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          type: "thread.handler-changed",
+          payload: {
+            threadId: childThreadId,
+            handler,
+            previousHandler: null,
+            reason: "handed",
+            updatedAt: handedAt,
+          },
+          metadata: {},
+        });
+        // The brief starts a turn in the handler's chat (system origin).
+        const briefs = () =>
+          dispatchedOrigins.filter((entry) => entry.text.startsWith(HANDED_BRIEF_PREFIX));
+        expect(yield* waitFor(() => briefs().length > 0, real(2 * MINUTE))).toBe(true);
+        expect(briefs()[0]?.origin).toMatchObject({ kind: "system" });
+        expect(briefs()[0]?.text).toContain("«Pricing page»");
+        expect(briefs()[0]?.text).toContain("About: Build the /pricing page with Stripe checkout");
+        // While handed, the person's raw Done for it is the handler's to report.
+        expect(yield* watched(yield* AssistantPushService)).toBe(true);
+        expect(
+          yield* waitFor(() => world.turnCount === 1 && world.running === null, real(2 * MINUTE)),
+        ).toBe(true);
+
+        // The handler writes into the chat; that turn finishes: the handler hears it.
+        const requestedAt = iso();
+        yield* publish({
+          sequence: 2,
+          eventId: EventId.make("evt-handler-writes"),
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          occurredAt: requestedAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          type: "thread.turn-start-requested",
+          payload: {
+            threadId: childThreadId,
+            messageId: MessageId.make("child-msg-1"),
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: requestedAt,
+          },
+          metadata: { origin: { kind: "agent", threadId: mainThreadId } },
+        });
+        yield* finishChild(requestedAt, yield* ProjectionTurnRepository);
+        expect(yield* waitFor(() => notices().length > 0, real(3 * MINUTE))).toBe(true);
+        expect(notices()[0]?.text).toContain("A chat the person handed you has settled.");
+        expect(
+          yield* waitFor(() => world.turnCount === 2 && world.running === null, real(2 * MINUTE)),
+        ).toBe(true);
+
+        // The person adds a line in the handed chat: it stays handed, the handler hears it.
+        const wroteAt = iso();
+        yield* publish({
+          sequence: 3,
+          eventId: EventId.make("evt-person-wrote"),
+          aggregateKind: "thread",
+          aggregateId: childThreadId,
+          occurredAt: wroteAt,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          type: "thread.message-sent",
+          payload: {
+            threadId: childThreadId,
+            messageId: MessageId.make("child-person"),
+            role: "user",
+            text: "Use the Pro plan name",
+            attachments: [],
+            turnId: null,
+            streaming: false,
+            createdAt: wroteAt,
+            updatedAt: wroteAt,
+          },
+          metadata: {},
+        });
+        const wrote = () =>
+          dispatchedOrigins.filter((entry) => entry.text.startsWith(HANDED_NOTE_PREFIX));
+        expect(yield* waitFor(() => wrote().length > 0, real(2 * MINUTE))).toBe(true);
+        expect(wrote()[0]?.text).toContain("Use the Pro plan name");
+
+        // The handler is deleted: the chat goes back to the person.
+        yield* publish({
+          sequence: 4,
+          eventId: EventId.make("evt-handler-deleted"),
+          aggregateKind: "thread",
+          aggregateId: mainThreadId,
+          occurredAt: iso(),
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          type: "thread.deleted",
+          payload: { threadId: mainThreadId, deletedAt: iso() },
+          metadata: {},
+        });
+        const released = () =>
+          dispatchedCommands.filter((command) => command.type === "thread.handler.set");
+        expect(yield* waitFor(() => released().length > 0, real(MINUTE))).toBe(true);
+        expect(released()[0]).toMatchObject({
+          threadId: childThreadId,
+          handler: null,
+          reason: "handler-gone",
+        });
+      }),
+    ),
+  60_000,
 );

@@ -2672,6 +2672,97 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 
+  it.effect("projects who handles a handed chat (Hand to…, T63)", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshots = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+      const createdAt = "2026-11-24T09:00:00.000Z";
+      const projectId = ProjectId.make("project-hand-to");
+      const pricing = ThreadId.make("thread-pricing");
+      const coordinator = ThreadId.make("thread-coordinator");
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-hand-project"),
+        projectId,
+        title: "launch",
+        workspaceRoot: "/tmp/project-hand-to",
+        defaultModelSelection: null,
+        createdAt,
+      });
+      for (const [threadId, title] of [
+        [pricing, "Pricing page"],
+        [coordinator, "Launch week"],
+      ] as const) {
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make(`cmd-hand-thread-${threadId}`),
+          threadId,
+          projectId,
+          title,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        });
+      }
+      yield* engine.dispatch({
+        type: "thread.handler.set",
+        commandId: CommandId.make("cmd-hand"),
+        threadId: pricing,
+        handler: { threadId: coordinator, kind: "chat", title: "Launch week", note: "to launch" },
+        createdAt,
+      });
+      const rows = yield* sql<{ readonly handlerJson: string | null; readonly controller: string }>`
+        SELECT handler_json AS "handlerJson", controller
+        FROM projection_threads
+        WHERE thread_id = ${pricing}
+      `;
+      assert.strictEqual(rows[0]?.controller, "agent");
+      assert.deepInclude(JSON.parse(rows[0]?.handlerJson ?? "null"), {
+        threadId: coordinator,
+        kind: "chat",
+        title: "Launch week",
+        note: "to launch",
+      });
+      const shell = yield* snapshots.getThreadShellById(pricing);
+      assert.strictEqual(
+        shell._tag === "Some" ? shell.value.handler?.threadId : "none",
+        coordinator,
+      );
+      const snapshot = yield* snapshots.getShellSnapshot();
+      assert.strictEqual(
+        snapshot.threads.find((entry) => entry.id === pricing)?.handler?.threadId,
+        coordinator,
+      );
+      const full = yield* snapshots.getSnapshot();
+      assert.strictEqual(
+        full.threads.find((entry) => entry.id === pricing)?.handler?.threadId,
+        coordinator,
+      );
+
+      // Taken back: cleared, back with the person.
+      yield* engine.dispatch({
+        type: "thread.handler.set",
+        commandId: CommandId.make("cmd-take-back"),
+        threadId: pricing,
+        handler: null,
+        createdAt,
+      });
+      const after = yield* sql<{
+        readonly handlerJson: string | null;
+        readonly controller: string;
+      }>`
+        SELECT handler_json AS "handlerJson", controller
+        FROM projection_threads
+        WHERE thread_id = ${pricing}
+      `;
+      assert.deepEqual(after, [{ handlerJson: null, controller: "human" }]);
+    }),
+  );
+
   it.effect("projects the assistant chat migration and assistant-started chats", () =>
     Effect.gen(function* () {
       const engine = yield* OrchestrationEngineService;

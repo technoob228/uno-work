@@ -121,6 +121,7 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       agentThreads: true,
       agentsCloseChat: true,
       chatHandoff: true,
+      chatHandTo: true,
       threadOwner: true,
       threadContinueDirect: true,
       threadContinuePages: true,

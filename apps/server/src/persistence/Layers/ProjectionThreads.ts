@@ -14,6 +14,7 @@ import {
 import {
   ModelSelection,
   ThreadComputerWait,
+  ThreadHandler,
   ThreadPullRequest,
   ThreadSource,
 } from "@t3tools/contracts";
@@ -26,6 +27,7 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     ),
     source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
     computerWait: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadComputerWait))),
+    handler: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadHandler))),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -74,6 +76,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           source_json,
           computer_wait_json,
           pending_for_you_json,
+          handler_json,
           latest_user_message_at,
           pending_approval_count,
           pending_user_input_count,
@@ -117,6 +120,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.source ? JSON.stringify(row.source) : null},
           ${row.computerWait ? JSON.stringify(row.computerWait) : null},
           ${row.pendingForYou ?? null},
+          ${row.handler ? JSON.stringify(row.handler) : null},
           ${row.latestUserMessageAt},
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
@@ -160,6 +164,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           source_json = excluded.source_json,
           computer_wait_json = excluded.computer_wait_json,
           pending_for_you_json = excluded.pending_for_you_json,
+          handler_json = excluded.handler_json,
           latest_user_message_at = excluded.latest_user_message_at,
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
@@ -210,6 +215,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           source_json AS "source",
           computer_wait_json AS "computerWait",
           pending_for_you_json AS "pendingForYou",
+          handler_json AS "handler",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -262,6 +268,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           source_json AS "source",
           computer_wait_json AS "computerWait",
           pending_for_you_json AS "pendingForYou",
+          handler_json AS "handler",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",

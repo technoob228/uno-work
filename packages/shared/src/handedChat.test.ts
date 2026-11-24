@@ -1,0 +1,65 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  formatHandedBrief,
+  formatHandedNote,
+  HANDED_BRIEF_PREFIX,
+  HANDED_DEFAULT_EXPECTED,
+  parseHandedBrief,
+  parseHandedNote,
+} from "./handedChat.ts";
+
+describe("handedChat", () => {
+  it("brief round-trips for the card", () => {
+    const text = formatHandedBrief({
+      threadId: "t-1",
+      title: "Pricing «page»",
+      about: "Build the /pricing page:\ncopy, Stripe checkout",
+      now: "Copy done, checkout in test mode.",
+      expected: "take it to launch, ask me only about money",
+    });
+    expect(text.startsWith(HANDED_BRIEF_PREFIX)).toBe(true);
+    expect(text).toContain("chat_message (threadId t-1)");
+    expect(parseHandedBrief(text)).toEqual({
+      threadId: "t-1",
+      title: 'Pricing "page"',
+      about: "Build the /pricing page: copy, Stripe checkout",
+      now: "Copy done, checkout in test mode.",
+      expected: "take it to launch, ask me only about money",
+    });
+  });
+
+  it("no note: the default expectation", () => {
+    const text = formatHandedBrief({
+      threadId: "t",
+      title: "x",
+      about: "",
+      now: "",
+      expected: null,
+    });
+    expect(parseHandedBrief(text)?.expected).toBe(HANDED_DEFAULT_EXPECTED);
+    expect(parseHandedBrief("hello")).toBeNull();
+  });
+
+  it("notes read in the person's words", () => {
+    expect(
+      parseHandedNote(formatHandedNote({ kind: "taken-back", threadId: "t", title: "Pricing" })),
+    ).toEqual({ kind: "taken-back", threadId: "t", line: "You took back “Pricing”." });
+    expect(
+      parseHandedNote(
+        formatHandedNote({
+          kind: "person-wrote",
+          threadId: "t",
+          title: "Pricing",
+          text: "Use «Pro»",
+        }),
+      ),
+    ).toEqual({ kind: "person-wrote", threadId: "t", line: 'You wrote in “Pricing”: Use "Pro"' });
+    expect(
+      parseHandedNote(
+        formatHandedNote({ kind: "handed-elsewhere", threadId: "t", title: "Pricing" }),
+      )?.kind,
+    ).toBe("handed-elsewhere");
+    expect(parseHandedNote("hi")).toBeNull();
+  });
+});

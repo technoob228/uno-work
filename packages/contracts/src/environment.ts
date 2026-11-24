@@ -39,6 +39,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       (thread.control.set on a chat nobody spawned, Misha 14.11) and keeps
       `spawnKind` (subagent / thread). Absent: only spawned chats can be joined. */
   chatHandoff: Schema.optionalKey(Schema.Boolean),
+  /** Server understands thread.handler.set ("Hand to…" another chat or an
+      assistant, T63, 0.0.195): projects `handler`, sends the handler a brief,
+      this chat's Ready and questions, and lets the handler write into a chat
+      kept closed to other agents. Absent: clients keep Hand to agent / Join. */
+  chatHandTo: Schema.optionalKey(Schema.Boolean),
   /** Server projects who a chat answers to (28.10): `startedBy`,
       `latestPersonMessageAt` and the agents' person calls
       (`thread.person.call` / `.release`, bridge `/call-person`,

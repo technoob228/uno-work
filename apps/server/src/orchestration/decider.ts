@@ -24,6 +24,7 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
+import { clipHandlerNote, clipHandlerTitle, handlerRefusal } from "./threadHandler.ts";
 
 const nowIso = () => new Date().toISOString();
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -1279,6 +1280,119 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
+    case "thread.handler.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const current = thread.handler ?? null;
+      const occurredAt = nowIso();
+      const base = withEventBase({
+        aggregateKind: "thread",
+        aggregateId: command.threadId,
+        occurredAt,
+        commandId: command.commandId,
+      });
+      if (command.handler === null) {
+        // Idempotent: nobody handles it.
+        if (current === null) return [];
+        // The person takes it back; the handler may give it back; the daemon
+        // clears it when the handler is gone. No other agent.
+        if (
+          !isHumanOrigin(origin) &&
+          origin?.kind !== "system" &&
+          !(origin?.kind === "agent" && origin.threadId === current.threadId)
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `not_your_handled_chat: Only the person or the chat's handler can take thread '${command.threadId}' back.`,
+          });
+        }
+        const released: PlannedOrchestrationEvent = {
+          ...base,
+          type: "thread.handler-changed",
+          payload: {
+            threadId: command.threadId,
+            handler: null,
+            previousHandler: current,
+            reason: command.reason ?? "taken-back",
+            updatedAt: occurredAt,
+          },
+        };
+        // Back with the person, as Join: it returns to their sidebar.
+        return (thread.controller ?? "human") === "agent"
+          ? [
+              released,
+              controlChangedEvent({
+                threadId: command.threadId,
+                controller: "human",
+                reason: "handoff",
+                commandId: command.commandId,
+                occurredAt,
+              }),
+            ]
+          : released;
+      }
+      // Only the person hands a chat; a handler can't pass it on.
+      if (!isHumanOrigin(origin)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `handler_person_only: Only the person can hand thread '${command.threadId}' to someone.`,
+        });
+      }
+      const refusal = handlerRefusal({
+        threads: readModel.threads,
+        threadId: command.threadId,
+        handlerThreadId: command.handler.threadId,
+      });
+      if (refusal !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `${refusal.code}: ${refusal.detail}`,
+        });
+      }
+      const note = clipHandlerNote(command.handler.note);
+      const title = clipHandlerTitle(command.handler.title);
+      if (
+        current !== null &&
+        current.threadId === command.handler.threadId &&
+        (current.note ?? null) === note
+      ) {
+        return [];
+      }
+      const handed: PlannedOrchestrationEvent = {
+        ...base,
+        type: "thread.handler-changed",
+        payload: {
+          threadId: command.threadId,
+          handler: {
+            threadId: command.handler.threadId,
+            kind: command.handler.kind,
+            ...(title !== null ? { title } : {}),
+            ...(note !== null ? { note } : {}),
+            handedAt: occurredAt,
+          },
+          previousHandler: current,
+          reason: "handed",
+          updatedAt: occurredAt,
+        },
+      };
+      // Driven by an agent now (as Hand to agent): it leaves the person's list.
+      return (thread.controller ?? "human") === "agent"
+        ? handed
+        : [
+            handed,
+            controlChangedEvent({
+              threadId: command.threadId,
+              controller: "agent",
+              reason: "handoff",
+              commandId: command.commandId,
+              occurredAt,
+            }),
+          ];
+    }
+
     case "thread.runtime-mode.set": {
       yield* requireThread({
         readModel,
@@ -1370,8 +1484,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       // The person's "Don't let agents write here" holds for every agent: a
       // chat's agent through the bridge and the manager / assistant tools.
+      // ...except its handler ("Hand to…"): "Keep other agents out" keeps out
+      // the others.
+      const fromHandler =
+        origin?.kind === "agent" && origin.threadId === (targetThread.handler?.threadId ?? null);
       if (
         (origin?.kind === "agent" || origin?.kind === "manager") &&
+        !fromHandler &&
         (targetThread.agentsClosedAt ?? null) !== null
       ) {
         return yield* new OrchestrationCommandInvariantError({
@@ -1430,9 +1549,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         occurredAt: command.createdAt,
       });
       // A human writing into an agent-driven thread takes control first, so
-      // the message lands in a human-controlled thread.
+      // the message lands in a human-controlled thread. Not a chat they
+      // handed to someone ("Hand to…"): they add a line, the handler keeps it
+      // and hears what they wrote.
       const takeControlEvent =
-        targetController === "agent" && isHumanOrigin(origin)
+        targetController === "agent" &&
+        isHumanOrigin(origin) &&
+        (targetThread.handler ?? null) === null
           ? controlChangedEvent({
               threadId: command.threadId,
               controller: "human",
