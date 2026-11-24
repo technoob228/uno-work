@@ -80,10 +80,10 @@ const withAdapter = <A, E>(
     ),
   );
 
-const collectTurn = (
+const collectTurn = <E>(
   adapter: GrokAdapterShape,
   threadId: ThreadId,
-  send: Effect.Effect<unknown, unknown>,
+  send: Effect.Effect<unknown, E>,
   answer?: "accept" | "decline",
 ) =>
   Effect.gen(function* () {
