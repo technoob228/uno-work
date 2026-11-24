@@ -41,7 +41,12 @@ function makeAntigravity(
     platform: "linux",
     homeDir: "/home/unowork",
     baseEnv: { PATH: "/usr/bin" },
-    probeNpmGlobalWritable: async () => false,
+    locateNpm: async () => ({
+      npm: "npm",
+      binDir: undefined,
+      globalWritable: false,
+      managed: false,
+    }),
     probeUvAvailable: async () => true,
     resolveCliEnvironment: async () => ({
       binaryPath: "/home/unowork/.local/share/uno-work/antigravity/versions/1.5.16/antigravity",

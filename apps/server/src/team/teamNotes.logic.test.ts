@@ -91,7 +91,9 @@ describe("how this chat's request went", () => {
   });
 
   it("done with an answer stays done", () => {
-    expect(outgoingNote(request({ status: "done", answer: "Added." }), "n")).toContain("it is done.");
+    expect(outgoingNote(request({ status: "done", answer: "Added." }), "n")).toContain(
+      "it is done.",
+    );
   });
 
   it("declined with why", () => {

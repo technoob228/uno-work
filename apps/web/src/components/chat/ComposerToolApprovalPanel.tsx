@@ -106,7 +106,10 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
   };
 
   return (
-    <div data-testid="tool-approval-card" className="rounded-t-[19px] border-b border-border/65 bg-muted/20 px-4 py-3 sm:px-5">
+    <div
+      data-testid="tool-approval-card"
+      className="rounded-t-[19px] border-b border-border/65 bg-muted/20 px-4 py-3 sm:px-5"
+    >
       <div className="flex items-center gap-2">
         <ShieldQuestionIcon className="size-3.5 text-muted-foreground/60" />
         <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
