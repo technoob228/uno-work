@@ -14,7 +14,6 @@
 - The assistant knows your projects. It sees a short passport of each project (recent chats with their results, the rules from AGENTS.md / CLAUDE.md, the project memory) and answers "what did we do there last" by itself instead of starting a separate chat.
 - Grok CLI joins Claude Code, Codex and Gemini: Install in Settings → AI, sign in with an xAI account (a link and a code) or an xAI API key, and its models show up in the model picker, onboarding and the model roles. Gemini, Grok and your own ACP agents now show the agent's real error text, show thinking separately, don't repeat the history when a chat continues and stop cleanly on Stop.
 - Cloud agents on your Mac work only while the Cloud agents switch in Settings → Computer is on there. Every command they run shows in a log on the Mac, Stop cloud agents turns the switch off and stops what they started, and they can't ssh from the Mac to other machines. A git push or an install from a cloud agent asks you each time, a request can be marked "Don't ask again for this chat", and a cloud chat can start Codex on the Mac in Codex's sandbox without network.
-- Slack: approvals get Allow and Deny buttons, as in Telegram, and only the owner's press counts. The buttons start working once Interactivity is on in the Slack app; until then the message still says to open Uno Work.
 
 ## v0.0.191 — 2026-11-23
 
