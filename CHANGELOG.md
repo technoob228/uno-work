@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.193 — 2026-11-24
+
+- Update in the "A new version of Uno Work is ready" notice updates this computer, and the app if it has an update, instead of opening a list of every machine. Update everything (Settings, or "Update other computers…") lists only the computers in use: this one, the ones online and the ones you used in the last 14 days; the rest fold under "Other computers". Only computers that are online are ticked, every step has a time limit, so a computer that doesn't answer no longer stops the others, the window can be closed while it runs, and each row shows the version the computer itself reports.
+- The desktop app updates again: 0.0.190–0.0.192 got no desktop build, so the app stayed on 0.0.189.
+
 ## v0.0.192 — 2026-11-24
 
 - "Waiting for you": cards an agent is waiting on and links to its sites you haven't opened yet show as a strip above the input, a number on the chat in the sidebar and one "Waiting for you · N" line in Inbox. The computer keeps the list, so Not needed and opened links are remembered on every device.
