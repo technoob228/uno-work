@@ -65,6 +65,8 @@ export interface HarnessSetupApi {
   /** Forget a settled job so the dialog can start over. */
   readonly clearAuth: (driver: ProviderAuthDriver) => void;
   readonly clearInstall: (driver: ProviderDriverKind) => void;
+  /** Forget a failed install and look for the CLI again (installed by hand meanwhile?). */
+  readonly recheckInstall: (driver: ProviderDriverKind) => void;
 }
 
 export function resolveClient(environmentId: EnvironmentId | null): WsRpcClient {
@@ -344,6 +346,14 @@ export function useHarnessSetup(
     setInstallJobs((current) => ({ ...current, [driver]: undefined }));
   }, []);
 
+  const recheckInstall = useCallback(
+    (driver: ProviderDriverKind) => {
+      clearInstall(driver);
+      refreshProviders(driver);
+    },
+    [clearInstall, refreshProviders],
+  );
+
   const hasActiveJob =
     Object.values(installJobs).some(isJobActive) || Object.values(authJobs).some(isJobActive);
 
@@ -434,6 +444,7 @@ export function useHarnessSetup(
       signOut,
       clearAuth,
       clearInstall,
+      recheckInstall,
     }),
     [
       installJobs,
@@ -445,6 +456,7 @@ export function useHarnessSetup(
       signOut,
       clearAuth,
       clearInstall,
+      recheckInstall,
     ],
   );
 }

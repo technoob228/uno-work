@@ -7,10 +7,12 @@ import { describe, expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import { GeminiSettings } from "@t3tools/contracts";
+import { GEMINI_ANTIGRAVITY_DETECTED_MESSAGE } from "@t3tools/shared/agentVersions";
 
 import {
   buildGeminiModels,
   checkGeminiProviderStatus,
+  detectAntigravityApp,
   geminiModelLabel,
 } from "./GeminiProvider.ts";
 
@@ -93,6 +95,42 @@ describe("Gemini CLI status", () => {
       expect(snapshot.auth).toMatchObject({ status: "authenticated", type: "gemini-api-key" });
     }),
   );
+
+  it.effect("not installed but Antigravity is on the Mac: points to Antigravity (T64)", () =>
+    Effect.gen(function* () {
+      const config = { ...settings, binaryPath: "/nonexistent/gemini" };
+      const withApp = yield* checkGeminiProviderStatus({
+        config,
+        environment: { PATH: "/nonexistent" },
+        discoveredModels: () => [],
+        detectAntigravity: async () => true,
+      }).pipe(Effect.provide(NodeServices.layer));
+      expect(withApp.installed).toBe(false);
+      expect(withApp.message).toBe(GEMINI_ANTIGRAVITY_DETECTED_MESSAGE);
+      const without = yield* checkGeminiProviderStatus({
+        config,
+        environment: { PATH: "/nonexistent" },
+        discoveredModels: () => [],
+        detectAntigravity: async () => false,
+      }).pipe(Effect.provide(NodeServices.layer));
+      expect(without.message).toMatch(/not installed/);
+    }),
+  );
+
+  it("finds Antigravity.app only on a Mac", async () => {
+    const home = await mkdtemp(path.join(os.tmpdir(), "uno-antigravity-"));
+    expect(await detectAntigravityApp("darwin", home)).toBe(
+      await import("node:fs/promises").then((fs) =>
+        fs.access("/Applications/Antigravity.app").then(
+          () => true,
+          () => false,
+        ),
+      ),
+    );
+    await mkdir(path.join(home, "Applications", "Antigravity.app"), { recursive: true });
+    expect(await detectAntigravityApp("darwin", home)).toBe(true);
+    expect(await detectAntigravityApp("linux", home)).toBe(false);
+  });
 
   it.effect("not on PATH: not installed (Install is offered)", () =>
     Effect.gen(function* () {

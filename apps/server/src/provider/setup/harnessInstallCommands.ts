@@ -108,6 +108,8 @@ export interface InstallPlanContext {
   /** Whether the npm global prefix can be written by the current user. */
   readonly npmGlobalWritable: boolean;
   readonly uvAvailable: boolean;
+  /** The npm the install runs (an absolute path when it was looked up); default "npm". */
+  readonly npmBin?: string;
 }
 
 export type InstallPlan =
@@ -146,6 +148,11 @@ const NPM_INSTALL_ENV_BY_DRIVER: Readonly<Record<string, Readonly<Record<string,
   grok: { npm_config_allow_scripts: "@xai-official/grok" },
 };
 
+/** The CLI is installed with npm (and so needs Node.js). */
+export function isNpmInstalledDriver(driver: string): boolean {
+  return Object.hasOwn(NPM_SPEC_BY_DRIVER, driver);
+}
+
 export function isInstallableDriver(driver: ProviderDriverKind): boolean {
   return (INSTALLABLE_PROVIDER_DRIVERS as ReadonlyArray<string>).includes(driver);
 }
@@ -177,7 +184,7 @@ export function resolveInstallPlan(
     const args = ["install", "-g", npmSpec];
     return {
       kind: "command",
-      command: "npm",
+      command: context.npmBin ?? "npm",
       args,
       env,
       display: `${Object.entries(env)

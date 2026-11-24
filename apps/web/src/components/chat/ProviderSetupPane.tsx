@@ -7,10 +7,14 @@
  * @module components/chat/ProviderSetupPane
  */
 import { useNavigate } from "@tanstack/react-router";
-import { CheckCircle2, Copy, Loader2, TriangleAlert } from "lucide-react";
+import { CheckCircle2, Copy, Loader2 } from "lucide-react";
 import { memo, useState } from "react";
 
 import type { EnvironmentId } from "@t3tools/contracts";
+import {
+  GEMINI_ANTIGRAVITY_DETECTED_MESSAGE,
+  GEMINI_CLI_REPO_URL,
+} from "@t3tools/shared/agentVersions";
 
 import {
   usePrimaryEnvironmentDescriptor,
@@ -22,6 +26,7 @@ import { CURSOR_LOGIN_COMMAND, HARNESS_REAUTH_COPY } from "../harness/harnessAut
 import { describeSignInState, HarnessSignInPanel } from "../harness/HarnessSignInDialog";
 import { OpenCodeKeyForm } from "../harness/OpenCodeKeyForm";
 import { isAuthableDriver, isJobActive, progressLine } from "../harness/harnessSetupState";
+import { InstallFailureCard } from "../harness/InstallFailureCard";
 import { SetupLogDetails } from "../harness/SetupLogDetails";
 import type { HarnessSetupApi } from "../harness/useHarnessSetup";
 import { Button } from "../ui/button";
@@ -61,6 +66,37 @@ function PaneHeader(props: { entry: ProviderInstanceEntry; badge: string | null 
   );
 }
 
+/**
+ * Gemini CLI is Google's own open-source agent, not a third-party tool; when
+ * Google Antigravity is on the Mac, its agent needs no install (T64).
+ */
+function GeminiCliNote(props: { entry: ProviderInstanceEntry }) {
+  const antigravity = props.entry.snapshot.message === GEMINI_ANTIGRAVITY_DETECTED_MESSAGE;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {antigravity ? (
+        <div
+          className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-snug"
+          data-gemini-antigravity="true"
+        >
+          {GEMINI_ANTIGRAVITY_DETECTED_MESSAGE}
+        </div>
+      ) : null}
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        Gemini CLI is Google's official open-source command-line agent.{" "}
+        <a
+          href={GEMINI_CLI_REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-primary underline-offset-2 hover:underline"
+        >
+          github.com/google-gemini/gemini-cli
+        </a>
+      </p>
+    </div>
+  );
+}
+
 function InstallPane(props: {
   entry: ProviderInstanceEntry;
   setup: HarnessSetupApi;
@@ -83,6 +119,7 @@ function InstallPane(props: {
       <p className="text-xs leading-snug text-muted-foreground">
         Install {entry.displayName} on {machineLabel}. Runs as your user, no terminal needed.
       </p>
+      {entry.driverKind === "gemini" ? <GeminiCliNote entry={entry} /> : null}
 
       {installing ? (
         <div className="flex flex-col gap-1.5">
@@ -101,21 +138,11 @@ function InstallPane(props: {
           Installed. Loading models…
         </div>
       ) : failed ? (
-        <div className="flex flex-col gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5">
-          <div className="flex items-start gap-2 text-xs text-amber-700 dark:text-amber-300">
-            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-            <span className="min-w-0 break-words">{job?.error ?? "The install failed."}</span>
-          </div>
-          <SetupLogDetails log={job?.log ?? ""} label="Show log" />
-          <Button
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => void setup.startInstall(entry.driverKind)}
-          >
-            Retry
-          </Button>
-        </div>
+        <InstallFailureCard
+          job={job}
+          onRetry={() => void setup.startInstall(entry.driverKind)}
+          onCheckAgain={() => setup.recheckInstall(entry.driverKind)}
+        />
       ) : (
         <Button
           size="sm"
