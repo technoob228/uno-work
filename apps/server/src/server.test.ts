@@ -126,7 +126,7 @@ import { ChatRequests, type ChatRequestsShape } from "./chatRequests/ChatRequest
 import { TeamCollab, type TeamCollabShape } from "./team/TeamCollab.ts";
 import { makePartsCache } from "./team/teamCloud.ts";
 import { NO_PARTS } from "./team/teamCloud.logic.ts";
-import type { MyComputerCore } from "./myComputer/myComputerCore.ts";
+import { MyComputerFailure, type MyComputerCore } from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { DEFAULT_TRUST_SETTINGS } from "./myComputer/trust/trustStore.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
@@ -1283,6 +1283,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             core: {
               cachedStatus: async () => ({ enabled: true, computers: [computer] }),
               refused: async () => {},
+              // No Uno Work on that computer (no chat-requests/state.json):
+              // the T47 rules alone, as before (chatRequests/macSide.ts).
+              read: async () => {
+                throw new MyComputerFailure("remote", "No such file or folder: state.json");
+              },
             } as unknown as MyComputerCore,
             trust: {
               paused: async () => null,
