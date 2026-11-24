@@ -5,8 +5,11 @@
  *
  * A waiting request: what is shipped, which machine asks, for how long —
  * «Открыть на N мин» (the console's Touch ID page in the browser) and
- * «Отказать». An open window: «Закрыть сейчас». And «Заморозить всё» for
- * the whole gate. Decided ones stay for a while with the console's own line.
+ * «Отказать», always both: when the page can't open from here «Открыть»
+ * says why and what to press instead. An open window: «Закрыть сейчас». And
+ * «Заморозить всё» for the whole gate. Decided ones stay for a while with the
+ * console's own line. The same card opens on its own from a notification
+ * (DeployRequestDialog).
  */
 import {
   ExternalLinkIcon,
@@ -20,7 +23,6 @@ import {
   type DeployCardAction,
   type DeployRequest,
   deployCardView,
-  openUnavailableHint,
   visibleRequests,
 } from "../../deployApprovals/deployApprovals.logic";
 import {
@@ -46,7 +48,6 @@ export const DeployApprovalCards = memo(function DeployApprovalCards(props: {
   const nowMs = Date.now();
   const requests = visibleRequests(gate, nowMs, props.liveOnly ? 0 : 3);
   if (!gate?.approver || requests.length === 0) return null;
-  const hint = openUnavailableHint(gate);
   const anyLive = requests.some((q) => deployCardView(q, nowMs, gate).tone !== "done");
 
   return (
@@ -79,28 +80,38 @@ export const DeployApprovalCards = memo(function DeployApprovalCards(props: {
           />
         ))}
       </ul>
-      {hint ? (
-        <p className="px-1 text-[11px] leading-snug text-muted-foreground/80">{hint}</p>
-      ) : null}
     </section>
   );
 });
 
-function DeployCard(props: {
+export function DeployCard(props: {
   request: DeployRequest;
   nowMs: number;
   gate: Parameters<typeof deployCardView>[2];
   busy: boolean;
+  /** A dialog: a plain block, not a list item. */
+  as?: "li" | "div";
+  /** After a press that decides it (Отказать, Закрыть сейчас, the Touch ID page opened). */
+  onPressed?: () => void;
 }) {
   const view = deployCardView(props.request, props.nowMs, props.gate);
   const Icon = view.tone === "open" ? LockKeyholeOpenIcon : ShieldAlertIcon;
+  // «Открыть» that can't open from here says why, in the card, instead.
+  const [whyShown, setWhyShown] = useState(false);
+  const showWhy = view.openBlocked !== null && (whyShown || view.openState === "frozen");
   const press = (action: DeployCardAction) => {
-    if (action === "open") openDeployApprovalPage(props.request);
-    else if (action === "deny") void denyDeployRequest(props.request);
+    if (action === "open") {
+      if (view.openBlocked !== null || !openDeployApprovalPage(props.request)) {
+        setWhyShown(true);
+        return;
+      }
+    } else if (action === "deny") void denyDeployRequest(props.request);
     else void closeDeployWindow(props.request);
+    props.onPressed?.();
   };
+  const Root = props.as ?? "li";
   return (
-    <li
+    <Root
       className={cn(
         "list-none rounded-lg border px-2.5 py-2",
         view.tone === "waiting" && "border-warning/40 bg-warning/5",
@@ -133,12 +144,13 @@ function DeployCard(props: {
               <Button
                 key={action}
                 size="xs"
-                disabled={props.busy}
+                disabled={props.busy || view.openState === "frozen"}
                 onClick={() => press(action)}
-                title="Откроется страница консоли — подтвердите Touch ID"
+                title={view.openBlocked ?? "Откроется страница консоли — подтвердите Touch ID"}
+                data-testid={`deploy-open-${props.request.id}`}
               >
                 {view.openLabel}
-                <ExternalLinkIcon />
+                {view.openState === "ready" ? <ExternalLinkIcon /> : null}
               </Button>
             ) : action === "deny" ? (
               <Button
@@ -147,6 +159,7 @@ function DeployCard(props: {
                 variant="outline"
                 disabled={props.busy}
                 onClick={() => press(action)}
+                data-testid={`deploy-deny-${props.request.id}`}
               >
                 Отказать
               </Button>
@@ -164,7 +177,16 @@ function DeployCard(props: {
           )}
         </div>
       ) : null}
-    </li>
+      {showWhy ? (
+        <p
+          className="pt-1.5 pl-6 text-[11px] leading-snug text-muted-foreground"
+          role="status"
+          data-testid={`deploy-open-why-${props.request.id}`}
+        >
+          {view.openBlocked}
+        </p>
+      ) : null}
+    </Root>
   );
 }
 

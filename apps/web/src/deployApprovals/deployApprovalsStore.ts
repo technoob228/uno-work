@@ -43,6 +43,12 @@ interface DeployApprovalsState {
   readonly busy: Readonly<Record<string, true>>;
   /** Poll fast until this time (ms). */
   readonly fastUntil: number;
+  /**
+   * The request a notification click opened (DeployRequestDialog): the copy
+   * the notification was made from, so the card shows at once — the live one
+   * from `gate` replaces it as soon as it is there. null — nothing opened.
+   */
+  readonly focused: DeployRequest | null;
 }
 
 export const useDeployApprovalsStore = create<DeployApprovalsState>(() => ({
@@ -51,6 +57,7 @@ export const useDeployApprovalsStore = create<DeployApprovalsState>(() => ({
   stopped: false,
   busy: {},
   fastUntil: 0,
+  focused: null,
 }));
 
 /** Requests waiting for a decision — added to the bell's and the Inbox row's count. */
@@ -74,8 +81,32 @@ export function setDeployApprovalsEnabled(enabled: boolean): void {
   useDeployApprovalsStore.setState(
     enabled
       ? { enabled: true, stopped: false }
-      : { enabled: false, gate: null, stopped: false, busy: {}, fastUntil: 0 },
+      : { enabled: false, gate: null, stopped: false, busy: {}, fastUntil: 0, focused: null },
   );
+}
+
+/**
+ * A notification was clicked: show this request's card right away, in any
+ * layout (the dialog draws from what the notification already had — no
+ * waiting for the console, the sidebar or a chat), and ask the console for a
+ * fresh answer behind it.
+ */
+export function focusDeployRequest(request: DeployRequest): void {
+  useDeployApprovalsStore.setState({ focused: request });
+  void refreshDeployApprovals();
+}
+
+export function closeDeployFocus(): void {
+  useDeployApprovalsStore.setState({ focused: null });
+}
+
+/** The focused request as the console last said it (falls back to the notification's copy). */
+export function useFocusedDeployRequest(): DeployRequest | null {
+  return useDeployApprovalsStore((state) => {
+    const focused = state.focused;
+    if (!focused) return null;
+    return state.gate?.requests.find((q) => q.id === focused.id) ?? focused;
+  });
 }
 
 /** Ask the console now; the previous answer is kept on a passing error. */
