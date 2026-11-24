@@ -482,6 +482,8 @@ export const HERMES_DISPATCHER_MCP_TOOLS: Readonly<Record<string, ReadonlyArray<
     // repeats it, get_thread_status repeats work_status.
     "work_status",
     "read_thread_detail",
+    // What it knows of a project beyond its passport (assistants/projectPassport.ts).
+    "project_context",
     "send_turn",
     "interrupt_turn",
     "respond_to_request",
