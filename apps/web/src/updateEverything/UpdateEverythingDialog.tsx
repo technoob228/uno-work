@@ -165,14 +165,14 @@ export function UpdateEverythingDialog(props: {
   /** What the person ticked or unticked; the rest follows the defaults. */
   const [picked, setPicked] = useState<ReadonlyMap<string, boolean>>(new Map());
 
-  const focusRow = useMemo(() => {
-    if (!props.focusEnvironmentId) return null;
-    return (
-      rows.find((row) => row.environmentId === props.focusEnvironmentId) ??
-      rows.find((row) => row.isPrimary) ??
-      null
-    );
-  }, [props.focusEnvironmentId, rows]);
+  // Only the computer the notice is about: never another one in its place.
+  const focusRow = useMemo(
+    () =>
+      props.focusEnvironmentId
+        ? (rows.find((row) => row.environmentId === props.focusEnvironmentId) ?? null)
+        : null,
+    [props.focusEnvironmentId, rows],
+  );
 
   const isSelected = useCallback(
     (row: PlanRow) => {
@@ -336,7 +336,7 @@ export function UpdateEverythingDialog(props: {
               ) : null}
             </div>
           ) : null}
-          {!inRun && count === 0 && !checking ? (
+          {!inRun && count === 0 && !checking && (scope === "all" || focusRow) ? (
             <p className="text-sm text-muted-foreground">
               {scope === "this" ? UPDATE_COPY.thisUpToDate : UPDATE_COPY.upToDate}
             </p>
