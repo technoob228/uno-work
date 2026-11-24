@@ -51,7 +51,15 @@ export function parseUnoBox(raw: unknown): UnoBox | null {
     url: asNullableString(record["url"]),
     workMachine: record["work_machine"] === true || record["role"] === "work",
     ...withMachineClass(record["class"]),
+    ...withLastActive(record),
   };
+}
+
+/** `economy.last_active_at`: when the person last used the box (absent on older consoles). */
+function withLastActive(record: Record<string, unknown>): { lastActiveAt?: string } {
+  const economy = asRecord(record["economy"]);
+  const at = asNullableString(economy?.["last_active_at"]);
+  return at ? { lastActiveAt: at } : {};
 }
 
 function withMachineClass(value: unknown): { machineClass?: UnoMachineClass } {

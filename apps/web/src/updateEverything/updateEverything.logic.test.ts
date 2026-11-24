@@ -4,6 +4,10 @@ import { describe, expect, it } from "vitest";
 import type { SelfUpdateStatus } from "../selfUpdate/selfUpdate";
 import {
   buildUpdatePlan,
+  isRecentlyUsed,
+  isSelectedByDefault,
+  isUpdatableBox,
+  planRowLine,
   planCount,
   planRowSummary,
   planStoppedChats,
@@ -158,7 +162,7 @@ describe("runUpdatePlan", () => {
     const { calls, last, deps } = recorder();
     await runUpdatePlan(plan([{ selfUpdate: self({}), agents: [agent({})] }]), deps);
     expect(calls).toEqual(["agent:env-a:Claude", "work:env-a"]);
-    expect(last.get("a")).toEqual({ kind: "done", note: "Updated" });
+    expect(last.get("a")).toEqual({ kind: "done", note: "Updated to Uno Work 0.0.170" });
   });
 
   it("finishes the other computers before the one serving this page", async () => {
@@ -177,7 +181,7 @@ describe("runUpdatePlan", () => {
     const { calls, last, deps } = recorder();
     await runUpdatePlan(plan([{ key: "z", environmentId: null, reach: "asleep" }]), deps);
     expect(calls).toEqual(["wake:z", "work:env-z"]);
-    expect(last.get("z")).toEqual({ kind: "done", note: "Updated" });
+    expect(last.get("z")).toEqual({ kind: "done", note: "Updated to Uno Work 0.0.170" });
   });
 
   it("goes on after an agent fails, and says what failed", async () => {
@@ -212,6 +216,172 @@ describe("runUpdatePlan", () => {
       failing,
     );
     expect(last.get("a")).toEqual({ kind: "failed", message: "Still starting." });
-    expect(last.get("b")).toEqual({ kind: "done", note: "Updated" });
+    expect(last.get("b")).toEqual({ kind: "done", note: "Updated to Uno Work 0.0.170" });
+  });
+});
+
+describe("which computers the list offers (24.11: a list of 20, nothing updated)", () => {
+  it("leaves archived boxes and plain servers out", () => {
+    expect(isUpdatableBox({ status: "archived" })).toBe(false);
+    expect(isUpdatableBox({ status: "deleting" })).toBe(false);
+    expect(isUpdatableBox({ status: "running", workMachine: false })).toBe(false);
+    expect(isUpdatableBox({ status: "sleeping", workMachine: true })).toBe(true);
+    // An older console doesn't say: a running or sleeping box stays in.
+    expect(isUpdatableBox({ status: "running" })).toBe(true);
+  });
+
+  it("ticks only computers that are on and need an update", () => {
+    const rows = buildUpdatePlan([
+      target({ key: "on", selfUpdate: self({}) }),
+      target({ key: "asleep", environmentId: null, reach: "asleep" }),
+      target({ key: "current", selfUpdate: self({ available: false }), agents: [] }),
+    ]);
+    const ticked = rows.filter(isSelectedByDefault).map((row) => row.key);
+    expect(ticked).toEqual(["on"]);
+  });
+
+  it("says plainly what happens to a sleeping computer", () => {
+    const [row] = buildUpdatePlan([target({ environmentId: null, reach: "asleep" })]);
+    expect(planRowLine(row!, false)).toBe(
+      "Not open here now. Its own Update shows when you open it",
+    );
+    expect(planRowLine(row!, true)).toBe("Not open here now. Wakes up or connects to update");
+  });
+});
+
+describe("runUpdatePlan never hangs as a whole", () => {
+  const never = <T>() => new Promise<T>(() => {});
+  const base = (calls: string[], last: Map<string, RowProgress>): RunDeps => ({
+    wake: async (row) => ({ environmentId: `env-${row.key}`, work: "0.0.170", agents: [] }),
+    updateAgent: async () => {},
+    updateWork: async (environmentId) => {
+      calls.push(`work:${environmentId}`);
+      return "updated";
+    },
+    onProgress: (key, progress) => last.set(key, progress),
+  });
+  const fast = { wakeMs: 30, agentMs: 30, workMs: 30, versionMs: 30 };
+
+  it("reaches this computer even when every other one never wakes", async () => {
+    const calls: string[] = [];
+    const last = new Map<string, RowProgress>();
+    const rows = buildUpdatePlan([
+      target({ key: "here", environmentId: "here", isPrimary: true, selfUpdate: self({}) }),
+      ...Array.from({ length: 19 }, (_, index) =>
+        target({ key: `asleep-${index}`, environmentId: null, reach: "asleep" }),
+      ),
+    ]);
+    await runUpdatePlan(rows, { ...base(calls, last), wake: () => never() }, fast);
+    expect(calls).toEqual(["work:here"]);
+    expect(last.get("asleep-0")).toEqual({
+      kind: "failed",
+      message: "Didn't wake up in 1 min. Update it when you open it.",
+    });
+    expect(last.get("here")?.kind).toBe("done");
+  });
+
+  it("runs at most three computers at a time", async () => {
+    let running = 0;
+    let peak = 0;
+    const last = new Map<string, RowProgress>();
+    const rows = buildUpdatePlan(
+      Array.from({ length: 8 }, (_, index) =>
+        target({ key: `c${index}`, environmentId: `c${index}`, selfUpdate: self({}) }),
+      ),
+    );
+    await runUpdatePlan(rows, {
+      ...base([], last),
+      updateWork: async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        running -= 1;
+        return "updated";
+      },
+    });
+    expect(peak).toBe(3);
+    expect([...last.values()].every((progress) => progress.kind === "done")).toBe(true);
+  });
+
+  it("fails one computer whose update doesn't answer, and goes on", async () => {
+    const calls: string[] = [];
+    const last = new Map<string, RowProgress>();
+    const rows = buildUpdatePlan([
+      target({ key: "stuck", environmentId: "stuck", selfUpdate: self({}) }),
+      target({ key: "fine", environmentId: "fine", selfUpdate: self({}) }),
+    ]);
+    await runUpdatePlan(
+      rows,
+      {
+        ...base(calls, last),
+        updateWork: async (environmentId) =>
+          environmentId === "stuck" ? never() : ("updated" as const),
+      },
+      { ...fast, concurrency: 1 },
+    );
+    expect(last.get("stuck")).toEqual({
+      kind: "failed",
+      message: "Uno Work: no answer in 1 min. It may still finish by itself.",
+    });
+    expect(last.get("fine")?.kind).toBe("done");
+  });
+});
+
+describe("the result is what each computer reports", () => {
+  const deps = (version: string | null, last: Map<string, RowProgress>): RunDeps => ({
+    wake: async () => ({ environmentId: "x", work: null, agents: [] }),
+    updateAgent: async () => {},
+    updateWork: async () => "updated",
+    readVersion: async () => version,
+    onProgress: (key, progress) => last.set(key, progress),
+  });
+  const one = () => buildUpdatePlan([target({ selfUpdate: self({}) })]);
+
+  it("shows the version the computer runs after the update", async () => {
+    const last = new Map<string, RowProgress>();
+    await runUpdatePlan(one(), deps("0.0.170", last));
+    expect(last.get("a")).toEqual({ kind: "done", note: "Updated · Uno Work 0.0.170" });
+  });
+
+  it("doesn't call it updated when the computer is still on the old version", async () => {
+    const last = new Map<string, RowProgress>();
+    await runUpdatePlan(one(), deps("0.0.168", last));
+    expect(last.get("a")).toEqual({
+      kind: "failed",
+      message: "Still on Uno Work 0.0.168. Try again in a minute.",
+    });
+  });
+
+  it("counts a slow update that got there after all", async () => {
+    const last = new Map<string, RowProgress>();
+    await runUpdatePlan(
+      one(),
+      { ...deps("0.0.170", last), updateWork: () => new Promise(() => {}) },
+      { workMs: 20 },
+    );
+    expect(last.get("a")).toEqual({ kind: "done", note: "Updated · Uno Work 0.0.170" });
+  });
+});
+
+describe("computers not in use stay out of the way (Misha 24.11)", () => {
+  const now = Date.parse("2026-11-24T12:00:00Z");
+  const daysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
+
+  it("counts this computer, one on the line, and one used in the last two weeks", () => {
+    expect(isRecentlyUsed(target({ isPrimary: true, reach: "asleep" }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "online" }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: daysAgo(3) }), now)).toBe(true);
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: daysAgo(15) }), now)).toBe(false);
+    // Never opened.
+    expect(isRecentlyUsed(target({ reach: "asleep", lastUsedAt: null }), now)).toBe(false);
+  });
+
+  it("never ticks a computer that isn't in use", () => {
+    const rows = buildUpdatePlan(
+      [target({ key: "old", reach: "asleep", environmentId: null, lastUsedAt: daysAgo(40) })],
+      now,
+    );
+    expect(rows[0]).toMatchObject({ recent: false, wakes: true });
+    expect(isSelectedByDefault(rows[0]!)).toBe(false);
   });
 });

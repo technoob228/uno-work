@@ -183,6 +183,11 @@ export const UnoBox = Schema.Struct({
   workMachine: Schema.optional(Schema.Boolean),
   /** Console `class`; absent from older consoles (read as Standard). */
   machineClass: Schema.optional(UnoMachineClass),
+  /**
+   * Last time the person used it (console `economy.last_active_at`). Absent
+   * from older consoles and from accounts without the economy block.
+   */
+  lastActiveAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type UnoBox = typeof UnoBox.Type;
 

@@ -49,6 +49,16 @@ describe("parseUnoBox", () => {
     });
   });
 
+  it("reads when the person last used it (economy.last_active_at)", () => {
+    const box = parseUnoBox({
+      id: 3273,
+      status: "sleeping",
+      economy: { enabled: true, last_active_at: "2026-11-24T13:13:06.036959Z" },
+    });
+    expect(box?.lastActiveAt).toBe("2026-11-24T13:13:06.036959Z");
+    expect(parseUnoBox({ id: 1, status: "running" })).not.toHaveProperty("lastActiveAt");
+  });
+
   it("fills defaults for a freshly launched box that has almost nothing yet", () => {
     const box = parseUnoBox({ id: 7, status: "provisioning", provision_state: "queued" });
     expect(box).toMatchObject({

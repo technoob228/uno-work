@@ -13,7 +13,10 @@ import { useEffect, useMemo } from "react";
 
 import { resolveClient } from "../components/harness/useHarnessSetup";
 import { isElectron } from "../env";
-import { ensureEnvironmentConnectionBootstrapped } from "../environments/runtime";
+import {
+  ensureEnvironmentConnectionBootstrapped,
+  useSavedEnvironmentRegistryStore,
+} from "../environments/runtime";
 import { refreshEnvironmentProviders } from "../environments/settings/serverSettings";
 import { useMachineRows } from "../hooks/useMachineRows";
 import { usePrimaryEnvironmentId } from "../environments/primary/context";
@@ -35,15 +38,31 @@ import { useStore } from "../store";
 import { connectUnoBoxById, isBoxDead } from "../unoBoxConnect";
 import {
   buildUpdatePlan,
+  isUpdatableBox,
+  withTimeout,
   type PlanRow,
   type RunDeps,
   type UpdateTarget,
 } from "./updateEverything.logic";
 
 const POLL_MS = 2_000;
+/** One status read while the daemon restarts; a hung request is just a miss. */
+const POLL_REQUEST_MS = 15_000;
 /** The updater's own limit is 30 min; two minutes is usual. */
 const WORK_TIMEOUT_MS = 12 * 60_000;
 const AGENT_TIMEOUT_MS = 10 * 60_000;
+/** Pairing a woken box; the run's own limit for waking is a bit longer. */
+const BOOTSTRAP_TIMEOUT_MS = 60_000;
+
+/** The later of two ISO times; null when neither parses. */
+function latest(...values: ReadonlyArray<string | null | undefined>): string | null {
+  let best: { at: number; value: string } | null = null;
+  for (const value of values) {
+    const at = value ? Date.parse(value) : Number.NaN;
+    if (value && Number.isFinite(at) && (best === null || at > best.at)) best = { at, value };
+  }
+  return best?.value ?? null;
+}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -54,7 +73,12 @@ async function waitForAgentJob(environmentId: EnvironmentId, agent: AgentUpdateS
   const deadline = Date.now() + AGENT_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
-    const status = await client.providerSetup.installStatus({ jobId });
+    const status = await withTimeout(
+      client.providerSetup.installStatus({ jobId }),
+      POLL_REQUEST_MS,
+      "no answer",
+    ).catch(() => null);
+    if (status === null) continue;
     if (status.state === "succeeded") {
       void refreshEnvironmentProviders(environmentId, defaultInstanceIdForDriver(driver));
       return;
@@ -76,7 +100,11 @@ async function waitForWorkUpdate(
   while (Date.now() < deadline) {
     await sleep(POLL_MS);
     // The daemon restarts on the way: a failed read is part of the update.
-    const status = await fetchSelfUpdateStatus(environmentId).catch(() => null);
+    const status = await withTimeout(
+      fetchSelfUpdateStatus(environmentId),
+      POLL_REQUEST_MS,
+      "no answer",
+    ).catch(() => null);
     if (status?.state === "done") return "updated";
     if (status?.state === "failed") throw new Error(status.error ?? "The update didn't finish.");
   }
@@ -89,6 +117,7 @@ export function useUpdateEverything() {
   const machines = useMachineRows();
   const desktop = useDesktopUpdateState().data ?? null;
   const threadsByEnvironment = useStore((state) => state.environmentStateById);
+  const savedById = useSavedEnvironmentRegistryStore((state) => state.byId);
 
   const online = useMemo(
     () =>
@@ -113,6 +142,8 @@ export function useUpdateEverything() {
   const rows = useMemo<ReadonlyArray<PlanRow>>(() => {
     const targets = machines.flatMap((row): UpdateTarget[] => {
       if (row.box && isBoxDead(row.box.status)) return [];
+      // Archived boxes and plain servers: nothing to update there from here.
+      if (row.box && row.environmentId === null && !isUpdatableBox(row.box)) return [];
       const index = online.findIndex((entry) => entry.key === row.key);
       const isOnline = index >= 0;
       const environmentId = row.environmentId;
@@ -133,11 +164,15 @@ export function useUpdateEverything() {
           selfUpdate: isOnline ? selfUpdates[index]?.data : null,
           agents: isOnline ? agentUpdates[index]?.data : null,
           runningChats,
+          lastUsedAt: latest(
+            environmentId ? savedById[environmentId]?.lastConnectedAt : null,
+            row.box?.lastActiveAt,
+          ),
         },
       ];
     });
     return buildUpdatePlan(targets);
-  }, [agentUpdates, machines, online, selfUpdates, threadsByEnvironment]);
+  }, [agentUpdates, machines, online, savedById, selfUpdates, threadsByEnvironment]);
 
   const appAction = isElectron && desktop ? resolveDesktopUpdateButtonAction(desktop) : "none";
   const appVersion = desktop?.downloadedVersion ?? desktop?.availableVersion ?? null;
@@ -154,7 +189,11 @@ export function useUpdateEverything() {
       }
       const record = await connectUnoBoxById(primaryEnvironmentId, row.boxId, row.label);
       const environmentId = record.environmentId;
-      await ensureEnvironmentConnectionBootstrapped(environmentId);
+      await withTimeout(
+        ensureEnvironmentConnectionBootstrapped(environmentId),
+        BOOTSTRAP_TIMEOUT_MS,
+        "Woke up, but didn't connect. Update it when you open it.",
+      );
       const [self, agents] = await Promise.all([
         fetchSelfUpdateStatus(environmentId),
         fetchAgentUpdates(environmentId).catch(() => null),
@@ -166,6 +205,10 @@ export function useUpdateEverything() {
       };
     },
     updateAgent: (environmentId, agent) => waitForAgentJob(environmentId as EnvironmentId, agent),
+    readVersion: async (environmentId) => {
+      const status = await fetchSelfUpdateStatus(environmentId as EnvironmentId);
+      return status?.currentVersion ?? null;
+    },
     updateWork: async (environmentId, when) => {
       const id = environmentId as EnvironmentId;
       try {
