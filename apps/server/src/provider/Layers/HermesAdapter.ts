@@ -1178,6 +1178,23 @@ export function makeHermesAdapter(
                       }),
                     );
                     return;
+                  case "ReasoningDelta": {
+                    const turnId = eventTurnId(ctx);
+                    if (turnId === undefined) return;
+                    yield* offerRuntimeEvent(
+                      makeAcpContentDeltaEvent({
+                        stamp: yield* makeEventStamp(),
+                        provider: PROVIDER,
+                        threadId: ctx.threadId,
+                        turnId,
+                        ...(event.itemId ? { itemId: event.itemId } : {}),
+                        text: event.text,
+                        rawPayload: event.rawPayload,
+                        streamKind: "reasoning_text",
+                      }),
+                    );
+                    return;
+                  }
                   case "ContentDelta": {
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
                     // Synchronous from here to the first yield: sendTurn reads

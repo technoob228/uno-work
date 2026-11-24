@@ -25,6 +25,7 @@ import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "./Drivers/CursorDriver.ts";
 import { CustomHarnessDriver, type CustomHarnessDriverEnv } from "./Drivers/CustomHarnessDriver.ts";
 import { GeminiDriver, type GeminiDriverEnv } from "./Drivers/GeminiDriver.ts";
+import { GrokDriver, type GrokDriverEnv } from "./Drivers/GrokDriver.ts";
 import { HermesDriver, type HermesDriverEnv } from "./Drivers/HermesDriver.ts";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
 import { UnoDriver, type UnoDriverEnv } from "./Drivers/UnoDriver.ts";
@@ -41,6 +42,7 @@ export type BuiltInDriversEnv =
   | CursorDriverEnv
   | CustomHarnessDriverEnv
   | GeminiDriverEnv
+  | GrokDriverEnv
   | HermesDriverEnv
   | OpenCodeDriverEnv
   | UnoDriverEnv;
@@ -59,6 +61,7 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CodexDriver,
   ClaudeDriver,
   GeminiDriver,
+  GrokDriver,
   CursorDriver,
   OpenCodeDriver,
   // Custom (ACP) harnesses: no default instance — every entry is one the

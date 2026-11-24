@@ -47,6 +47,31 @@ describe("parseOAuthPrompt", () => {
     expect(parsed.needsCodeInput).toBe(false);
   });
 
+  it("extracts Grok's device URL and code, with nothing to paste back", () => {
+    // `grok login --device-auth`, Grok CLI 1.0.92 (23.11.2026), stdout piped.
+    const parsed = parseOAuthPrompt(
+      [
+        "",
+        "To sign in, open this URL in your browser:",
+        "",
+        "  https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH",
+        "",
+        "  (Could not open browser automatically — open the URL above manually.)",
+        "",
+        "Confirm this code in your browser:",
+        "",
+        "  ABCD-EFGH",
+        "",
+        "\u001b[90mOnly continue with a code you requested. Don't share it with anyone.\u001b[0m",
+        "",
+        "Waiting for authorization...",
+      ].join("\n"),
+    );
+    expect(parsed.verificationUrl).toBe("https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH");
+    expect(parsed.userCode).toBe("ABCD-EFGH");
+    expect(parsed.needsCodeInput).toBe(false);
+  });
+
   it("does not mistake the version banner for a code before the URL is printed", () => {
     const parsed = parseOAuthPrompt(CODEX_DEVICE_PROMPT.split("Follow these steps")[0]!);
     expect(parsed.verificationUrl).toBeUndefined();

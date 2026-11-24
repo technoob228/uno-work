@@ -52,6 +52,7 @@ describe("detectHarnessAuthLoss — provider snapshot", () => {
     ["opencode", "updateKey", "OpenCode"],
     ["cursor", "cursorCli", "Cursor"],
     ["uno", "unoAccount", "Uno AI"],
+    ["grok", "signIn", "Grok"],
   ] as const)("%s signed out → %s", (driver, kind, label) => {
     const loss = detectHarnessAuthLoss(input({ driver, providerStatus: signedOut(driver) }));
     expect(loss?.kind).toBe(kind);
@@ -148,6 +149,14 @@ describe("detectHarnessAuthLoss — error text", () => {
     ["uno", "gateway returned 401"],
     ["uno", "Invalid API key"],
     ["cursor", "Cursor Agent is not authenticated. Run `agent login`."],
+    [
+      "grok",
+      "API error (status 400 Bad Request): invalid-argument: Incorrect API key provided. You can obtain an API key from https://console.x.ai.",
+    ],
+    [
+      "grok",
+      "Grok is not signed in on this computer. Sign in on this computer: Settings → AI → Grok → Sign in (xAI account or an xAI API key).",
+    ],
   ])("%s: %s", (driver, text) => {
     const loss = detectHarnessAuthLoss(
       input({ driver, providerStatus: makeProvider(driver), threadError: text }),

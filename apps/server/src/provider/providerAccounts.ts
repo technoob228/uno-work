@@ -36,6 +36,7 @@ const PROVIDER_NAME: Readonly<Record<ProviderAuthDriver, string>> = {
   // Not offered (HarnessSetupService refuses a second Gemini account); here
   // for the exhaustive table only.
   gemini: "Gemini",
+  grok: "Grok",
 };
 
 /**

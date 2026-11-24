@@ -88,6 +88,7 @@ const INFRA_PROCESSES = new Set([
   "hermes",
   "cursor-agent",
   "gemini",
+  "grok",
   // macOS services that listen on TCP (AirPlay, Handoff, sharing).
   "ControlCe",
   "ControlCenter",

@@ -32,15 +32,15 @@ import {
 } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
-import { ClaudeAI, Gemini, OpenAI, OpenCodeIcon, UnoIcon, type Icon } from "../../Icons";
+import { ClaudeAI, Gemini, GrokIcon, OpenAI, OpenCodeIcon, UnoIcon, type Icon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { ConnectedBadge, SetupHeading, SetupNote, SetupShell } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 
-type AiId = "uno" | "claudeAgent" | "codex" | "gemini" | "opencode";
-type AuthAiId = "claudeAgent" | "codex" | "gemini";
+type AiId = "uno" | "claudeAgent" | "codex" | "gemini" | "grok" | "opencode";
+type AuthAiId = "claudeAgent" | "codex" | "gemini" | "grok";
 const isAuthAi = (id: AiId): id is AuthAiId =>
-  id === "claudeAgent" || id === "codex" || id === "gemini";
+  id === "claudeAgent" || id === "codex" || id === "gemini" || id === "grok";
 
 interface AiRow {
   readonly id: AiId;
@@ -75,6 +75,12 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     name: "Gemini CLI",
     icon: Gemini,
     description: () => "Use your Google account, or a Gemini API key.",
+  },
+  {
+    id: "grok",
+    name: "Grok",
+    icon: GrokIcon,
+    description: () => "Use your xAI account, or an xAI API key.",
   },
   {
     id: "opencode",

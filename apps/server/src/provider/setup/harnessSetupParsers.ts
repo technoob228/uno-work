@@ -23,6 +23,17 @@
  *
  *     Enter the authorization code:
  *
+ *   grok login --device-auth (Grok CLI 1.0.92, 2026-11; nothing to paste back)
+ *     To sign in, open this URL in your browser:
+ *
+ *       https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH
+ *
+ *     Confirm this code in your browser:
+ *
+ *       ABCD-EFGH
+ *
+ *     Waiting for authorization...
+ *
  * @module provider/setup/harnessSetupParsers
  */
 

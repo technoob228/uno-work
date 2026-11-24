@@ -791,3 +791,121 @@ describe("Gemini CLI sign-in", () => {
     });
   });
 });
+
+describe("Grok sign-in", () => {
+  function makeGrok(initial: { signedIn?: boolean; storedKey?: string } = {}) {
+    const state = { signedIn: initial.signedIn ?? false, storedKey: initial.storedKey };
+    const harness = makeHarness({
+      authWatchIntervalMs: 2,
+      resolveCliEnvironment: async () => ({
+        binaryPath: "grok",
+        env: { GROK_DISABLE_AUTOUPDATER: "1" },
+      }),
+      probeAuth: async () => ({
+        authenticated: state.signedIn,
+        signature: state.signedIn ? "authenticated|xai-account|xAI account|" : "",
+      }),
+      grok: {
+        signedIn: async () => state.signedIn,
+        storeApiKey: async (apiKey) => {
+          state.storedKey = apiKey;
+        },
+        removeApiKey: async () => {
+          const had = state.storedKey !== undefined;
+          state.storedKey = undefined;
+          return had;
+        },
+      },
+    });
+    return { harness, state };
+  }
+
+  it("stores an xAI API key without running anything, and never logs it", async () => {
+    const { harness, state } = makeGrok();
+    const { jobId: id } = harness.runner.authStart({
+      driver: "grok",
+      method: "apiKey",
+      apiKey: "xai-TEST-KEY-123",
+    });
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("XAI_API_KEY");
+    expect(status.log).not.toContain("xai-TEST-KEY-123");
+    expect(state.storedKey).toBe("xai-TEST-KEY-123");
+    expect(harness.processes).toHaveLength(0);
+    expect(harness.refreshed).toEqual(["grok"]);
+  });
+
+  it("runs `grok login --device-auth`: the link and the code show, nothing to paste", async () => {
+    const { harness } = makeGrok();
+    const { jobId: id } = harness.runner.authStart({ driver: "grok", method: "oauth" });
+    await tick(8);
+    const child = harness.latest();
+    expect(child.input.command).toBe("grok");
+    expect(child.input.args).toEqual(["login", "--device-auth"]);
+    expect(child.input.env.GROK_DISABLE_AUTOUPDATER).toBe("1");
+    child.input.onOutput(
+      "\nTo sign in, open this URL in your browser:\n\n  https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH\n\nConfirm this code in your browser:\n\n  ABCD-EFGH\n\nWaiting for authorization...\n",
+    );
+    const waiting = harness.runner.authStatus({ jobId: id });
+    expect(waiting.verificationUrl).toBe("https://accounts.x.ai/oauth2/device?user_code=ABCD-EFGH");
+    expect(waiting.userCode).toBe("ABCD-EFGH");
+    expect(waiting.needsCodeInput).toBe(false);
+    child.input.onExit({ code: 0, signal: null });
+    await harness.runner.drain();
+    expect(harness.runner.authStatus({ jobId: id }).state).toBe("succeeded");
+    expect(harness.refreshed).toEqual(["grok"]);
+  });
+
+  it("is done at once when Grok is already signed in to xAI", async () => {
+    const { harness } = makeGrok({ signedIn: true });
+    const { jobId: id } = harness.runner.authStart({ driver: "grok", method: "oauth" });
+    await harness.runner.drain();
+    const status = harness.runner.authStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("already signed in");
+    expect(harness.processes).toHaveLength(0);
+  });
+
+  it("has no second account", () => {
+    const { harness } = makeGrok();
+    expect(() =>
+      harness.runner.authStart({
+        driver: "grok",
+        method: "oauth",
+        instanceId: "grok_account_1" as ProviderInstanceId,
+      }),
+    ).toThrow(/one account per computer/);
+  });
+
+  it("signs out: the stored key goes and `grok logout` clears the xAI sign-in", async () => {
+    const { harness, state } = makeGrok({ signedIn: true, storedKey: "xai-TEST" });
+    const out = harness.runner.authSignOut({ driver: "grok" });
+    await tick(8);
+    expect(harness.latest().input.args).toEqual(["logout"]);
+    harness.latest().input.onExit({ code: 0, signal: null });
+    await expect(out).resolves.toEqual({ driver: "grok", signedOut: true });
+    expect(state.storedKey).toBeUndefined();
+    expect(harness.refreshed).toEqual(["grok"]);
+  });
+
+  it("signs out of a key alone without running the CLI", async () => {
+    const { harness, state } = makeGrok({ storedKey: "xai-TEST" });
+    await expect(harness.runner.authSignOut({ driver: "grok" })).resolves.toEqual({
+      driver: "grok",
+      signedOut: true,
+    });
+    expect(state.storedKey).toBeUndefined();
+    expect(harness.processes).toHaveLength(0);
+  });
+
+  it("installs with npm, letting the package fetch its binary", async () => {
+    const { harness } = makeGrok();
+    harness.runner.installStart({ driver: ProviderDriverKind.make("grok") });
+    await tick(8);
+    expect(harness.latest().input.command).toBe("npm");
+    expect(harness.latest().input.args).toEqual(["install", "-g", "@xai-official/grok@latest"]);
+    expect(harness.latest().input.env.npm_config_allow_scripts).toBe("@xai-official/grok");
+  });
+});

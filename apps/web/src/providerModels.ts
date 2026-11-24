@@ -152,6 +152,7 @@ const DEFAULT_THREAD_DRIVER_PREFERENCE: ReadonlyArray<string> = [
   "codex",
   "claudeAgent",
   "gemini",
+  "grok",
   "opencode",
   "cursor",
 ];

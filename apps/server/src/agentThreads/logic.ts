@@ -321,6 +321,7 @@ const PROVIDER_ALIASES: Readonly<Record<string, string>> = {
   "claude-code": "claudeAgent",
   claudecode: "claudeAgent",
   "gemini-cli": "gemini",
+  "grok-cli": "grok",
 };
 
 export type ProviderModelResolution =

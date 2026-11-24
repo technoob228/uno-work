@@ -306,8 +306,9 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     return Queue.offer(serverQueue, message).pipe(Effect.asVoid);
   };
 
-  const handleExitEncoded = (message: RpcMessage.ResponseExitEncoded) =>
-    Ref.get(extPending).pipe(
+  const handleExitEncoded = (encoded: RpcMessage.ResponseExitEncoded) => {
+    const message = normalizeAcpJsonRpcError(encoded);
+    return Ref.get(extPending).pipe(
       Effect.flatMap((pending) => {
         if (!pending.has(message.requestId)) {
           return Queue.offer(clientQueue, message).pipe(Effect.asVoid);
@@ -328,6 +329,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         );
       }),
     );
+  };
 
   const routeDecodedMessage = (
     message: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,
@@ -506,6 +508,30 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     notify: sendNotification,
   } satisfies AcpPatchedProtocol;
 });
+
+/**
+ * Effect RPC's JSON-RPC codec turns a standard JSON-RPC error answer into a
+ * defect (a plain Error: `data` is lost). An ACP error is a typed failure
+ * with its code and `data` — Grok CLI puts its words there ("Internal
+ * error" + `data.message`). Upstream T3 Code 1f6d9e789a.
+ */
+function normalizeAcpJsonRpcError(
+  message: RpcMessage.ResponseExitEncoded,
+): RpcMessage.ResponseExitEncoded {
+  if (message.exit._tag !== "Failure") return message;
+  const [failure] = message.exit.cause;
+  if (
+    message.exit.cause.length !== 1 ||
+    failure?._tag !== "Die" ||
+    !isProtocolError(failure.defect)
+  ) {
+    return message;
+  }
+  return {
+    ...message,
+    exit: { _tag: "Failure", cause: [{ _tag: "Fail", error: failure.defect }] },
+  };
+}
 
 function isProtocolError(
   value: unknown,

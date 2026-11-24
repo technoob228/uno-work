@@ -27,7 +27,7 @@ describe("isInstallableDriver", () => {
       expect(isInstallableDriver(driver(value))).toBe(true);
     }
     expect(isInstallableDriver(driver("uno"))).toBe(false);
-    expect(isInstallableDriver(driver("grok"))).toBe(false);
+    expect(isInstallableDriver(driver("aider"))).toBe(false);
   });
 });
 
@@ -72,7 +72,20 @@ describe("resolveInstallPlan", () => {
     expect(packageFor("codex")).toBe("@openai/codex@latest");
     expect(packageFor("claudeAgent")).toBe("@anthropic-ai/claude-code@latest");
     expect(packageFor("gemini")).toBe("@google/gemini-cli@latest");
+    expect(packageFor("grok")).toBe("@xai-official/grok@latest");
     expect(packageFor("opencode")).toBe(`opencode-ai@${UNO_OPENCODE_VERSION}`);
+  });
+
+  it("lets npm 12 run Grok's postinstall, which fetches the native binary", () => {
+    const plan = resolveInstallPlan(driver("grok"), { ...baseContext, npmGlobalWritable: false });
+    if (plan.kind !== "command") throw new Error("expected a command plan");
+    expect(plan.env).toEqual({
+      npm_config_prefix: userLocalNpmPrefix("/home/unowork"),
+      npm_config_allow_scripts: "@xai-official/grok",
+    });
+    expect(plan.display).toBe(
+      "npm_config_prefix=/home/unowork/.local npm_config_allow_scripts=@xai-official/grok npm install -g @xai-official/grok@latest",
+    );
   });
 
   it("installs the pinned Hermes that runs a Claude plan, falling back to PyPI's (15.10)", () => {
@@ -138,6 +151,6 @@ describe("resolveInstallPlan", () => {
     const uno = resolveInstallPlan(driver("uno"), baseContext);
     expect(uno.kind).toBe("unsupported");
     if (uno.kind === "unsupported") expect(uno.reason).toContain("ships with Uno Work");
-    expect(resolveInstallPlan(driver("grok"), baseContext).kind).toBe("unsupported");
+    expect(resolveInstallPlan(driver("aider"), baseContext).kind).toBe("unsupported");
   });
 });

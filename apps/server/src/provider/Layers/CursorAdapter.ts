@@ -809,6 +809,21 @@ export function makeCursorAdapter(
                       }),
                     );
                     return;
+                  case "ReasoningDelta":
+                    if (ctx.activeTurnId === undefined) return;
+                    yield* offerRuntimeEvent(
+                      makeAcpContentDeltaEvent({
+                        stamp: yield* makeEventStamp(),
+                        provider: PROVIDER,
+                        threadId: ctx.threadId,
+                        turnId: ctx.activeTurnId,
+                        ...(event.itemId ? { itemId: event.itemId } : {}),
+                        text: event.text,
+                        rawPayload: event.rawPayload,
+                        streamKind: "reasoning_text",
+                      }),
+                    );
+                    return;
                   case "ContentDelta":
                     yield* logNative(
                       ctx.threadId,

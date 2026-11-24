@@ -133,7 +133,17 @@ const NPM_SPEC_BY_DRIVER: Readonly<Record<string, string>> = {
   codex: "@openai/codex@latest",
   claudeAgent: "@anthropic-ai/claude-code@latest",
   gemini: "@google/gemini-cli@latest",
+  grok: "@xai-official/grok@latest",
   opencode: `opencode-ai@${UNO_OPENCODE_VERSION}`,
+};
+
+/**
+ * Grok CLI's npm package fetches its native binary in a postinstall script;
+ * npm 12 skips install scripts unless the package is allowed, and still
+ * exits 0 (upstream T3 Code, provider-grok driver). Older npm ignores it.
+ */
+const NPM_INSTALL_ENV_BY_DRIVER: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  grok: { npm_config_allow_scripts: "@xai-official/grok" },
 };
 
 export function isInstallableDriver(driver: ProviderDriverKind): boolean {
@@ -158,16 +168,21 @@ export function resolveInstallPlan(
 
   const npmSpec = NPM_SPEC_BY_DRIVER[driver];
   if (npmSpec) {
-    const env = context.npmGlobalWritable
-      ? {}
-      : { npm_config_prefix: userLocalNpmPrefix(context.homeDir) };
+    const env = {
+      ...(context.npmGlobalWritable
+        ? {}
+        : { npm_config_prefix: userLocalNpmPrefix(context.homeDir) }),
+      ...NPM_INSTALL_ENV_BY_DRIVER[driver],
+    };
     const args = ["install", "-g", npmSpec];
     return {
       kind: "command",
       command: "npm",
       args,
       env,
-      display: `${context.npmGlobalWritable ? "" : `npm_config_prefix=${env.npm_config_prefix} `}npm ${args.join(" ")}`,
+      display: `${Object.entries(env)
+        .map(([key, value]) => `${key}=${value} `)
+        .join("")}npm ${args.join(" ")}`,
     };
   }
 

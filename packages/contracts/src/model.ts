@@ -193,6 +193,7 @@ const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
+const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
@@ -225,6 +226,8 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [CURSOR_DRIVER_KIND]: "auto",
   // Gemini CLI's own router (Pro for hard turns, Flash for the rest).
   [GEMINI_DRIVER_KIND]: "auto",
+  // Grok CLI's own default (grok-4.6 on 1.0.92); the CLI's list replaces it.
+  [GROK_DRIVER_KIND]: "grok-4.6",
   // Hermes — прежде всего оркестратор: "Smart" из часов Uno AI (id шлюза,
   // без префикса харнесса). Тяжёлые модели выбираются явно (ROUTING.md).
   [HERMES_DRIVER_KIND]: UNO_SMART_GATEWAY_MODEL,
@@ -329,5 +332,6 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CLAUDE_DRIVER_KIND]: "Claude",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GEMINI_DRIVER_KIND]: "Gemini CLI",
+  [GROK_DRIVER_KIND]: "Grok",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

@@ -23,6 +23,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   claudeAgent: "Claude Code",
   codex: "Codex",
   gemini: "Gemini CLI",
+  grok: "Grok",
   uno: "Uno AI",
 };
 

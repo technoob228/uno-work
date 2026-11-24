@@ -49,6 +49,7 @@ const HARNESS_ALIASES: Readonly<Record<string, string>> = {
   "claude-code": "claudeAgent",
   claudecode: "claudeAgent",
   "gemini-cli": "gemini",
+  "grok-cli": "grok",
 };
 
 const HARNESS_LABELS: Readonly<Record<string, string>> = {
@@ -56,6 +57,7 @@ const HARNESS_LABELS: Readonly<Record<string, string>> = {
   codex: "Codex",
   cursor: "Cursor",
   gemini: "Gemini CLI",
+  grok: "Grok",
   opencode: "OpenCode",
   hermes: "Hermes",
   uno: "Uno AI",

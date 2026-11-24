@@ -159,9 +159,13 @@ export function pollDemoAuth(jobId: string) {
         verificationUrl:
           job.driver === "gemini"
             ? "https://accounts.google.com/o/oauth2/v2/auth?demo"
-            : "https://claude.ai/oauth/authorize?demo",
+            : job.driver === "grok"
+              ? "https://accounts.x.ai/oauth2/device?user_code=DEMO-GROK"
+              : "https://claude.ai/oauth/authorize?demo",
         // Gemini CLI shows a code on Google's page to paste back here.
         ...(job.driver === "gemini" ? { needsCodeInput: true } : {}),
+        // Grok shows a device code here to confirm on xAI's page; nothing comes back.
+        ...(job.driver === "grok" ? { userCode: "DEMO-GROK" } : {}),
       },
       done: false,
     };
@@ -391,7 +395,21 @@ function signInProvidersFor(machineKey: string, checkedAt: string, version: stri
       { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro", isCustom: false, capabilities: null },
     ],
   };
-  return [agent("claudeAgent"), agent("codex"), gemini];
+  // Grok CLI (T59, 23.11): installed, signs in with an xAI account.
+  const grok = {
+    ...agent("claudeAgent"),
+    driver: "grok",
+    instanceId: "grok",
+    displayName: "Grok",
+    auth: signedInHere.has("grok")
+      ? { status: "authenticated", type: "xai-account", label: "xAI account" }
+      : { status: "unauthenticated" },
+    models: [
+      { slug: "grok-4.6", name: "Grok 4.6", isCustom: false, capabilities: null, isDefault: true },
+      { slug: "grok-4.5", name: "Grok 4.5", isCustom: false, capabilities: null },
+    ],
+  };
+  return [agent("claudeAgent"), agent("codex"), gemini, grok];
 }
 
 /** Claude Code (and Codex on the MacBook) signed in with the person's own accounts. */

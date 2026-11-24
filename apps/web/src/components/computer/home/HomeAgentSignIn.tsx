@@ -6,7 +6,7 @@
  * in for them (Misha 15.10: anything else risks the person's account).
  *
  * - Opens by itself once, on the first visit after the person picked their
- *   agent before Work (`?agent=claude|codex|gemini`, or an own-agent goal with the
+ *   agent before Work (`?agent=claude|codex|gemini|grok`, or an own-agent goal with the
  *   account's default AI on Claude / Codex) — `shouldAutoOpenAgentSignIn`.
  * - The Next step card's "Sign in to Claude Code" opens it too
  *   (`openAgentSignIn`).
@@ -86,7 +86,7 @@ export interface AgentOnComputer {
   readonly provider: ServerProvider | null;
   /** Signed in with the person's own subscription or key (not the plan's Uno AI credit). */
   readonly signedIn: boolean;
-  /** Claude Code, Codex or Gemini CLI — whichever — signed in with the person's own account. */
+  /** Claude Code, Codex, Gemini CLI or Grok — whichever — signed in with the person's own account. */
   readonly anySignedIn: boolean;
   /**
    * The person's agent has no sign-in (OpenCode / Uno AI picked before Work):
@@ -117,7 +117,8 @@ export function useAgentOnComputer(ownAgentGoal: boolean): AgentOnComputer {
       anySignedIn:
         signedInWithOwnAccount(byId("claudeAgent")) ||
         signedInWithOwnAccount(byId("codex")) ||
-        signedInWithOwnAccount(byId("gemini")),
+        signedInWithOwnAccount(byId("gemini")) ||
+        signedInWithOwnAccount(byId("grok")),
       noSignIn,
     };
   }, [driver, noSignIn, providers]);

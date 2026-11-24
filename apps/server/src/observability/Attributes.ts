@@ -124,5 +124,8 @@ export function normalizeModelMetricLabel(model: string | null | undefined): str
   if (normalized.includes("gemini")) {
     return "gemini";
   }
+  if (normalized.includes("grok")) {
+    return "grok";
+  }
   return "other";
 }
