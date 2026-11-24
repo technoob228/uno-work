@@ -60,7 +60,12 @@ export function colleagueMessageNote(input: {
 const quoted = (request: Pick<TeamRequest, "title" | "gist" | "kind">) =>
   `“${label(request.title || request.gist || request.kind, "your request", 120)}”`;
 
-const statusPhrase = (status: TeamRequestStatus, threadTitle: string | null): string | null => {
+const statusPhrase = (
+  status: TeamRequestStatus,
+  threadTitle: string | null,
+  /** "done" with a reason and no answer: the chat there failed (bridge.logic.ts), not a result. */
+  failed = false,
+): string | null => {
   switch (status) {
     case "started":
       return `it started on their computer${threadTitle ? ` as the chat “${label(threadTitle, "a chat", 120)}”` : ""}. Its answer comes back here when it is done: don't poll, go on or end your turn.`;
@@ -79,7 +84,9 @@ const statusPhrase = (status: TeamRequestStatus, threadTitle: string | null): st
     case "answered":
       return "it was answered.";
     case "done":
-      return "it is done.";
+      return failed
+        ? "it did not finish: the chat on their computer stopped with an error, so don't count on its work."
+        : "it is done.";
     case "waiting":
       return null;
   }
@@ -91,14 +98,18 @@ const statusPhrase = (status: TeamRequestStatus, threadTitle: string | null): st
  * text: fenced.
  */
 export function outgoingNote(request: TeamRequest, nonce: string): string | null {
-  const phrase = statusPhrase(request.status, request.threadTitle);
+  const failed =
+    request.status === "done" &&
+    Boolean(request.reason) &&
+    (request.answer?.trim() ?? "").length === 0;
+  const phrase = statusPhrase(request.status, request.threadTitle, failed);
   if (phrase === null) return null;
   const who = label(request.to.username ?? request.to.email?.split("@")[0] ?? "", "your colleague");
   const project = label(request.projectName, "the project");
   const head = `${TEAM_NOTE_PREFIX} About this chat's request to ${who} (a colleague in ${project}) ${quoted(request)}: ${phrase}`;
   const reason =
     request.reason &&
-    ["declined", "refused", "cancelled", "stopped", "expired"].includes(request.status)
+    (["declined", "refused", "cancelled", "stopped", "expired"].includes(request.status) || failed)
       ? ` Why: ${label(request.reason, "", 300)}`
       : "";
   const answer = request.answer?.trim() ?? "";
