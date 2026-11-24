@@ -100,7 +100,7 @@ export const PendingForYouStrip = memo(function PendingForYouStrip(props: {
               return (
                 <li
                   key={item.id}
-                  className="group/pending flex min-w-0 items-center gap-2 px-2.5 py-1"
+                  className="group/pending @container/pending flex min-w-0 items-center gap-2 px-2.5 py-1"
                   data-testid="pending-for-you-row"
                   data-kind={item.kind}
                 >
@@ -109,22 +109,22 @@ export const PendingForYouStrip = memo(function PendingForYouStrip(props: {
                     type="button"
                     title="Show it in the chat"
                     onClick={() => props.onShow(item)}
-                    className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 rounded-sm text-left outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                    className="flex min-w-0 flex-1 cursor-pointer items-baseline gap-2 overflow-hidden rounded-sm text-left outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                     data-testid="pending-for-you-show"
                   >
                     <span className="min-w-0 truncate font-medium text-foreground underline-offset-2 group-hover/pending:underline">
                       {item.title}
                     </span>
-                    <span className="hidden shrink-0 text-muted-foreground sm:inline">
+                    <span className="hidden shrink-0 text-muted-foreground @md/pending:inline">
                       {itemMeta(item)}
                     </span>
                     {item.answersYou ? (
-                      <span className="hidden shrink-0 items-center gap-1 text-emerald-700 sm:flex dark:text-emerald-300/90">
+                      <span className="hidden shrink-0 items-center gap-1 text-emerald-700 @lg/pending:flex dark:text-emerald-300/90">
                         <CircleCheckIcon aria-hidden className="size-3" />
                         Your answer
                       </span>
                     ) : from ? (
-                      <span className="hidden min-w-0 shrink truncate text-muted-foreground md:inline">
+                      <span className="hidden min-w-0 shrink truncate text-muted-foreground @lg/pending:inline">
                         from {from}
                       </span>
                     ) : null}
@@ -160,7 +160,7 @@ export const PendingForYouStrip = memo(function PendingForYouStrip(props: {
                     data-testid="pending-for-you-dismiss"
                   >
                     <XIcon aria-hidden className="size-3" />
-                    <span className="hidden lg:inline">Not needed</span>
+                    <span className="hidden @xl/pending:inline">Not needed</span>
                   </button>
                 </li>
               );

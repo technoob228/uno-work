@@ -5369,18 +5369,18 @@ export default function ChatView(props: ChatViewProps) {
                 <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-8 bg-linear-to-t from-background to-transparent" />
               ) : null}
 
-              {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
+              {/* scroll to end round button at the right edge — shown when user has scrolled away from the bottom */}
               {showScrollToBottom && showsTimeline(embeddedVisibility) && (
-                <div className="pointer-events-none absolute bottom-3 left-1/2 z-30 flex -translate-x-1/2 justify-center">
-                  <button
-                    type="button"
-                    onClick={() => scrollToEnd(true)}
-                    className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/70 bg-card/85 px-3 py-1 text-foreground/80 text-xs shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
-                  >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  aria-label="Scroll to end"
+                  title="Scroll to end"
+                  data-testid="scroll-to-end"
+                  onClick={() => scrollToEnd(true)}
+                  className="absolute right-1.5 bottom-1.5 z-30 flex size-7 cursor-pointer items-center justify-center rounded-full border border-border/70 bg-card/90 text-foreground/80 shadow-sm backdrop-blur-md transition-colors hover:border-border hover:text-foreground"
+                >
+                  <ChevronDownIcon className="size-4" />
+                </button>
               )}
             </div>
 
