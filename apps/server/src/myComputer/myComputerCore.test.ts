@@ -61,7 +61,7 @@ describe("the console's routes", () => {
     const warnings: Array<string> = [];
     const core = makeCore({ token: async () => "", warn: (message) => warnings.push(message) });
     await expect(core.status()).resolves.toEqual({ enabled: false, computers: [] });
-    await expect(core.toolsVisible()).resolves.toBe(false);
+    await expect(core.toolsShown()).resolves.toBe("none");
     await expect(core.pair()).rejects.toThrow(/isn't linked to the Uno console/);
     expect(fake.requests).toEqual([]);
     expect(warnings).toEqual([]);
@@ -114,32 +114,33 @@ describe("the console's routes", () => {
     await expect(makeCore().status()).rejects.toThrow(/restarting or unavailable.*try again/);
   });
 
-  it("tools show only with the feature on and a computer connected, and the answer is cached", async () => {
+  it("all tools show with a computer connected, only the list without one, none with the feature off; the answer is cached", async () => {
     const core = makeCore({ timings: { toolsVisibleTtlMs: 60_000 } });
-    await expect(core.toolsVisible()).resolves.toBe(true);
-    await expect(core.toolsVisible()).resolves.toBe(true);
+    await expect(core.toolsShown()).resolves.toBe("all");
+    await expect(core.toolsShown()).resolves.toBe("all");
     expect(fake.requests).toHaveLength(1);
 
+    // No computer yet: the list stays, so the agent can say how to connect one.
     const empty = makeCore();
     fake.listing = { status: 200, body: { enabled: true, computers: [] } };
-    await expect(empty.toolsVisible()).resolves.toBe(false);
+    await expect(empty.toolsShown()).resolves.toBe("list");
 
     const disabled = makeCore();
     fake.listing = { status: 200, body: { enabled: false, computers: [computerRow()] } };
-    await expect(disabled.toolsVisible()).resolves.toBe(false);
+    await expect(disabled.toolsShown()).resolves.toBe("none");
   });
 
   it("connecting a computer shows the tools at once; a console that fails hides them quietly", async () => {
     fake.listing = { status: 200, body: { enabled: true, computers: [] } };
     const core = makeCore();
-    await expect(core.toolsVisible()).resolves.toBe(false);
+    await expect(core.toolsShown()).resolves.toBe("list");
     fake.listing = { status: 200, body: { enabled: true, computers: [computerRow()] } };
     await core.pairStatus("7KQ2-M9XD");
-    await expect(core.toolsVisible()).resolves.toBe(true);
+    await expect(core.toolsShown()).resolves.toBe("all");
 
     const fresh = makeCore();
     fake.listing = { status: 500, body: {} };
-    await expect(fresh.toolsVisible()).resolves.toBe(false);
+    await expect(fresh.toolsShown()).resolves.toBe("none");
   });
 
   it("a slow console doesn't hold up tools/list", async () => {
@@ -147,7 +148,7 @@ describe("the console's routes", () => {
       fetchImpl: (() => new Promise(() => undefined)) as unknown as typeof fetch,
       timings: { toolsVisibleWaitMs: 20 },
     });
-    await expect(stuck.toolsVisible()).resolves.toBe(false);
+    await expect(stuck.toolsShown()).resolves.toBe("none");
   });
 });
 
