@@ -96,7 +96,10 @@ import { ChatRequests } from "../chatRequests/ChatRequests.ts";
 import { TeamCollab } from "../team/TeamCollab.ts";
 import { TEAM_TOOL_NAMES } from "../team/teamTools.ts";
 import { CommandGuardPolicy } from "../provider/Services/CommandGuardPolicy.ts";
-import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
+import {
+  MY_COMPUTER_TOOL_NAMES,
+  MY_COMPUTER_TOOL_NAMES_WHEN_NONE,
+} from "../myComputer/myComputerTools.ts";
 import { WORKSPACE_TOOL_NAMES, type ComputerWaitMark } from "../myComputer/workspaceTools.ts";
 import {
   makeComputerWorkspaceReader,
@@ -1163,7 +1166,9 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
           Effect.map(
             ([computersVisible, inDevMode, teamOn]): ReadonlySet<string> =>
               new Set([
-                ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES),
+                // No computer connected: only the list stays, so the agent can say why
+                // (T70) instead of finding nothing to call. It is read-only.
+                ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES_WHEN_NONE),
                 ...(teamOn ? [] : TEAM_TOOL_NAMES),
                 ...(inDevMode ? [] : DEV_MODE_TOOL_NAMES),
                 // Listed only to a chat whose project is on the person's

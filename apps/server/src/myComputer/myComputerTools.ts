@@ -48,6 +48,11 @@ export const MY_COMPUTER_TOOL_NAMES: ReadonlySet<string> = new Set([
   ...START_CHAT_TOOL_NAMES,
 ]);
 
+/** With no computer connected only the read-only list is shown, to explain why. */
+export const MY_COMPUTER_TOOL_NAMES_WHEN_NONE: ReadonlySet<string> = new Set(
+  [...MY_COMPUTER_TOOL_NAMES].filter((name) => name !== "my_computers_list"),
+);
+
 /** What the tools need from tools.ts (passed in: no runtime import cycle). */
 export interface MyComputerToolKit {
   readonly resolvePath: (raw: string, deps: Deps) => string;
@@ -56,6 +61,9 @@ export interface MyComputerToolKit {
   readonly requireAccess: (deps: Deps) => Effect.Effect<void, UnoWorkToolError>;
   readonly fail: (message: string) => UnoWorkToolError;
 }
+
+export const NO_COMPUTER_NOTE =
+  "No computer is connected to this Uno account, so the other my_computer_* tools are off. Next step for the person: on their Mac or PC open Uno Work, Settings, Computer, and connect it (one command in a terminal). If they already did, the helper may be linked to another Uno account: in Settings, Computer, the Mac shows which one, and Reconnect to my account fixes it. Until then, don't try another way to reach their computer.";
 
 const NOT_HERE_MESSAGE =
   "This Uno Work can't reach the person's own computers. Tell them; don't try another way.";
@@ -346,7 +354,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
             return {
               enabled: status.enabled,
               computers: [],
-              note: "No computer is connected. The person can connect one in Uno Work (one command in a terminal).",
+              note: NO_COMPUTER_NOTE,
             };
           }
           const computers = yield* Effect.forEach(

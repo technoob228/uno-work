@@ -27,7 +27,7 @@ import {
 } from "./fakeConsole.testkit.ts";
 import { createMyComputerCore, MAX_FILE_BYTES } from "./myComputerCore.ts";
 import { myComputerShape } from "./MyComputerService.ts";
-import { MY_COMPUTER_TOOL_NAMES } from "./myComputerTools.ts";
+import { MY_COMPUTER_TOOL_NAMES, MY_COMPUTER_TOOL_NAMES_WHEN_NONE } from "./myComputerTools.ts";
 
 let fake: FakeConsole;
 let home: string;
@@ -611,6 +611,18 @@ describe("showing the tools", () => {
     const without = await listed(MY_COMPUTER_TOOL_NAMES);
     for (const name of MY_COMPUTER_TOOL_NAMES) expect(without.has(name)).toBe(false);
     expect(all.size - without.size).toBe(MY_COMPUTER_TOOL_NAMES.size);
+  });
+
+  it("no computer connected: only my_computers_list stays, and it explains the next step", async () => {
+    const without = await listed(MY_COMPUTER_TOOL_NAMES_WHEN_NONE);
+    expect(without.has("my_computers_list")).toBe(true);
+    expect(without.has("my_computer_run")).toBe(false);
+    expect(without.has("my_computer_write_file")).toBe(false);
+    const { deps } = makeDeps();
+    fake.listing = { status: 200, body: { enabled: true, computers: [] } };
+    const answer = await ok("my_computers_list", deps);
+    expect(answer.note).toContain("Settings, Computer");
+    expect(answer.note).toContain("another Uno account");
   });
 
   it("a hidden tool still answers a chat that knew it, with its own error", async () => {
