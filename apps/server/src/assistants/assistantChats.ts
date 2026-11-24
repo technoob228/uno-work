@@ -86,6 +86,8 @@ export function billingForDriver(driver: string | null): AssistantChatBilling {
     case "cursor":
     // The person's own Google sign-in or Gemini key.
     case "gemini":
+    // The person's own Grok (SuperGrok / X Premium) sign-in or xAI key.
+    case "grok":
       return "plan";
     default:
       return "other";

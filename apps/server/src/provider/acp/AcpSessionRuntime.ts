@@ -117,6 +117,20 @@ export interface AcpSessionRuntimeOptions {
    */
   readonly authMethodId?: string;
   /**
+   * `_meta` of `initialize` (Grok CLI: `{ clientType: "extension" }`, without
+   * which it silently denies what its Auto mode refuses instead of asking).
+   */
+  readonly initializeMeta?: Record<string, unknown>;
+  /** `_meta` of `session/cancel` (Grok CLI: `{ cancelTrigger: "ctrl_c" }`). */
+  readonly cancelMeta?: Record<string, unknown>;
+  /**
+   * How long `session/load` may take. An agent that never answers it (Grok
+   * CLI can leave it open once the replay is done — upstream T3 Code) would
+   * hold the chat's start until the start deadline; past this the chat
+   * opens a new session instead.
+   */
+  readonly sessionLoadTimeoutMs?: number;
+  /**
    * Receives the agent's stderr as it arrives. When set, stderr is drained
    * (a chatty agent can't block on a full pipe) — custom harnesses keep a
    * tail of it for diagnostics.
@@ -512,6 +526,7 @@ const makeAcpSessionRuntime = (
         protocolVersion: 1,
         clientCapabilities: initializeClientCapabilities,
         clientInfo: options.clientInfo,
+        ...(options.initializeMeta ? { _meta: options.initializeMeta } : {}),
       } satisfies EffectAcpSchema.InitializeRequest;
 
       const initializeResult = yield* runLoggedRequest(
@@ -551,10 +566,26 @@ const makeAcpSessionRuntime = (
           cwd: options.cwd,
           mcpServers,
         } satisfies EffectAcpSchema.LoadSessionRequest;
-        const resumed = yield* runLoggedRequest(
+        const load = runLoggedRequest(
           "session/load",
           loadPayload,
           acp.agent.loadSession(loadPayload),
+        );
+        const resumed = yield* (
+          options.sessionLoadTimeoutMs === undefined
+            ? load
+            : load.pipe(
+                Effect.timeoutOrElse({
+                  duration: Duration.millis(options.sessionLoadTimeoutMs),
+                  orElse: () =>
+                    Effect.fail(
+                      new EffectAcpErrors.AcpTransportError({
+                        detail: "session/load did not answer in time",
+                        cause: new Error("session/load did not answer in time"),
+                      }),
+                    ),
+                }),
+              )
         ).pipe(Effect.exit);
         if (
           Exit.isSuccess(resumed) &&
@@ -580,6 +611,9 @@ const makeAcpSessionRuntime = (
             nextSegmentIndex: state.nextSegmentIndex,
           }));
         } else {
+          // Whatever a failed or abandoned load replayed is not this session's.
+          yield* Queue.clear(eventQueue);
+          yield* Ref.set(toolCallsRef, new Map());
           const createPayload = {
             cwd: options.cwd,
             mcpServers,
@@ -698,7 +732,12 @@ const makeAcpSessionRuntime = (
           }),
         ),
       cancel: getStartedState.pipe(
-        Effect.flatMap((started) => acp.agent.cancel({ sessionId: started.sessionId })),
+        Effect.flatMap((started) =>
+          acp.agent.cancel({
+            sessionId: started.sessionId,
+            ...(options.cancelMeta ? { _meta: options.cancelMeta } : {}),
+          }),
+        ),
       ),
       setMode: (modeId) =>
         Ref.get(modeStateRef).pipe(
@@ -766,6 +805,10 @@ const handleSessionUpdate = ({
   readonly dropAgentText?: (text: string) => boolean;
 }): Effect.Effect<void> =>
   Effect.gen(function* () {
+    // A `session/load` replay the agent marks as one (Grok CLI:
+    // `_meta.isReplay`). The history is already in the chat, and a replay
+    // that outlives the load answer would land in the first turn.
+    if (isReplayNotification(params)) return;
     const parsed = parseSessionUpdateEvent(params);
     if (parsed.modeId) {
       yield* Ref.update(modeStateRef, (current) =>
@@ -799,6 +842,16 @@ const handleSessionUpdate = ({
         });
         continue;
       }
+      if (event._tag === "ReasoningDelta") {
+        // One thought line per stretch between assistant messages: the id
+        // follows the segment counter, so a later stretch starts a new line.
+        const { nextSegmentIndex } = yield* Ref.get(assistantSegmentRef);
+        yield* Queue.offer(queue, {
+          ...event,
+          itemId: `reasoning:${params.sessionId}:run:${runNonce}:segment:${nextSegmentIndex}`,
+        });
+        continue;
+      }
       if (event._tag === "ContentDelta") {
         if (dropAgentText?.(event.text)) continue;
         if (event.text.trim().length === 0) {
@@ -822,6 +875,14 @@ const handleSessionUpdate = ({
       yield* Queue.offer(queue, event);
     }
   });
+
+function isReplayNotification(params: EffectAcpSchema.SessionNotification): boolean {
+  const meta = (value: unknown): unknown =>
+    typeof value === "object" && value !== null ? (value as { _meta?: unknown })._meta : undefined;
+  const isReplay = (value: unknown): boolean =>
+    typeof value === "object" && value !== null && (value as { isReplay?: unknown }).isReplay === true;
+  return isReplay(meta(params)) || isReplay(meta(params.update));
+}
 
 function updateModeState(modeState: AcpSessionModeState, nextModeId: string): AcpSessionModeState {
   const normalized = nextModeId.trim();

@@ -509,6 +509,34 @@ export const GeminiSettings = makeProviderSettingsSchema(
 );
 export type GeminiSettings = typeof GeminiSettings.Type;
 
+/**
+ * Grok CLI by xAI (`@xai-official/grok`, `grok agent stdio`). On by default,
+ * like Gemini CLI: it shows up once the CLI is installed and signed in.
+ */
+export const GrokSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting("grok").pipe(
+      Schema.annotateKey({
+        title: "Binary path",
+        description: "Path to the Grok CLI binary.",
+        providerSettingsForm: { placeholder: "grok", clearWhenEmpty: "omit" },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["binaryPath"],
+  },
+);
+export type GrokSettings = typeof GrokSettings.Type;
+
 export const HermesSettings = makeProviderSettingsSchema(
   {
     // On by default since 0.0.94: Hermes is the default harness of new chats
@@ -1078,6 +1106,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     gemini: GeminiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     hermes: HermesSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     uno: UnoProviderSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -1178,6 +1207,12 @@ const GeminiSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const GrokSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 const HermesSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
@@ -1271,6 +1306,7 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       gemini: Schema.optionalKey(GeminiSettingsPatch),
+      grok: Schema.optionalKey(GrokSettingsPatch),
       hermes: Schema.optionalKey(HermesSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       uno: Schema.optionalKey(OpenCodeSettingsPatch),

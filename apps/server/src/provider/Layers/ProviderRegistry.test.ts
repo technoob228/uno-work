@@ -1195,6 +1195,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               "codex",
               "cursor",
               "gemini",
+              "grok",
               "hermes",
               "opencode",
               "uno",

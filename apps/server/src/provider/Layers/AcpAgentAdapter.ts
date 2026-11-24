@@ -77,7 +77,7 @@ import {
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { acpPermissionResponse } from "../acp/AcpAdapterSupport.ts";
-import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
+import { type AcpToolCallState, parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
 import {
   applyCustomHarnessModel,
@@ -121,8 +121,18 @@ export interface AcpAgentProfile {
   readonly resolveLaunch: (env: NodeJS.ProcessEnv) => Promise<AcpAgentLaunch>;
   /** Appended to "<name> cannot start: <reason>". */
   readonly launchFailureHint: string;
-  /** ACP `authenticate` method sent after `initialize`; absent: none. */
-  readonly authMethodId?: string;
+  /**
+   * ACP `authenticate` method sent after `initialize`; absent: none. A
+   * function picks it from the session's environment (Grok: its API key when
+   * one is set, else the stored sign-in).
+   */
+  readonly authMethodId?: string | ((env: NodeJS.ProcessEnv) => Promise<string | undefined>);
+  /** `_meta` of `initialize` (see AcpSessionRuntimeOptions.initializeMeta). */
+  readonly initializeMeta?: Record<string, unknown>;
+  /** `_meta` of `session/cancel`. */
+  readonly cancelMeta?: Record<string, unknown>;
+  /** Give up on a `session/load` that doesn't answer and open a new session. */
+  readonly sessionLoadTimeoutMs?: number;
   /**
    * Refuse to start before spawning (the agent would hang or fail in a way
    * that says less), e.g. Gemini CLI not signed in. Returns the reason.
@@ -197,6 +207,12 @@ interface SessionContext {
   currentModeId: string | undefined;
   readonly availableModeIds: ReadonlyArray<string>;
   activeTurnId: TurnId | undefined;
+  /**
+   * Tool calls of the active turn the agent has not finished. A turn that
+   * fails or is cancelled leaves them running in the chat forever unless
+   * they are closed (upstream T3 Code settles them the same way).
+   */
+  openToolCalls: Map<string, AcpToolCallState>;
   stopped: boolean;
 }
 
@@ -219,12 +235,27 @@ function parseResume(raw: unknown): { sessionId: string } | undefined {
  * \"API key not valid…\"…`. Unwraps such JSON down to the innermost message.
  */
 export function agentErrorText(defect: unknown): string {
+  // Grok CLI answers a refused key with a bare "Internal error" and the
+  // words in `data.message` ("API error (status 400 Bad Request): …
+  // Incorrect API key provided…", seen live 23.11.2026).
+  const data =
+    typeof defect === "object" && defect !== null && "data" in defect
+      ? (defect as { data: unknown }).data
+      : undefined;
+  const dataMessage =
+    typeof data === "string"
+      ? data
+      : typeof data === "object" && data !== null && "message" in data
+        ? (data as { message: unknown }).message
+        : undefined;
   let text =
-    defect instanceof Error
-      ? defect.message
-      : typeof defect === "object" && defect !== null && "message" in defect
-        ? String((defect as { message: unknown }).message)
-        : String(defect);
+    typeof dataMessage === "string" && dataMessage.trim()
+      ? dataMessage
+      : defect instanceof Error
+        ? defect.message
+        : typeof defect === "object" && defect !== null && "message" in defect
+          ? String((defect as { message: unknown }).message)
+          : String(defect);
   for (let depth = 0; depth < 4; depth += 1) {
     let parsed: unknown;
     try {
@@ -472,6 +503,11 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
           let ctx!: SessionContext;
           const stderr = makeTextTail();
           const resumeSessionId = parseResume(input.resumeCursor)?.sessionId;
+          const pickAuthMethod = profile.authMethodId;
+          const authMethodId =
+            typeof pickAuthMethod === "function"
+              ? yield* Effect.promise(() => pickAuthMethod(sessionEnvironment))
+              : pickAuthMethod;
 
           const acp = yield* makeCustomAcpRuntime({
             childProcessSpawner,
@@ -481,7 +517,12 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             ...(mcpServers.length > 0 ? { mcpServers } : {}),
-            ...(profile.authMethodId ? { authMethodId: profile.authMethodId } : {}),
+            ...(authMethodId ? { authMethodId } : {}),
+            ...(profile.initializeMeta ? { initializeMeta: profile.initializeMeta } : {}),
+            ...(profile.cancelMeta ? { cancelMeta: profile.cancelMeta } : {}),
+            ...(profile.sessionLoadTimeoutMs !== undefined
+              ? { sessionLoadTimeoutMs: profile.sessionLoadTimeoutMs }
+              : {}),
             onStderr: stderr.append,
             ...(profile.dropAgentText ? { dropAgentText: profile.dropAgentText } : {}),
             clientInfo: { name: "uno-work", version: options.clientVersion ?? "0.0.0" },
@@ -619,6 +660,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             currentModeId: modeState?.currentModeId,
             availableModeIds: (modeState?.availableModes ?? []).map((mode) => mode.id),
             activeTurnId: undefined,
+            openToolCalls: new Map(),
             stopped: false,
             pendingHarnessInstructions:
               resumeSessionId !== undefined && started.sessionId === resumeSessionId
@@ -670,6 +712,14 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                   }
                   case "ToolCallUpdated":
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                    if (
+                      event.toolCall.status === "completed" ||
+                      event.toolCall.status === "failed"
+                    ) {
+                      ctx.openToolCalls.delete(event.toolCall.toolCallId);
+                    } else if (ctx.activeTurnId !== undefined) {
+                      ctx.openToolCalls.set(event.toolCall.toolCallId, event.toolCall);
+                    }
                     yield* offerRuntimeEvent(
                       makeAcpToolCallEvent({
                         stamp: yield* makeEventStamp(),
@@ -692,6 +742,22 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
+                      }),
+                    );
+                    return;
+                  case "ReasoningDelta":
+                    yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                    if (ctx.activeTurnId === undefined) return;
+                    yield* offerRuntimeEvent(
+                      makeAcpContentDeltaEvent({
+                        stamp: yield* makeEventStamp(),
+                        provider: PROVIDER,
+                        threadId: ctx.threadId,
+                        turnId: ctx.activeTurnId,
+                        ...(event.itemId ? { itemId: event.itemId } : {}),
+                        text: event.text,
+                        rawPayload: event.rawPayload,
+                        streamKind: "reasoning_text",
                       }),
                     );
                     return;
@@ -815,6 +881,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
               interactionMode: input.interactionMode,
             });
             liveCtx.activeTurnId = turnId;
+            liveCtx.openToolCalls = new Map();
             liveCtx.lastPlanFingerprint = undefined;
             liveCtx.session = {
               ...liveCtx.session,
@@ -848,7 +915,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                     ? new ProviderAdapterRequestError({
                         provider: PROVIDER,
                         method: "session/prompt",
-                        detail: withStderr(mapped.detail, liveCtx.stderr.get()),
+                        detail: withStderr(agentErrorText(error), liveCtx.stderr.get()),
                         cause: error,
                       })
                     : mapped;
@@ -866,7 +933,11 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                     }),
                   ),
                 ),
+                Effect.tapError(() => settleOpenToolCalls(liveCtx, turnId)),
               );
+            if (result.stopReason === "cancelled") {
+              yield* settleOpenToolCalls(liveCtx, turnId);
+            }
 
             liveCtx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
             liveCtx.session = {
@@ -893,6 +964,29 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             };
           }),
         );
+      });
+
+    /**
+     * Close what a failed or cancelled turn left open, as failed. Not on a
+     * completed turn: an agent may finish its answer with a tool still
+     * running in the background (a dev server), which reports later.
+     */
+    const settleOpenToolCalls = (ctx: SessionContext, turnId: TurnId) =>
+      Effect.gen(function* () {
+        const open = Array.from(ctx.openToolCalls.values());
+        ctx.openToolCalls = new Map();
+        for (const toolCall of open) {
+          yield* offerRuntimeEvent(
+            makeAcpToolCallEvent({
+              stamp: yield* makeEventStamp(),
+              provider: PROVIDER,
+              threadId: ctx.threadId,
+              turnId,
+              toolCall: { ...toolCall, status: "failed" },
+              rawPayload: { settled: true, toolCallId: toolCall.toolCallId },
+            }),
+          );
+        }
       });
 
     const interruptTurn: AcpAgentAdapterShape["interruptTurn"] = (threadId) =>

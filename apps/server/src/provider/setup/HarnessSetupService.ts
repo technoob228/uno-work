@@ -44,6 +44,7 @@ import {
   CodexSettings,
   defaultInstanceIdForDriver,
   GeminiSettings,
+  GrokSettings,
   type ProviderAccountAddInput,
   type ProviderAccountAddResult,
   type ProviderAccountRemoveInput,
@@ -107,6 +108,7 @@ import {
   readGeminiSelectedAuthType,
   writeGeminiSelectedAuthType,
 } from "../acp/GeminiAcpSupport.ts";
+import { GROK_API_KEY_ENV, GROK_PROCESS_ENV, probeGrokAuth } from "../acp/GrokAcpSupport.ts";
 
 export const AUTH_JOB_TIMEOUT_MS = 10 * 60_000;
 /** How often a waiting browser sign-in checks whether the harness got signed in another way. */
@@ -182,6 +184,8 @@ export interface HarnessSetupRunnerDeps {
   readonly storeClaudeApiKey: (apiKey: string) => Promise<void>;
   /** Gemini CLI's sign-in files and stored key; absent: Gemini sign-in is refused. */
   readonly gemini?: GeminiSignInStore;
+  /** Grok CLI's sign-in and stored key; absent: Grok sign-in is refused. */
+  readonly grok?: GrokSignInStore;
   /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
   readonly removeClaudeApiKey: () => Promise<boolean>;
   readonly refreshProvider: (
@@ -222,6 +226,22 @@ export interface GeminiSignInStore {
   /** Token files gone, the account marked signed out; true if there was one. */
   readonly clearGoogleSignIn: () => Promise<boolean>;
 }
+
+/**
+ * Grok CLI signs in with `grok login --device-auth` (an xAI device code, no
+ * code to paste back) into `~/.grok/auth.json`, or reads `XAI_API_KEY`.
+ */
+export interface GrokSignInStore {
+  /** A stored xAI sign-in (not the key) is there. */
+  readonly signedIn: () => Promise<boolean>;
+  /** XAI_API_KEY into the default Grok instance's environment. */
+  readonly storeApiKey: (apiKey: string) => Promise<void>;
+  /** Drops it; true if one was there. */
+  readonly removeApiKey: () => Promise<boolean>;
+}
+
+/** Device sign-in of Grok CLI 1.0.92 (prints the link and the code, polls xAI). */
+export const GROK_LOGIN_ARGS: ReadonlyArray<string> = ["login", "--device-auth"];
 
 interface InstallExtra {
   readonly command: string;
@@ -365,6 +385,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       driver === "codex" ||
       driver === "claudeAgent" ||
       driver === "gemini" ||
+      driver === "grok" ||
       driver === "opencode";
     const [npmGlobalWritable, uvAvailable] = await Promise.all([
       needsNpm ? deps.probeNpmGlobalWritable().catch(() => false) : Promise.resolve(true),
@@ -644,11 +665,42 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     }
   };
 
+  const runGrokAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
+    const store = deps.grok;
+    if (!store) throw new Error("Grok sign-in is not available on this computer.");
+    if (job.extra.method === "apiKey") {
+      auths.markRunning(job.jobId);
+      await store.storeApiKey(apiKey ?? "");
+      auths.appendLog(
+        job.jobId,
+        `Stored ${GROK_API_KEY_ENV} in the Grok provider environment on this machine; Grok now signs in with it.\n`,
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(ProviderDriverKind.make("grok"));
+      return;
+    }
+    if (await store.signedIn()) {
+      auths.markRunning(job.jobId);
+      auths.appendLog(
+        job.jobId,
+        "Grok is already signed in to an xAI account here. To use another account, sign out first.\n",
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(ProviderDriverKind.make("grok"));
+      return;
+    }
+    await runCliLogin(job, { args: GROK_LOGIN_ARGS, parsePrompt: true });
+  };
+
   const runAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
     const { driver, method } = job.extra;
 
     if (driver === "gemini") {
       await runGeminiAuth(job, apiKey);
+      return;
+    }
+    if (driver === "grok") {
+      await runGrokAuth(job, apiKey);
       return;
     }
 
@@ -690,6 +742,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     }
     if (input.driver === "gemini" && input.instanceId) {
       throw fail("invalid", "Gemini CLI has one account per computer.");
+    }
+    if (input.driver === "grok" && input.instanceId) {
+      throw fail("invalid", "Grok has one account per computer.");
     }
     const jobKey = authJobKey(input);
     const waiting = auths.findActive("auth", jobKey);
@@ -825,6 +880,33 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       await refreshAfterSuccess(ProviderDriverKind.make(driver));
       return { driver, signedOut: true };
     }
+    if (driver === "grok") {
+      const store = deps.grok;
+      if (!store) return { driver, signedOut: false, error: "Grok sign-in is not available." };
+      const removedKey = await store.removeApiKey().catch((error: unknown) => {
+        log("provider sign-out failed", { driver, error: describeError(error) });
+        return false;
+      });
+      const hadSignIn = await store.signedIn().catch(() => false);
+      const cli = await deps.resolveCliEnvironment(driver);
+      const result = hadSignIn
+        ? await runQuick(
+            cli.binaryPath,
+            ["logout"],
+            withUserLocalBinOnPath({ ...deps.baseEnv, ...cli.env }, deps.homeDir),
+          )
+        : { code: 0, output: "" };
+      await refreshAfterSuccess(ProviderDriverKind.make(driver));
+      if (result.code === 0 || (removedKey && !hadSignIn)) return { driver, signedOut: true };
+      log("provider sign-out failed", { driver, code: result.code, reason: result.reason });
+      return {
+        driver,
+        signedOut: false,
+        error:
+          result.reason ??
+          `Sign-out exited with code ${result.code}.${summarizeTail(result.output)}`,
+      };
+    }
     const cli = await (instanceId
       ? deps.resolveCliEnvironment(driver, instanceId)
       : deps.resolveCliEnvironment(driver));
@@ -950,6 +1032,7 @@ export function makeHarnessSetupShape(
 const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 const decodeGeminiSettings = Schema.decodeUnknownSync(GeminiSettings);
+const decodeGrokSettings = Schema.decodeUnknownSync(GrokSettings);
 
 const isWritableDir = (dir: string): Promise<boolean> =>
   access(dir, fsConstants.W_OK).then(
@@ -1039,13 +1122,24 @@ export const HarnessSetupLive = Layer.effect(
             env: { ...instanceEnv, ...GEMINI_PROCESS_ENV },
           } satisfies CliEnvironment;
         }
+        if (driver === "grok") {
+          const config = decodeGrokSettings(instance?.config ?? {});
+          return {
+            binaryPath: config.binaryPath.trim() || "grok",
+            env: { ...instanceEnv, ...GROK_PROCESS_ENV },
+          } satisfies CliEnvironment;
+        }
         const config = decodeClaudeSettings(instance?.config ?? {});
         const env = yield* makeClaudeEnvironment(config, instanceEnv);
         return { binaryPath: config.binaryPath, env } satisfies CliEnvironment;
       }).pipe(Effect.provideService(Path.Path, path));
 
     /** A key into the default instance's environment, stored as sensitive. */
-    const storeApiKey = (driver: "claudeAgent" | "gemini", name: string, apiKey: string) =>
+    const storeApiKey = (
+      driver: "claudeAgent" | "gemini" | "grok",
+      name: string,
+      apiKey: string,
+    ) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
@@ -1070,7 +1164,7 @@ export const HarnessSetupLive = Layer.effect(
         });
       });
 
-    const removeApiKey = (driver: "claudeAgent" | "gemini", name: string) =>
+    const removeApiKey = (driver: "claudeAgent" | "gemini" | "grok", name: string) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
@@ -1104,6 +1198,22 @@ export const HarnessSetupLive = Layer.effect(
       clearGoogleSignIn: () => geminiEnv().then(clearGeminiGoogleSignIn),
     };
 
+    // Grok's sign-in is where the daemon's own Grok runs look (`GROK_HOME`
+    // of the default instance, else ~/.grok). Only the stored sign-in counts
+    // here: the key is checked apart (removeApiKey).
+    const grokEnv = () =>
+      runPromise(resolveCliEnvironment("grok")).then((cli) => ({ ...process.env, ...cli.env }));
+    const grok: GrokSignInStore = {
+      signedIn: () =>
+        grokEnv().then(async (env) => {
+          const withoutKey: NodeJS.ProcessEnv = { ...env };
+          delete withoutKey[GROK_API_KEY_ENV];
+          return (await probeGrokAuth(withoutKey)).status === "authenticated";
+        }),
+      storeApiKey: (apiKey) => runPromise(storeApiKey("grok", GROK_API_KEY_ENV, apiKey)),
+      removeApiKey: () => runPromise(removeApiKey("grok", GROK_API_KEY_ENV)),
+    };
+
     const runner = makeHarnessSetupRunner({
       spawn: spawnHarnessProcess,
       platform: process.platform,
@@ -1117,6 +1227,7 @@ export const HarnessSetupLive = Layer.effect(
         runPromise(storeApiKey("claudeAgent", ANTHROPIC_API_KEY_ENV, apiKey)),
       removeClaudeApiKey: () => runPromise(removeApiKey("claudeAgent", ANTHROPIC_API_KEY_ENV)),
       gemini,
+      grok,
       refreshProvider: (driver, instanceId) =>
         runPromise(
           instanceId
@@ -1156,6 +1267,9 @@ export const HarnessSetupLive = Layer.effect(
         }
         if (input.driver === "gemini") {
           return yield* fail("invalid", "Gemini CLI has one account per computer.");
+        }
+        if (input.driver === "grok") {
+          return yield* fail("invalid", "Grok has one account per computer.");
         }
         const instanceId = newAccountInstanceId(input.driver);
         const folder = accountFolder(homeDir, instanceId);
