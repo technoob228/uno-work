@@ -104,6 +104,51 @@ export interface CodexSessionRuntimeOptions {
   readonly extraArgs?: ReadonlyArray<string>;
   /** A restricted assistant's chat: run `codex app-server` inside the sandbox. */
   readonly sandbox?: HarnessSandboxPlan;
+  /**
+   * A chat held to the rules of this computer (chatRequests/, T50): its
+   * commands run in Codex's own sandbox without network, reading only
+   * {@link CodexCommandGuard.readableRoots}, whatever the chat's mode; a
+   * command that asks to leave the sandbox goes through {@link CodexCommandGuard.check}.
+   */
+  readonly guard?: CodexCommandGuard;
+}
+
+/** What the adapter decides for a held chat (chatRequests/commandGuard.ts). */
+export interface CodexCommandGuard {
+  /** Absolute; the platform's own (system, toolchains) are added by Codex. */
+  readonly readableRoots: ReadonlyArray<string>;
+  /** Absolute; the working folder is one already. */
+  readonly writableRoots: ReadonlyArray<string>;
+  /**
+   * A command that wants out of the sandbox (network, a write elsewhere):
+   * `decline` without a card, `accept` without a card (the chat's mode lets
+   * it), `ask` the person.
+   */
+  readonly check: (input: {
+    readonly command: string;
+    readonly cwd: string;
+  }) => Promise<"decline" | "accept" | "ask">;
+}
+
+/** The sandbox a held chat's turn runs in: no network, reads only where it may. */
+export function guardedTurnSandboxPolicy(
+  runtimeMode: RuntimeMode,
+  guard: Pick<CodexCommandGuard, "readableRoots" | "writableRoots">,
+): EffectCodexSchema.V2TurnStartParams__SandboxPolicy {
+  const readOnlyAccess = {
+    type: "restricted" as const,
+    includePlatformDefaults: true,
+    readableRoots: [...guard.readableRoots],
+  };
+  if (runtimeMode === "approval-required") {
+    return { type: "readOnly", access: readOnlyAccess, networkAccess: false };
+  }
+  return {
+    type: "workspaceWrite",
+    writableRoots: [...guard.writableRoots],
+    networkAccess: false,
+    readOnlyAccess,
+  };
 }
 
 /** The sandbox spec of a Codex session: its home (sign-in, config, sessions) read-write. */
@@ -274,10 +319,17 @@ function readResumeCursorThreadId(
   return Schema.is(CodexResumeCursorSchema)(resumeCursor) ? resumeCursor.threadId : undefined;
 }
 
-function runtimeModeToThreadConfig(input: RuntimeMode): {
+function runtimeModeToThreadConfig(
+  input: RuntimeMode,
+  guarded = false,
+): {
   readonly approvalPolicy: EffectCodexSchema.V2ThreadStartParams__AskForApproval;
   readonly sandbox: EffectCodexSchema.V2ThreadStartParams__SandboxMode;
 } {
+  // A held chat never runs outside the sandbox: a command asks to leave it.
+  if (guarded && input !== "approval-required") {
+    return { approvalPolicy: "on-request", sandbox: "workspace-write" };
+  }
   switch (input) {
     case "approval-required":
       return {
@@ -303,8 +355,9 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: EffectCodexSchema.V2ThreadStartParams__ServiceTier | undefined;
+  readonly guarded?: boolean;
 }): EffectCodexSchema.V2ThreadStartParams {
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const config = runtimeModeToThreadConfig(input.runtimeMode, input.guarded === true);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
@@ -373,6 +426,7 @@ export function buildTurnStartParams(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly interactionMode?: ProviderInteractionMode;
   readonly appendDeveloperInstructions?: string;
+  readonly guard?: Pick<CodexCommandGuard, "readableRoots" | "writableRoots">;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -388,7 +442,7 @@ export function buildTurnStartParams(input: {
     turnInput.push(attachment);
   }
 
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const config = runtimeModeToThreadConfig(input.runtimeMode, input.guard !== undefined);
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
@@ -402,7 +456,9 @@ export function buildTurnStartParams(input: {
     threadId: input.threadId,
     input: turnInput,
     approvalPolicy: config.approvalPolicy,
-    sandboxPolicy: runtimeModeToTurnSandboxPolicy(input.runtimeMode),
+    sandboxPolicy: input.guard
+      ? guardedTurnSandboxPolicy(input.runtimeMode, input.guard)
+      : runtimeModeToTurnSandboxPolicy(input.runtimeMode),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -461,6 +517,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: EffectCodexSchema.V2ThreadStartParams__ServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly guarded?: boolean;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -468,6 +525,7 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    ...(input.guarded === true ? { guarded: true } : {}),
   });
 
   if (resumeThreadId === undefined) {
@@ -972,6 +1030,25 @@ export const makeCodexSessionRuntime = (
 
     yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
       Effect.gen(function* () {
+        // A held chat: the rules of this computer answer first (no card for a no).
+        if (options.guard !== undefined) {
+          const guard = options.guard;
+          const command = payload.command ?? "";
+          const verdict = yield* Effect.promise(() =>
+            guard
+              .check({ command, cwd: payload.cwd ?? options.cwd })
+              .catch(() => "decline" as const),
+          );
+          if (verdict !== "ask") {
+            yield* Effect.logInfo("codex.command-guard", {
+              threadId: options.threadId,
+              verdict,
+            });
+            return {
+              decision: verdict,
+            } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
+          }
+        }
         const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
         const turnId = TurnId.make(payload.turnId);
         const itemId = ProviderItemId.make(payload.itemId);
@@ -1231,6 +1308,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.guard ? { guarded: true } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -1295,6 +1373,7 @@ export const makeCodexSessionRuntime = (
             ...(options.appendDeveloperInstructions
               ? { appendDeveloperInstructions: options.appendDeveloperInstructions }
               : {}),
+            ...(options.guard ? { guard: options.guard } : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse)(
@@ -1366,7 +1445,11 @@ export const makeCodexSessionRuntime = (
             next.delete(requestId);
             return next;
           });
-          yield* Deferred.succeed(pending.decision, decision);
+          // A held chat: a push or an install asks each time, never "for the session".
+          yield* Deferred.succeed(
+            pending.decision,
+            options.guard !== undefined && decision === "acceptForSession" ? "accept" : decision,
+          );
           yield* emitEvent({
             kind: "notification",
             threadId: options.threadId,

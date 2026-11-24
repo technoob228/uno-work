@@ -4,17 +4,20 @@
  * person's cloud computers asks to start a chat on this one
  * (chatRequests/). Only waiting ones; what was decided is in Settings →
  * Computer. Start opens the new chat, Decline says no, "Read the brief" shows
- * what the cloud agent wrote.
+ * what the cloud agent wrote. "Don't ask again for this chat" with Start: that
+ * chat's next requests start by themselves (revoked in Settings → Computer).
  */
 import type { ChatRequestView } from "@t3tools/contracts";
 import { MessageSquarePlusIcon } from "lucide-react";
-import { memo } from "react";
+import { memo, useId, useState } from "react";
 
 import {
   folderLabel,
   harnessLabel,
   requestTitle,
   ownWaitingRequests,
+  TRUST_CHAT_HINT,
+  TRUST_CHAT_LABEL,
   waitsUntilLabel,
 } from "../../chatRequests/chatRequests.logic";
 import { openChatRequestBrief, useChatRequestsStore } from "../../chatRequests/chatRequestsStore";
@@ -22,6 +25,7 @@ import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { cn } from "../../lib/utils";
 import { useChatRequestActions } from "../chatRequests/useChatRequestActions";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 
 export const ChatRequestCards = memo(function ChatRequestCards(props: {
   readonly className?: string;
@@ -52,7 +56,7 @@ export const ChatRequestCards = memo(function ChatRequestCards(props: {
             key={request.id}
             request={request}
             busy={busy[request.id] === true}
-            onStart={() => void actions.start(request.id)}
+            onStart={(trustChat) => void actions.start(request.id, trustChat)}
             onDecline={() => void actions.decline(request.id)}
             onOpenBrief={() => {
               props.onOpened?.();
@@ -68,11 +72,12 @@ export const ChatRequestCards = memo(function ChatRequestCards(props: {
 function ChatRequestCard(props: {
   request: ChatRequestView;
   busy: boolean;
-  onStart: () => void;
+  onStart: (trustChat: boolean) => void;
   onDecline: () => void;
   onOpenBrief: () => void;
 }) {
   const { request } = props;
+  const [trustChat, setTrustChat] = useState(false);
   return (
     <li
       className="list-none rounded-lg border border-warning/40 bg-warning/5 px-2.5 py-2"
@@ -94,7 +99,7 @@ function ChatRequestCard(props: {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-1 pt-2 pl-6">
-        <Button size="xs" disabled={props.busy} onClick={props.onStart}>
+        <Button size="xs" disabled={props.busy} onClick={() => props.onStart(trustChat)}>
           Start
         </Button>
         <Button size="xs" variant="outline" disabled={props.busy} onClick={props.onDecline}>
@@ -104,6 +109,40 @@ function ChatRequestCard(props: {
           Read the brief
         </Button>
       </div>
+      <TrustChatToggle
+        checked={trustChat}
+        disabled={props.busy}
+        onCheckedChange={setTrustChat}
+        className="pt-1.5 pl-6"
+        testId={`chat-request-trust-${request.id}`}
+      />
     </li>
+  );
+}
+
+/** "Don't ask again for this chat": goes with Start, here and in the brief. */
+export function TrustChatToggle(props: {
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly onCheckedChange: (checked: boolean) => void;
+  readonly className?: string;
+  readonly testId?: string;
+}) {
+  const id = useId();
+  return (
+    <div className={cn("flex items-start gap-1.5", props.className)}>
+      <Checkbox
+        id={id}
+        checked={props.checked}
+        disabled={props.disabled === true}
+        onCheckedChange={(checked) => props.onCheckedChange(checked === true)}
+        className="mt-px"
+        data-testid={props.testId}
+      />
+      <label htmlFor={id} className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-snug">
+        <span className="text-foreground/85">{TRUST_CHAT_LABEL}</span>
+        {props.checked ? <span className="text-muted-foreground/80">{TRUST_CHAT_HINT}</span> : null}
+      </label>
+    </div>
   );
 }

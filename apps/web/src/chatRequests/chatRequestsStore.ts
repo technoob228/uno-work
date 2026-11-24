@@ -8,7 +8,12 @@
  * cloud computer there is nothing to show — `hostId` stays null, nothing is
  * asked, every count is 0.
  */
-import type { ChatRequestDecideInput, ChatRequestsState, EnvironmentId } from "@t3tools/contracts";
+import type {
+  ChatRequestChatKey,
+  ChatRequestDecideInput,
+  ChatRequestsState,
+  EnvironmentId,
+} from "@t3tools/contracts";
 import { create } from "zustand";
 
 import { demoHooks } from "../demo/demoFlag";
@@ -135,13 +140,19 @@ export type DecideOutcome =
 export async function decideChatRequest(
   id: string,
   decision: ChatRequestDecideInput["decision"],
+  /** Start, and from now on start that chat's requests without asking. */
+  trustChat = false,
 ): Promise<DecideOutcome> {
   const hostId = useChatRequestsStore.getState().hostId;
   const api = hostApi();
   if (!api || !hostId) return { ok: false, message: failureMessage(null) };
   setBusy(id, true);
   try {
-    const result = await api.chatRequests.decide({ id, decision });
+    const result = await api.chatRequests.decide({
+      id,
+      decision,
+      ...(trustChat && decision === "start" ? { trustChat: true } : {}),
+    });
     useChatRequestsStore.setState((store) => ({
       state: result.state,
       briefId: store.briefId === id ? null : store.briefId,
@@ -169,6 +180,42 @@ export async function setChatRequestsAllowed(allow: boolean): Promise<string | n
     return failureMessage(cause);
   } finally {
     setBusy("allow", false);
+  }
+}
+
+/** Settings → Computer → Cloud agents → "Stop cloud agents": off, and what runs now stops. */
+export async function stopCloudAgents(): Promise<string | null> {
+  const api = hostApi();
+  if (!api) return failureMessage(null);
+  setBusy("stop", true);
+  try {
+    const state = await api.chatRequests.setAllowed({ allow: false, stopRunning: true });
+    useChatRequestsStore.setState({ state });
+    return null;
+  } catch (cause) {
+    return failureMessage(cause);
+  } finally {
+    setBusy("stop", false);
+  }
+}
+
+/** Settings → Computer → Cloud agents → Revoke: that chat asks again. */
+export async function revokeChatRequestTrust(key: ChatRequestChatKey): Promise<string | null> {
+  const api = hostApi();
+  if (!api) return failureMessage(null);
+  const busyKey = `trust:${key.boxId ?? ""}:${key.threadId}`;
+  setBusy(busyKey, true);
+  try {
+    const state = await api.chatRequests.revokeTrust({
+      boxId: key.boxId,
+      threadId: key.threadId,
+    });
+    useChatRequestsStore.setState({ state });
+    return null;
+  } catch (cause) {
+    return failureMessage(cause);
+  } finally {
+    setBusy(busyKey, false);
   }
 }
 

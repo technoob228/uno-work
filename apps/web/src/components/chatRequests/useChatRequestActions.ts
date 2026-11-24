@@ -18,8 +18,8 @@ export function useChatRequestActions(options?: { readonly onDone?: () => void }
   const onDone = options?.onDone;
 
   const start = useCallback(
-    async (id: string) => {
-      const outcome = await decideChatRequest(id, "start");
+    async (id: string, trustChat = false) => {
+      const outcome = await decideChatRequest(id, "start", trustChat);
       if (!outcome.ok) {
         toastManager.add({
           type: "error",

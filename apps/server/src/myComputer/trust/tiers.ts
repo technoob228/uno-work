@@ -35,17 +35,30 @@ export interface TierResult {
   readonly tier: MyComputerTier;
   /** A few words for the person and the agent: "git push", "reading ~/.ssh". */
   readonly reason: string;
+  /**
+   * An `always` that is a git push or a package install, nothing more (Misha
+   * 23.11): a chat started at a cloud chat's request asks the person for it
+   * each time instead of being refused. Kept only while every `always` part of
+   * the line is one (`higher`).
+   */
+  readonly askable?: true;
 }
 
 const ORDER: Record<MyComputerTier, number> = { free: 0, chat: 1, ask: 2, always: 3, blocked: 4 };
 
-export const higher = (a: TierResult, b: TierResult): TierResult =>
-  ORDER[b.tier] > ORDER[a.tier] ? b : a;
+export const higher = (a: TierResult, b: TierResult): TierResult => {
+  if (ORDER[b.tier] !== ORDER[a.tier]) return ORDER[b.tier] > ORDER[a.tier] ? b : a;
+  // Same tier: the part that can't be asked for wins (`git push && ssh …` stays refused).
+  return a.askable === true && b.askable !== true ? b : a;
+};
 
 export const tierAtLeast = (tier: MyComputerTier, floor: MyComputerTier) =>
   ORDER[tier] >= ORDER[floor];
 
 const r = (tier: MyComputerTier, reason: string): TierResult => ({ tier, reason });
+/** A push or a package install: `always`, which a chat from the cloud may ask for. */
+const askable = (reason: string): TierResult => ({ tier: "always", reason, askable: true });
+const INSTALL_SUBS = new Set(["install", "i", "add"]);
 const FREE = r("free", "reading and checking");
 
 /** What a path costs: the computer's answer for each absolute raw path. */
@@ -66,6 +79,15 @@ export interface TierContext extends PathJudgeContext {
 
 export const BLOCKED_CONTAINERS =
   "Containers and virtual machines don't run on the person's computer (their rule). Run it on this cloud computer or a temporary Uno machine instead.";
+/**
+ * ssh and its kin from the person's computer: refused for every cloud agent
+ * (Misha 23.11, "no ssh to prod from it"). That computer holds the keys the
+ * prod gate is there to keep agents away from; a cloud agent reaches a
+ * server from its own cloud computer, through the gate.
+ */
+export const BLOCKED_OTHER_MACHINES =
+  "Agents from the cloud don't reach other machines through the person's computer (their rule: it would go around the gate to their servers). Connect from this cloud computer instead, or tell the person what to run.";
+const REMOTE_SHELLS = new Set(["ssh", "scp", "sftp", "mosh", "autossh", "sshpass", "ssh-copy-id"]);
 export const BLOCKED_FULL_RUN =
   "Full test runs and benchmarks don't run on the person's computer (their rule): run one package or one file there (a --filter or a path), or run the whole suite on this cloud computer.";
 
@@ -782,6 +804,7 @@ function programTier(
     return programTier(wrapped.rest, piped, state, ctx, depth);
   }
 
+  if (REMOTE_SHELLS.has(key)) return r("blocked", BLOCKED_OTHER_MACHINES);
   if (CONTAINER_PROGRAMS.has(key) || key.startsWith("qemu-system")) {
     return r("blocked", BLOCKED_CONTAINERS);
   }
@@ -1140,7 +1163,8 @@ function pipTier(args: ReadonlyArray<Word>): TierResult {
     ["list", "show", "freeze", "check", "--version", "help", "index", "inspect"].includes(sub)
   )
     return FREE;
-  if (["install", "uninstall", "download", "wheel"].includes(sub)) return r("always", `pip ${sub}`);
+  if (sub === "install") return askable("pip install");
+  if (["uninstall", "download", "wheel"].includes(sub)) return r("always", `pip ${sub}`);
   return r("ask", `pip ${sub}`);
 }
 
@@ -1306,7 +1330,11 @@ function packageManagerTier(
   if (sub === undefined)
     return key === "yarn" ? higher(r("chat", "yarn install"), where) : r("ask", key);
   if (/^(-v|--version|-h|--help|help)$/.test(sub)) return FREE;
-  if (global) return r("always", `installing globally (${key} ${sub} -g)`);
+  if (global) {
+    return INSTALL_SUBS.has(sub) || (key === "yarn" && INSTALL_SUBS.has(rest[1]?.text ?? ""))
+      ? askable(`installing globally (${key} ${sub} -g)`)
+      : r("always", `installing globally (${key} ${sub} -g)`);
+  }
   if (
     [
       "publish",
@@ -1520,9 +1548,10 @@ function gitTier(args: ReadonlyArray<Word>, state: State, ctx: TierContext): Tie
   const where = cwdTier(local, ctx);
   if (sub === undefined || sub === "--version") return higher(result, FREE);
   if (args[index]!.dynamic) return r("ask", "a git command known only when it runs");
-  if (sub === "push" || sub === "send-email" || sub === "svn" || sub === "p4")
+  if (sub === "push") return higher(result, askable("git push"));
+  if (sub === "send-email" || sub === "svn" || sub === "p4")
     return higher(result, r("always", `git ${sub}`));
-  if (sub === "lfs" && rest[0]?.text === "push") return r("always", "git lfs push");
+  if (sub === "lfs" && rest[0]?.text === "push") return askable("git lfs push");
   if (sub === "filter-branch" || sub === "filter-repo")
     return r("always", `git ${sub} (rewrites history)`);
   if (sub === "config") {
@@ -1707,7 +1736,8 @@ function cargoTier(args: ReadonlyArray<Word>, state: State, ctx: TierContext): T
       hasFlag(after, "--check") ? r("free", "cargo fmt --check") : r("chat", "cargo fmt"),
       where,
     );
-  if (["install", "uninstall", "publish", "login", "logout", "yank", "owner"].includes(sub))
+  if (sub === "install") return askable("cargo install");
+  if (["uninstall", "publish", "login", "logout", "yank", "owner"].includes(sub))
     return r("always", `cargo ${sub}`);
   if (
     [
@@ -1755,7 +1785,7 @@ function goTier(args: ReadonlyArray<Word>, state: State, ctx: TierContext): Tier
     (sub === "env" && !hasFlag(after, "-w", "-u"))
   )
     return higher(r("free", `go ${sub}`), where);
-  if (sub === "install") return r("always", "go install");
+  if (sub === "install") return askable("go install");
   if (["build", "run", "generate", "get", "mod", "fmt", "work", "clean"].includes(sub))
     return higher(r("chat", `go ${sub}`), where);
   return r("ask", `go ${sub}`);
@@ -1950,7 +1980,7 @@ function specificTier(
         key === "rsync" &&
         all.some((word) => /^[^/]*:/.test(word.text) || word.text.startsWith("rsync://"))
       ) {
-        return r("always", "copying to or from another machine");
+        return r("blocked", BLOCKED_OTHER_MACHINES);
       }
       if (all.length < 2) return r("ask", `${key} with one path`);
       const recursive =
@@ -2123,7 +2153,9 @@ function specificTier(
       ) {
         return FREE;
       }
-      return r("always", `brew ${sub}`);
+      return sub === "install" || sub === "reinstall" || sub === "upgrade"
+        ? askable(`brew ${sub}`)
+        : r("always", `brew ${sub}`);
     }
     case "pip":
     case "pip3":
@@ -2131,6 +2163,8 @@ function specificTier(
     case "uv": {
       const sub = args[0]?.text;
       if (sub === "pip") return pipTier(args.slice(1));
+      if ((sub === "tool" || sub === "python") && args[1]?.text === "install")
+        return askable(`uv ${sub} install`);
       if (sub === "tool" || sub === "self" || (sub === "python" && args[1]?.text === "install"))
         return r("always", `uv ${sub}`);
       if (sub === "publish") return r("always", "uv publish");

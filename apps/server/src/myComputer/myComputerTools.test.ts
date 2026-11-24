@@ -144,7 +144,14 @@ const refusal = async (name: string, deps: UnoWorkToolDeps, args: unknown = {}) 
 
 /** What reached the computer, the trust gate's own path checks left out. */
 const ops = (name: string) =>
-  fake.frames().filter((frame) => frame.op === name && !isTrustCheck(frame));
+  fake
+    .frames()
+    .filter(
+      (frame) =>
+        frame.op === name &&
+        !isTrustCheck(frame) &&
+        !String(frame.path ?? "").includes(".uno-work/chat-requests/"),
+    );
 const cautious = (deps: UnoWorkToolDeps) => ({
   ...deps,
   asksFirst: Effect.succeed({ name: "Scout" }),
@@ -319,6 +326,71 @@ describe("the gate", () => {
     expect(await refusal("my_computers_list", deps)).toContain("agent access");
     expect(await refusal("my_computer_run", deps, RUN)).toContain("agent access");
     expect(fake.requests).toEqual([]);
+  });
+
+  describe("on a computer where Uno Work runs (Misha 23.11)", () => {
+    const hostState = (allow: boolean, stoppedAt: string | null = null) =>
+      JSON.stringify({
+        v: 1,
+        allow,
+        active: 0,
+        limit: 3,
+        seenAt: "2026-11-23T10:00:00.000Z",
+        app: "uno-work",
+        ...(stoppedAt ? { stoppedAt } : {}),
+      });
+    const logLines = () =>
+      fake
+        .frames()
+        .filter(
+          (frame) =>
+            frame.op === "write" && String(frame.path).endsWith("chat-requests/commands.jsonl"),
+        )
+        .map((frame) => JSON.parse(Buffer.from(String(frame.data), "base64").toString("utf8")));
+
+    it("its switch off: nothing runs, and the refusal is in the log there", async () => {
+      fake.macState = hostState(false);
+      const { deps } = makeDeps({ runtimeMode: "full-access" });
+      expect(await refusal("my_computer_run", deps, RUN)).toContain("Cloud agents are off");
+      expect(ops("exec")).toEqual([]);
+      expect(logLines().map((line) => line.outcome)).toEqual(["refused"]);
+    });
+
+    it("Stop cloud agents pressed there: nothing runs, the agent hears why", async () => {
+      fake.macState = hostState(false, "2026-11-23T10:00:00.000Z");
+      const { deps } = makeDeps({ runtimeMode: "full-access" });
+      expect(await refusal("my_computer_run", deps, RUN)).toContain("Stop cloud agents");
+      expect(ops("exec")).toEqual([]);
+    });
+
+    it("its switch on: every command is in the log there before it runs", async () => {
+      fake.macState = hostState(true);
+      const { deps } = makeDeps({ runtimeMode: "full-access" });
+      await ok("my_computer_run", deps, RUN);
+      const frames = fake.frames();
+      const logged = frames.findIndex(
+        (frame) => frame.op === "write" && String(frame.path).endsWith("commands.jsonl"),
+      );
+      const ran = frames.findIndex((frame) => frame.op === "exec" && !isTrustCheck(frame));
+      expect(logged).toBeGreaterThanOrEqual(0);
+      expect(logged).toBeLessThan(ran);
+      expect(logLines()[0]).toMatchObject({ kind: "run", outcome: "ran", threadTitle: "Chat" });
+    });
+
+    it("a log line that can't be written there: the command doesn't run", async () => {
+      fake.macState = hostState(true);
+      const helper = fake.helper;
+      fake.helper = (frame, reply, channel) => {
+        if (frame.op === "write" && String(frame.path).endsWith("commands.jsonl")) {
+          reply({ type: "error", code: "disk_full", message: "no space left" });
+          return;
+        }
+        helper(frame, reply, channel);
+      };
+      const { deps } = makeDeps({ runtimeMode: "full-access" });
+      expect(await refusal("my_computer_run", deps, RUN)).toContain("into the log");
+      expect(ops("exec")).toEqual([]);
+    });
   });
 
   it("a Helper can't run or write in the person's name past the orchestrator rule", () => {

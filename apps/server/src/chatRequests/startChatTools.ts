@@ -86,7 +86,8 @@ export function startChatTools(kit: StartChatToolKit): ReadonlyArray<UnoWorkTool
         "Ask to start a chat on the person's own computer (their laptop, not this cloud computer), for work that has to happen there: their local apps, files, browser, devices.",
         "The person sees the request in Uno Work there (Needs you and the sidebar) and in their Telegram, with Start and Decline, and can read the whole brief. Nothing starts until they press Start; a request waits 2 hours at most; at most 2 at once per computer.",
         "Off by default: until the person turns it on in Uno Work on that computer (Settings → Computer), requests are refused at once; then don't ask again, tell them where to turn it on if it matters.",
-        "Start opens an ordinary Claude Code chat there with `brief` as its first message. That chat can't ssh to other machines, deploy, push, use sudo, install or read secrets: keep such steps for this chat or the person.",
+        "Start opens an ordinary Claude Code (or Codex, with provider: codex) chat there with `brief` as its first message, in this chat's mode. That chat can't ssh to other machines, deploy, use sudo or read secrets; a git push or an install there asks the person each time. Keep such steps for this chat or the person.",
+        'A chat the person trusts there ("Don\'t ask again for this chat" on its earlier request) starts without Start while their switch is on; the answer says so.',
         "The answer (started, declined, expired, refused) and then that chat's answers come back into this chat as notes from Uno Work — don't poll; end your turn or go on with other work. `my_computer_chat_request` reads a request's state when you need it.",
       ].join(" "),
       inputSchema: {
@@ -121,8 +122,9 @@ export function startChatTools(kit: StartChatToolKit): ReadonlyArray<UnoWorkTool
           },
           provider: {
             type: "string",
-            enum: ["claudeAgent"],
-            description: "Only Claude Code for now (the one held to the rules there).",
+            enum: ["claudeAgent", "codex"],
+            description:
+              "Claude Code (default) or Codex. Both are held to the rules there; Codex runs in its sandbox without network, so anything that needs the network asks the person.",
           },
           model: { type: "string", minLength: 1, maxLength: 200 },
           computer: computerArg,

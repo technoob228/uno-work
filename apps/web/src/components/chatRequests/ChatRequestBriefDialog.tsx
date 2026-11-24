@@ -6,6 +6,7 @@
  * AppSidebarLayout, so opening it from a popover or a sidebar row is the same.
  */
 import { BotIcon, ShieldCheckIcon } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import {
   HELD_TO_LINE,
@@ -17,6 +18,7 @@ import {
   waitsUntilLabel,
 } from "../../chatRequests/chatRequests.logic";
 import { closeChatRequestBrief, useChatRequestsStore } from "../../chatRequests/chatRequestsStore";
+import { TrustChatToggle } from "../inbox/ChatRequestCards";
 import { TeamBriefCaption, TeamBriefLimits } from "../team/TeamBrief";
 import { Button } from "../ui/button";
 import {
@@ -41,6 +43,9 @@ export function ChatRequestBriefDialog() {
   const actions = useChatRequestActions({ onDone: closeChatRequestBrief });
   const open = briefId !== null && request !== null;
   const waiting = request?.status === "waiting";
+  const [trustChat, setTrustChat] = useState(false);
+  // Each brief starts unticked.
+  useEffect(() => setTrustChat(false), [briefId]);
 
   return (
     <Dialog
@@ -93,7 +98,17 @@ export function ChatRequestBriefDialog() {
             </p>
           </DialogPanel>
           {waiting ? (
-            <DialogFooter>
+            <DialogFooter className="sm:items-center">
+              {/* A colleague's request (T51) follows its project's level instead. */}
+              {request.team ? null : (
+                <TrustChatToggle
+                  checked={trustChat}
+                  disabled={busy}
+                  onCheckedChange={setTrustChat}
+                  className="mr-auto max-w-xs"
+                  testId="chat-request-brief-trust"
+                />
+              )}
               <Button
                 variant="outline"
                 disabled={busy}
@@ -101,7 +116,10 @@ export function ChatRequestBriefDialog() {
               >
                 Decline
               </Button>
-              <Button disabled={busy} onClick={() => void actions.start(request.id)}>
+              <Button
+                disabled={busy}
+                onClick={() => void actions.start(request.id, trustChat && !request.team)}
+              >
                 Start
               </Button>
             </DialogFooter>

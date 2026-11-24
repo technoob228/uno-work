@@ -315,6 +315,7 @@ export interface WsRpcClient {
     readonly state: RpcUnaryNoArgMethod<typeof WS_METHODS.chatRequestsState>;
     readonly decide: RpcUnaryMethod<typeof WS_METHODS.chatRequestsDecide>;
     readonly setAllowed: RpcUnaryMethod<typeof WS_METHODS.chatRequestsSetAllowed>;
+    readonly revokeTrust: RpcUnaryMethod<typeof WS_METHODS.chatRequestsRevokeTrust>;
   };
   /** T51: what this computer does for the people of a project (contracts team.ts). */
   readonly team: {
@@ -860,6 +861,8 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.chatRequestsDecide](input)),
       setAllowed: (input) =>
         transport.request((client) => client[WS_METHODS.chatRequestsSetAllowed](input)),
+      revokeTrust: (input) =>
+        transport.request((client) => client[WS_METHODS.chatRequestsRevokeTrust](input)),
     },
     team: {
       state: () => transport.request((client) => client[WS_METHODS.teamState]({})),

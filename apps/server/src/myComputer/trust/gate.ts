@@ -4,6 +4,10 @@
  * refusal in the journal, the chat's Allow after an approval, the idle clock.
  * The `trust` hook of every `my_computer_*` and `workspace_*` tool.
  *
+ * With `macSide` (the `my_computer_*` tools): the person's switch on that
+ * computer is read first and every call goes into the log there before it
+ * runs (chatRequests/macSide.ts).
+ *
  * @module myComputer/trust/gate
  */
 import type { MyComputerActivityKind } from "@t3tools/contracts";
@@ -11,6 +15,13 @@ import { Effect } from "effect";
 
 import type { ComputerTrustGate, UnoWorkToolDeps, UnoWorkToolError } from "../../unoWork/tools.ts";
 import type { MyComputerShape } from "../MyComputerService.ts";
+import {
+  commandLine,
+  MAC_SIDE_REFUSALS,
+  macSideRefusal,
+  type MacSide,
+  type MacSideState,
+} from "../../chatRequests/macSide.ts";
 import { decideTrust, STOPPED_MESSAGE, type TrustOpKind } from "./decide.ts";
 import type { TrustOperation } from "./judge.ts";
 
@@ -25,6 +36,8 @@ export interface TrustGateInput {
   readonly extraAllowed?: ReadonlyArray<string> | undefined;
   readonly context: { readonly cautious: boolean; readonly outsideText: boolean };
   readonly fail: (message: string) => UnoWorkToolError;
+  /** The switch and the log on that computer (Uno Work there); absent: not asked. */
+  readonly macSide?: MacSide | undefined;
 }
 
 const opKind = (operation: TrustOperation): TrustOpKind =>
@@ -38,11 +51,35 @@ export function computerTrustGate(
   const threadTitle = deps.caller.threadTitle;
   return Effect.tryPromise({
     try: async (signal): Promise<ComputerTrustGate> => {
+      const mac = input.macSide;
+      let macState: MacSideState = { kind: "absent" };
+      /** A line in the log there, when Uno Work is there. */
+      const logThere = async (
+        outcome: "ran" | "allowed" | "refused",
+        tier: string,
+        reason?: string,
+      ) => {
+        if (mac === undefined || macState.kind !== "present") return;
+        await mac.log(
+          computer.id,
+          commandLine({
+            kind: input.journal.kind,
+            summary: input.journal.summary,
+            outcome,
+            tier,
+            reason,
+            threadTitle: threadTitle ?? "",
+            threadId,
+            at: new Date(),
+          }),
+        );
+      };
       const refuse = async (
         tier: ComputerTrustGate["trust"]["tier"],
         reason: string,
         message: string,
       ): Promise<ComputerTrustGate> => {
+        await logThere("refused", tier, reason).catch(() => undefined);
         await api.core.refused({
           computerId: computer.id,
           kind: input.journal.kind,
@@ -57,6 +94,19 @@ export function computerTrustGate(
       const paused = await api.trust.paused();
       if (paused?.reason === "stopped") {
         return refuse("ask", "agents stopped by the person", STOPPED_MESSAGE);
+      }
+      if (mac !== undefined) {
+        const read = await mac.state(computer.id).catch(() => null);
+        if (read === null) {
+          return refuse(
+            "ask",
+            "the switch there couldn't be read",
+            MAC_SIDE_REFUSALS.unchecked(computer.name),
+          );
+        }
+        macState = read;
+        const off = macSideRefusal(macState, computer.name);
+        if (off !== null) return refuse("ask", "cloud agents are off there", off);
       }
       const settings = await api.trust.settings();
       const judged = await api.judge.judge(
@@ -86,6 +136,17 @@ export function computerTrustGate(
         return refuse(judged.tier, judged.reason, decision.message);
       }
       if (decision.verdict === "run") {
+        const logged = await logThere("ran", judged.tier).then(
+          () => true,
+          () => false,
+        );
+        if (!logged) {
+          return refuse(
+            judged.tier,
+            "the log there couldn't be written",
+            MAC_SIDE_REFUSALS.unlogged(computer.name),
+          );
+        }
         await api.trust.touch();
         return { verdict: "run", trust };
       }
@@ -95,6 +156,7 @@ export function computerTrustGate(
         sensitive: decision.sensitive,
         trust,
         onApproved: Effect.promise(async () => {
+          await logThere("allowed", judged.tier, judged.reason).catch(() => undefined);
           if (decision.resume) await api.trust.resume();
           if (decision.grant) {
             await api.trust.grant({ threadId, threadTitle, computerId: computer.id });

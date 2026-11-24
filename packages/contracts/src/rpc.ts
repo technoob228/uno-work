@@ -403,6 +403,7 @@ import {
   ChatRequestDecideInput,
   ChatRequestDecideResult,
   ChatRequestsError,
+  ChatRequestsRevokeTrustInput,
   ChatRequestsSetAllowedInput,
   ChatRequestsState,
 } from "./chatRequests.ts";
@@ -611,6 +612,7 @@ export const WS_METHODS = {
   teamState: "team.state",
   teamRefresh: "team.refresh",
   teamLetAgentAnswer: "team.letAgentAnswer",
+  chatRequestsRevokeTrust: "chatRequests.revokeTrust",
 
   // Computers lifecycle (computers.ts): what a computer is for, its work, chats on it
   computersState: "computers.state",
@@ -1023,6 +1025,12 @@ export const WsTeamLetAgentAnswerRpc = Rpc.make(WS_METHODS.teamLetAgentAnswer, {
   payload: TeamLetAgentAnswerInput,
   success: TeamLetAgentAnswerResult,
   error: TeamError,
+});
+
+export const WsChatRequestsRevokeTrustRpc = Rpc.make(WS_METHODS.chatRequestsRevokeTrust, {
+  payload: ChatRequestsRevokeTrustInput,
+  success: ChatRequestsState,
+  error: ChatRequestsError,
 });
 
 export const WsComputersStateRpc = Rpc.make(WS_METHODS.computersState, {
@@ -2784,6 +2792,7 @@ export const WsChatRequestsRpcGroup = RpcGroup.make(
   WsChatRequestsStateRpc,
   WsChatRequestsDecideRpc,
   WsChatRequestsSetAllowedRpc,
+  WsChatRequestsRevokeTrustRpc,
 );
 
 /** T51: the team's methods (team.ts), apart from the main group for the same reason. */

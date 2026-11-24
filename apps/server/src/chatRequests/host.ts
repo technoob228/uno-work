@@ -13,6 +13,10 @@
  *   its first turn: CommandGuardPolicy) and opens it with the brief framed
  *   as the cloud agent's text (remoteChatHost.ts, so the sidebar says who
  *   started it);
+ * - a request from a chat the person trusts ("Don't ask again for this
+ *   chat") starts at once, as if Start were pressed; Settings revokes it;
+ * - "Stop cloud agents" turns the switch off and stops every command a cloud
+ *   agent runs here right now (`stopRunning`);
  * - a started chat is followed for a day (its state, its last answer);
  *   `state.json` is rewritten every minute; every request and decision goes
  *   into the journal.
@@ -34,6 +38,7 @@ import {
   type ChatRequestDecidedVia,
   type ChatRequestDecideInput,
   type ChatRequestDecideResult,
+  type ChatRequestsRevokeTrustInput,
   type ChatRequestsSetAllowedInput,
   type ChatRequestFile,
   type ChatRequestsState,
@@ -56,9 +61,10 @@ import {
   expireDue,
   followed,
   framedBrief,
-  GUARDED_PROVIDER,
   guard,
+  GUARDED_PROVIDER,
   guardReadOnly,
+  guardedProviderOf,
   hostStateOf,
   parseRemoteDecision,
   parseRequestFile,
@@ -69,6 +75,8 @@ import {
   started,
   stateOf,
   toFollow,
+  trust,
+  untrust,
   type HostRecord,
   type HostStore,
 } from "./hostLogic.ts";
@@ -81,6 +89,8 @@ import {
   readDecision,
   readHostStore,
   readIncoming,
+  readRemoteCommands,
+  trimRemoteCommands,
   removeDecision,
   removeIncoming,
   spoolPaths,
@@ -101,6 +111,8 @@ export interface HostDeps {
   readonly isOwnComputer: Effect.Effect<boolean>;
   /** What `state.json` says wrote it: `uno-work 0.0.190`. */
   readonly app: string;
+  /** "Stop cloud agents": stops what cloud agents run here right now; how many. */
+  readonly stopRunning?: () => Promise<number>;
   readonly nowMs?: () => number;
   /**
    * T51: mark a chat as holding outside text (T49 `OutsideThreads.mark`)
@@ -150,6 +162,9 @@ export interface HostShape {
   ) => Effect.Effect<ChatRequestDecideResult, ChatRequestsError>;
   readonly setAllowed: (
     input: ChatRequestsSetAllowedInput,
+  ) => Effect.Effect<ChatRequestsState, ChatRequestsError>;
+  readonly revokeTrust: (
+    input: ChatRequestsRevokeTrustInput,
   ) => Effect.Effect<ChatRequestsState, ChatRequestsError>;
   readonly paths: ReturnType<typeof spoolPaths>;
   readonly team: TeamHostShape;
@@ -229,6 +244,7 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
         if (!own && !store.records.some((entry) => entry.team !== undefined)) return;
         const before = store;
         const changed: Array<HostRecord> = [];
+        const autoStart: Array<HostRecord> = [];
         const now = nowMs();
         for (const id of own ? yield* io(() => listIncoming(paths)) : []) {
           const raw = yield* io(() => readIncoming(paths, id));
@@ -241,7 +257,9 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
           yield* io(() => removeIncoming(paths, id));
           if (admitted === null) continue;
           store = admitted.store;
-          changed.push(admitted.record);
+          // A trusted chat's: its answer is "started", not a "waiting" first.
+          if (admitted.autoStart) autoStart.push(admitted.record);
+          else changed.push(admitted.record);
           yield* journal(eventOf(admitted.record), admitted.record);
           yield* Effect.logInfo("chat request received").pipe(
             Effect.annotateLogs({
@@ -250,6 +268,27 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
               from: admitted.record.from.computerName,
             }),
           );
+        }
+        if (own && autoStart.length > 0) {
+          yield* persist(store, changed);
+          changed.length = 0;
+          for (const entry of autoStart) {
+            const startedOk = yield* decideNow(
+              { id: entry.id, decision: "start" },
+              "here",
+              true,
+            ).pipe(
+              Effect.as(true),
+              Effect.catchTag("ChatRequestsError", () => Effect.succeed(false)),
+            );
+            // Couldn't start by itself: it waits for the person's Start like any other.
+            if (!startedOk) {
+              const now2 = yield* io(() => readHostStore(stateDir));
+              const still = now2.records.find((candidate) => candidate.id === entry.id);
+              if (still) changed.push(still);
+            }
+          }
+          store = yield* io(() => readHostStore(stateDir));
         }
         if (own && (yield* io(() => listDecisions(paths))).length > 0) {
           // Saved first: a decision reads the store as it is now.
@@ -273,6 +312,7 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
           store = next.store;
           changed.push(next.record);
         }
+        yield* io(() => trimRemoteCommands(paths)).pipe(Effect.ignoreCause({ log: false }));
         const pruned = prune(store, now);
         if (pruned !== store) {
           store = pruned;
@@ -286,18 +326,32 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
       }),
     );
 
+    /** The view, with the last calls of cloud agents here (`commands.jsonl`). */
+    const viewWithCommands = (store: HostStore) =>
+      io(() => readRemoteCommands(paths)).pipe(
+        Effect.orElseSucceed(() => []),
+        Effect.map((commands) => ({ ...stateOf(store, nowMs()), commands })),
+      );
+
     const state: HostShape["state"] = io(() => readHostStore(stateDir)).pipe(
-      Effect.map((store) => stateOf(store, nowMs())),
+      Effect.flatMap(viewWithCommands),
     );
 
     /** Start / Decline, under the lock: from the app here, or from the person's Telegram. */
-    const decideNow = (input: ChatRequestDecideInput, via: ChatRequestDecidedVia) =>
+    const decideNow = (
+      input: ChatRequestDecideInput,
+      via: ChatRequestDecidedVia,
+      /** No press: a trusted chat's request, started as it arrived. */
+      auto = false,
+    ) =>
       Effect.gen(function* () {
         let store = yield* io(() => readHostStore(stateDir));
         const now = nowMs();
         const check = checkDecidable(store, input.id, now);
         if (!check.ok) return yield* fail(check.message);
-        const entry = check.record;
+        const entry = auto ? { ...check.record, trusted: true } : check.record;
+        const provider = guardedProviderOf(entry.provider);
+        if (provider === null) return yield* fail("That harness isn't held to the rules here.");
         if (input.decision === "decline") {
           const next = declined(store, entry.id, now, via);
           yield* persist(next.store, next.record ? [next.record] : [], true);
@@ -307,6 +361,11 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
         // Held to the rules before its first turn: the record says so first.
         const threadId = ThreadId.make(crypto.randomUUID());
         store = guard(store, threadId);
+        // "Don't ask again" is for the person's own cloud chats; a colleague's has its level (T51).
+        if (input.trustChat === true && !auto && entry.team === undefined) {
+          store = trust(store, entry, now);
+          yield* journal("trusted", entry);
+        }
         yield* io(() => writeHostStore(stateDir, store));
         const team = entry.team;
         if (team !== undefined) {
@@ -318,7 +377,7 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
             text: framedBrief(entry),
             title: entry.title,
             ...(entry.cwd ? { cwd: entry.cwd } : {}),
-            provider: GUARDED_PROVIDER,
+            provider,
             ...(entry.model ? { model: entry.model } : {}),
             // No wider than the chat that asked, nor than the project's chats here.
             // A colleague's: edits without asking at most, commands wait for a yes.
@@ -363,18 +422,29 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
           { threadId: result.threadId, title: result.title },
           nowMs(),
           via,
+          auto,
         );
         yield* persist(next.store, next.record ? [next.record] : [], true);
         if (next.record) {
           yield* journal(
-            team?.auto === true && via === "here" ? "auto-started" : "started",
+            auto || (team?.auto === true && via === "here") ? "auto-started" : "started",
             next.record,
           );
         }
         return { state: stateOf(next.store, nowMs()), threadId: result.threadId };
       });
 
-    const decide: HostShape["decide"] = (input) => lock.withPermits(1)(decideNow(input, "here"));
+    const decide: HostShape["decide"] = (input) =>
+      lock.withPermits(1)(
+        decideNow(input, "here").pipe(
+          Effect.flatMap((result) =>
+            io(() => readRemoteCommands(paths)).pipe(
+              Effect.orElseSucceed(() => []),
+              Effect.map((commands) => ({ ...result, state: { ...result.state, commands } })),
+            ),
+          ),
+        ),
+      );
 
     /**
      * Start / Decline the person pressed in Telegram: applied like the app's
@@ -406,11 +476,20 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
         Effect.gen(function* () {
           const store = yield* io(() => readHostStore(stateDir));
           const now = nowMs();
-          const next = setAllow(store, input.allow, now);
+          const stopping = input.stopRunning === true;
+          const next = setAllow(store, stopping ? false : input.allow, now, stopping);
+          // Saved first: the cloud side reads it before its next call.
           yield* persist(next.store, next.changed, true);
-          yield* journal(input.allow ? "allowed" : "turned-off", null);
+          if (stopping) {
+            const stopped = deps.stopRunning
+              ? yield* io(deps.stopRunning).pipe(Effect.orElseSucceed(() => 0))
+              : 0;
+            yield* journal("stopped", null, `${stopped} running command(s) stopped`);
+          } else {
+            yield* journal(input.allow ? "allowed" : "turned-off", null);
+          }
           for (const entry of next.changed) yield* journal("refused", entry);
-          return stateOf(next.store, now);
+          return yield* viewWithCommands(next.store);
         }),
       );
 
@@ -502,5 +581,29 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
       },
     };
 
-    return { tick: hostTick, state, decide, setAllowed, paths, team } satisfies HostShape;
+    const revokeTrust: HostShape["revokeTrust"] = (input) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          const store = yield* io(() => readHostStore(stateDir));
+          const next = untrust(store, input);
+          if (next === null) return yield* viewWithCommands(store);
+          yield* persist(next.store, [], true);
+          yield* journal(
+            "untrusted",
+            null,
+            `${next.chat.threadTitle} on ${next.chat.computerName}`,
+          );
+          return yield* viewWithCommands(next.store);
+        }),
+      );
+
+    return {
+      tick: hostTick,
+      state,
+      decide,
+      setAllowed,
+      revokeTrust,
+      paths,
+      team,
+    } satisfies HostShape;
   });

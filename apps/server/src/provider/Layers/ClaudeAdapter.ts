@@ -101,7 +101,11 @@ import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { describeClaudeSystemMessage } from "./claudeSystemNotices.ts";
 import { claudeWorkspaceOptions, joinNotes } from "../../myComputer/computerWorkspaceHarness.ts";
-import { claudeGuardHook, makeCommandGuard } from "../../chatRequests/commandGuard.ts";
+import {
+  claudeGuardHook,
+  makeCommandGuard,
+  type GuardAskPerson,
+} from "../../chatRequests/commandGuard.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -2840,9 +2844,61 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           } satisfies PermissionResult;
         }
 
+        const { decision, suggestions } = yield* askPersonEffect(context, {
+          toolName,
+          toolInput,
+          toolUseId: callbackOptions.toolUseID,
+          signal: callbackOptions.signal,
+          suggestions: callbackOptions.suggestions,
+        });
+
+        if (decision === "accept" || decision === "acceptForSession") {
+          return {
+            behavior: "allow",
+            updatedInput: toolInput,
+            ...(decision === "acceptForSession"
+              ? {
+                  updatedPermissions: toSessionPermissionUpdates(toolName, suggestions),
+                }
+              : {}),
+          } satisfies PermissionResult;
+        }
+
+        return {
+          behavior: "deny",
+          message:
+            decision === "cancel"
+              ? "User cancelled tool execution."
+              : "User declined tool execution.",
+        } satisfies PermissionResult;
+      });
+
+      /**
+       * An Allow card in this chat for one tool call, and the person's answer:
+       * the chat's own mode asking (canUseTool), or the rules of this computer
+       * asking for a push or an install whatever the mode (the guard hook).
+       */
+      const askPersonEffect = Effect.fn("askPerson")(function* (
+        context: ClaudeSessionContext,
+        ask: {
+          readonly toolName: string;
+          readonly toolInput: Record<string, unknown>;
+          readonly toolUseId: string | undefined;
+          readonly signal: AbortSignal;
+          readonly suggestions?: Parameters<CanUseTool>[2]["suggestions"];
+          /** The card's line instead of the tool's summary. */
+          readonly detail?: string;
+        },
+      ) {
+        const { toolName, toolInput } = ask;
+        const callbackOptions = {
+          toolUseID: ask.toolUseId,
+          signal: ask.signal,
+          suggestions: ask.suggestions,
+        };
         const requestId = ApprovalRequestId.make(yield* Random.nextUUIDv4);
         const requestType = classifyRequestType(toolName);
-        const detail = summarizeToolRequest(toolName, toolInput);
+        const detail = ask.detail ?? summarizeToolRequest(toolName, toolInput);
         const decisionDeferred = yield* Deferred.make<ProviderApprovalDecision>();
         const pendingApproval: PendingApproval = {
           requestType,
@@ -2924,32 +2980,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           },
         });
 
-        if (decision === "accept" || decision === "acceptForSession") {
-          return {
-            behavior: "allow",
-            updatedInput: toolInput,
-            ...(decision === "acceptForSession"
-              ? {
-                  updatedPermissions: toSessionPermissionUpdates(
-                    toolName,
-                    pendingApproval.suggestions,
-                  ),
-                }
-              : {}),
-          } satisfies PermissionResult;
-        }
-
-        return {
-          behavior: "deny",
-          message:
-            decision === "cancel"
-              ? "User cancelled tool execution."
-              : "User declined tool execution.",
-        } satisfies PermissionResult;
+        return { decision, suggestions: pendingApproval.suggestions };
       });
 
       const canUseTool: CanUseTool = (toolName, toolInput, callbackOptions) =>
         runPromise(canUseToolEffect(toolName, toolInput, callbackOptions));
+
+      /** A push or an install in a chat held to the rules: one Allow card, this call only. */
+      const guardAskPerson: GuardAskPerson = (ask) =>
+        runPromise(
+          Effect.gen(function* () {
+            const context = yield* Ref.get(contextRef);
+            if (!context) return "cancel" as const;
+            const { decision } = yield* askPersonEffect(context, {
+              toolName: ask.toolName,
+              toolInput:
+                ask.toolInput !== null && typeof ask.toolInput === "object"
+                  ? (ask.toolInput as Record<string, unknown>)
+                  : {},
+              toolUseId: ask.toolUseId,
+              signal: ask.signal,
+              detail: ask.detail,
+            });
+            // "For the session" isn't on offer here: the next push asks again.
+            return decision === "accept" || decision === "acceptForSession"
+              ? ("accept" as const)
+              : decision === "cancel"
+                ? ("cancel" as const)
+                : ("decline" as const);
+          }),
+        );
 
       const claudeBinaryPath = claudeSettings.binaryPath;
       const extraArgs = parseCliArgs(claudeSettings.launchArgs).flags;
@@ -3066,7 +3126,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               hooks: {
                 PreToolUse: [
                   {
-                    hooks: [claudeGuardHook(makeCommandGuard(input.commandGuard)) as HookCallback],
+                    hooks: [
+                      claudeGuardHook(
+                        makeCommandGuard(input.commandGuard),
+                        guardAskPerson,
+                      ) as HookCallback,
+                    ],
                   },
                 ],
               },

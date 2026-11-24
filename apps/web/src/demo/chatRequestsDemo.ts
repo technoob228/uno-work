@@ -34,6 +34,26 @@ export interface DemoRequest {
   threadState: string | null;
   /** T51: from a colleague in a project (teamCollabDemo.ts). */
   team?: ChatRequestTeam;
+  trusted?: boolean;
+}
+
+interface DemoTrusted {
+  boxId: number | null;
+  threadId: string;
+  computerName: string;
+  threadTitle: string;
+  since: string;
+}
+
+interface DemoCommand {
+  at: string;
+  kind: string;
+  summary: string;
+  outcome: "ran" | "allowed" | "refused";
+  tier: string;
+  reason?: string;
+  computerName: string;
+  threadTitle: string;
 }
 
 export interface ChatRequestsDemoHooks {
@@ -116,6 +136,23 @@ const requests: DemoRequest[] = [
     decidedVia: "telegram",
   },
   {
+    id: "cr-deck-2",
+    status: "started",
+    createdAt: at(-20 * HOUR),
+    expiresAt: at(-18 * HOUR),
+    decidedAt: at(-20 * HOUR),
+    from: { ...UNO_WORK, threadId: "w-deck", threadTitle: "Pitch deck numbers" },
+    cwd: "~/projects/pitch-deck",
+    provider: "codex",
+    title: "Export the deck as PDF",
+    gist: "Export the updated pitch deck as PDF",
+    brief: "Export the pitch deck from Keynote as PDF into ~/projects/pitch-deck/out.",
+    reason: null,
+    threadId: "m-deck",
+    threadState: "done",
+    trusted: true,
+  },
+  {
     id: "cr-downloads",
     status: "declined",
     createdAt: at(-30 * HOUR),
@@ -150,6 +187,67 @@ const requests: DemoRequest[] = [
 ];
 
 let allow = true;
+let stoppedAt: string | null = null;
+
+const trustedChats: DemoTrusted[] = [
+  {
+    ...UNO_WORK,
+    threadId: "w-deck",
+    threadTitle: "Pitch deck numbers",
+    since: at(-26 * HOUR + 3 * MIN),
+  },
+];
+
+/** The last calls of cloud agents on the MacBook, newest first. */
+const commands: DemoCommand[] = [
+  {
+    at: at(-2 * MIN),
+    kind: "run",
+    summary: "cd ~/projects/landing && git status --short",
+    outcome: "ran",
+    tier: "free",
+    computerName: "uno-work",
+    threadTitle: "Landing page for the bakery",
+  },
+  {
+    at: at(-3 * MIN),
+    kind: "read",
+    summary: "~/projects/landing/package.json",
+    outcome: "ran",
+    tier: "free",
+    computerName: "uno-work",
+    threadTitle: "Landing page for the bakery",
+  },
+  {
+    at: at(-9 * MIN),
+    kind: "run",
+    summary: "ssh misha@prod.bakery.example 'systemctl restart site'",
+    outcome: "refused",
+    tier: "blocked",
+    reason: "ssh to another machine",
+    computerName: "uno-work",
+    threadTitle: "Landing page for the bakery",
+  },
+  {
+    at: at(-14 * MIN),
+    kind: "run",
+    summary: "cd ~/projects/landing && git push origin order-form",
+    outcome: "allowed",
+    tier: "always",
+    reason: "git push",
+    computerName: "uno-work",
+    threadTitle: "Landing page for the bakery",
+  },
+  {
+    at: at(-40 * MIN),
+    kind: "write",
+    summary: "~/Documents/exports/orders-week-46.csv (18 KB)",
+    outcome: "ran",
+    tier: "chat",
+    computerName: "uno-work",
+    threadTitle: "Weekly sales report",
+  },
+];
 /** Waiting requests taken away by `hold()`, to arrive again. */
 const held: DemoRequest[] = [];
 
@@ -157,13 +255,21 @@ function snapshot() {
   const active =
     requests.filter((q) => q.status === "waiting").length +
     requests.filter((q) => q.status === "started" && q.threadState === "running").length;
+  const trustedKeys = new Set(trustedChats.map((chat) => `${chat.boxId}:${chat.threadId}`));
   return {
     allow,
     limit: 2,
     active,
     requests: requests
       .toSorted((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .map((q) => ({ ...q, from: { ...q.from } })),
+      .map((q) => ({
+        ...q,
+        from: { ...q.from },
+        ...(trustedKeys.has(`${q.from.boxId}:${q.from.threadId}`) ? { fromTrusted: true } : {}),
+      })),
+    trustedChats: trustedChats.map((chat) => ({ ...chat })),
+    commands: commands.map((line) => ({ ...line })),
+    stoppedAt,
   };
 }
 
@@ -182,8 +288,11 @@ export function installChatRequestsDemo(environmentId: string): void {
     },
     fresh() {
       allow = false;
+      stoppedAt = null;
       requests.length = 0;
       held.length = 0;
+      trustedChats.length = 0;
+      commands.length = 0;
     },
     arrive() {
       const next = held.shift();
@@ -207,12 +316,41 @@ export function answerChatRequestsRpc(
       return snapshot();
     case WS_METHODS.chatRequestsSetAllowed:
       allow = body.allow === true;
+      if (body.stopRunning === true) stoppedAt = at(0);
+      else if (allow) stoppedAt = null;
+      if (!allow) {
+        for (const q of requests) {
+          if (q.status !== "waiting") continue;
+          q.status = "refused";
+          q.decidedAt = at(0);
+          q.reason = "Cloud agents were turned off here.";
+        }
+      }
       return snapshot();
+    case WS_METHODS.chatRequestsRevokeTrust: {
+      const index = trustedChats.findIndex(
+        (chat) => chat.threadId === body.threadId && chat.boxId === (body.boxId ?? null),
+      );
+      if (index >= 0) trustedChats.splice(index, 1);
+      return snapshot();
+    }
     case WS_METHODS.chatRequestsDecide: {
       const request = requests.find((q) => q.id === body.id && q.status === "waiting");
       if (!request) return { state: snapshot(), threadId: null };
       request.decidedAt = at(0);
       if (body.decision === "start") {
+        if (
+          body.trustChat === true &&
+          !trustedChats.some((chat) => chat.threadId === request.from.threadId)
+        ) {
+          trustedChats.unshift({
+            boxId: request.from.boxId,
+            threadId: request.from.threadId,
+            computerName: request.from.computerName,
+            threadTitle: request.from.threadTitle,
+            since: at(0),
+          });
+        }
         request.status = "started";
         request.threadId = hooks.startChat({
           title: request.title,
