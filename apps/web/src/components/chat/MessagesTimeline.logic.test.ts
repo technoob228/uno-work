@@ -5,12 +5,15 @@ import {
   computeMessageDurationStart,
   deriveAgentTalkFold,
   deriveMessagesTimelineRows,
+  deriveSettledTurnFolds,
   displayChangedFilePath,
+  lastFoldableRowIndex,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   workingReassurance,
   holdsOutsideText,
 } from "./MessagesTimeline.logic";
+import { buildStreamFrames, STREAM_TURN_ID } from "./MessagesTimeline.stream.fixture";
 
 describe("workingReassurance", () => {
   it('says nothing at first and "still working" once the wait is long', () => {
@@ -760,5 +763,61 @@ describe("the agents' talk after the answer to the person (Misha 13.11)", () => 
     expect(deriveAgentTalkFold(entries.slice(0, 2))).toBeNull();
     expect(deriveAgentTalkFold([entries[0]!, entries[2]!, entries[3]!])).toBeNull();
     expect(deriveAgentTalkFold([...entries, agentTalkMessage("again", 40, "user")])).toBeNull();
+  });
+});
+
+describe("a turn written on screen (T67)", () => {
+  const frames = buildStreamFrames();
+  const done = frames.find((frame) => frame.label === "done")!;
+  const derive = (input: { heldOpenTurnIds?: ReadonlySet<never>; keepWorkingSlot?: boolean }) =>
+    deriveMessagesTimelineRows({
+      timelineEntries: done.timelineEntries,
+      completionDividerBeforeEntryId: "a-answer",
+      isWorking: false,
+      activeTurnStartedAt: done.latestTurn.startedAt,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+      latestTurn: done.latestTurn,
+      ...input,
+    });
+
+  it("folds a finished turn for a chat opened later", () => {
+    const rows = derive({});
+    expect(rows.map((row) => row.id)).toEqual([
+      "u-0",
+      "a-0",
+      "u-1",
+      `turn-fold:${STREAM_TURN_ID}`,
+      "a-answer",
+    ]);
+  });
+
+  it("keeps a watched turn as it was: no fold, no divider pushed in above the answer", () => {
+    const rows = derive({ heldOpenTurnIds: new Set([STREAM_TURN_ID as never]) });
+    expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
+    expect(rows.map((row) => row.id)).toContain("a-note");
+    const answer = rows.find((row) => row.id === "a-answer");
+    expect(answer).toMatchObject({ kind: "message", showCompletionDivider: false });
+  });
+
+  it("keeps the wait line's room, empty, once the turn ends", () => {
+    expect(derive({}).at(-1)?.kind).not.toBe("working");
+    expect(derive({ keepWorkingSlot: true }).at(-1)).toMatchObject({
+      kind: "working",
+      id: "working-indicator-row",
+      idle: true,
+    });
+  });
+
+  it("knows the last row a held turn would fold, to fold it once that is out of view", () => {
+    const fold = deriveSettledTurnFolds({
+      timelineEntries: done.timelineEntries,
+      latestTurn: done.latestTurn,
+    }).get(STREAM_TURN_ID);
+    expect(fold).toBeDefined();
+    const rows = derive({ heldOpenTurnIds: new Set([STREAM_TURN_ID as never]) });
+    const last = lastFoldableRowIndex(rows, fold!);
+    expect(rows[last]?.id).toBe("w-run-1");
+    expect(lastFoldableRowIndex(rows, { hiddenEntryIds: new Set() })).toBe(-1);
   });
 });
