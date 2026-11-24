@@ -38,6 +38,7 @@
 import * as NodeOS from "node:os";
 import { access, constants as fsConstants } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
+import * as nodePath from "node:path";
 
 import {
   ClaudeSettings,
@@ -61,6 +62,7 @@ import {
   type ProviderAuthStatusInput,
   type ProviderAuthSubmitCodeInput,
   ProviderDriverKind,
+  type ProviderInstallHelp,
   type ProviderInstallJobStatus,
   type ProviderInstallStartInput,
   type ProviderInstallStartResult,
@@ -88,7 +90,21 @@ import {
 } from "../providerAccounts.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import { isInstallableDriver, resolveInstallPlan } from "./harnessInstallCommands.ts";
+import {
+  isInstallableDriver,
+  isNpmInstalledDriver,
+  resolveInstallPlan,
+} from "./harnessInstallCommands.ts";
+import {
+  installManagedNode,
+  locateNpm,
+  ManagedNodeError,
+  managedNodeDownload,
+  npmMissingHelp,
+  withDirFirstOnPath,
+  withManagedNodeOnPath,
+  type NpmRuntime,
+} from "./npmRuntime.ts";
 import { SetupJobStore, type SetupJobRecord } from "./harnessJobs.ts";
 import {
   type HarnessProcessHandle,
@@ -174,7 +190,15 @@ export interface HarnessSetupRunnerDeps {
   readonly platform: NodeJS.Platform;
   readonly homeDir: string;
   readonly baseEnv: NodeJS.ProcessEnv;
-  readonly probeNpmGlobalWritable: () => Promise<boolean>;
+  /** A working npm on this machine (PATH, then the usual Node folders, then ~/.uno/node). */
+  readonly locateNpm: () => Promise<NpmRuntime | null>;
+  /**
+   * Brings Node.js into ~/.uno/node when the machine has none. Absent where
+   * Uno Work brings no Node (Windows): the card tells what to install.
+   */
+  readonly installManagedNode?: (log: (line: string) => void) => Promise<void>;
+  /** Homebrew is there (the card then offers a brew command). */
+  readonly brewAvailable?: () => Promise<boolean>;
   readonly probeUvAvailable: () => Promise<boolean>;
   /** Binary + environment the daemon itself uses to run that driver's CLI (or that instance's). */
   readonly resolveCliEnvironment: (
@@ -245,6 +269,7 @@ export const GROK_LOGIN_ARGS: ReadonlyArray<string> = ["login", "--device-auth"]
 
 interface InstallExtra {
   readonly command: string;
+  readonly help?: ProviderInstallHelp;
 }
 
 interface AuthExtra {
@@ -381,21 +406,49 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
 
   const runInstall = async (job: SetupJobRecord<InstallExtra>) => {
     const driver = job.driver as ProviderDriverKind;
-    const needsNpm =
-      driver === "codex" ||
-      driver === "claudeAgent" ||
-      driver === "gemini" ||
-      driver === "grok" ||
-      driver === "opencode";
-    const [npmGlobalWritable, uvAvailable] = await Promise.all([
-      needsNpm ? deps.probeNpmGlobalWritable().catch(() => false) : Promise.resolve(true),
+    const needsNpm = isNpmInstalledDriver(driver);
+    const [located, uvAvailable] = await Promise.all([
+      needsNpm ? deps.locateNpm().catch(() => null) : Promise.resolve(null),
       driver === "hermes" ? deps.probeUvAvailable().catch(() => false) : Promise.resolve(true),
     ]);
+    let npm = located;
+    if (needsNpm && !npm) {
+      // No Node.js here (T64): bring Uno Work's own, or say what to do by hand.
+      installs.markRunning(job.jobId);
+      let managedError: ManagedNodeError | undefined;
+      if (deps.installManagedNode) {
+        installs.updateExtra(job.jobId, { command: "Get Node.js for Uno Work" });
+        try {
+          await deps.installManagedNode((line) => installs.appendLog(job.jobId, line));
+          npm = await deps.locateNpm().catch(() => null);
+        } catch (error) {
+          managedError =
+            error instanceof ManagedNodeError
+              ? error
+              : new ManagedNodeError(describeError(error), "unpack");
+          installs.appendLog(job.jobId, `${managedError.message}\n`);
+        }
+      }
+      if (!npm) {
+        const help = npmMissingHelp({
+          driver,
+          platform: deps.platform,
+          brewAvailable: await (deps.brewAvailable?.() ?? Promise.resolve(false)).catch(
+            () => false,
+          ),
+          ...(managedError ? { managedNodeError: managedError } : {}),
+        });
+        installs.updateExtra(job.jobId, { help });
+        installs.finish(job.jobId, { state: "failed", error: help.title });
+        return;
+      }
+    }
     const plan = resolveInstallPlan(driver, {
       platform: deps.platform,
       homeDir: deps.homeDir,
-      npmGlobalWritable,
+      npmGlobalWritable: npm?.globalWritable ?? true,
       uvAvailable,
+      ...(npm ? { npmBin: npm.npm } : {}),
     });
     if (plan.kind === "unsupported") {
       installs.finish(job.jobId, { state: "failed", error: plan.reason });
@@ -410,7 +463,12 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       jobId: job.jobId,
       command: plan.command,
       args: plan.args,
-      env: { ...withUserLocalBinOnPath(deps.baseEnv, deps.homeDir), ...plan.env },
+      env: {
+        ...(npm?.binDir
+          ? withDirFirstOnPath(withUserLocalBinOnPath(deps.baseEnv, deps.homeDir), npm.binDir)
+          : withUserLocalBinOnPath(deps.baseEnv, deps.homeDir)),
+        ...plan.env,
+      },
       timeoutMs: installTimeoutMs,
     });
 
@@ -462,6 +520,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       log: job.log,
       command: job.extra.command,
       ...(job.error ? { error: job.error } : {}),
+      ...(job.state === "failed" && job.extra.help ? { help: job.extra.help } : {}),
     };
   };
 
@@ -982,7 +1041,9 @@ function describeError(error: unknown): string {
 
 function describeSpawnError(command: string, error: Error): string {
   const code = (error as NodeJS.ErrnoException).code;
-  if (code === "ENOENT") return `"${command}" was not found on this machine's PATH.`;
+  if (code === "ENOENT") {
+    return `Uno Work could not find "${nodePath.basename(command)}" on this computer.`;
+  }
   return `Could not start "${command}": ${error.message}`;
 }
 
@@ -1034,40 +1095,6 @@ const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 const decodeGeminiSettings = Schema.decodeUnknownSync(GeminiSettings);
 const decodeGrokSettings = Schema.decodeUnknownSync(GrokSettings);
 
-const isWritableDir = (dir: string): Promise<boolean> =>
-  access(dir, fsConstants.W_OK).then(
-    () => true,
-    () => false,
-  );
-
-/** `npm prefix -g` then a write check on its `lib/node_modules`. */
-const probeNpmGlobalWritable = (env: NodeJS.ProcessEnv): Promise<boolean> =>
-  new Promise((resolve) => {
-    const child = nodeSpawn("npm", ["prefix", "-g"], {
-      env,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-      shell: process.platform === "win32",
-    });
-    let output = "";
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    child.on("error", () => resolve(false));
-    child.on("close", (code) => {
-      const prefix = output.trim();
-      if (code !== 0 || prefix.length === 0) {
-        resolve(false);
-        return;
-      }
-      const modulesDir = process.platform === "win32" ? prefix : `${prefix}/lib/node_modules`;
-      void isWritableDir(modulesDir).then((writable) =>
-        writable ? resolve(true) : isWritableDir(prefix).then(resolve),
-      );
-    });
-  });
-
 const probeCommandAvailable = (command: string, env: NodeJS.ProcessEnv): Promise<boolean> =>
   new Promise((resolve) => {
     const child = nodeSpawn(command, ["--version"], {
@@ -1090,7 +1117,10 @@ export const HarnessSetupLive = Layer.effect(
     const runPromise = Effect.runPromiseWith(runtimeContext);
     const runFork = Effect.runForkWith(runtimeContext);
     const homeDir = NodeOS.homedir();
-    const baseEnv = withUserLocalBinOnPath(process.env, homeDir);
+    const baseEnv = withManagedNodeOnPath(withUserLocalBinOnPath(process.env, homeDir), homeDir);
+    // Two agents installed at once share one Node.js download.
+    let managedNodeInstall: Promise<void> | null = null;
+    const managedNodeAvailable = managedNodeDownload(process.platform, process.arch) !== null;
 
     const resolveCliEnvironment = (driver: ProviderAuthDriver, instanceId?: ProviderInstanceId) =>
       Effect.gen(function* () {
@@ -1215,7 +1245,32 @@ export const HarnessSetupLive = Layer.effect(
       platform: process.platform,
       homeDir,
       baseEnv,
-      probeNpmGlobalWritable: () => probeNpmGlobalWritable(baseEnv),
+      locateNpm: () => locateNpm({ env: baseEnv, homeDir, platform: process.platform }),
+      ...(managedNodeAvailable
+        ? {
+            installManagedNode: (log: (line: string) => void) => {
+              managedNodeInstall ??= installManagedNode(
+                { homeDir, platform: process.platform, arch: process.arch },
+                log,
+              ).finally(() => {
+                managedNodeInstall = null;
+              });
+              return managedNodeInstall;
+            },
+          }
+        : {}),
+      brewAvailable: async () => {
+        for (const brew of ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]) {
+          if (
+            await access(brew, fsConstants.X_OK).then(
+              () => true,
+              () => false,
+            )
+          )
+            return true;
+        }
+        return false;
+      },
       probeUvAvailable: () => probeCommandAvailable("uv", baseEnv),
       resolveCliEnvironment: (driver, instanceId) =>
         runPromise(resolveCliEnvironment(driver, instanceId)),

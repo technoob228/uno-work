@@ -36,7 +36,10 @@ import {
   selfUpdateStartRouteLayer,
   selfUpdateStatusRouteLayer,
 } from "./selfUpdateHttp.ts";
+import * as OS from "node:os";
+
 import { fixPath } from "./os-jank.ts";
+import { withManagedNodeOnPath } from "./provider/setup/npmRuntime.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
 import { unoWorkRouteLayers } from "./unoWork/http.ts";
 import { remoteComputersRouteLayers } from "./remoteComputers/http.ts";
@@ -857,6 +860,9 @@ export const makeServerLayer = Layer.unwrap(
     const config = yield* ServerConfig;
 
     fixPath();
+    // Uno Work's own Node.js (~/.uno/node, brought by Install when the
+    // machine has none) last on PATH, before any provider copies the env.
+    process.env.PATH = withManagedNodeOnPath(process.env, OS.homedir()).PATH;
     // Before any layer can start a child: the flag must not reach them.
     takeWatchdogExitFlagAtStart();
 

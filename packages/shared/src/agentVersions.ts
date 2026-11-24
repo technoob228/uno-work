@@ -31,3 +31,14 @@ export interface AgentUpdateStatus {
   /** Installed by npm. Anything else updates itself or by what installed it. */
   readonly managed: boolean;
 }
+
+/** Google's own repository of Gemini CLI: the card links it (T64). */
+export const GEMINI_CLI_REPO_URL = "https://github.com/google-gemini/gemini-cli";
+
+/**
+ * Gemini CLI's status when Google Antigravity is on the Mac but Gemini CLI is
+ * not (T64, 24.11): Antigravity has its own agent in Uno Work (T66), so the
+ * Gemini CLI card points there instead of asking for a second install.
+ */
+export const GEMINI_ANTIGRAVITY_DETECTED_MESSAGE =
+  "Use Antigravity — it's already on this Mac. Gemini CLI is a separate install, only needed if you want it too.";

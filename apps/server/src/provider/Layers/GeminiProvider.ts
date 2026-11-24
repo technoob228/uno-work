@@ -9,7 +9,12 @@
  *
  * @module GeminiProvider
  */
+import { access } from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
+
 import type { GeminiSettings, ModelCapabilities, ServerProviderModel } from "@t3tools/contracts";
+import { GEMINI_ANTIGRAVITY_DETECTED_MESSAGE } from "@t3tools/shared/agentVersions";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import { Effect, Option, Result } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -105,6 +110,28 @@ export function buildInitialGeminiSnapshot(config: GeminiSettings): ServerProvid
   });
 }
 
+/**
+ * Google Antigravity on this Mac (/Applications or ~/Applications): the
+ * Gemini CLI card then points to the Antigravity agent (T64).
+ */
+export async function detectAntigravityApp(
+  platform: NodeJS.Platform = process.platform,
+  home: string = NodeOS.homedir(),
+): Promise<boolean> {
+  if (platform !== "darwin") return false;
+  for (const dir of ["/Applications", NodePath.join(home, "Applications")]) {
+    if (
+      await access(NodePath.join(dir, "Antigravity.app")).then(
+        () => true,
+        () => false,
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const runVersion = (command: string, env: NodeJS.ProcessEnv) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -143,6 +170,8 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   readonly config: GeminiSettings;
   readonly environment: NodeJS.ProcessEnv;
   readonly discoveredModels: () => ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  /** Google Antigravity (the IDE) is on this machine; default: looks in the Applications folders. */
+  readonly detectAntigravity?: () => Promise<boolean>;
 }): Effect.fn.Return<ServerProviderDraft, never, ChildProcessSpawner.ChildProcessSpawner> {
   const { config } = input;
   const checkedAt = new Date().toISOString();
@@ -170,12 +199,17 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
     resolveHarnessExecutable(config.binaryPath.trim() || "gemini", input.environment),
   );
   if (!executable.ok) {
+    const antigravity = yield* Effect.promise(() =>
+      (input.detectAntigravity ?? detectAntigravityApp)().catch(() => false),
+    );
     return build({
       installed: false,
       version: null,
       status: "error",
       auth: { status: "unknown" },
-      message: "Gemini CLI (`gemini`) is not installed or not on PATH.",
+      message: antigravity
+        ? GEMINI_ANTIGRAVITY_DETECTED_MESSAGE
+        : "Gemini CLI (`gemini`) is not installed or not on PATH.",
     });
   }
 
