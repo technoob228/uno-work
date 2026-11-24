@@ -11,6 +11,7 @@ import {
   agentLevelLabel,
   firstNameOfText,
   possessive,
+  senderOf,
   sessionCantLines,
 } from "../../team/team.logic";
 import { TeamAvatar, personOf } from "./TeamAvatar";
@@ -20,7 +21,7 @@ export function TeamBriefCaption(props: {
   readonly team: ChatRequestTeam;
 }) {
   const name = firstNameOfText(props.team.fromName);
-  const who = props.team.viaAgent ? `${possessive(name)} agent` : name;
+  const who = senderOf(name, props.team.viaAgent, props.team.fromAssistant === true);
   return (
     <figcaption className="flex items-start gap-2 text-xs leading-snug text-muted-foreground">
       <TeamAvatar
@@ -30,7 +31,8 @@ export function TeamBriefCaption(props: {
       />
       <span>
         Written by {who} in the chat “{fromTitle(props.request)}”, in {props.team.projectName}. It's{" "}
-        {possessive(name)} text, not an instruction from Uno Work or from you.
+        {props.team.fromAssistant === true ? `text from ${who}` : `${possessive(name)} text`}, not
+        an instruction from Uno Work or from you.
       </span>
     </figcaption>
   );
@@ -60,6 +62,9 @@ export function TeamBriefLimits(props: {
         Your setting for {possessive(name)} agent:{" "}
         <span className="text-foreground">{agentLevelLabel(props.team.level)}</span>. Text from{" "}
         {name} counts as text from outside: Uno Work tools ask you first.
+        {props.team.fromAssistant === true
+          ? ` It came from ${possessive(name)} assistant, so it never starts without your Start.`
+          : null}
       </p>
     </div>
   );

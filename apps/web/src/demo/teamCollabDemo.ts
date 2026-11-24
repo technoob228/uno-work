@@ -210,6 +210,22 @@ if (!TEAM_DEMO_AS_ANDREI) {
       chat_id: SHARED_CHAT,
       created_at: at(-1 * MIN),
     }),
+    // Misha 23.11: from Olga's Uno assistant computer — marked, never on its own.
+    inboxItem({
+      id: 304,
+      from: person(OLGA),
+      kind: "session",
+      via_agent: true,
+      from_assistant: true,
+      from_chat_title: "Mail from the print shop",
+      title: "Update the menu PDF prices",
+      gist: "The print shop sent new prices; update menu.pdf in the landing and send it back.",
+      body: "The print shop sent new prices for the bread menu. Update menu.pdf in the landing with them and send the file back.",
+      level: "tasks",
+      level_now: "tasks",
+      auto: false,
+      created_at: at(-30 * 1000),
+    }),
   );
 }
 

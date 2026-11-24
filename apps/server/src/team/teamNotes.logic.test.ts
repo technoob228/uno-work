@@ -19,6 +19,7 @@ const request = (over: Partial<TeamRequest> = {}): TeamRequest => ({
   to: { userId: 3, email: "misha@example.com", username: "Misha" },
   kind: "session",
   viaAgent: true,
+  fromAssistant: false,
   fromChatTitle: "Checkout",
   fromThread: "thread-1",
   title: "Fix the order form",
@@ -100,6 +101,33 @@ describe("the question brief", () => {
     expect(brief).toContain("level for their agents here is Answer questions");
     expect(brief).toContain("This chat only reads");
     expect(brief).toContain("Never put keys");
+  });
+});
+
+describe("from a colleague's assistant computer", () => {
+  it("the question brief names the assistant and never says on its own", () => {
+    const brief = questionBrief({
+      fromName: "Andrei",
+      fromAssistant: true,
+      projectName: "Shop",
+      fromChatTitle: "Mail",
+      title: "Where is the price?",
+      body: "",
+      auto: true,
+      nonce: "n",
+    });
+    expect(brief).toContain("Andrei's assistant (a colleague in Shop");
+    expect(brief).toContain("the person here pressed Let my agent answer");
+    expect(brief).not.toContain("so you answer on your own");
+  });
+
+  it("Telegram says Andrei's assistant, not Andrei", () => {
+    const copy = telegramCopy(request({ fromAssistant: true }), {
+      computerName: "MacBook",
+      buttons: true,
+    });
+    expect(copy.text).toContain("Andrei's assistant (a colleague in Shop) asks to start");
+    expect(copy.text).toContain("(text of Andrei's assistant)");
   });
 });
 

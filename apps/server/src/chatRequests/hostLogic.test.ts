@@ -320,5 +320,10 @@ describe("T51: a colleague's session request", () => {
     expect(text.match(/<\/outside_input_n1>/g)).toHaveLength(1);
     const pressed = framedBrief(take(EMPTY_HOST_STORE, teamFile(42)).record, "n2");
     expect(pressed).toContain("the person here pressed Start");
+    // From their assistant computer: named so, and never "on its own".
+    const viaAssistant = take(EMPTY_HOST_STORE, teamFile(43, { auto: true, fromAssistant: true }));
+    const asst = framedBrief(viaAssistant.record, "n3");
+    expect(asst).toContain("at the request of Andrei's assistant (a colleague in Shop");
+    expect(asst).toContain("the person here pressed Start");
   });
 });

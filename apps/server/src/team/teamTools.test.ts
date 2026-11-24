@@ -55,7 +55,6 @@ describe("the cloud's refusals, as one line", () => {
     [409, "TOO_MANY_ROUNDS", "chat_call_person"],
     [409, "TOO_MANY_SESSIONS", "TOO_MANY_SESSIONS:"],
     [429, "REQUEST_RATE_LIMITED", "RATE_LIMIT:"],
-    [403, "ASSISTANT_COMPUTER_NO_TEAM_REQUESTS", "assistant's computer"],
     [409, "PERSON_NOT_ENABLED", "isn't on for andrei"],
     [400, "CANNOT_TARGET_SELF", "CANNOT_TARGET_SELF:"],
     [413, "BODY_TOO_LARGE", "BODY_TOO_LARGE:"],

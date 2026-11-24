@@ -8,7 +8,7 @@
  */
 import { memo } from "react";
 
-import { AGENT_LEVELS, possessive, type TeamOutsideText } from "../../team/team.logic";
+import { AGENT_LEVELS, outsideWho, type TeamOutsideText } from "../../team/team.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { TeamAvatar, personOf } from "./TeamAvatar";
 
@@ -17,8 +17,8 @@ export const TeamAgentMessage = memo(function TeamAgentMessage(props: {
 }) {
   const { parsed } = props;
   const level = AGENT_LEVELS.find((item) => item.id === parsed.level) ?? null;
-  const agent = parsed.kind === "agent";
-  const who = agent ? `${possessive(parsed.name)} agent` : parsed.name;
+  const agent = parsed.kind !== "colleague";
+  const who = outsideWho(parsed);
   // No id in the line: the face's tone goes by the name.
   const toneId = [...parsed.name].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return (

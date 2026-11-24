@@ -76,6 +76,12 @@ export interface TeamRequest {
   readonly to: TeamPerson;
   readonly kind: TeamRequestKind;
   readonly viaAgent: boolean;
+  /**
+   * Sent from the sender's Uno assistant computer (the server sets it from
+   * the machine's role). Shown as "<name>'s assistant"; never starts or
+   * answers anything here without the person's button.
+   */
+  readonly fromAssistant: boolean;
   readonly fromChatTitle: string;
   /** `from_thread`: the asking chat on the sender's computer (outgoing only). */
   readonly fromThread: string | null;
@@ -159,6 +165,11 @@ export function personName(person: TeamPerson | null): string {
   const email = person?.email?.trim();
   if (email) return email.split("@")[0] || email;
   return "A colleague";
+}
+
+/** Who asked when an agent did: "Misha's agent", or "Misha's assistant" from his assistant computer. */
+export function agentOf(name: string, fromAssistant: boolean): string {
+  return `${name}'s ${fromAssistant ? "assistant" : "agent"}`;
 }
 
 /** `GET /api/v1/work/team/projects` → the projects this person is in. */
@@ -258,7 +269,8 @@ export function parseRequest(raw: unknown): TeamRequest | null {
     from: parsePerson(request["from"]) ?? { userId: 0, email: null, username: null },
     to: parsePerson(request["to"]) ?? { userId: 0, email: null, username: null },
     kind: kind as TeamRequestKind,
-    viaAgent: request["via_agent"] === true,
+    viaAgent: request["via_agent"] === true || request["from_assistant"] === true,
+    fromAssistant: request["from_assistant"] === true,
     fromChatTitle: text(request["from_chat_title"]),
     fromThread: textOrNull(request["from_thread"]),
     title: text(request["title"]),
@@ -266,7 +278,8 @@ export function parseRequest(raw: unknown): TeamRequest | null {
     body: text(request["body"]),
     level,
     levelNow: isLevel(request["level_now"]) ? request["level_now"] : level,
-    auto: request["auto"] === true,
+    // Never on its own from an assistant computer, whatever the cloud says.
+    auto: request["auto"] === true && request["from_assistant"] !== true,
     status: status as TeamRequestStatus,
     reason: textOrNull(request["reason"]),
     answer: textOrNull(request["answer"]),
