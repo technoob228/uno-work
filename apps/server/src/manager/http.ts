@@ -971,6 +971,7 @@ const TelegramGroupAccessPayload = Schema.Struct({
   chatId: Schema.String,
   members: ManagerTelegramGroupMembers,
   userIds: Schema.optional(Schema.Array(Schema.String)),
+  hearAll: Schema.optional(Schema.Boolean),
 });
 
 /**

@@ -598,6 +598,8 @@ export function setTelegramGroupAccess(
     readonly chatId: string;
     readonly members: ManagerTelegramGroupMembers;
     readonly userIds?: ReadonlyArray<string>;
+    /** Uno's bot only: also hear the group's messages that don't call it. */
+    readonly hearAll?: boolean;
   },
 ): Promise<ManagerTelegramGroupsResult> {
   const { environmentId, ...body } = input;

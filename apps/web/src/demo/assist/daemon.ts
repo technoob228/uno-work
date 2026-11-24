@@ -301,6 +301,8 @@ interface DemoGroup {
   userIds: ReadonlyArray<string>;
   /** Added to the bot's chats (false: the owner called the bot there, waiting). */
   added: boolean;
+  /** Uno's bot: "Hear everything" on (T57, 23.11). */
+  hearAll?: boolean;
   readonly people: ReadonlyArray<{
     readonly id: string;
     readonly name: string;
@@ -371,16 +373,22 @@ function demoGroupsResult(linked: boolean): ManagerTelegramGroupsResult {
       pending: [],
     };
   }
+  const shared = tgbot === "shared-on";
+  // Uno's bot (23.11): groups the owner added the bot to are added at once;
+  // Group Privacy is still on, so "Hear everything" waits for it.
+  if (shared) for (const group of demoGroups) group.added = true;
   return {
     supported: true,
-    bot: tgbot === "shared-on" ? "shared" : "own",
-    botUsername: tgbot === "shared-on" ? "uno_work_bot" : "uno_team_bot",
+    bot: shared ? "shared" : "own",
+    ...(shared ? { readsAll: false } : {}),
+    botUsername: shared ? "uno_work_bot" : "uno_team_bot",
     groups: demoGroups
       .filter((group) => group.added)
       .map((group) => ({
         chatId: group.chatId,
         title: group.title,
         members: group.members,
+        ...(shared && group.hearAll === true ? { hearAll: true } : {}),
         people: group.people.map((person) => {
           const owner = person.id === DEMO_OWNER.id;
           const selected = !owner && group.userIds.includes(person.id);
@@ -936,6 +944,7 @@ export function daemonHandlers(hooks: DaemonHooks): HttpHandler[] {
         group.members = members;
       }
       if (Array.isArray(body.userIds)) group.userIds = body.userIds.map(String);
+      if (typeof body.hearAll === "boolean") group.hearAll = body.hearAll;
       group.added = true;
       return json(demoGroupsResult(true));
     }),

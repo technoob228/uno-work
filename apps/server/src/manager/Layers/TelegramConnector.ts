@@ -138,6 +138,7 @@ import {
   SHARED_GROUPS_INFO_TTL_MS,
   sharedGroupAccessBody,
   sharedGroupAccessPushes,
+  sharedGroupsToAdd,
   type SharedGroupsInfo,
   withSharedGroups,
 } from "../telegramSharedGroups.ts";
@@ -406,6 +407,8 @@ export interface ManagerTelegramServiceShape {
     readonly chatId: string;
     readonly members: ManagerTelegramGroupMembers;
     readonly userIds?: ReadonlyArray<string> | undefined;
+    /** Uno's bot only: also hear the group's messages that don't call it. */
+    readonly hearAll?: boolean | undefined;
   }) => Effect.Effect<
     | { readonly ok: true; readonly result: ManagerTelegramGroupsResult }
     | { readonly ok: false; readonly error: string }
@@ -897,6 +900,35 @@ const makeTelegramConnector = Effect.gen(function* () {
         next.delete(projectId);
         return next;
       });
+    });
+
+  /**
+   * Decision 23.11: groups of Uno's assistant bot the owner added the bot to
+   * (or called it in) are added at once with "only me" — no Add button. Reads
+   * the row afresh; returns the saved config, or null when nothing was added.
+   */
+  const addSharedGroups = (projectId: ProjectId, chatIds: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const row = yield* readRow(projectId);
+      if (row === null || !isAssistantBotRelay(row.botToken)) return null;
+      let next = row;
+      for (const chatId of chatIds) {
+        if (next.allowedChatIds.includes(chatId)) continue;
+        const change = withTelegramGroupAccess(next, { chatId, members: "owners", userIds: [] });
+        if (change.ok) next = change.config;
+      }
+      if (next === row) return null;
+      const saved = yield* connectorRepository
+        .upsert({ projectId, kind: "telegram", config: next, updatedAt: new Date().toISOString() })
+        .pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+        );
+      if (!saved) return null;
+      yield* Effect.logInfo("telegram groups of Uno's bot added").pipe(
+        Effect.annotateLogs({ projectId, chatIds }),
+      );
+      return next;
     });
 
   /**
@@ -1827,7 +1859,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       const chatId = String(chatIdNumber);
       const routedRows = yield* routedRowsOf(projectId);
-      const access = mergeRoutedAccess(
+      let access = mergeRoutedAccess(
         config,
         routedRows.map((row) => row.config),
       );
@@ -2800,7 +2832,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       const userId = answer.user?.id;
       if (userId === undefined || answer.user?.is_bot === true) return;
       const routedRows = yield* routedRowsOf(projectId);
-      const access = mergeRoutedAccess(
+      let access = mergeRoutedAccess(
         config,
         routedRows.map((row) => row.config),
       );
@@ -2860,7 +2892,7 @@ const makeTelegramConnector = Effect.gen(function* () {
       }
       const chatId = String(chatIdNumber);
       const routedRows = yield* routedRowsOf(projectId);
-      const access = mergeRoutedAccess(
+      let access = mergeRoutedAccess(
         config,
         routedRows.map((row) => row.config),
       );
@@ -3326,7 +3358,7 @@ const makeTelegramConnector = Effect.gen(function* () {
         }
       }
       // Chats linked to the routed assistants are this bot's chats too.
-      const access = mergeRoutedAccess(
+      let access = mergeRoutedAccess(
         config,
         routedRows.map((row) => row.config),
       );
@@ -3356,6 +3388,22 @@ const makeTelegramConnector = Effect.gen(function* () {
         message.from?.id !== undefined &&
         message.from.is_bot !== true &&
         telegramOwnerUserIds(access).has(String(message.from.id));
+      // Uno's assistant bot delivers a group only when the console has groups
+      // on for this account; the owner there is answered at once (23.11).
+      if (
+        inGroup &&
+        fromOwner &&
+        isAssistantBotRelay(config.botToken) &&
+        !access.allowedChatIds.includes(chatId)
+      ) {
+        const added = yield* addSharedGroups(projectId, [chatId]);
+        if (added !== null) {
+          access = mergeRoutedAccess(
+            added,
+            routedRows.map((row) => row.config),
+          );
+        }
+      }
       if (
         inGroup &&
         message.from !== undefined &&
@@ -4280,6 +4328,25 @@ const makeTelegramConnector = Effect.gen(function* () {
           supported,
         });
         if (info === null || !supported) return { ...view, bot: "shared" as const };
+        // Groups the owner added the bot to are added here at once (23.11);
+        // asked afresh first, so a group just removed here isn't re-added.
+        if (sharedGroupsToAdd(row, info).length > 0) {
+          const fresh = yield* sharedGroupsInfo(projectId, row.botToken, { fresh: true });
+          const added =
+            fresh === null
+              ? null
+              : yield* addSharedGroups(projectId, sharedGroupsToAdd(row, fresh));
+          if (added !== null && fresh !== null) {
+            const next = telegramGroupsView({
+              config: added,
+              seen: directory.connectors[projectId] ?? [],
+              botUsername,
+              supported,
+            });
+            yield* syncSharedGroups(projectId, added, fresh);
+            return withSharedGroups(next, fresh);
+          }
+        }
         yield* syncSharedGroups(projectId, row, info);
         return withSharedGroups(view, info);
       }
@@ -4317,7 +4384,11 @@ const makeTelegramConnector = Effect.gen(function* () {
             "Groups need the assistant's own bot: Uno's shared bot only answers in private chats.",
         };
       }
-      const change = withTelegramGroupAccess(row, input);
+      // "Hear everything" is a choice for Uno's bot only (the console filters).
+      const change = withTelegramGroupAccess(
+        row,
+        isAssistantBotRelay(row.botToken) ? input : { ...input, hearAll: undefined },
+      );
       if (!change.ok) return { ok: false as const, error: change.error };
       const saved = yield* connectorRepository
         .upsert({
@@ -4336,6 +4407,7 @@ const makeTelegramConnector = Effect.gen(function* () {
           projectId: input.projectId,
           chatId: input.chatId,
           members: input.members,
+          hearAll: input.hearAll,
         }),
       );
       return { ok: true as const, result: yield* groups(input.projectId) };

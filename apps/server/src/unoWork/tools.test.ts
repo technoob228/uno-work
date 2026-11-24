@@ -2830,6 +2830,37 @@ describe("assistant_groups: who the assistant answers in Telegram groups", () =>
     expect(calls).toEqual([]);
   });
 
+  it("hear_all (Uno's bot, 23.11): keeps who is heard, asks first, own bot refused", async () => {
+    expect(toolLevel(tool("assistant_groups"), { group: "Family", hear_all: true })).toBe(
+      "sensitive",
+    );
+    const base = makeDeps().deps;
+    const calls: Array<Record<string, unknown>> = [];
+    const shared = { ...view(), bot: "shared" as const, readsAll: false };
+    const deps: UnoWorkToolDeps = {
+      ...base,
+      assistant: {
+        status: Effect.die("not used"),
+        openTelegram: Effect.succeed({ ok: true }),
+        groups: {
+          list: Effect.succeed(shared),
+          set: (input) =>
+            Effect.sync(() => {
+              calls.push(input);
+              return { ok: true as const, result: shared };
+            }),
+        },
+      },
+    };
+    const value = valueOf(await run("assistant_groups", deps, { group: "Family", hear_all: true }));
+    expect(calls).toEqual([{ chatId: FAMILY, members: "selected", userIds: ["7"], hearAll: true }]);
+    expect(String(value.hears)).toMatch(/once Uno's bot can read whole groups/);
+    const own = withGroups(makeDeps().deps);
+    const refused = await run("assistant_groups", own.deps, { group: "Family", hear_all: true });
+    expect(refused._tag).toBe("Failure");
+    expect(own.calls).toEqual([]);
+  });
+
   it("without the wiring: an error that points at Settings", async () => {
     const result = await run("assistant_groups", makeDeps().deps, {});
     expect(result._tag).toBe("Failure");

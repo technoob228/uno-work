@@ -614,6 +614,7 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
         readonly chatId: string;
         readonly members: ManagerTelegramGroupMembers;
         readonly userIds?: ReadonlyArray<string>;
+        readonly hearAll?: boolean;
       }) => Effect.Effect<
         | { readonly ok: true; readonly result: ManagerTelegramGroupsResult }
         | { readonly ok: false; readonly error: string }
@@ -691,7 +692,7 @@ export type AssistantTelegramStep =
 
 /** Whether an `assistant_groups` call changes something (then it asks first). */
 export function assistantGroupsChanges(args: Record<string, unknown>): boolean {
-  return ["access", "people", "add", "remove"].some((key) => args[key] !== undefined);
+  return ["access", "people", "add", "remove", "hear_all"].some((key) => args[key] !== undefined);
 }
 
 const GROUP_ACCESS_WORD: Readonly<Record<ManagerTelegramGroupMembers, string>> = {
@@ -710,6 +711,7 @@ export function assistantGroupsAnswer(view: ManagerTelegramGroupsResult) {
       group: group.title ?? group.chatId,
       chatId: group.chatId,
       access: GROUP_ACCESS_WORD[group.members],
+      ...(group.hearAll === true ? { hearsEverything: true } : {}),
       people: group.people.map((person) => ({
         name: person.name,
         ...(person.username !== null ? { username: `@${person.username}` } : {}),
@@ -732,10 +734,14 @@ export function assistantGroupsAnswer(view: ManagerTelegramGroupsResult) {
               `Waiting to be added: ${view.pending.map((group) => group.title ?? group.chatId).join(", ")}. Say who the assistant should listen to there: only you, people you pick, or everyone.`,
             ]
           : [],
-    // Uno's assistant bot keeps Group Privacy on: only calls reach it.
+    // Uno's assistant bot: calls always reach it; the rest of a group only
+    // where the owner turned on "hear everything" and Telegram sends it.
     ...(view.bot === "shared"
       ? {
-          hears: `In groups the assistant hears only messages that mention ${bot} or reply to its messages, not its name without @.`,
+          hears:
+            view.readsAll === true
+              ? `In groups the assistant hears messages that mention ${bot} or reply to it; in groups with hear_all on, it also follows the rest of the conversation.`
+              : `In groups the assistant hears only messages that mention ${bot} or reply to its messages, not its name without @. hear_all can be turned on now; it starts working once Uno's bot can read whole groups.`,
         }
       : {}),
   };
@@ -4000,7 +4006,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "assistant_groups",
     group: "person",
     description:
-      'Who the assistant answers in Telegram groups (its own bot, see assistant_connect). Without arguments: the groups its bot answers in — name, who is heard ("me": only the owner; "selected": the owner and the people picked; "everyone": every member) and the people seen writing there — plus groups waiting to be added. To change one: `group` (its name or chat id) and `access`; with "selected" pass `people` (the full list: names, @usernames or Telegram user ids as listed), or `add` / `remove` to change the list by a few people. A waiting group is added by the same call. Changing always asks the person first. People other than the owner talk in a chat of their own: the bot\'s commands don\'t work for them and anything the assistant does there waits for the owner\'s OK. To get a group listed, the person adds the bot to the group and calls it there once ("@bot hi"). A person shows up in a group\'s list after they write to the bot there. For the bot to hear its name without @, the person turns off Group Privacy in @BotFather (Bot Settings).',
+      'Who the assistant answers in Telegram groups (its own bot, see assistant_connect, or Uno\'s bot). Without arguments: the groups its bot answers in — name, who is heard ("me": only the owner; "selected": the owner and the people picked; "everyone": every member) and the people seen writing there — plus groups waiting to be added. To change one: `group` (its name or chat id) and `access`; with "selected" pass `people` (the full list: names, @usernames or Telegram user ids as listed), or `add` / `remove` to change the list by a few people. A waiting group is added by the same call. Changing always asks the person first. People other than the owner talk in a chat of their own: the bot\'s commands don\'t work for them and anything the assistant does there waits for the owner\'s OK. To get a group listed, the person adds the bot to the group and calls it there once ("@bot hi"). A person shows up in a group\'s list after they write to the bot there. For the bot to hear its name without @, the person turns off Group Privacy in @BotFather (Bot Settings). Through Uno\'s bot, `hear_all: true` lets the assistant follow the whole conversation of that group (the owner\'s choice per group).',
     inputSchema: {
       type: "object",
       properties: {
@@ -4032,6 +4038,11 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           items: { type: "string", minLength: 1 },
           maxItems: 50,
           description: "People to take off the selected list.",
+        },
+        hear_all: {
+          type: "boolean",
+          description:
+            "Uno's bot only: true — the assistant also gets the group's messages that don't call it; false — only calls.",
         },
       },
       additionalProperties: false,
@@ -4087,8 +4098,12 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         const people = current?.people ?? [];
         const asked = (key: string) => strings(args, key);
         const explicit = str(args, "access");
-        const members: ManagerTelegramGroupMembers =
-          explicit === "me"
+        const onlyHearAll = ["access", "people", "add", "remove"].every(
+          (key) => args[key] === undefined,
+        );
+        const members: ManagerTelegramGroupMembers = onlyHearAll
+          ? (current?.members ?? "owners")
+          : explicit === "me"
             ? "owners"
             : explicit === "everyone"
               ? "anyone"
@@ -4113,7 +4128,18 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             'With selected, name at least one person in `people`. For nobody but the owner use access: "me".',
           );
         }
-        const outcome = yield* groups.set({ chatId: target.chatId, members, userIds });
+        const hearAll = typeof args["hear_all"] === "boolean" ? args["hear_all"] : undefined;
+        if (hearAll !== undefined && view.bot !== "shared") {
+          return yield* toolError(
+            "hear_all is for Uno's bot. With the assistant's own bot, turn off Group Privacy in @BotFather instead.",
+          );
+        }
+        const outcome = yield* groups.set({
+          chatId: target.chatId,
+          members,
+          userIds,
+          ...(hearAll === undefined ? {} : { hearAll }),
+        });
         if (!outcome.ok) return yield* toolError(outcome.error);
         return { changed: target.title ?? target.chatId, ...assistantGroupsAnswer(outcome.result) };
       }),

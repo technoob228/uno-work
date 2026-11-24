@@ -4,6 +4,7 @@ import {
   decodeSharedGroupsInfo,
   sharedGroupAccessBody,
   sharedGroupAccessPushes,
+  sharedGroupsToAdd,
   withSharedGroups,
 } from "./telegramSharedGroups.ts";
 
@@ -16,12 +17,14 @@ describe("decodeSharedGroupsInfo", () => {
       decodeSharedGroupsInfo({
         enabled: true,
         bot_username: "uno_work_bot",
+        reads_all: false,
         groups: [
           {
             chat_id: FAMILY,
             title: "  Family\n chat ",
             members: "selected",
             user_ids: ["7", 8, "x", "-1"],
+            hear_all: true,
             host: true,
             accounts: 2,
           },
@@ -33,16 +36,26 @@ describe("decodeSharedGroupsInfo", () => {
     ).toEqual({
       enabled: true,
       botUsername: "uno_work_bot",
+      readsAll: false,
       groups: [
         {
           chatId: FAMILY,
           title: "Family chat",
           members: "selected",
           userIds: ["7", "8"],
+          hearAll: true,
           host: true,
           accounts: 2,
         },
-        { chatId: CLUB, title: null, members: "owners", userIds: [], host: false, accounts: 1 },
+        {
+          chatId: CLUB,
+          title: null,
+          members: "owners",
+          userIds: [],
+          hearAll: false,
+          host: false,
+          accounts: 1,
+        },
       ],
     });
   });
@@ -51,6 +64,7 @@ describe("decodeSharedGroupsInfo", () => {
     expect(decodeSharedGroupsInfo({ enabled: false, groups: [{ chat_id: FAMILY }] })).toEqual({
       enabled: false,
       botUsername: null,
+      readsAll: null,
       groups: [],
     });
   });
@@ -67,6 +81,7 @@ describe("withSharedGroups", () => {
     const info = decodeSharedGroupsInfo({
       enabled: true,
       bot_username: "uno_work_bot",
+      reads_all: true,
       groups: [
         { chat_id: FAMILY, title: "Family" },
         { chat_id: CLUB, title: "Book club" },
@@ -85,6 +100,7 @@ describe("withSharedGroups", () => {
     expect(view).toEqual({
       supported: true,
       bot: "shared",
+      readsAll: true,
       botUsername: "uno_work_bot",
       groups: [{ chatId: FAMILY, title: "Family", members: "owners", people: [] }],
       pending: [
@@ -133,13 +149,14 @@ describe("sharedGroupAccessPushes", () => {
       info,
     );
     expect(pushes).toEqual([
-      { chatId: FAMILY, members: "selected", userIds: ["7"] },
-      { chatId: CLUB, members: "anyone", userIds: [] },
+      { chatId: FAMILY, members: "selected", userIds: ["7"], hearAll: false },
+      { chatId: CLUB, members: "anyone", userIds: [], hearAll: false },
     ]);
     expect(sharedGroupAccessBody(pushes[0]!)).toEqual({
       chat_id: FAMILY,
       members: "selected",
       user_ids: ["7"],
+      hear_all: false,
     });
   });
 
@@ -158,6 +175,43 @@ describe("sharedGroupAccessPushes", () => {
         { allowedChatIds: [CLUB], groupMembers: "anyone-with-approval" },
         info,
       ),
-    ).toEqual([{ chatId: CLUB, members: "anyone", userIds: [] }]);
+    ).toEqual([{ chatId: CLUB, members: "anyone", userIds: [], hearAll: false }]);
+  });
+
+  it("hear everything is part of the rule (23.11)", () => {
+    expect(
+      sharedGroupAccessPushes(
+        {
+          allowedChatIds: [FAMILY, CLUB],
+          groups: {
+            [FAMILY]: { members: "selected", userIds: ["7", "8"], hearAll: true },
+            [CLUB]: { members: "owners", userIds: [] },
+          },
+        },
+        info,
+      ),
+    ).toEqual([{ chatId: FAMILY, members: "selected", userIds: ["7", "8"], hearAll: true }]);
+    const heard = decodeSharedGroupsInfo({
+      enabled: true,
+      groups: [{ chat_id: CLUB, members: "owners", hear_all: true }],
+    })!;
+    // Turned off here: pushed as off.
+    expect(
+      sharedGroupAccessPushes(
+        { allowedChatIds: [CLUB], groups: { [CLUB]: { members: "owners", userIds: [] } } },
+        heard,
+      ),
+    ).toEqual([{ chatId: CLUB, members: "owners", userIds: [], hearAll: false }]);
+  });
+});
+
+describe("sharedGroupsToAdd", () => {
+  it("groups the console bound here that aren't added yet (23.11)", () => {
+    const info = decodeSharedGroupsInfo({
+      enabled: true,
+      groups: [{ chat_id: FAMILY }, { chat_id: CLUB }],
+    })!;
+    expect(sharedGroupsToAdd({ allowedChatIds: ["777", FAMILY] }, info)).toEqual([CLUB]);
+    expect(sharedGroupsToAdd({ allowedChatIds: [] }, { ...info, enabled: false })).toEqual([]);
   });
 });
