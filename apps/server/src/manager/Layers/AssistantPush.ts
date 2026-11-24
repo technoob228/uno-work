@@ -462,13 +462,11 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
     /** A handler deleted or archived: the chats it handled go back to the person. */
     const releaseHandledBy = (handlerThreadId: string) =>
       Effect.gen(function* () {
-        const snapshot = yield* projections
-          .getShellSnapshot()
-          .pipe(
-            Effect.orElseSucceed(() => ({
-              threads: [] as ReadonlyArray<OrchestrationThreadShell>,
-            })),
-          );
+        const snapshot = yield* projections.getShellSnapshot().pipe(
+          Effect.orElseSucceed(() => ({
+            threads: [] as ReadonlyArray<OrchestrationThreadShell>,
+          })),
+        );
         for (const chat of snapshot.threads) {
           if (chat.handler?.threadId !== handlerThreadId) continue;
           yield* engine
