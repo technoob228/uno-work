@@ -256,7 +256,7 @@ export const ClientSettingsSchema = Schema.Struct({
   computerSpaces: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // How the sidebar groups chats since 0.0.138 (Misha 16.10): project,
   // status, computer in the order picked; [] — one list, newest first. Null —
-  // not chosen yet: `sidebarInboxMode` above decides (status or project).
+  // not chosen yet: by status (T65, Misha 24.11; the web's resolveGroupLevels).
   sidebarGroupLevels: Schema.NullOr(Schema.Array(SidebarGroupLevel)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

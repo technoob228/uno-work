@@ -581,7 +581,7 @@ export function GeneralSettingsPanel({
 } = {}) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
-  const sidebarLevels = resolveGroupLevels(settings.sidebarGroupLevels, settings.sidebarInboxMode);
+  const sidebarLevels = resolveGroupLevels(settings.sidebarGroupLevels);
   // Labs "Sidebar view menu": Sidebar view / Chats from all computers / Group
   // by computer; off — the 0.0.137 "Inbox sidebar" switch.
   const sidebarViewMenu = useFeatureFlag("sidebarViewMenu");

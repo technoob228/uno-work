@@ -39,8 +39,6 @@ const barProps = {
   onShowSnoozed: () => {},
   onOpenArchive: () => {},
   onClearFilters: () => {},
-  onNewChat: () => {},
-  newChatShortcutLabel: "⌘N",
 };
 
 afterEach(() => {
@@ -83,11 +81,7 @@ describe("sidebar Add a project button", () => {
     const screen = await render(
       <TooltipProvider>
         <ul style={{ width: 200 }}>
-          <LegacySidebarDChatsBar
-            onNewChat={() => {}}
-            newChatShortcutLabel={null}
-            onAddProject={() => {}}
-          />
+          <LegacySidebarDChatsBar onAddProject={() => {}} />
           <SidebarAddProjectButton onAddProject={() => {}} />
         </ul>
       </TooltipProvider>,

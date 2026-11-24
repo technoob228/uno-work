@@ -424,6 +424,15 @@ export function needsYouPlace(needsYou: number): {
 }
 
 /**
+ * The Inbox icon's name (always in the places row since T65): "Inbox", and
+ * how many things wait for the person when some do.
+ */
+export function inboxLabel(needsYou: number): string {
+  const { count } = needsYouPlace(needsYou);
+  return count > 0 ? `Inbox · ${count} waiting for you` : "Inbox";
+}
+
+/**
  * Which names in the places row on top can grow out of their icons (Misha
  * 29.10, "denser + a tooltip"): each one alone, beside every other item at
  * rest, gaps included. A name that doesn't fit isn't cut ("Fil…"): that icon

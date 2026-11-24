@@ -12,7 +12,8 @@
  * submenus with checkboxes; Only mine (Misha 28.10) hides the chats agents,
  * Uno, assistants or apps run on their own (Sidebar.owner; 29.10: 0.0.161's
  * "Chats assistants started" went into it). A filter is said in the title
- * only, with × next to it to clear.
+ * only, with × next to it to clear the projects and computers picked; Only
+ * mine is a view, not a filter — it changes in the menu only (T65, 24.11).
  *
  * The funnel by the title (Misha 31.10, as in T3 Code) is the short way to
  * the same project filter: two clicks to one project in any grouping. It and
@@ -27,9 +28,11 @@
  *
  * New chat came back here on 15.10 (Misha): 0.0.133 took the icon off the
  * header to give the account name room, and people lost the obvious way to
- * start a chat. Its tooltip names the person's own shortcut (chat.new). Since
- * 20.11 (T53) it opens the picker of computer and folder (NewChatPicker.tsx);
- * ⇧-click starts in the open chat's folder as before.
+ * start a chat. Since 20.11 (T53) it opens the picker of computer and folder
+ * (NewChatPicker.tsx); ⇧-click starts in the open chat's folder as before.
+ * Since 24.11 (T65, Misha) it is a full-width "New chat ⌘N" button under this
+ * line, over the pinned chats (SidebarDNewChatButton); the pencil on the line
+ * went: two New chats 30 px apart read as two different things.
  */
 import {
   ArrowDownIcon,
@@ -58,6 +61,7 @@ import { create } from "zustand";
 
 import { cn } from "../../lib/utils";
 import { NewChatPickerButton } from "./NewChatPicker";
+import { Kbd } from "../ui/kbd";
 import {
   filterSidebarProjectScopeItems,
   reduceSidebarProjectScopeMenuState,
@@ -101,11 +105,6 @@ import {
 const BAR_BUTTON_CLASS =
   "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-hidden hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover data-popup-open:text-foreground";
 
-/** "New chat ⌘N" — or plain "New chat" when nothing is bound. */
-export function newChatTooltipLabel(shortcutLabel: string | null): string {
-  return shortcutLabel ? `New chat ${shortcutLabel}` : "New chat";
-}
-
 /** The title's menu, open or not (the mock's "Show" buttons open it). */
 export const useSidebarDViewMenu = create<{
   readonly open: boolean;
@@ -147,16 +146,12 @@ function BarButton({
 }
 
 /**
- * Labs "Sidebar view menu" off — the 0.0.137 line: a quiet "Chats" label,
- * New chat, then Add a project. How the chats are laid out (classic or
- * inbox) is the Settings switch, not a control here (Misha 11.10).
+ * Labs "Sidebar view menu" off — the 0.0.137 line: a quiet "Chats" label and
+ * Add a project (New chat is the button under it since T65). How the chats
+ * are laid out (classic or inbox) is the Settings switch, not a control here
+ * (Misha 11.10).
  */
-export function LegacySidebarDChatsBar(props: {
-  onNewChat: (event: ReactMouseEvent) => void;
-  /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
-  newChatShortcutLabel: string | null;
-  onAddProject: () => void;
-}) {
+export function LegacySidebarDChatsBar(props: { onAddProject: () => void }) {
   return (
     <li
       className="mt-2 flex h-7 list-none items-center gap-0.5 pr-1 pl-2.5"
@@ -165,14 +160,6 @@ export function LegacySidebarDChatsBar(props: {
       <span className="min-w-0 flex-1 truncate text-xs font-medium text-sidebar-muted-foreground/70">
         Chats
       </span>
-      <NewChatPickerButton
-        tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
-        testId="sidebar-d-new-chat"
-        className={BAR_BUTTON_CLASS}
-        onShiftClick={props.onNewChat}
-      >
-        <SquarePenIcon className="size-3.5" />
-      </NewChatPickerButton>
       <BarButton
         label="Add a project"
         tooltip="Add a project"
@@ -668,16 +655,14 @@ export function SidebarDChatsBar(props: {
   inlineSubagents?: boolean;
   onInlineSubagentsChange?: (inline: boolean) => void;
   onClearFilters: () => void;
-  onNewChat: (event: ReactMouseEvent) => void;
-  /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
-  newChatShortcutLabel: string | null;
   onAddProject: () => void;
 }) {
   const open = useSidebarDViewMenu((state) => state.open);
   const setOpen = useSidebarDViewMenu((state) => state.setOpen);
   const showComputers = props.multiComputer && props.computers.length > 1;
-  const filtered =
-    props.onlyMine || props.pickedProjects !== null || props.pickedComputers !== null;
+  // Only mine isn't one: a stray × turned it off for good (T65, Misha 24.11).
+  const filtered = props.pickedProjects !== null || props.pickedComputers !== null;
+  const clearLabel = props.onlyMine ? "Show all my chats" : "Show all chats";
   const levels = props.multiComputer
     ? props.levels
     : props.levels.filter((level) => level !== "computer");
@@ -842,7 +827,7 @@ export function SidebarDChatsBar(props: {
                 <button
                   type="button"
                   onClick={props.onClearFilters}
-                  aria-label="Show all chats"
+                  aria-label={clearLabel}
                   data-testid="sidebar-d-clear-filter"
                   className="inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-row-hover hover:text-foreground"
                 />
@@ -850,7 +835,7 @@ export function SidebarDChatsBar(props: {
             >
               <XIcon className="size-3" />
             </TooltipTrigger>
-            <TooltipPopup side="top">Show all chats</TooltipPopup>
+            <TooltipPopup side="top">{clearLabel}</TooltipPopup>
           </Tooltip>
         ) : null}
       </div>
@@ -862,13 +847,38 @@ export function SidebarDChatsBar(props: {
       >
         <FolderPlusIcon className="size-3.5" />
       </BarButton>
+    </li>
+  );
+}
+
+/**
+ * T65 (Misha 24.11): New chat you can't miss — a full-width button at the top
+ * of the chats, over the pinned ones, not at the top of the sidebar. The same
+ * picker of computer and folder as ⌘N (T53); ⇧-click starts in the open
+ * chat's folder at once.
+ */
+export function SidebarDNewChatButton(props: {
+  onNewChat: (event: ReactMouseEvent) => void;
+  /** The person's chat.new shortcut (e.g. "⌘N"); null — none bound. */
+  newChatShortcutLabel: string | null;
+}) {
+  return (
+    <li className="list-none px-0.5 pt-1 pb-1" data-testid="sidebar-d-new-chat-row">
       <NewChatPickerButton
-        tooltip={newChatTooltipLabel(props.newChatShortcutLabel)}
+        tooltip="Pick a computer and a folder"
         testId="sidebar-d-new-chat"
-        className={BAR_BUTTON_CLASS}
+        side="bottom"
+        align="start"
         onShiftClick={props.onNewChat}
+        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-sm font-medium text-foreground shadow-xs outline-hidden transition-colors hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-sidebar-row-hover"
       >
-        <SquarePenIcon className="size-3.5" />
+        <SquarePenIcon aria-hidden className="size-4 shrink-0" />
+        New chat
+        {props.newChatShortcutLabel ? (
+          <Kbd className="ml-auto h-4.5 bg-transparent px-0 text-[11px] text-muted-foreground/80">
+            {props.newChatShortcutLabel}
+          </Kbd>
+        ) : null}
       </NewChatPickerButton>
     </li>
   );

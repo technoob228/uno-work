@@ -24,10 +24,10 @@ import {
 import { resolveStatusOrder } from "./sidebarD.logic";
 
 describe("group levels", () => {
-  it("falls back to the old Inbox switch until chosen", () => {
-    expect(resolveGroupLevels(null, true)).toEqual(["status"]);
-    expect(resolveGroupLevels(null, false)).toEqual(["project"]);
-    expect(resolveGroupLevels([], true)).toEqual([]);
+  it("is By status until chosen (T65), and the choice once made", () => {
+    expect(resolveGroupLevels(null)).toEqual(["status"]);
+    expect(resolveGroupLevels(["project"])).toEqual(["project"]);
+    expect(resolveGroupLevels([])).toEqual([]);
   });
   it("drops Computer with one computer in view, and repeats", () => {
     expect(effectiveLevels(["computer", "project"], 1)).toEqual(["project"]);
