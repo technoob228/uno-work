@@ -225,9 +225,6 @@ describe("always asks, full access too", () => {
     "gh pr merge 12",
     "gh pr create --fill",
     "gh api -X POST repos/x/y/issues",
-    "ssh box 'ls'",
-    "scp file box:/tmp",
-    "rsync -a ./ box:/srv/app",
     "rm -rf ~",
     "rm -rf ~/",
     "rm -rf /",
@@ -332,6 +329,54 @@ describe("blocked by policy: containers, VMs, full test runs, benchmarks", () =>
     "cd ~/projects/mono && nx run-many -t test",
     "cd ~/projects/mono && lerna run test",
   ]);
+});
+
+describe("blocked for cloud agents: other machines through the person's computer", () => {
+  cases("blocked", [
+    "ssh box 'ls'",
+    "ssh root@prod.example.com 'systemctl restart app'",
+    "scp file box:/tmp",
+    "sftp box",
+    "mosh box",
+    "sshpass -p x ssh box",
+    "rsync -a ./ box:/srv/app",
+    "git status && ssh box",
+    "sh -c 'ssh box uptime'",
+    "nice -n 19 ssh box",
+  ]);
+});
+
+describe("askable: a push or a package install, nothing more", () => {
+  const judged = (command: string) => commandTier(command, ctx());
+  it.each([
+    "git push",
+    "git push origin HEAD",
+    "git lfs push origin main",
+    "npm install -g typescript",
+    "bun add -g vercel",
+    "pip install requests",
+    "brew install jq",
+    "brew upgrade",
+    "cargo install ripgrep",
+    "go install golang.org/x/tools/gopls@latest",
+    "uv tool install ruff",
+    "git add . && git commit -m x && git push",
+  ])("%s asks", (command) => {
+    const result = judged(command);
+    expect(result.tier).toBe("always");
+    expect(result.askable).toBe(true);
+  });
+  it.each([
+    "git push && ssh box",
+    "sudo npm install -g typescript",
+    "git push && vercel --prod",
+    "git push --force && cat ~/.ssh/id_rsa",
+    "npm publish",
+    "git -c core.sshCommand=x push",
+    "brew services start postgres",
+  ])("%s isn't askable", (command) => {
+    expect(judged(command).askable).not.toBe(true);
+  });
 });
 
 describe("shell parsing", () => {

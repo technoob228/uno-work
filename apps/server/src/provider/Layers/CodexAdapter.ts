@@ -30,6 +30,7 @@ import {
   sessionMcpServers,
   type CustomMcpServersGetter,
 } from "../../mcp/customMcpServers.ts";
+import { CODEX_GUARD_INSTRUCTIONS, makeCodexCommandGuard } from "../../chatRequests/codexGuard.ts";
 import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -1396,13 +1397,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const mcpArgs = codexMcpConfigArgs(
           sessionMcpServers({
             bridgeEnvironment: sessionEnvironment,
-            // A sandboxed assistant's chat: no owner's servers, its assistant's yes.
+            // A sandboxed assistant's chat, or one held to this computer's
+            // rules: no owner's servers (they carry the person's keys).
             custom: options?.customMcpServers?.({
               threadId: input.threadId,
-              sandboxed: input.harnessSandbox !== undefined,
+              sandboxed: input.harnessSandbox !== undefined || input.commandGuard !== undefined,
             }),
           }),
         );
+        // Held to this computer's rules (chatRequests/codexGuard.ts): the agent hears them.
+        const developerInstructions =
+          [
+            options?.appendDeveloperInstructions,
+            input.commandGuard ? CODEX_GUARD_INSTRUCTIONS : undefined,
+          ]
+            .filter((part): part is string => part !== undefined && part.length > 0)
+            .join("\n\n") || undefined;
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1411,8 +1421,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(Object.keys(sessionEnvironment).length > 0
             ? { environment: sessionEnvironment }
             : {}),
-          ...(options?.appendDeveloperInstructions
-            ? { appendDeveloperInstructions: options.appendDeveloperInstructions }
+          ...(developerInstructions ? { appendDeveloperInstructions: developerInstructions } : {}),
+          ...(input.commandGuard
+            ? {
+                guard: makeCodexCommandGuard({
+                  plan: input.commandGuard,
+                  cwd: sessionCwd,
+                  runtimeMode: input.runtimeMode,
+                }),
+              }
             : {}),
           ...(mcpArgs.length > 0 ? { extraArgs: mcpArgs } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
@@ -1708,6 +1725,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     capabilities: {
       sessionModelSwitch: "in-session",
       harnessSandbox: true,
+      commandGuard: true,
     },
     startSession,
     sendTurn,

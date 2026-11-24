@@ -38,15 +38,26 @@ describe("a chat started at a cloud chat's request", () => {
   it.each([
     ["ssh to another machine", "ssh root@prod.example.com 'systemctl restart app'"],
     ["a deploy", "vercel deploy --prod"],
-    ["a push", "git push origin main"],
     ["sudo", "sudo rm -rf /var/www"],
-    ["an install", "npm install -g some-cli"],
+    ["sudo before an install", "sudo npm install -g some-cli"],
+    ["a push with ssh after it", "git push && ssh box"],
     ["reading keys", "cat ~/.ssh/id_ed25519"],
   ])("is refused %s", async (_what, command) => {
     const verdict = await check("Bash", { command });
     expect(verdict).not.toBeNull();
-    expect(verdict!.deny).toMatch(/^Blocked here: /);
-    expect(verdict!.deny).toContain("say what is needed and stop");
+    expect(verdict && "deny" in verdict ? verdict.deny : "").toMatch(/^Blocked here: /);
+    expect(verdict && "deny" in verdict ? verdict.deny : "").toContain(
+      "say what is needed and stop",
+    );
+  });
+
+  it.each([
+    ["a push", "git push origin main", "git push"],
+    ["a global install", "npm install -g some-cli", "installing globally"],
+    ["a pip install", "pip install requests", "pip install"],
+  ])("asks the person for %s each time", async (_what, command, reason) => {
+    const verdict = await check("Bash", { command });
+    expect(verdict && "ask" in verdict ? verdict.reason : null).toContain(reason);
   });
 
   it.each([["ls -la"], ["git status"], ["npm run dev"], ["cat package.json"]])(
@@ -78,7 +89,7 @@ describe("a chat started at a cloud chat's request", () => {
       {
         hook_event_name: "PreToolUse",
         tool_name: "Bash",
-        tool_input: { command: "git push" },
+        tool_input: { command: "vercel deploy --prod" },
         cwd: project,
       },
       "tool-1",
@@ -98,6 +109,45 @@ describe("a chat started at a cloud chat's request", () => {
       { signal },
     );
     expect(allowed).toEqual({ continue: true });
+  });
+
+  it("asks the person for a push: allowed runs it, declined refuses it", async () => {
+    const signal = new AbortController().signal;
+    const asked: Array<string> = [];
+    const answers: Array<"accept" | "decline"> = ["accept", "decline"];
+    const hook = claudeGuardHook(guard(), async ({ detail }) => {
+      asked.push(detail);
+      return answers.shift()!;
+    });
+    const push = {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "git push origin main" },
+      cwd: project,
+    };
+    expect(await hook(push, "tool-1", { signal })).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "allow" },
+    });
+    expect(await hook(push, "tool-2", { signal })).toMatchObject({
+      hookSpecificOutput: { permissionDecision: "deny" },
+    });
+    expect(asked).toHaveLength(2);
+    expect(asked[0]).toMatch(/^Git push: /);
+  });
+
+  it("refuses a push when nobody can be asked", async () => {
+    const hook = claudeGuardHook(guard());
+    const verdict = await hook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Bash",
+        tool_input: { command: "git push" },
+        cwd: project,
+      },
+      "tool-1",
+      { signal: new AbortController().signal },
+    );
+    expect(verdict).toMatchObject({ hookSpecificOutput: { permissionDecision: "deny" } });
   });
 
   it("refuses when the check itself fails", async () => {
@@ -149,7 +199,8 @@ describe("T51: a chat answering a colleague's agent's question", () => {
     ["WebFetch", { url: "https://example.com" }],
     ["mcp__uno-work__mail_send", {}],
   ])("refuses %s", async (toolName, input) => {
-    expect((await ask(toolName, input))?.deny).toContain("This chat only reads");
+    const verdict = await ask(toolName, input);
+    expect(verdict && "deny" in verdict ? verdict.deny : "").toContain("This chat only reads");
   });
 
   it("still never reads keys", async () => {

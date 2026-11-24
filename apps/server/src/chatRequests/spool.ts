@@ -5,6 +5,9 @@
  * - the request folder `~/.uno-work/chat-requests/` (`in/`, `out/`,
  *   `decisions/`, `state.json`), written by the cloud daemon through the "Connect my
  *   computer" tunnel and by Uno Work here (contracts chatRequests.ts);
+ * - `commands.jsonl` there: each call a cloud agent makes on this computer
+ *   (`my_computer_*`), appended by the cloud side before it runs; Uno Work
+ *   here shows it and keeps it short;
  * - Uno Work's own record of them, `<stateDir>/chat-requests/requests.json`,
  *   with the chats held to the rules (`guarded`), and the journal of
  *   requests and decisions `journal.jsonl` next to it.
@@ -18,7 +21,12 @@ import { promises as fsp } from "node:fs";
 import * as os from "node:os";
 import path from "node:path";
 
-import type { ChatRequestAnswer, ChatRequestsHostState } from "@t3tools/contracts";
+import {
+  RemoteCommandLine,
+  type ChatRequestAnswer,
+  type ChatRequestsHostState,
+} from "@t3tools/contracts";
+import { Schema } from "effect";
 
 import { EMPTY_HOST_STORE, parseHostStore, type HostRecord, type HostStore } from "./hostLogic.ts";
 
@@ -33,6 +41,8 @@ export interface SpoolPaths {
   /** Start / Decline pressed in the person's Telegram, written by the cloud daemon. */
   readonly decisions: string;
   readonly state: string;
+  /** Calls of cloud agents on this computer, one JSON line each. */
+  readonly commands: string;
 }
 
 export function spoolPaths(home: string = os.homedir()): SpoolPaths {
@@ -43,6 +53,7 @@ export function spoolPaths(home: string = os.homedir()): SpoolPaths {
     outgoing: path.join(root, "out"),
     decisions: path.join(root, "decisions"),
     state: path.join(root, "state.json"),
+    commands: path.join(root, "commands.jsonl"),
   };
 }
 
@@ -166,6 +177,57 @@ export async function writeHostStore(stateDir: string, store: HostStore): Promis
   await writeAtomic(storePaths(stateDir).store, JSON.stringify(store, null, 2));
 }
 
+/** How many lines of `commands.jsonl` Settings shows. */
+export const REMOTE_COMMANDS_SHOWN = 50;
+/** Past this size the file is cut to its last lines. */
+const REMOTE_COMMANDS_MAX_BYTES = 512 * 1024;
+const REMOTE_COMMANDS_KEEP_LINES = 1000;
+/** Read from the end only: a long file never comes in whole. */
+const REMOTE_COMMANDS_TAIL_BYTES = 128 * 1024;
+
+const decodeCommandLine = Schema.decodeUnknownOption(RemoteCommandLine);
+
+/** The last calls of cloud agents here, newest first; lines that aren't one are skipped. */
+export async function readRemoteCommands(
+  paths: SpoolPaths,
+  limit: number = REMOTE_COMMANDS_SHOWN,
+): Promise<ReadonlyArray<RemoteCommandLine>> {
+  const handle = await fsp.open(paths.commands, "r").catch(() => null);
+  if (handle === null) return [];
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, REMOTE_COMMANDS_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    const lines = buffer.toString("utf8").split("\n");
+    // A cut first line is half a line.
+    if (length < size) lines.shift();
+    const out: Array<RemoteCommandLine> = [];
+    for (let index = lines.length - 1; index >= 0 && out.length < limit; index -= 1) {
+      const line = lines[index]!.trim();
+      if (line === "") continue;
+      try {
+        const decoded = decodeCommandLine(JSON.parse(line));
+        if (decoded._tag === "Some") out.push(decoded.value);
+      } catch {
+        // Not a line of ours.
+      }
+    }
+    return out;
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Too long: only its last lines stay. */
+export async function trimRemoteCommands(paths: SpoolPaths): Promise<void> {
+  const stat = await fsp.stat(paths.commands).catch(() => null);
+  if (stat === null || stat.size <= REMOTE_COMMANDS_MAX_BYTES) return;
+  const text = await fsp.readFile(paths.commands, "utf8");
+  const lines = text.split("\n").filter((line) => line.trim() !== "");
+  await writeAtomic(paths.commands, `${lines.slice(-REMOTE_COMMANDS_KEEP_LINES).join("\n")}\n`);
+}
+
 export type JournalEvent =
   | "received"
   | "refused"
@@ -177,14 +239,17 @@ export type JournalEvent =
   | "start-failed"
   /** A Start / Decline from Telegram that came too late or found it decided. */
   | "telegram-dropped"
-  /** T51: started without a button (level Do tasks). */
+  /** T51: started without a button (level Do tasks); a trusted chat's request, without a press. */
   | "auto-started"
   /** T51: a colleague's request the cloud says is over (cancelled, expired there). */
   | "retired"
-  /** T51: stopped at the colleague's or the project's request. */
+  /** T51: stopped at the colleague's or the project's request; "Stop cloud agents" here. */
   | "stopped"
   /** T51: a read-only chat answering a colleague's agent's question. */
-  | "answering";
+  | "answering"
+  /** "Don't ask again for this chat" ticked on Start; revoked in Settings. */
+  | "trusted"
+  | "untrusted";
 
 /** One line of the journal of requests and decisions (who asked, what, how it ended). */
 export async function appendJournal(

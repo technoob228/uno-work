@@ -23,6 +23,12 @@ export const ChatRequestsRpcLayer = WsChatRequestsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.chatRequestsDecide, requests.decide(input), attributes),
       [WS_METHODS.chatRequestsSetAllowed]: (input) =>
         observeRpcEffect(WS_METHODS.chatRequestsSetAllowed, requests.setAllowed(input), attributes),
+      [WS_METHODS.chatRequestsRevokeTrust]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.chatRequestsRevokeTrust,
+          requests.revokeTrust(input),
+          attributes,
+        ),
     });
   }),
 );

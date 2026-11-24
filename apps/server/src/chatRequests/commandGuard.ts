@@ -5,10 +5,12 @@
  *
  * - commands and paths are judged by the same tiers as the cloud agents'
  *   calls on the person's computer (myComputer/trust/, T47), here with this
- *   computer's real paths; what is `always` there (ssh to another machine,
- *   deploys, git push, sudo, installs, secrets, changing things outside the
- *   project folders) or `blocked` (containers, full test runs) is refused;
- *   the rest goes on under the chat's own mode;
+ *   computer's real paths; `blocked` (ssh to other machines, containers,
+ *   full test runs) is refused; `always` that is only a git push or a
+ *   package install asks the person with an Allow card each time, whatever
+ *   the chat's mode (Misha 23.11); the rest of `always` (deploys, sudo,
+ *   secrets, changing things outside the project folders) is refused; the
+ *   rest goes on under the chat's own mode;
  * - Uno Work's own data here (its chats, settings and sign-ins) and the
  *   request folder are out of reach;
  * - MCP servers other than uno-work are refused (they carry the person's
@@ -67,7 +69,14 @@ export const localResolver = (
     );
   });
 
-export type GuardVerdict = { readonly deny: string } | null;
+/**
+ * Null: the call goes on (under the chat's mode). `ask`: only with the
+ * person's Allow, for this one call (a push, an install).
+ */
+export type GuardVerdict =
+  | { readonly deny: string }
+  | { readonly ask: string; readonly reason: string }
+  | null;
 
 export interface CommandGuard {
   /** Null: the call goes on (under the chat's mode). */
@@ -129,11 +138,19 @@ const absoluteFrom = (raw: string, cwd: string, home: string) => {
 
 /** The sentence the agent reads, and acts on: say it and stop. */
 export const guardDenial = (what: string, why = "started at a cloud chat's request") =>
-  `Blocked here: ${what}. This chat was ${why}, so on this computer it can't ssh to other machines, deploy, push, use sudo, install, read secrets or change things outside the project folders. Don't look for another way: say what is needed and stop, so the person can do it.`;
+  `Blocked here: ${what}. This chat was ${why}, so on this computer it can't ssh to other machines, deploy, use sudo, read secrets or change things outside the project folders${why.includes("colleague") ? " (nor push or install)" : " (git push and installs ask the person each time)"}. Don't look for another way: say what is needed and stop, so the person can do it.`;
 
 /** T51: the sentence for a read-only chat. */
 export const readOnlyDenial = (toolName: string) =>
   `Blocked here: ${toolName}. This chat only reads: it answers a colleague's agent's question, so it can't edit files, run commands or use other tools. Answer from what you can read; if the question needs more, say so in your answer and stop.`;
+
+/** The card's line for a push or an install. */
+export const guardAsk = (reason: string) =>
+  `${reason[0]?.toUpperCase() ?? ""}${reason.slice(1)}: this chat was started at a cloud chat's request, so a push or an install asks you each time.`;
+
+/** What the agent hears when the person said no to it. */
+export const guardDeclined = (reason: string) =>
+  `The person declined ${reason}. Don't try another way: say what is left to do and stop.`;
 
 export function makeCommandGuard(
   plan: CommandGuardPlan,
@@ -152,6 +169,8 @@ export function makeCommandGuard(
   const caseInsensitive = system !== "linux";
   const allowedFolders = options?.allowedFolders ?? DEFAULT_ALLOWED_FOLDERS;
   const blocked = plan.blockedRoots.map((root) => path.resolve(root));
+  /** T51: a colleague's request (not the person's own cloud chat): pushes and installs stay refused. */
+  const fromColleague = plan.why.includes("colleague");
   const shown = (root: string) =>
     root === home ? "~" : root.startsWith(`${home}/`) ? `~/${root.slice(home.length + 1)}` : root;
   const fold = (value: string) => (caseInsensitive ? value.toLowerCase() : value);
@@ -206,6 +225,11 @@ export function makeCommandGuard(
         },
         signal,
       );
+      // A push or an install asks the person (Misha 23.11) — in a chat a
+      // cloud chat of theirs asked for; a colleague's (T51) is refused them.
+      if (verdict.tier === "always" && verdict.askable === true && !fromColleague) {
+        return { ask: guardAsk(verdict.reason), reason: verdict.reason };
+      }
       return REFUSED_TIERS.has(verdict.tier)
         ? { deny: guardDenial(verdict.reason, plan.why) }
         : null;
@@ -213,11 +237,22 @@ export function makeCommandGuard(
   };
 }
 
+/** The person's answer to an Allow card the guard raised (the adapter shows it). */
+export type GuardAskPerson = (input: {
+  readonly toolName: string;
+  readonly toolInput: unknown;
+  readonly toolUseId: string | undefined;
+  readonly detail: string;
+  readonly signal: AbortSignal;
+}) => Promise<"accept" | "decline" | "cancel">;
+
 /**
  * The guard as a Claude Agent SDK PreToolUse hook (structurally typed: the
  * adapter passes it in `hooks`). A guard that fails refuses: never open.
+ * A push or an install asks the person through `askPerson` (an Allow card
+ * in that chat, for this one call); without it, it is refused.
  */
-export function claudeGuardHook(guard: CommandGuard) {
+export function claudeGuardHook(guard: CommandGuard, askPerson?: GuardAskPerson) {
   return async (
     input: {
       readonly hook_event_name?: string;
@@ -225,7 +260,7 @@ export function claudeGuardHook(guard: CommandGuard) {
       readonly tool_input?: unknown;
       readonly cwd?: string;
     },
-    _toolUseId: string | undefined,
+    toolUseId: string | undefined,
     options: { readonly signal: AbortSignal },
   ) => {
     if (input.hook_event_name !== "PreToolUse" || typeof input.tool_name !== "string") {
@@ -240,11 +275,29 @@ export function claudeGuardHook(guard: CommandGuard) {
       })
       .catch(() => ({ deny: guardDenial("a call that couldn't be checked") }));
     if (verdict === null) return { continue: true };
-    return {
+    const deny = (reason: string) => ({
       hookSpecificOutput: {
         hookEventName: "PreToolUse" as const,
         permissionDecision: "deny" as const,
-        permissionDecisionReason: verdict.deny,
+        permissionDecisionReason: reason,
+      },
+    });
+    if ("deny" in verdict) return deny(verdict.deny);
+    if (askPerson === undefined) return deny(guardDenial(verdict.reason));
+    const answer = await askPerson({
+      toolName: input.tool_name,
+      toolInput: input.tool_input,
+      toolUseId,
+      detail: verdict.ask,
+      signal: options.signal,
+    }).catch(() => "cancel" as const);
+    if (answer !== "accept") return deny(guardDeclined(verdict.reason));
+    // Allowed for this call: no second card from the chat's own mode.
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse" as const,
+        permissionDecision: "allow" as const,
+        permissionDecisionReason: `The person allowed ${verdict.reason}.`,
       },
     };
   };

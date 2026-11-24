@@ -16,6 +16,8 @@ import {
   expireDue,
   followed,
   framedBrief,
+  hostStateOf,
+  isTrusted,
   parseHostStore,
   parseRemoteDecision,
   parseRequestFile,
@@ -29,6 +31,8 @@ import {
   teamRecordId,
   teamThreadIds,
   viewOf,
+  trust,
+  untrust,
   type HostStore,
 } from "./hostLogic.ts";
 
@@ -105,8 +109,9 @@ describe("admitting a request", () => {
   });
 
   it("refuses harnesses that aren't held to the rules", () => {
-    expect(admitted(ON, file("a", { provider: "codex" })).record.status).toBe("refused");
-    expect(admitted(ON, file("a", { provider: "claudeAgent" })).record.status).toBe("waiting");
+    expect(admitted(ON, file("a", { provider: "opencode" })).record.status).toBe("refused");
+    expect(admitted(ON, file("b", { provider: "claudeAgent" })).record.status).toBe("waiting");
+    expect(admitted(ON, file("c", { provider: "codex" })).record.status).toBe("waiting");
   });
 
   it("expires one that arrived after its 2 hours", () => {
@@ -325,5 +330,80 @@ describe("T51: a colleague's session request", () => {
     const asst = framedBrief(viaAssistant.record, "n3");
     expect(asst).toContain("at the request of Andrei's assistant (a colleague in Shop");
     expect(asst).toContain("the person here pressed Start");
+  });
+});
+
+describe("don't ask again for this chat", () => {
+  it("starts that chat's next requests at once, and only that chat's", () => {
+    const first = admitted(ON, file("a"));
+    const trusted = trust(first.store, first.record, T0);
+    expect(isTrusted(trusted, first.record.from)).toBe(true);
+    const again = admitted(trusted, file("b"));
+    expect(again.autoStart).toBe(true);
+    const other = admitted(
+      trusted,
+      file("c", { from: { ...file("c").from, threadId: "another-cloud-thread" } }),
+    );
+    expect(other.autoStart).toBe(false);
+  });
+
+  it("does nothing while the switch is off", () => {
+    const first = admitted(ON, file("a"));
+    const off = setAllow(trust(first.store, first.record, T0), false, T0).store;
+    const next = admitted(off, file("b"));
+    expect(next.record.status).toBe("refused");
+    expect(next.autoStart).toBe(false);
+  });
+
+  it("is revoked in Settings, and the cloud side hears it", () => {
+    const first = admitted(ON, file("a"));
+    const trusted = trust(first.store, first.record, T0);
+    expect(hostStateOf(trusted, T0, "uno-work").trusted).toEqual([
+      { boxId: 7, threadId: "cloud-thread" },
+    ]);
+    const revoked = untrust(trusted, { boxId: 7, threadId: "cloud-thread" });
+    expect(revoked?.chat.threadTitle).toBe("Bakery site");
+    expect(isTrusted(revoked!.store, first.record.from)).toBe(false);
+    expect(untrust(revoked!.store, { boxId: 7, threadId: "cloud-thread" })).toBeNull();
+    expect(stateOf(revoked!.store, T0).trustedChats).toEqual([]);
+  });
+
+  it("survives a restart", () => {
+    const first = admitted(ON, file("a"));
+    const trusted = trust(first.store, first.record, T0);
+    const parsed = parseHostStore(JSON.parse(JSON.stringify(trusted)));
+    expect(isTrusted(parsed, first.record.from)).toBe(true);
+  });
+
+  it("marks the chat it started without a press", () => {
+    const first = admitted(ON, file("a"));
+    const done = started(
+      first.store,
+      "a",
+      { threadId: "t-1", title: "Order form" },
+      T0,
+      "here",
+      true,
+    );
+    expect(done.record?.trusted).toBe(true);
+    expect(framedBrief(done.record!)).toContain("trusts to start chats without asking");
+  });
+});
+
+describe("stop cloud agents", () => {
+  it("turns the switch off, notes when, and clears it when turned on again", () => {
+    const waiting = admitted(ON, file("a"));
+    const stopped = setAllow(waiting.store, false, T0 + 5, true);
+    expect(stopped.store.allow).toBe(false);
+    expect(stopped.changed.map((entry) => entry.status)).toEqual(["refused"]);
+    expect(hostStateOf(stopped.store, T0 + 5, "uno-work").stoppedAt).toBe(
+      new Date(T0 + 5).toISOString(),
+    );
+    const on = setAllow(stopped.store, true, T0 + 10).store;
+    expect(stateOf(on, T0 + 10).stoppedAt).toBeNull();
+  });
+
+  it("tells the cloud side which harnesses can be asked for", () => {
+    expect(hostStateOf(ON, T0, "uno-work").providers).toEqual(["claudeAgent", "codex"]);
   });
 });

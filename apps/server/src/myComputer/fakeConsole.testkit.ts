@@ -54,6 +54,11 @@ export interface FakeConsole {
   helper: (frame: Frame, reply: (answer: Frame) => void, channel: FakeChannel) => void;
   /** Refuse the WebSocket upgrade with this status. */
   refuseUpgrade: number | null;
+  /**
+   * Uno Work's `chat-requests/state.json` on the computer (chatRequests/macSide.ts):
+   * null, the default, is no Uno Work there (the helper's "no such file").
+   */
+  macState: string | null;
   readonly close: () => Promise<void>;
 }
 
@@ -219,7 +224,29 @@ export async function startFakeConsole(): Promise<FakeConsole> {
         if (opcode === OPCODE_TEXT) {
           const frame = JSON.parse(payload.toString("utf8")) as Frame;
           channel.frames.push(frame);
-          fake.helper(frame, (answer) => channel.send({ id: frame.id, ...answer }), channel);
+          const reply = (answer: Frame) => channel.send({ id: frame.id, ...answer });
+          if (
+            frame["op"] === "read" &&
+            String(frame["path"]).endsWith("chat-requests/state.json")
+          ) {
+            if (fake.macState === null) {
+              reply({
+                type: "error",
+                code: "not_found",
+                message: `No such file or folder: ${String(frame["path"])}`,
+              });
+            } else {
+              const data = Buffer.from(fake.macState, "utf8");
+              const offset = Number(frame["offset"] ?? 0);
+              reply({
+                type: "result",
+                data: data.subarray(offset).toString("base64"),
+                eof: true,
+              });
+            }
+            return;
+          }
+          fake.helper(frame, reply, channel);
         } else if (opcode === OPCODE_PING) {
           write(OPCODE_PONG, payload);
         } else if (opcode === OPCODE_CLOSE) {
@@ -242,6 +269,7 @@ export async function startFakeConsole(): Promise<FakeConsole> {
     listing: { status: 200, body: { enabled: true, computers: [] } },
     helper: () => undefined,
     refuseUpgrade: null,
+    macState: null,
     close: async () => {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));

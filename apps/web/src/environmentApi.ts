@@ -127,6 +127,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       state: () => rpcClient.chatRequests.state(),
       decide: rpcClient.chatRequests.decide,
       setAllowed: rpcClient.chatRequests.setAllowed,
+      revokeTrust: rpcClient.chatRequests.revokeTrust,
     },
     team: {
       state: () => rpcClient.team.state(),

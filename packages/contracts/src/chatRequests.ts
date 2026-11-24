@@ -102,7 +102,7 @@ export const ChatRequestFile = Schema.Struct({
   from: ChatRequestFrom,
   /** Folder on the person's computer: `~/projects/site`. Absent: the project used last. */
   cwd: Schema.optionalKey(Text(4096)),
-  /** Harness: `claudeAgent` (the only one held to the rules there for now). */
+  /** Harness: `claudeAgent` or `codex` (both held to the rules there). Absent: Claude Code. */
   provider: Schema.optionalKey(Text(200)),
   model: Schema.optionalKey(Text(500)),
   /** The asking chat's mode: the chat there runs no wider (nor wider than that project's chats). */
@@ -163,6 +163,8 @@ export const ChatRequestAnswer = Schema.Struct({
   decidedAt: Schema.NullOr(Schema.String),
   /** Started / declined: where the person pressed (absent before 0.0.190). */
   decidedVia: Schema.optionalKey(ChatRequestDecidedVia),
+  /** Started without a press: the person trusts the chat that asked (0.0.192). */
+  trusted: Schema.optionalKey(Schema.Boolean),
   thread: Schema.NullOr(ChatRequestThread),
 });
 export type ChatRequestAnswer = typeof ChatRequestAnswer.Type;
@@ -181,10 +183,63 @@ export const ChatRequestRemoteDecision = Schema.Struct({
 });
 export type ChatRequestRemoteDecision = typeof ChatRequestRemoteDecision.Type;
 
+/** A cloud chat, by where it lives: the pair the person trusts. */
+export const ChatRequestChatKey = Schema.Struct({
+  boxId: Schema.NullOr(Schema.Number),
+  threadId: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+});
+export type ChatRequestChatKey = typeof ChatRequestChatKey.Type;
+
+/**
+ * "Don't ask again for this chat" (Misha 23.11): its requests start without
+ * Start, while the switch is on, within the 2 at once; revoked in Settings →
+ * Computer, both logged.
+ */
+export const ChatRequestTrustedChat = Schema.Struct({
+  ...ChatRequestChatKey.fields,
+  computerName: Schema.String,
+  threadTitle: Schema.String,
+  since: Schema.String,
+});
+export type ChatRequestTrustedChat = typeof ChatRequestTrustedChat.Type;
+
+/** The harnesses a chat from the cloud may run on there (both held to the rules). */
+export const CHAT_REQUEST_PROVIDERS = ["claudeAgent", "codex"] as const;
+
+/**
+ * One call a cloud agent made on this computer (`my_computer_*`), as the
+ * cloud side wrote it here before it ran: `~/.uno-work/chat-requests/commands.jsonl`.
+ * The person reads it in Settings → Computer → Cloud agents.
+ */
+export const RemoteCommandLine = Schema.Struct({
+  at: Schema.String,
+  /** run, read, write, list. */
+  kind: Schema.String,
+  /** The command or the path, cut to 600 characters. */
+  summary: Schema.String,
+  /** ran (no card), allowed (after the person's Allow), refused. */
+  outcome: Schema.String,
+  /** The T47 tier: free, chat, ask, always, blocked. */
+  tier: Schema.String,
+  reason: Schema.optionalKey(Schema.String),
+  computerName: Schema.String,
+  threadTitle: Schema.String,
+  threadId: Schema.optionalKey(Schema.String),
+  boxId: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+});
+export type RemoteCommandLine = typeof RemoteCommandLine.Type;
+
+/** The file of those lines on the person's computer, from its home. */
+export const REMOTE_COMMANDS_FILE = `${CHAT_REQUESTS_DIR}/commands.jsonl`;
+
 /** `state.json`: what the cloud side checks before it asks. */
 export const ChatRequestsHostState = Schema.Struct({
   v: Schema.Literal(1),
-  /** The person's switch there (Settings → Computer). */
+  /**
+   * The person's switch there (Settings → Computer → Cloud agents): chat
+   * requests, and since 0.0.192 also every `my_computer_*` call of a cloud
+   * agent on that computer.
+   */
   allow: Schema.Boolean,
   /** Waiting requests and chats from the cloud still working. */
   active: NonNegativeInt,
@@ -192,6 +247,12 @@ export const ChatRequestsHostState = Schema.Struct({
   /** Uno Work there wrote this; every minute while it runs. */
   seenAt: Schema.String,
   app: Schema.String,
+  /** Chats whose requests start without Start (0.0.192): the cloud side tells them so. */
+  trusted: Schema.optionalKey(Schema.Array(ChatRequestChatKey)),
+  /** Harnesses accepted there (0.0.192); absent: Claude Code only. */
+  providers: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** The person pressed "Stop cloud agents" there: when (0.0.192). */
+  stoppedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type ChatRequestsHostState = typeof ChatRequestsHostState.Type;
 
@@ -213,6 +274,10 @@ export const ChatRequestView = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   /** Started / declined: pressed here or in the person's Telegram. */
   decidedVia: Schema.optionalKey(ChatRequestDecidedVia),
+  /** Started without a press: the person trusts the chat that asked. */
+  trusted: Schema.optionalKey(Schema.Boolean),
+  /** The chat that asked is trusted now ("Don't ask again for this chat"). */
+  fromTrusted: Schema.optionalKey(Schema.Boolean),
   /** The chat it started here. */
   threadId: Schema.NullOr(Schema.String),
   threadState: Schema.NullOr(Schema.String),
@@ -228,12 +293,20 @@ export const ChatRequestsState = Schema.Struct({
   active: NonNegativeInt,
   /** Newest first: waiting ones and the last decided ones (the journal). */
   requests: Schema.Array(ChatRequestView),
+  /** Chats whose requests start without Start. */
+  trustedChats: Schema.optionalKey(Schema.Array(ChatRequestTrustedChat)),
+  /** The last calls of cloud agents here (`my_computer_*`), newest first. */
+  commands: Schema.optionalKey(Schema.Array(RemoteCommandLine)),
+  /** When the person last pressed "Stop cloud agents" here. */
+  stoppedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type ChatRequestsState = typeof ChatRequestsState.Type;
 
 export const ChatRequestDecideInput = Schema.Struct({
   id: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
   decision: Schema.Literals(["start", "decline"]),
+  /** Start, and from now on start this chat's requests without asking. */
+  trustChat: Schema.optionalKey(Schema.Boolean),
 });
 export type ChatRequestDecideInput = typeof ChatRequestDecideInput.Type;
 
@@ -244,8 +317,19 @@ export const ChatRequestDecideResult = Schema.Struct({
 });
 export type ChatRequestDecideResult = typeof ChatRequestDecideResult.Type;
 
-export const ChatRequestsSetAllowedInput = Schema.Struct({ allow: Schema.Boolean });
+export const ChatRequestsSetAllowedInput = Schema.Struct({
+  allow: Schema.Boolean,
+  /**
+   * "Stop cloud agents" (the kill switch): off, and every command a cloud
+   * agent runs here right now is stopped.
+   */
+  stopRunning: Schema.optionalKey(Schema.Boolean),
+});
 export type ChatRequestsSetAllowedInput = typeof ChatRequestsSetAllowedInput.Type;
+
+/** Settings → Computer: a trusted chat asks again from now on. */
+export const ChatRequestsRevokeTrustInput = ChatRequestChatKey;
+export type ChatRequestsRevokeTrustInput = typeof ChatRequestsRevokeTrustInput.Type;
 
 export class ChatRequestsError extends Schema.TaggedErrorClass<ChatRequestsError>()(
   "ChatRequestsError",

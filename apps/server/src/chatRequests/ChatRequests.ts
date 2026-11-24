@@ -33,6 +33,7 @@ import {
   ThreadId,
   type ChatRequestDecideInput,
   type ChatRequestDecideResult,
+  type ChatRequestsRevokeTrustInput,
   type ChatRequestsSetAllowedInput,
   type ChatRequestsState,
 } from "@t3tools/contracts";
@@ -69,6 +70,7 @@ import {
   type OutRecord,
 } from "./outgoing.ts";
 import { ensureSpool } from "./spool.ts";
+import { stopCloudAgentCommands } from "./stopCloudAgents.ts";
 
 const COMPONENT = "chat-requests";
 const HOST_TICK = "5 seconds";
@@ -81,6 +83,10 @@ export interface ChatRequestsShape {
   ) => Effect.Effect<ChatRequestDecideResult, ChatRequestsError>;
   readonly setAllowed: (
     input: ChatRequestsSetAllowedInput,
+  ) => Effect.Effect<ChatRequestsState, ChatRequestsError>;
+  /** A trusted chat asks again from now on. */
+  readonly revokeTrust: (
+    input: ChatRequestsRevokeTrustInput,
   ) => Effect.Effect<ChatRequestsState, ChatRequestsError>;
   /** The sending side (a cloud computer with "Connect my computer"); null elsewhere. */
   readonly outgoing: Outgoing | null;
@@ -126,6 +132,7 @@ export const ChatRequestsLive = Layer.effect(
               fail("Outside text can't be marked here, so a colleague's chat can't start."),
             )
           : outside.mark(threadId),
+      stopRunning: () => stopCloudAgentCommands(),
     });
     const stateDir = config.stateDir;
     const io = <A>(run: () => Promise<A>) =>
@@ -319,6 +326,7 @@ export const ChatRequestsLive = Layer.effect(
       state: hostSide.state,
       decide: hostSide.decide,
       setAllowed: hostSide.setAllowed,
+      revokeTrust: hostSide.revokeTrust,
       outgoing,
       team: hostSide.team,
       isOwnComputer: isOwnComputerNow,

@@ -74,6 +74,8 @@ export interface OutRecord {
   readonly announced?: boolean;
   /** …and that message says how it ended. */
   readonly retired?: boolean;
+  /** The person there trusts the chat that asked: it starts without Start. */
+  readonly trusted?: boolean;
 }
 
 /** The person's Telegram: the request with Start / Decline, and how it ended. */
@@ -269,6 +271,8 @@ export const OUT_REASONS = {
     `${name} was asleep or offline for 2 hours, so the request never got there.`,
   closedThere: (name: string) =>
     `Uno Work isn't open on ${name} right now: the request waits there until it opens (2 hours at most).`,
+  harnessThere: (name: string) =>
+    `Uno Work on ${name} is older and starts only Claude Code chats from the cloud. Leave provider out, or ask the person to update Uno Work there.`,
 };
 
 export function makeOutgoing(deps: OutgoingDeps) {
@@ -308,7 +312,8 @@ export function makeOutgoing(deps: OutgoingDeps) {
   const withMessenger = (record: OutRecord): OutRecord => {
     const messenger = deps.messenger;
     if (messenger === undefined) return record;
-    if (record.status === "waiting" && record.announced !== true) {
+    // A trusted chat's request starts there by itself: no buttons to press.
+    if (record.status === "waiting" && record.announced !== true && record.trusted !== true) {
       void messenger.announce(record).catch(() => undefined);
       return { ...record, announced: true };
     }
@@ -336,6 +341,23 @@ export function makeOutgoing(deps: OutgoingDeps) {
       return settle(record, "refused", OUT_REASONS.oldApp(record.computerName));
     }
     if (!hostState.value.allow) return settle(record, "refused", REASONS.off);
+    const provider = record.request.provider?.trim().toLowerCase();
+    const accepted = (hostState.value.providers ?? ["claudeAgent"]).map((name) =>
+      name.toLowerCase(),
+    );
+    if (
+      provider !== undefined &&
+      provider !== "" &&
+      !accepted.includes(provider) &&
+      !(provider.startsWith("claude") && accepted.includes("claudeagent"))
+    ) {
+      return settle(record, "refused", OUT_REASONS.harnessThere(record.computerName));
+    }
+    const trusted = (hostState.value.trusted ?? []).some(
+      (chat) =>
+        chat.threadId === record.request.from.threadId &&
+        (chat.boxId ?? null) === (record.request.from.boxId ?? null),
+    );
     if (hostState.value.active >= hostState.value.limit) {
       return settle(
         record,
@@ -352,6 +374,7 @@ export function makeOutgoing(deps: OutgoingDeps) {
     return {
       ...settle(record, "waiting", stale ? OUT_REASONS.closedThere(record.computerName) : null),
       deliveredAt: new Date(nowMs()).toISOString(),
+      ...(trusted ? { trusted: true } : {}),
     };
   };
 
@@ -360,6 +383,9 @@ export function makeOutgoing(deps: OutgoingDeps) {
       case "queued":
         return `${record.computerName} is asleep or offline. The request waits here and goes there as soon as it is back (2 hours at most). You'll hear how it went in this chat; don't ask again.`;
       case "waiting":
+        if (record.trusted === true) {
+          return `${record.request.title}: the person on ${record.computerName} trusts this chat, so it starts there without asking (within a few seconds while Uno Work is open there). You'll hear in this chat when it started and its answers. Don't ask again, and don't wait in a loop: end your turn or go on with other work.${record.reason ? ` ${record.reason}` : ""}`;
+        }
         return `${record.request.title}: the person sees it in Uno Work on ${record.computerName} with Start and Decline; it waits 2 hours at most. You'll hear the answer in this chat. Don't ask again, and don't wait in a loop: end your turn or go on with other work.${record.reason ? ` ${record.reason}` : ""}`;
       case "refused":
         return `Refused at once: ${record.reason ?? ""}`;

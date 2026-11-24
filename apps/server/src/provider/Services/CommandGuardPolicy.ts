@@ -4,7 +4,8 @@
  * started on this computer at a cloud chat's request (chatRequests/) can't
  * ssh to other machines, deploy, push, use sudo, install or read secrets —
  * whatever the chat's mode. The adapter blocks those tool calls by code
- * before they run (Claude: a PreToolUse hook); an adapter without
+ * before they run (Claude: a PreToolUse hook; Codex: its sandbox without
+ * network, and the tiers on each command that asks out); an adapter without
  * `capabilities.commandGuard` can't run such a chat at all.
  *
  * Implemented by chatRequests/commandGuardPolicy.ts; absent (tests) = no chat
@@ -48,5 +49,5 @@ export class CommandGuardPolicy extends Context.Service<
 /** The sentence for a harness that can't be held to the rules. */
 export function harnessNotGuardableMessage(harness: string): string {
   const name = harness.length > 0 ? harness[0]!.toUpperCase() + harness.slice(1) : "This agent";
-  return `${name} can't run this chat: it was started at a cloud chat's request, and only Claude is held to the rules for such chats here. Switch the chat to Claude.`;
+  return `${name} can't run this chat: it was started at a cloud chat's request, and only Claude and Codex are held to the rules for such chats here. Switch the chat to Claude or Codex.`;
 }

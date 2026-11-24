@@ -35,6 +35,7 @@ import { OUTPUT_LIMIT_BYTES } from "./outputCollector.ts";
 import { computerTrustGate } from "./trust/gate.ts";
 import { START_CHAT_TOOL_NAMES, startChatTools } from "../chatRequests/startChatTools.ts";
 import type { TrustOperation } from "./trust/judge.ts";
+import { makeMacSide, type MacSide } from "../chatRequests/macSide.ts";
 
 type Deps = UnoWorkToolDeps;
 
@@ -58,6 +59,52 @@ export interface MyComputerToolKit {
 
 const NOT_HERE_MESSAGE =
   "This Uno Work can't reach the person's own computers. Tell them; don't try another way.";
+
+/**
+ * The switch and the log on the person's computer, one per daemon (its
+ * reading of the switch is cached a few seconds per computer).
+ */
+const macSides = new WeakMap<object, MacSide>();
+function macSideOf(api: MyComputerShape): MacSide {
+  const known = macSides.get(api.core);
+  if (known !== undefined) return known;
+  const made = makeMacSide({
+    read: async (computerId, filePath) => {
+      try {
+        const read = await api.core.read({
+          computerId,
+          path: filePath,
+          maxBytes: 64 * 1024,
+          quiet: true,
+        });
+        return read.data.toString("utf8");
+      } catch (cause) {
+        // The helper's "no such file" (`not_found`): no Uno Work there. Any
+        // other failure can't tell, so the call is refused (gate.ts).
+        if (
+          cause instanceof MyComputerFailure &&
+          cause.kind === "remote" &&
+          /No such file/i.test(cause.message)
+        ) {
+          return null;
+        }
+        throw cause;
+      }
+    },
+    append: async (computerId, filePath, text) => {
+      await api.core.write({
+        computerId,
+        path: filePath,
+        data: Buffer.from(text, "utf8"),
+        append: true,
+        mkdirs: true,
+        quiet: true,
+      });
+    },
+  });
+  macSides.set(api.core, made);
+  return made;
+}
 
 const LIST_LIMIT = 500;
 const READ_DEFAULT_BYTES = OUTPUT_LIMIT_BYTES;
@@ -172,6 +219,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
           journal: { kind, summary },
           context,
           fail: kit.fail,
+          macSide: macSideOf(api),
         });
       });
 

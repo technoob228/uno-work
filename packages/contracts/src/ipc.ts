@@ -56,6 +56,7 @@ import type {
 import type {
   ChatRequestDecideInput,
   ChatRequestDecideResult,
+  ChatRequestsRevokeTrustInput,
   ChatRequestsSetAllowedInput,
   ChatRequestsState,
 } from "./chatRequests.ts";
@@ -1156,6 +1157,7 @@ export interface EnvironmentApi {
     state: () => Promise<ChatRequestsState>;
     decide: (input: ChatRequestDecideInput) => Promise<ChatRequestDecideResult>;
     setAllowed: (input: ChatRequestsSetAllowedInput) => Promise<ChatRequestsState>;
+    revokeTrust: (input: ChatRequestsRevokeTrustInput) => Promise<ChatRequestsState>;
   };
   /**
    * T51: what this computer does for the people of a project (team.ts).
