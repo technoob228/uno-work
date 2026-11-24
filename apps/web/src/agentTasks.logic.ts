@@ -381,3 +381,41 @@ export function latestReportIdBySender(
   }
   return out;
 }
+
+/**
+ * "Hand to…" (T63): a chat the person handed to another chat leaves their
+ * list (and the Agents' chats shelf) and sits as a line under the chat that
+ * handles it — when that chat is in the list. One that needs the person
+ * (an approval, a question, a call) or is pinned stays where it is, as do
+ * chats whose handler isn't listed (the Uno chat on top, another scope).
+ */
+export function nestHandedChats<T extends TaskSummary>(input: {
+  readonly listed: ReadonlyArray<T>;
+  readonly shelf: ReadonlyArray<T>;
+  readonly keyOf: (thread: Pick<T, "environmentId" | "id">) => string;
+}): {
+  readonly listed: ReadonlyArray<T>;
+  readonly shelf: ReadonlyArray<T>;
+  /** Handler's key → the chats it handles, newest first. */
+  readonly nested: ReadonlyMap<string, ReadonlyArray<T>>;
+} {
+  const listedKeys = new Set(input.listed.map((thread) => input.keyOf(thread)));
+  const nested = new Map<string, T[]>();
+  const nestedKeyOf = (thread: T): string | null => {
+    const handler = thread.handler ?? null;
+    if (handler === null || thread.pinnedAt !== null || agentTaskNeedsPerson(thread)) return null;
+    const key = input.keyOf({ environmentId: thread.environmentId, id: handler.threadId } as T);
+    return listedKeys.has(key) && key !== input.keyOf(thread) ? key : null;
+  };
+  const keep = (thread: T) => {
+    const key = nestedKeyOf(thread);
+    if (key === null) return true;
+    nested.set(key, [...(nested.get(key) ?? []), thread]);
+    return false;
+  };
+  const listed = input.listed.filter(keep);
+  const shelf = input.shelf.filter(keep);
+  for (const [key, chats] of nested) nested.set(key, chats.toSorted(newestFirst));
+  if (nested.size === 0) return { listed: input.listed, shelf: input.shelf, nested };
+  return { listed, shelf, nested };
+}

@@ -1,7 +1,13 @@
-import type { EnvironmentId, ThreadController, ThreadId } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ThreadController,
+  ThreadHandlerKind,
+  ThreadId,
+} from "@t3tools/contracts";
 
 import { AGENTS_ACCESS_COPY, HANDLER_COPY } from "./agentThreads.logic";
 import { readEnvironmentApi } from "./environmentApi";
+import { HAND_TO_COPY } from "./handTo.logic";
 import { newCommandId } from "./lib/utils";
 import { stackedThreadToast, toastManager } from "./components/ui/toast";
 
@@ -78,6 +84,66 @@ export async function setThreadHandler(input: {
       stackedThreadToast({
         type: "error",
         title: HANDLER_COPY.failed,
+        description: error instanceof Error ? error.message : "An error occurred.",
+      }),
+    );
+    return false;
+  }
+}
+
+/**
+ * "Hand to…" / "Take back" (T63, Misha 24.11): hand the chat to another chat
+ * or an assistant (thread.handler.set), or take it back (handler null). The
+ * handler gets a brief and then this chat's Ready and questions; approvals
+ * stay with the person. Resolves true when the daemon took it.
+ */
+export async function setThreadHandedTo(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly handler: {
+    readonly threadId: ThreadId;
+    readonly kind: ThreadHandlerKind;
+    readonly title: string;
+    readonly note?: string | null;
+  } | null;
+}): Promise<boolean> {
+  const api = readEnvironmentApi(input.environmentId);
+  if (!api) return false;
+  const { handler } = input;
+  try {
+    await api.orchestration.dispatchCommand({
+      type: "thread.handler.set",
+      commandId: newCommandId(),
+      threadId: input.threadId,
+      handler:
+        handler === null
+          ? null
+          : {
+              threadId: handler.threadId,
+              kind: handler.kind,
+              title: handler.title,
+              note: handler.note?.trim() ? handler.note.trim() : null,
+            },
+      ...(handler === null ? { reason: "taken-back" as const } : {}),
+      createdAt: new Date().toISOString(),
+    });
+    toastManager.add(
+      stackedThreadToast(
+        handler === null
+          ? { type: "success", title: HAND_TO_COPY.takenBackToast }
+          : {
+              type: "success",
+              title: HAND_TO_COPY.handedToast(handler.title),
+              description: HAND_TO_COPY.handedDescription,
+            },
+      ),
+    );
+    return true;
+  } catch (error) {
+    toastManager.add(
+      stackedThreadToast({
+        type: "error",
+        title: HAND_TO_COPY.failed,
         description: error instanceof Error ? error.message : "An error occurred.",
       }),
     );

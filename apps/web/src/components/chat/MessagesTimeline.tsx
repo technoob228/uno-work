@@ -32,6 +32,7 @@ import {
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { deriveTimelineEntries, formatElapsed, type PendingApproval } from "../../session-logic";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
+import { HandedChatMessage, isHandedChatText } from "./HandedChatMessage";
 import { SupportDraftCard } from "./SupportDraftCard";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import { useDevMode } from "../../devMode";
@@ -663,6 +664,14 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
           const note = parseUnoWorkNote(row.message.text);
           if (note?.kind === "automation") return <AutomationMessageRow note={note} />;
           if (note) return <UnoWorkNoteLine note={note} raw={row.message.text} />;
+          if (isHandedChatText(row.message.text)) {
+            return (
+              <HandedChatMessage
+                text={row.message.text}
+                environmentId={ctx.activeThreadEnvironmentId}
+              />
+            );
+          }
           const userAttachments = row.message.attachments ?? [];
           const allUserImages = userAttachments.filter(
             (attachment): attachment is ChatImageAttachment => attachment.type === "image",

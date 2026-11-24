@@ -15,6 +15,7 @@ import {
   handoffAction,
   isAgentTask,
   latestReportIdBySender,
+  nestHandedChats,
   sidebarAgentPlacement,
   threadHandler,
 } from "./agentTasks.logic";
@@ -356,5 +357,46 @@ describe("agentTasksChip (T63: the Tasks chip above the composer)", () => {
       label: "3 done",
       tone: "quiet",
     });
+  });
+});
+
+describe("Hand to… in the sidebar (T63)", () => {
+  const keyOf = (thread: { environmentId: string; id: string }) =>
+    `${thread.environmentId}:${thread.id}`;
+  const handedTo = (handlerId: string) => ({
+    controller: "agent" as const,
+    controlChangedAt: HANDED_AT,
+    handler: { threadId: ThreadId.make(handlerId), kind: "chat" as const, handedAt: HANDED_AT },
+  });
+
+  it("moves a handed chat under its handler, out of the list and the shelf", () => {
+    const launch = summary("launch");
+    const pricing = summary("pricing", {
+      ...handedTo("launch"),
+      updatedAt: "2026-11-13T11:00:00Z",
+    });
+    const hero = summary("hero", { ...handedTo("launch"), updatedAt: "2026-11-13T12:00:00Z" });
+    const result = nestHandedChats({ listed: [launch, pricing], shelf: [hero], keyOf });
+    expect(result.listed.map((thread) => thread.id)).toEqual(["launch"]);
+    expect(result.shelf).toEqual([]);
+    expect(result.nested.get("env:launch")?.map((thread) => thread.id)).toEqual([
+      "hero",
+      "pricing",
+    ]);
+  });
+
+  it("keeps it in place when it needs the person, is pinned, or its handler isn't listed", () => {
+    const launch = summary("launch");
+    const waiting = summary("waiting", { ...handedTo("launch"), hasPendingApprovals: true });
+    const pinned = summary("pinned", { ...handedTo("launch"), pinnedAt: HANDED_AT });
+    const elsewhere = summary("elsewhere", handedTo("uno-chat"));
+    const result = nestHandedChats({
+      listed: [launch, waiting, pinned],
+      shelf: [elsewhere],
+      keyOf,
+    });
+    expect(result.listed.map((thread) => thread.id)).toEqual(["launch", "waiting", "pinned"]);
+    expect(result.shelf.map((thread) => thread.id)).toEqual(["elsewhere"]);
+    expect(result.nested.size).toBe(0);
   });
 });

@@ -25,7 +25,9 @@ import {
   type ComposerOriginChip,
   type ThreadControlBarAction,
 } from "../../agentThreads.logic";
-import { setThreadAgentsClosed, setThreadHandler } from "../../agentsAccess";
+import { setThreadAgentsClosed, setThreadHandedTo, setThreadHandler } from "../../agentsAccess";
+import { HAND_TO_COPY, useHandToStore } from "../../handTo.logic";
+import { useEnvironmentSupportsHandTo } from "../../environments/handToSupport";
 import { useEnvironmentSupportsAgentsCloseChat } from "../../environments/agentsCloseChatSupport";
 import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThreadsSupport";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
@@ -84,13 +86,20 @@ function OriginPopup(props: {
   readonly chip: ComposerOriginChip;
   readonly onOpenParent: () => void;
   readonly onAction: (action: ThreadControlBarAction) => void;
+  /** "Hand to…" (T63): set on daemons that have it; Join reads "Take back" there. */
+  readonly onHandTo: (() => void) | null;
   readonly busy: boolean;
 }) {
   const { chip } = props;
   const { state } = chip;
-  const actions = [state.action, state.secondaryAction].filter(
-    (action): action is ThreadControlBarAction => action !== null,
-  );
+  const actions = [state.action, state.secondaryAction]
+    .filter((action): action is ThreadControlBarAction => action !== null)
+    .flatMap((action): ThreadControlBarAction[] => {
+      if (!props.onHandTo || action.kind !== "handoff") return [action];
+      // "Its own agent" is in the Hand to… picker; Join is Take back.
+      if (action.nextController === "agent") return [];
+      return [{ ...action, label: HAND_TO_COPY.takeBack, hint: "Take back: it's your chat again" }];
+    });
   return (
     <div className="flex flex-col gap-2.5 text-xs" data-testid="composer-origin-popup">
       <p className="text-foreground">
@@ -107,8 +116,19 @@ function OriginPopup(props: {
         ) : null}
         {state.trailText}
       </p>
-      {actions.length > 0 ? (
+      {actions.length > 0 || props.onHandTo ? (
         <div className="flex flex-wrap gap-2">
+          {props.onHandTo ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={props.busy}
+              onClick={props.onHandTo}
+              data-testid="composer-origin-hand-to"
+            >
+              {HAND_TO_COPY.action}
+            </Button>
+          ) : null}
           {actions.map((action) => (
             <Button
               key={action.label}
@@ -128,6 +148,46 @@ function OriginPopup(props: {
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** The chat is handed to another chat or an assistant (T63): who, and Take back. */
+function HandledPopup(props: {
+  readonly title: string;
+  readonly busy: boolean;
+  readonly onOpenHandler: () => void;
+  readonly onTakeBack: () => void;
+  readonly onHandTo: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2.5 text-xs" data-testid="composer-handled-popup">
+      <p className="text-foreground">
+        <button
+          type="button"
+          onClick={props.onOpenHandler}
+          title="Open the chat that handles this one"
+          className="cursor-pointer rounded-sm font-medium underline-offset-2 outline-hidden hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          “{props.title}”
+        </button>{" "}
+        handles this chat: it gets its Ready and questions and writes here. Approvals, secrets,
+        payments and sign-ins still come to you.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={props.busy}
+          onClick={props.onTakeBack}
+          data-testid="composer-handled-take-back"
+        >
+          {HAND_TO_COPY.takeBack}
+        </Button>
+        <Button size="xs" variant="ghost" disabled={props.busy} onClick={props.onHandTo}>
+          Hand to someone else
+        </Button>
+      </div>
     </div>
   );
 }
@@ -161,6 +221,16 @@ export function ComposerContextLine(props: {
   const supported = useEnvironmentSupportsAgentThreads(environmentId);
   const supportsAgentsAccess = useEnvironmentSupportsAgentsCloseChat(environmentId);
   const parentTitle = useThreadTitle(environmentId, spawnedByThreadId);
+  const supportsHandTo = useEnvironmentSupportsHandTo(environmentId);
+  const summary = useStore((store) =>
+    selectSidebarThreadSummaryByRef(store, { environmentId, threadId }),
+  );
+  const handler = supportsHandTo ? (summary?.handler ?? null) : null;
+  const handlerLiveTitle = useThreadTitle(environmentId, handler?.threadId ?? null);
+  const handlerTitle = handlerLiveTitle ?? handler?.title ?? "another chat";
+  const openHandTo = summary
+    ? () => useHandToStore.getState().open({ environmentId, threadId, title: summary.title })
+    : null;
   const agentLed = useStore((store) => {
     const summary = selectSidebarThreadSummaryByRef(store, { environmentId, threadId });
     return (
@@ -261,35 +331,74 @@ export function ComposerContextLine(props: {
     );
   }
 
-  const originChip = origin ? (
+  const handledChip = handler ? (
     <Chip
-      testId="composer-chip-origin"
-      icon={
-        origin.kind === "closed" ? (
-          <LockIcon aria-hidden className="size-3.5 shrink-0" />
-        ) : origin.kind === "handled" ? (
-          <ArrowRightLeftIcon aria-hidden className="size-3.5 shrink-0" />
-        ) : (
-          <CornerUpLeftIcon aria-hidden className="size-3.5 shrink-0" />
-        )
-      }
-      label={origin.label}
+      testId="composer-chip-handled"
+      icon={<ArrowRightLeftIcon aria-hidden className="size-3.5 shrink-0" />}
+      label={`Handled by “${handlerTitle}”`}
       popupClassName="w-[min(22rem,calc(100vw-1rem))]"
       popup={(close) => (
-        <OriginPopup
-          chip={origin}
+        <HandledPopup
+          title={handlerTitle}
           busy={busy}
-          onOpenParent={() => {
+          onOpenHandler={() => {
             close();
-            if (spawnedByThreadId) open(spawnedByThreadId);
+            open(handler.threadId);
           }}
-          onAction={(action) => void runAction(action, close)}
+          onTakeBack={() => {
+            setBusy(true);
+            void setThreadHandedTo({ environmentId, threadId, handler: null }).finally(() => {
+              setBusy(false);
+              close();
+            });
+          }}
+          onHandTo={() => {
+            close();
+            openHandTo?.();
+          }}
         />
       )}
     />
   ) : null;
 
-  if (!pendingChip && !tasksChip && !originChip) return null;
+  const originChip =
+    origin && !(handler && origin.kind === "handled") ? (
+      <Chip
+        testId="composer-chip-origin"
+        icon={
+          origin.kind === "closed" ? (
+            <LockIcon aria-hidden className="size-3.5 shrink-0" />
+          ) : origin.kind === "handled" ? (
+            <ArrowRightLeftIcon aria-hidden className="size-3.5 shrink-0" />
+          ) : (
+            <CornerUpLeftIcon aria-hidden className="size-3.5 shrink-0" />
+          )
+        }
+        label={origin.label}
+        popupClassName="w-[min(22rem,calc(100vw-1rem))]"
+        popup={(close) => (
+          <OriginPopup
+            chip={origin}
+            busy={busy}
+            onOpenParent={() => {
+              close();
+              if (spawnedByThreadId) open(spawnedByThreadId);
+            }}
+            onAction={(action) => void runAction(action, close)}
+            onHandTo={
+              supportsHandTo && openHandTo && !handler
+                ? () => {
+                    close();
+                    openHandTo();
+                  }
+                : null
+            }
+          />
+        )}
+      />
+    ) : null;
+
+  if (!pendingChip && !tasksChip && !handledChip && !originChip) return null;
   return (
     <div
       data-testid="composer-context-line"
@@ -297,6 +406,7 @@ export function ComposerContextLine(props: {
     >
       {pendingChip}
       {tasksChip}
+      {handledChip}
       {originChip}
     </div>
   );
