@@ -41,6 +41,14 @@ export const INBOX_PERSON_CALL_BODY_PREFIX = "Needs you: ";
  */
 export const INBOX_PERSON_ANSWER_BODY_PREFIX = "Answer to your question";
 
+/**
+ * The body of a chat's "Waiting for you" item (T52, kind `agent.input`):
+ * "Waiting for you · 3: Ship on Thursday? · Pricing · +1". One per chat; it
+ * stays unread while anything there waits (cards to answer, site links to
+ * open) and is read once nothing does.
+ */
+export const INBOX_PENDING_FOR_YOU_BODY_PREFIX = "Waiting for you · ";
+
 /** Kinds that wait for the person — shown as "Needs you". */
 export const INBOX_NEEDS_YOU_KINDS: ReadonlySet<InboxItemKind> = new Set([
   "agent.approval",

@@ -13,6 +13,7 @@ import type {
   InboxSnapshot,
   InboxSource,
   InboxUpdateInput,
+  OrchestrationEvent,
   OrchestrationThreadShell,
   ThreadId,
 } from "@t3tools/contracts";
@@ -49,6 +50,7 @@ import {
   type InboxPost,
   type StoredInboxItem,
 } from "./inboxModel.ts";
+import { inboxPendingAction, inboxPendingGroupKey } from "./inboxPendingForYou.ts";
 
 const WAKE_CHECK_EVERY = Duration.seconds(20);
 const WRITE_DEBOUNCE_MS = 250;
@@ -270,6 +272,63 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
         });
       });
 
+    // ── Waiting for you (T52): one item per chat, following its list ─────
+    const startedAt = new Date().toISOString();
+    const pendingSeen = new Map<ThreadId, { everSeen: Set<string>; lastIds: string[] }>();
+    const PENDING_EVENTS = new Set<string>([
+      "thread.message-sent",
+      "thread.activity-appended",
+      "thread.pending-for-you-updated",
+      "thread.reverted",
+      "thread.archived",
+      "thread.deleted",
+    ]);
+    const syncPending = (event: OrchestrationEvent) =>
+      Effect.gen(function* () {
+        if (!PENDING_EVENTS.has(event.type)) return;
+        if (event.type === "thread.message-sent" && event.payload.streaming) return;
+        if (event.aggregateKind !== "thread") return;
+        const threadId = event.aggregateId as ThreadId;
+        const shell = yield* threadShell(threadId);
+        const gone = shell === null || shell.archivedAt !== null;
+        const pending = gone ? null : (shell.pendingForYou ?? null);
+        const seen = pendingSeen.get(threadId);
+        const action = inboxPendingAction({
+          everSeen: seen?.everSeen ?? new Set(),
+          lastIds: seen?.lastIds,
+          pending,
+          startedAt,
+        });
+        const ids = (pending?.items ?? []).map((item) => item.id);
+        const everSeen = seen?.everSeen ?? new Set<string>();
+        for (const id of ids) everSeen.add(id);
+        pendingSeen.set(threadId, { everSeen, lastIds: ids });
+        if (action === null) return;
+        const groupKey = inboxPendingGroupKey(threadId);
+        if (action.type === "resolve") {
+          yield* markRead((item) => item.groupKey === groupKey);
+          return;
+        }
+        if (action.type === "update") {
+          const items = yield* Ref.get(itemsRef);
+          const unread = items.find((item) => item.groupKey === groupKey && item.readAt === null);
+          if (unread === undefined || unread.body === action.body) return;
+          yield* commit(
+            items.map((item) => (item === unread ? { ...item, body: action.body } : item)),
+          );
+          return;
+        }
+        if (shell === null) return;
+        yield* post({
+          kind: "agent.input",
+          source: agentSource(threadId, shell.title),
+          title: shell.title,
+          body: action.body,
+          open: { kind: "thread", threadId },
+          groupKey,
+        });
+      });
+
     yield* Effect.forkScoped(
       engine.streamDomainEvents.pipe(
         Stream.runForEach((event) =>
@@ -279,6 +338,7 @@ export const makeInboxService = (options: { readonly filePath?: string } = {}) =
               return [next.actions, next.state] as const;
             });
             for (const action of actions) yield* handleAction(action);
+            yield* syncPending(event);
           }).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("inbox: failed on an orchestration event", {

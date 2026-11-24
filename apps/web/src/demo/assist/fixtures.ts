@@ -11,6 +11,7 @@
 import {
   ASSISTANT_PROJECT_ID,
   INBOX_PERSON_ANSWER_BODY_PREFIX,
+  INBOX_PENDING_FOR_YOU_BODY_PREFIX,
   INBOX_PERSON_CALL_BODY_PREFIX,
 } from "@t3tools/contracts";
 
@@ -23,6 +24,7 @@ import {
   type ProjectSpec,
 } from "../heavyFixtures";
 import { PLAN_LIMIT_CHAT } from "./plans";
+import { pendingTrayChats } from "../pendingTrayDemo";
 import { type AssistWorld, macOnline } from "./world";
 import { teamDemoChats } from "../teamCollabDemo";
 
@@ -479,6 +481,8 @@ function liveChats(world: AssistWorld): ChatSpec[] {
   ];
   chats.push(...PERSON_NEEDED_CHATS);
   chats.push(...ANSWER_HELD_CHATS);
+  // T52: a long coordinator chat where three things wait for the person.
+  chats.push(...pendingTrayChats());
   // Multi-computer variants (28.10): one chat at work on each computer that's on.
   chats.push({
     id: "w-refunds",
@@ -561,6 +565,17 @@ function liveInbox(world: AssistWorld): (typeof INBOX)[number][] {
       chat: "w-stripe",
       title: "Card payments in the orders bot",
       body: `${INBOX_PERSON_CALL_BODY_PREFIX}Stripe asks you to sign in once to finish connecting the account.`,
+    },
+    {
+      // T52: the coordinator chat's "Waiting for you" item (the daemon keeps
+      // it in step with the chat's list; here it is a fixed line).
+      id: "i-t52-pending",
+      machine: "work",
+      kind: "agent.input",
+      minutesAgo: 12,
+      chat: "w-t52-launch",
+      title: "Launch week — coordinator",
+      body: `${INBOX_PENDING_FOR_YOU_BODY_PREFIX}3: Ship on Thursday? · Both hero banners are up · +1`,
     },
     {
       id: "i-backup",

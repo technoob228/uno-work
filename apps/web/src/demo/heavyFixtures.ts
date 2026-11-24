@@ -28,6 +28,7 @@ import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 import { DEMO_ASSIST } from "./demoFlag";
 import { timelineShowcaseThreads } from "./timelineShowcase";
+import { demoPendingForYou, pendingTrayActivities } from "./pendingTrayDemo";
 import { DEMO_ACCOUNTS, demoPlanSettings, hasPlans, planProvidersFor } from "./assist/plans";
 
 // The computers run the same Work as the page (no "runs another version" banner).
@@ -447,6 +448,8 @@ export interface ChatSpec {
    * parent, the person for theirs): the person joined it, or handed it off.
    */
   readonly handler?: "you" | "agent";
+  /** Each reply its own turn, as in a chat other agents keep writing to (T52). */
+  readonly turnPerReply?: boolean;
 }
 
 export const CHATS: ChatSpec[] = [
@@ -1153,13 +1156,14 @@ export function buildThread(chat: ChatSpec) {
       role,
       text,
       ...(sentByThreadId ? { sentByThreadId } : {}),
-      turnId: role === "assistant" ? turnId : null,
+      turnId: role === "assistant" ? (chat.turnPerReply ? `${turnId}-${index}` : turnId) : null,
       streaming: running && last && role === "assistant",
       createdAt: index === 0 ? created : at,
       updatedAt: index === 0 ? created : at,
     };
   });
   const lastAssistant = [...messages].toReversed().find((message) => message.role === "assistant");
+  const latestTurnId = chat.turnPerReply ? (lastAssistant?.turnId ?? turnId) : turnId;
   const turnStartedAt = running ? ago(chat.runningFor ?? chat.minutesAgo + 3) : created;
   return {
     id: chat.id,
@@ -1171,7 +1175,7 @@ export function buildThread(chat: ChatSpec) {
     branch: null,
     worktreePath: null,
     latestTurn: {
-      turnId,
+      turnId: latestTurnId,
       state: running ? "running" : failed ? "error" : "completed",
       requestedAt: turnStartedAt,
       startedAt: turnStartedAt,
@@ -1207,7 +1211,11 @@ export function buildThread(chat: ChatSpec) {
     deletedAt: null,
     messages,
     proposedPlans: [],
-    activities: askActivity(chat, updated, turnId),
+    activities: [
+      ...askActivity(chat, updated, turnId),
+      // T52: the coordinator chat's cards (pendingTrayDemo.ts).
+      ...pendingTrayActivities(chat.id, messages),
+    ],
     checkpoints: [],
     session: {
       threadId: chat.id,
@@ -1378,6 +1386,9 @@ export function toShellThread(thread: WireThread) {
     // Computers lifecycle: where an imported chat came from, and a turn waiting for a computer.
     ...((thread as { source?: unknown }).source !== undefined
       ? { source: (thread as { source?: unknown }).source }
+      : {}),
+    ...(demoPendingForYou(thread as never)
+      ? { pendingForYou: demoPendingForYou(thread as never) }
       : {}),
     ...((thread as { computerWait?: unknown }).computerWait !== undefined
       ? { computerWait: (thread as { computerWait?: unknown }).computerWait }

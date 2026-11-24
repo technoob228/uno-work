@@ -247,6 +247,8 @@ import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/Compos
 import { useReconnectWarningVisible } from "./chat/reconnectWarningGrace";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
 import { AgentTasksBar } from "./chat/AgentTasksBar";
+import { PendingForYouStrip } from "./chat/PendingForYouStrip";
+import { usePendingForYou } from "./chat/usePendingForYou";
 import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -1989,6 +1991,21 @@ export default function ChatView(props: ChatViewProps) {
     () => filterTimelineEntriesForVisibility(timelineEntries, embeddedVisibility),
     [embeddedVisibility, timelineEntries],
   );
+  // "Waiting for you · 3" (T52): what in this chat still waits for the person.
+  // The shell's copy: the computer updates it on every change (the chat's
+  // own copy only on load).
+  const pendingForYouList = useStore((state) =>
+    isServerThread && activeThread
+      ? selectEnvironmentState(state, environmentId).threadShellById[activeThread.id]?.pendingForYou
+      : undefined,
+  );
+  const pendingForYou = usePendingForYou({
+    environmentId,
+    threadId: isServerThread && activeThread ? activeThread.id : null,
+    chatKey: routeThreadKey,
+    pending: pendingForYouList,
+    enabled: showsTimeline(embeddedVisibility) && !isEmbedded,
+  });
   // A new chat not sent yet: the composer in the middle under "What should we
   // do in [folder] on [computer]?" (upstream draft hero, #4055).
   const isDraftHeroState = resolveDraftHeroState({
@@ -5289,6 +5306,8 @@ export default function ChatView(props: ChatViewProps) {
                   respondingRequestIds={respondingRequestIds}
                   onRespondToApproval={onRespondToApproval}
                   openAtAnswer={activeThreadHasUnreadAnswer}
+                  {...(pendingForYou.marks ? { pendingMarks: pendingForYou.marks } : {})}
+                  jumpTo={pendingForYou.jumpTo}
                   endOfFeed={
                     <>
                       <QueuedMessagesList
@@ -5534,6 +5553,9 @@ export default function ChatView(props: ChatViewProps) {
                       onStop={() => void onStopGoal()}
                       onDismiss={() => setDismissedGoalId(threadGoal.goalId)}
                     />
+                  ) : null}
+                  {pendingForYou.enabled && importedSource === null ? (
+                    <PendingForYouStrip {...pendingForYou.strip} />
                   ) : null}
                   <div className="relative z-10">
                     {importedSource !== null ? (

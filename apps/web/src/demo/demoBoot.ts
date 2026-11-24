@@ -25,6 +25,7 @@ import { setupWorker } from "msw/browser";
 import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "./rpcHarness";
 import { demoHooks } from "./demoFlag";
 import { deployApprovalHandlers } from "./deployApprovalsDemo";
+import { applyDemoPendingUpdate, installPendingTrayReplies } from "./pendingTrayDemo";
 import { answerChatRequestsRpc, installChatRequestsDemo } from "./chatRequestsDemo";
 import { answerTeamCollabRpc, installTeamCollabDemo } from "./teamCollabDemo";
 import { answerFileRpc, demoFolderEntries } from "./demoFiles";
@@ -773,6 +774,9 @@ function applyCommand(machine: DemoMachine, command: NormalizedWsRpcRequestBody)
   switch (command.type) {
     case "thread.settle":
       if (thread) Object.assign(thread, { settledOverride: "settled", settledAt: now });
+      break;
+    case "thread.pending-for-you.update":
+      if (thread) applyDemoPendingUpdate(thread as never, command as Record<string, unknown>);
       break;
     case "thread.unsettle":
       if (thread) Object.assign(thread, { settledOverride: "active", settledAt: null });
@@ -1865,6 +1869,7 @@ function startAssist() {
   installChatRequestsDemo(MACHINES.mac.environmentId);
   installTeamCollabDemo();
   startLifecycle(lifecycleOps);
+  installPendingTrayReplies();
   installAssistFixtures(WORLD);
   startDaemons({ world: WORLD });
   startEngine({ ops: assistOps, personaOf });

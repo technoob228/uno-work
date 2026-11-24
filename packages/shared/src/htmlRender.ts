@@ -35,6 +35,14 @@ export interface HtmlRenderReference {
    * sends waits in the person's message box for their Enter.
    */
   readonly source?: HtmlRenderSource;
+  /**
+   * A card only (T52): whether it waits for the person's answer — a choice, a
+   * quiz, a report with buttons. false: a report to look at. Absent: a card
+   * from before 0.0.192, never listed in "Waiting for you".
+   */
+  readonly waitsForAnswer?: boolean;
+  /** A card only: the page (attachment id) of an earlier card this one replaces. */
+  readonly replaces?: string;
 }
 
 export type HtmlRenderSource = "card";
@@ -67,7 +75,8 @@ function readMeasuredHeights(value: unknown) {
 
 export function readHtmlRenderReference(value: unknown): HtmlRenderReference | undefined {
   if (typeof value !== "object" || value === null) return undefined;
-  const { attachmentId, path, title, height, heights, source } = value as Record<string, unknown>;
+  const { attachmentId, path, title, height, heights, source, waitsForAnswer, replaces } =
+    value as Record<string, unknown>;
   if (
     typeof attachmentId !== "string" ||
     attachmentId.length === 0 ||
@@ -88,6 +97,13 @@ export function readHtmlRenderReference(value: unknown): HtmlRenderReference | u
     height: clampHtmlRenderHeight(height),
     ...(measured === undefined ? {} : { heights: measured }),
     ...(source === "card" ? { source: "card" as const } : {}),
+    ...(source === "card" && typeof waitsForAnswer === "boolean" ? { waitsForAnswer } : {}),
+    ...(source === "card" &&
+    typeof replaces === "string" &&
+    replaces.length > 0 &&
+    replaces.length <= 256
+      ? { replaces }
+      : {}),
   };
 }
 
@@ -98,6 +114,8 @@ export function htmlRenderReferencesEqual(left: HtmlRenderReference, right: Html
     left.title === right.title &&
     left.height === right.height &&
     left.source === right.source &&
+    left.waitsForAnswer === right.waitsForAnswer &&
+    left.replaces === right.replaces &&
     (left.heights ?? []).length === (right.heights ?? []).length &&
     (left.heights ?? []).every(
       ([width, height], index) =>

@@ -15,6 +15,7 @@ import {
   ProjectId,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, Schema } from "effect";
+import { parsePendingForYouState, pendingForYouView } from "@t3tools/shared/pendingForYou";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
@@ -57,6 +58,13 @@ import {
   mapProposedPlanRow,
   toPersistenceSqlOrDecodeError,
 } from "./ProjectionSnapshotQuery.rows.ts";
+/** The chat's "Waiting for you" (T52) as clients see it; left out while not tracked. */
+
+/** The chat's "Waiting for you" (T52) as clients see it; null while not tracked. */
+function pendingForYouOfRow(raw: string | null | undefined) {
+  const state = parsePendingForYouState(raw ?? null);
+  return state === null ? {} : { pendingForYou: pendingForYouView(state) };
+}
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
@@ -259,6 +267,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -568,6 +577,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
@@ -994,6 +1004,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 personCallReason: row.personCallReason ?? null,
                 source: row.source ?? null,
                 ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                ...pendingForYouOfRow(row.pendingForYou),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1216,6 +1227,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   personCallReason: row.personCallReason ?? null,
                   source: row.source ?? null,
                   ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                  ...pendingForYouOfRow(row.pendingForYou),
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1367,6 +1379,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     personCallReason: row.personCallReason ?? null,
                     source: row.source ?? null,
                     ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                    ...pendingForYouOfRow(row.pendingForYou),
                     session: sessionByThread.get(row.threadId) ?? null,
                     latestUserMessageAt: row.latestUserMessageAt,
                     hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -1606,6 +1619,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ...(threadRow.value.computerWait != null
           ? { computerWait: threadRow.value.computerWait }
           : {}),
+        ...pendingForYouOfRow(threadRow.value.pendingForYou),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -1725,6 +1739,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ...(threadRow.value.computerWait != null
           ? { computerWait: threadRow.value.computerWait }
           : {}),
+        ...pendingForYouOfRow(threadRow.value.pendingForYou),
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {

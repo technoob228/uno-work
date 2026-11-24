@@ -297,6 +297,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    pendingForYou: thread.pendingForYou ?? null,
   };
 }
 
@@ -332,6 +333,7 @@ function mapThreadShell(
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    pendingForYou: thread.pendingForYou ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -381,6 +383,7 @@ function mapThreadShell(
     autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    pendingForYouCount: thread.pendingForYou?.items.length ?? 0,
   };
   return {
     shell,
@@ -414,6 +417,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    pendingForYou: thread.pendingForYou ?? null,
   };
 }
 
@@ -517,7 +521,8 @@ function sidebarThreadSummariesEqual(
     (left.autoSettleDisabledAt ?? null) === (right.autoSettleDisabledAt ?? null) &&
     JSON.stringify(left.pullRequests ?? []) === JSON.stringify(right.pullRequests ?? []) &&
     threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
-    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null)
+    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null) &&
+    (left.pendingForYouCount ?? 0) === (right.pendingForYouCount ?? 0)
   );
 }
 
@@ -563,8 +568,14 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&
     (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
     threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
-    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null)
+    (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null) &&
+    pendingForYouStamp(left.pendingForYou) === pendingForYouStamp(right.pendingForYou)
   );
+}
+
+/** "Waiting for you" by value: every shell event decodes fresh objects. */
+function pendingForYouStamp(pending: ThreadShell["pendingForYou"]): string {
+  return pending ? JSON.stringify(pending) : "";
 }
 
 function threadTurnStatesEqual(left: ThreadTurnState | undefined, right: ThreadTurnState): boolean {
@@ -715,9 +726,15 @@ function writeThreadState(
   nextThread: Thread,
   previousThread?: Thread,
 ): EnvironmentState {
-  const nextShell = toThreadShell(nextThread);
-  const nextTurnState = toThreadTurnState(nextThread);
   const previousShell = state.threadShellById[nextThread.id];
+  const detailShell = toThreadShell(nextThread);
+  // "Waiting for you" (T52) is the shell stream's: the chat's own copy is only
+  // read on load and would put back what the person already dealt with.
+  const nextShell =
+    previousShell?.pendingForYou != null
+      ? { ...detailShell, pendingForYou: previousShell.pendingForYou }
+      : detailShell;
+  const nextTurnState = toThreadTurnState(nextThread);
   const previousTurnState = state.threadTurnStateById[nextThread.id];
 
   let nextState = ensureThreadRegistered(

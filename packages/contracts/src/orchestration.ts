@@ -348,6 +348,49 @@ export const ThreadComputerWait = Schema.Struct({
 });
 export type ThreadComputerWait = typeof ThreadComputerWait.Type;
 
+/**
+ * "Waiting for you" (T52, Misha 20.11/23.11): what in a chat still waits for
+ * the person — a card (`show_card`) they haven't answered, links to their own
+ * sites and reports (uno4.me) they haven't opened. The daemon keeps it
+ * (`@t3tools/shared/pendingForYou`), so the strip above the composer, the
+ * sidebar's count and the Inbox agree on every device.
+ */
+export const ThreadPendingLink = Schema.Struct({
+  href: Schema.String,
+  label: Schema.String,
+  opened: Schema.Boolean,
+});
+export type ThreadPendingLink = typeof ThreadPendingLink.Type;
+
+export const ThreadPendingItem = Schema.Struct({
+  /** `card:<attachmentId>` or `links:<messageId>`; stable. */
+  id: Schema.String,
+  kind: Schema.Literals(["card", "links"]),
+  title: Schema.String,
+  createdAt: IsoDateTime,
+  /** Posted in a turn the person's own message started: it answers them. */
+  answersYou: Schema.Boolean,
+  /** The chat whose agent's message started that turn; null when the person's. */
+  broughtByThreadId: Schema.NullOr(ThreadId),
+  /** kind "links": the agent's message with them. */
+  messageId: Schema.NullOr(MessageId),
+  /** kind "card": the page's activity (the feed row) and its page. */
+  activityId: Schema.NullOr(Schema.String),
+  attachmentId: Schema.NullOr(Schema.String),
+  links: Schema.Array(ThreadPendingLink),
+});
+export type ThreadPendingItem = typeof ThreadPendingItem.Type;
+
+export const ThreadPendingForYou = Schema.Struct({
+  /** What still waits: answers to the person first, then the oldest first. */
+  items: Schema.Array(ThreadPendingItem),
+  /** Waiting items the person hid ("Not needed"). */
+  hidden: Schema.Array(ThreadPendingItem),
+  /** Cards a newer card replaced (activity ids): dimmed in the feed. */
+  replacedActivityIds: Schema.Array(Schema.String),
+});
+export type ThreadPendingForYou = typeof ThreadPendingForYou.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -715,6 +758,8 @@ export const OrchestrationThread = Schema.Struct({
   source: Schema.optional(Schema.NullOr(ThreadSource)),
   // See ThreadComputerWait. Absent or null: not waiting for a computer.
   computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
+  // See ThreadPendingForYou. Absent: an older daemon.
+  pendingForYou: Schema.optional(Schema.NullOr(ThreadPendingForYou)),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -806,6 +851,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   source: Schema.optional(Schema.NullOr(ThreadSource)),
   // See ThreadComputerWait.
   computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
+  // See ThreadPendingForYou.
+  pendingForYou: Schema.optional(Schema.NullOr(ThreadPendingForYou)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -1081,6 +1128,18 @@ const ThreadReadCommand = Schema.Struct({
   readAt: IsoDateTime,
 });
 
+// "Waiting for you" (T52): the person hid items ("Not needed"), showed them
+// again, or opened links (normalized hrefs) — the daemon keeps it.
+const ThreadPendingForYouUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.pending-for-you.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  dismiss: Schema.optional(Schema.Array(Schema.String)),
+  restore: Schema.optional(Schema.Array(Schema.String)),
+  opened: Schema.optional(Schema.Array(Schema.String)),
+  createdAt: IsoDateTime,
+});
+
 // Handoff between the person and an agent (Misha 14.11): who handles the chat.
 // The person may set either value on any chat — take over a chat an agent
 // runs, or hand one of theirs to its agent (it leaves their sidebar); an
@@ -1234,6 +1293,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
+  ThreadPendingForYouUpdateCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1266,6 +1326,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadVisitCommand,
   ThreadMarkUnreadCommand,
   ThreadReadCommand,
+  ThreadPendingForYouUpdateCommand,
   ThreadControlSetCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
@@ -1452,6 +1513,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.visited",
   "thread.marked-unread",
   "thread.read",
+  "thread.pending-for-you-updated",
   "thread.control-changed",
   "thread.person-called",
   "thread.person-released",
@@ -1636,6 +1698,14 @@ export const ThreadMarkedUnreadPayload = Schema.Struct({
 export const ThreadReadPayload = Schema.Struct({
   threadId: ThreadId,
   readAt: IsoDateTime,
+});
+
+export const ThreadPendingForYouUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  dismiss: Schema.Array(Schema.String),
+  restore: Schema.Array(Schema.String),
+  opened: Schema.Array(Schema.String),
+  updatedAt: IsoDateTime,
 });
 
 export const ThreadControlChangedPayload = Schema.Struct({
@@ -1994,6 +2064,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.read"),
     payload: ThreadReadPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.pending-for-you-updated"),
+    payload: ThreadPendingForYouUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
