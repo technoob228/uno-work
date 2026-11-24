@@ -77,6 +77,8 @@ import { resolveConnectorOutgoingFile } from "./connectorOutgoingFiles.ts";
 import { queueOutgoingFile } from "./outgoingFileQueue.ts";
 import { AssistantPushService } from "./Services/AssistantPush.ts";
 import { capToolResultBody } from "../mcp/capToolResult.ts";
+import { AssistantProjects } from "../assistants/assistantProjects.ts";
+import { PROJECT_CONTEXT_MAX_CHARS } from "../assistants/projectPassport.ts";
 import { makeThreadSendableRoots } from "./threadSendableRoots.ts";
 import { SLACK_UPLOAD_LIMIT_BYTES } from "./largeFileLink.ts";
 import { TELEGRAM_BOT_UPLOAD_LIMIT_BYTES } from "./telegramMedia.ts";
@@ -327,6 +329,25 @@ export const managerMcpRouteLayer = HttpRouter.add(
           },
         };
       });
+    // project_context: read-only, within the token's projects (the same
+    // allowlist as list_threads), so it takes the same scope.
+    const assistantProjects = Option.getOrUndefined(yield* Effect.serviceOption(AssistantProjects));
+    const projectContext = assistantProjects
+      ? (
+          who: ManagerCaller,
+          input: { readonly project: string; readonly chats?: number | undefined },
+        ) =>
+          who.scopes.includes("threads:read")
+            ? assistantProjects.contextFor({
+                allowlist: who.projectAllowlist,
+                project: input.project,
+                chats: input.chats,
+              })
+            : Effect.succeed({
+                ok: false as const,
+                error: "This token can't read projects (it lacks threads:read).",
+              })
+      : undefined;
     const outcome = yield* handleManagerMcpMessage(
       toolService,
       callerWithThread,
@@ -337,6 +358,7 @@ export const managerMcpRouteLayer = HttpRouter.add(
         ...(automations ? { automations } : {}),
         assistantWorkspace,
         sendFile,
+        ...(projectContext ? { projectContext } : {}),
       },
       { assistantsEnabled },
     );
@@ -345,8 +367,20 @@ export const managerMcpRouteLayer = HttpRouter.add(
     }
     // The Uno dispatcher keeps every result in its context: long ones cut.
     const dispatcher = assistantProjectOfCaller(callerWithThread) === ASSISTANT_PROJECT_ID;
+    // project_context is the one read it asks for on purpose: its own cap.
+    const calledTool =
+      typeof body === "object" &&
+      body !== null &&
+      (body as { method?: unknown }).method === "tools/call"
+        ? (body as { params?: { name?: unknown } }).params?.name
+        : undefined;
     return HttpServerResponse.jsonUnsafe(
-      dispatcher ? capToolResultBody(outcome.body) : outcome.body,
+      dispatcher
+        ? capToolResultBody(
+            outcome.body,
+            calledTool === "project_context" ? PROJECT_CONTEXT_MAX_CHARS + 500 : undefined,
+          )
+        : outcome.body,
       { status: 200 },
     );
   }),

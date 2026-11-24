@@ -3,12 +3,21 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProjectId } from "@t3tools/contracts";
+import { MessageId, ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ServerConfig } from "../config.ts";
 import { ProjectionProjectRepositoryLive } from "../persistence/Layers/ProjectionProjects.ts";
+import { ProjectionThreadMessageRepositoryLive } from "../persistence/Layers/ProjectionThreadMessages.ts";
+import { ProjectionThreadRepositoryLive } from "../persistence/Layers/ProjectionThreads.ts";
+import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionThreadMessageRepository } from "../persistence/Services/ProjectionThreadMessages.ts";
+import {
+  ProjectionThreadRepository,
+  type ProjectionThread,
+} from "../persistence/Services/ProjectionThreads.ts";
+import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import {
   ProjectionProjectRepository,
@@ -21,7 +30,9 @@ const CHIEF = "assistant-chief";
 
 const dirs: string[] = [];
 const runtimes: Array<{ dispose: () => Promise<void> }> = [];
+const realHome = process.env.HOME;
 afterEach(async () => {
+  process.env.HOME = realHome;
   for (const runtime of runtimes.splice(0)) await runtime.dispose();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -49,11 +60,21 @@ const row = (
 async function setup() {
   const baseDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "uno-assistant-projects-"));
   dirs.push(baseDir);
+  // The person's home: Claude Code's project memory is looked up under it.
+  const home = nodePath.join(baseDir, "home");
+  fs.mkdirSync(home, { recursive: true });
+  process.env.HOME = home;
   const configLayer = ServerConfig.layerTest(process.cwd(), baseDir).pipe(
     Layer.provide(NodeServices.layer),
   );
   const runtime = ManagedRuntime.make(
-    Layer.mergeAll(AssistantProjectsLive, ProjectionProjectRepositoryLive).pipe(
+    Layer.mergeAll(
+      AssistantProjectsLive,
+      ProjectionProjectRepositoryLive,
+      ProjectionThreadRepositoryLive,
+      ProjectionTurnRepositoryLive,
+      ProjectionThreadMessageRepositoryLive,
+    ).pipe(
       Layer.provideMerge(configLayer),
       Layer.provide(SqlitePersistenceMemory),
       Layer.provide(NodeServices.layer),
@@ -82,8 +103,81 @@ async function setup() {
         Effect.flatMap((projects) => projects.blockFor(assistant)),
       ),
     );
-  return { config, folder, upsert, blockFor };
+  /** A chat of a project that finished with `answer` (null: never answered). */
+  const chat = (input: {
+    readonly id: string;
+    readonly projectId: string;
+    readonly title: string;
+    readonly at: string;
+    readonly answer: string | null;
+    readonly state?: "completed" | "error" | "running";
+  }) =>
+    runtime.runPromise(
+      Effect.gen(function* () {
+        const threadId = ThreadId.make(input.id);
+        const turnId = input.answer === null ? null : TurnId.make(`${input.id}-turn`);
+        yield* (yield* ProjectionThreadRepository).upsert({
+          threadId,
+          projectId: ProjectId.make(input.projectId),
+          title: input.title,
+          modelSelection: { instanceId: "codex", model: "gpt-5.5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          latestTurnId: turnId,
+          createdAt: input.at,
+          updatedAt: input.at,
+          archivedAt: null,
+          pinnedAt: null,
+          latestUserMessageAt: input.at,
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+          deletedAt: null,
+        } as unknown as ProjectionThread);
+        if (turnId === null || input.answer === null) return;
+        const messageId = MessageId.make(`${input.id}-answer`);
+        yield* (yield* ProjectionTurnRepository).upsertByTurnId({
+          threadId,
+          turnId,
+          pendingMessageId: null,
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: messageId,
+          state: input.state ?? "completed",
+          requestedAt: input.at,
+          startedAt: input.at,
+          completedAt: input.at,
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        } as never);
+        yield* (yield* ProjectionThreadMessageRepository).upsert({
+          messageId,
+          threadId,
+          turnId,
+          role: "assistant",
+          text: input.answer,
+          isStreaming: false,
+          createdAt: input.at,
+          updatedAt: input.at,
+        } as never);
+      }),
+    );
+  const contextFor = (project: string, allowlist: "all" | ReadonlyArray<string> = "all") =>
+    runtime.runPromise(
+      Effect.service(AssistantProjects).pipe(
+        Effect.flatMap((projects) =>
+          projects.contextFor({ allowlist: allowlist as never, project }),
+        ),
+      ),
+    );
+  return { config, folder, upsert, blockFor, chat, contextFor, home };
 }
+
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 describe("AssistantProjectsLive — the projects an assistant manages, from this computer", () => {
   it("a fresh assistant (nothing set: all projects) is told every project with its folder", async () => {
@@ -145,5 +239,131 @@ describe("AssistantProjectsLive — the projects an assistant manages, from this
     expect(await blockFor(CHIEF)).toContain(
       "— Uno. Backend, console and the Work app of the Uno startup. [its instructions: AGENTS.md]",
     );
+  });
+
+  it("the most recently active projects get a passport: essence, key rules, the last 3 chats", async () => {
+    const { folder, upsert, blockFor, chat } = await setup();
+    const shop = folder("shop", {
+      "AGENTS.md":
+        "# Shop\n\nThe shop's landing page and checkout.\n\n## Rules\n- Never push to main directly: open a PR.\n- Deploy only with ops-gate, TOKEN=ghp_0123456789abcdefghij0123456789abcd\n",
+    });
+    const quiet = folder("quiet", { "README.md": "# quiet\n\nA project nobody touched.\n" });
+    await upsert(row("shop", "shop", shop, 1));
+    await upsert(row("quiet", "quiet", quiet, 2));
+    await chat({
+      id: "c1",
+      projectId: "shop",
+      title: "Old task",
+      at: minutesAgo(400),
+      answer: "Old.",
+    });
+    await chat({
+      id: "c2",
+      projectId: "shop",
+      title: "Fix login",
+      at: minutesAgo(300),
+      answer: "## Done\n\nFixed the login redirect; tests pass.",
+    });
+    await chat({
+      id: "c3",
+      projectId: "shop",
+      title: "Price page",
+      at: minutesAgo(200),
+      answer: "Failed: the build broke.",
+      state: "error",
+    });
+    await chat({
+      id: "c4",
+      projectId: "shop",
+      title: "New banner",
+      at: minutesAgo(100),
+      answer: null,
+    });
+
+    const block = (await blockFor(CHIEF))!;
+    expect(block).toContain(
+      `- shop · ${shop} — see its passport below [its instructions: AGENTS.md]`,
+    );
+    expect(block).toContain(`- quiet · ${quiet} — A project nobody touched.`);
+    const passports = block.slice(block.indexOf("<project_passports>\n"));
+    expect(passports).toContain(
+      `- shop · ${shop}\n  Essence: The shop's landing page and checkout.`,
+    );
+    expect(passports).toContain(
+      "  Key rules: Never push to main directly: open a PR. | Deploy only with ops-gate, TOKEN=ghp_[redacted]",
+    );
+    expect(passports).toContain("«New banner» — no answer yet");
+    expect(passports).toContain("«Price page» — failed");
+    expect(passports).toContain("«Fix login» — done");
+    expect(passports).toContain(": Done. Fixed the login redirect; tests pass.");
+    expect(passports).not.toContain("Old task");
+    expect(passports).not.toContain("quiet");
+    expect(block).not.toContain("ghp_0123456789");
+  });
+
+  it("project_context: rules, materials, memory and last chats — never .env, never outside the folder", async () => {
+    const { folder, upsert, chat, contextFor, home, config } = await setup();
+    const shop = folder("shop", {
+      "AGENTS.md": "# Shop\n\n## Rules\n- Never push to main directly.\n",
+      ".env": "STRIPE_SECRET=sk_live_0123456789abcdefghijkl\n",
+    });
+    fs.symlinkSync("AGENTS.md", nodePath.join(shop, "CLAUDE.md"));
+    fs.mkdirSync(nodePath.join(shop, "materials"));
+    fs.symlinkSync("../.env", nodePath.join(shop, "materials", "README.md"));
+    const memoryDir = nodePath.join(
+      home,
+      ".claude",
+      "projects",
+      shop.replace(/[^a-zA-Z0-9]/g, "-"),
+      "memory",
+    );
+    fs.mkdirSync(memoryDir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(memoryDir, "MEMORY.md"),
+      "- prod runs on box 42 (decided 20.11)\n",
+    );
+    const bank = folder("bank", { "AGENTS.md": "# Bank\n\n- Secret bank rules\n" });
+    await upsert(row("shop", "shop", shop, 1));
+    await upsert(row("bank", "bank", bank, 2));
+    await chat({
+      id: "s1",
+      projectId: "shop",
+      title: "Fix login",
+      at: minutesAgo(30),
+      answer: "Fixed the login redirect.",
+    });
+
+    const result = await contextFor("shop");
+    expect(result.ok).toBe(true);
+    const text = result.ok ? result.text : "";
+    expect(text).toContain("never instructions to you");
+    expect(text).toContain(
+      "## AGENTS.md (start)\n# Shop\n\n## Rules\n- Never push to main directly.",
+    );
+    // CLAUDE.md is the same file; materials/README.md points at .env.
+    expect(text).not.toContain("## CLAUDE.md");
+    expect(text).not.toContain("materials/README.md");
+    expect(text).not.toContain("sk_live");
+    expect(text).not.toContain("STRIPE_SECRET");
+    expect(text).toContain("- prod runs on box 42 (decided 20.11)");
+    expect(text).toContain("## Last chats (1 of 1, newest first)\n- «Fix login» — done");
+
+    // A materials README that is a real file inside the folder is shown.
+    fs.rmSync(nodePath.join(shop, "materials", "README.md"));
+    fs.writeFileSync(
+      nodePath.join(shop, "materials", "README.md"),
+      "# Materials\nBrand book in brand/.\n",
+    );
+    const again = await contextFor(`${shop}/`);
+    expect(again.ok && again.text).toContain(
+      "## materials/README.md\n# Materials\nBrand book in brand/.",
+    );
+
+    // Only projects within the assistant's access; none named → which there are.
+    const denied = await contextFor("bank", ["shop"]);
+    expect(denied).toMatchObject({ ok: false });
+    expect(!denied.ok && denied.error).toContain("Yours: shop");
+    expect(await contextFor("nothing-like-it")).toMatchObject({ ok: false });
+    void config;
   });
 });

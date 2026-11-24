@@ -46,6 +46,8 @@ export interface AssistantProjectEntry {
   readonly instructions: ReadonlyArray<string>;
   /** The person's own computer the folder is on; absent: this computer. */
   readonly computerName?: string | undefined;
+  /** Its passport follows the list (`projectPassport.ts`): the line about it is there. */
+  readonly passport?: boolean | undefined;
 }
 
 /** A heading that names the file, not the project ("# AGENTS.md", "# README"). */
@@ -54,7 +56,7 @@ const FILE_NAME_HEADING = /^(agents|claude|readme|contributing)(\.md)?$/i;
 const POINTER_LINE = /^(see|read|смотри|см\.?)\s+\S+\.md\b/i;
 
 /** Markdown marks that say nothing in one line of plain text. */
-function plain(line: string): string {
+export function plain(line: string): string {
   return (
     line
       .replace(/!\[[^\]]*]\([^)]*\)/g, "")
@@ -173,6 +175,7 @@ function projectLine(project: AssistantProjectEntry): string {
     project.instructions.length > 0
       ? ` [its instructions: ${project.instructions.join(", ")}]`
       : "";
+  if (project.passport === true) return `${head} — see its passport below${instructions}`;
   return project.brief === null
     ? `${head}${instructions}`
     : `${head} — ${project.brief}${instructions}`;
