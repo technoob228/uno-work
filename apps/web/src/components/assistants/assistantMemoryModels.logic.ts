@@ -157,6 +157,7 @@ const HARNESS_NAMES: Readonly<Record<string, string>> = {
   codex: "Codex",
   gemini: "Gemini CLI",
   grok: "Grok",
+  antigravity: "Antigravity",
   opencode: "OpenCode",
   cursor: "Cursor",
   uno: "Uno AI",

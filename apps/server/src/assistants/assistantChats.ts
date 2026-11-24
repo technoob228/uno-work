@@ -88,6 +88,8 @@ export function billingForDriver(driver: string | null): AssistantChatBilling {
     case "gemini":
     // The person's own Grok (SuperGrok / X Premium) sign-in or xAI key.
     case "grok":
+    // The person's own Google (Antigravity) sign-in or Gemini key.
+    case "antigravity":
       return "plan";
     default:
       return "other";

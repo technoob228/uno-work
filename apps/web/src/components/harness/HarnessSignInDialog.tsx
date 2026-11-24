@@ -1,5 +1,5 @@
 /**
- * Sign-in dialog for Claude Code, Codex, Gemini CLI and Grok.
+ * Sign-in dialog for Claude Code, Codex, Gemini CLI, Grok and Antigravity.
  *
  * Two ways in, both driven by the daemon that owns the machine:
  *   - paste an API key (stored in that harness's provider environment, on
@@ -69,6 +69,8 @@ const ACCOUNT_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
   gemini:
     "Uses your Google account (free Gemini Code Assist, Google AI Pro or Ultra). The link comes from Gemini CLI on this computer: you sign in with Google yourself and paste the code back here.",
   grok: "Uses your grok.com account. The link comes from Grok on this computer: you sign in on the xAI site yourself and confirm the code shown here.",
+  antigravity:
+    "Uses your Google account (Google AI Pro or Ultra, or the free tier). The link comes from Antigravity on this computer: you sign in with Google yourself and paste the code the page shows back here.",
 };
 
 const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
@@ -78,6 +80,8 @@ const API_KEY_HINT: Readonly<Record<ProviderAuthDriver, string>> = {
   gemini:
     "A key from Google AI Studio. Stored as GEMINI_API_KEY for this agent, in plain text on that machine's disk.",
   grok: "A key from console.x.ai. Stored as XAI_API_KEY for this agent, in plain text on that machine's disk.",
+  antigravity:
+    "A key from Google AI Studio. Stored as ANTIGRAVITY_GEMINI_API_KEY for this agent, in plain text on that machine's disk.",
 };
 
 const API_KEY_PLACEHOLDER: Readonly<Record<ProviderAuthDriver, string>> = {
@@ -85,6 +89,7 @@ const API_KEY_PLACEHOLDER: Readonly<Record<ProviderAuthDriver, string>> = {
   codex: "sk-…",
   gemini: "AIza…",
   grok: "xai-…",
+  antigravity: "AIza…",
 };
 
 /** After this long checking a pasted code, say so and offer a new link. */
@@ -96,6 +101,7 @@ const CODE_CHECKER: Readonly<Record<ProviderAuthDriver, string>> = {
   codex: "OpenAI",
   gemini: "Google",
   grok: "xAI",
+  antigravity: "Google",
 };
 
 /** One-line lead for the sign-in surface, shared by the dialog and the picker pane. */

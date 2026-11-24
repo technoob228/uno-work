@@ -29,6 +29,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type ProviderOptionSelection,
   type ProviderUserInputAnswers,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -37,6 +38,7 @@ import {
   TurnId,
   type ProviderInteractionMode,
   type RuntimeMode,
+  type UserInputQuestion,
 } from "@t3tools/contracts";
 import {
   DateTime,
@@ -99,7 +101,25 @@ export interface AcpAgentAdapterShape extends ProviderAdapterShape<ProviderAdapt
 
 /** The agent's executable and argv, or why it can't start here. */
 export type AcpAgentLaunch =
-  | { readonly ok: true; readonly command: string; readonly args: ReadonlyArray<string> }
+  | {
+      readonly ok: true;
+      readonly command: string;
+      readonly args: ReadonlyArray<string>;
+      /** The process environment, when the agent needs it rewritten (Antigravity: sign-in storage). */
+      readonly environment?: NodeJS.ProcessEnv;
+      /** `initialize.clientInfo`, when the agent wants a particular one (Antigravity by version). */
+      readonly clientInfo?: { readonly name: string; readonly version: string };
+    }
+  | { readonly ok: false; readonly reason: string };
+
+/** Config option writes for a picked model and its options, or why the pick can't apply. */
+export type AcpAgentModelPlan =
+  | {
+      readonly ok: true;
+      /** The model id the chat shows afterwards (undefined: keep the current). */
+      readonly model?: string;
+      readonly writes: ReadonlyArray<{ readonly configId: string; readonly value: string }>;
+    }
   | { readonly ok: false; readonly reason: string };
 
 /** What a session's ACP mode is picked from (before the first turn and before each one). */
@@ -159,6 +179,34 @@ export interface AcpAgentProfile {
    * its permission prompts off). Returns why, shown as the turn's error.
    */
   readonly refusePrompt?: (text: string) => string | undefined;
+  /**
+   * A fresh per-session rewrite of `session/update`s before they are parsed
+   * (see AcpSessionRuntimeOptions.transformSessionUpdate).
+   */
+  readonly makeSessionUpdateTransform?: () => (
+    notification: EffectAcpSchema.SessionNotification,
+  ) => EffectAcpSchema.SessionNotification | undefined;
+  /**
+   * The agent's own model selection (Antigravity: thinking levels as a
+   * separate option, legacy ids). Replaces the generic model switch.
+   */
+  readonly planModel?: (input: {
+    readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
+    readonly model: string | undefined;
+    readonly options: ReadonlyArray<ProviderOptionSelection> | undefined;
+  }) => AcpAgentModelPlan;
+  /**
+   * A permission request that is really the agent's question to the person
+   * (Antigravity: `interaction_*`), shown as a question card.
+   */
+  readonly userInputQuestion?: (
+    request: EffectAcpSchema.RequestPermissionRequest,
+  ) => UserInputQuestion | undefined;
+  /** The answer to such a question as the permission response; undefined: cancel. */
+  readonly userInputResponse?: (
+    request: EffectAcpSchema.RequestPermissionRequest,
+    answers: ProviderUserInputAnswers,
+  ) => EffectAcpSchema.RequestPermissionResponse | undefined;
 }
 
 export interface AcpAgentAdapterOptions {
@@ -185,11 +233,19 @@ export interface AcpAgentAdapterOptions {
   readonly harnessInstructions?: string;
   /** Called with every session's discovered models (the picker learns them). */
   readonly onModelsDiscovered?: (discovered: DiscoveredModels) => void;
+  /** Called with the session's config options after start and after every change we make. */
+  readonly onConfigOptions?: (
+    configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
+  ) => void;
   readonly clientVersion?: string;
 }
 
 interface PendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
+}
+
+interface PendingUserInput {
+  readonly answers: Deferred.Deferred<ProviderUserInputAnswers | undefined>;
 }
 
 interface SessionContext {
@@ -203,6 +259,7 @@ interface SessionContext {
   readonly stderr: ReturnType<typeof makeTextTail>;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
+  readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>;
   lastPlanFingerprint: string | undefined;
   /** The brief still owed to this ACP session (see harnessInstructions). */
@@ -293,6 +350,14 @@ function settleAsCancelled(pending: ReadonlyMap<ApprovalRequestId, PendingApprov
   );
 }
 
+function settleUserInputs(pending: ReadonlyMap<ApprovalRequestId, PendingUserInput>) {
+  return Effect.forEach(
+    Array.from(pending.values()),
+    (entry) => Deferred.succeed(entry.answers, undefined).pipe(Effect.ignore),
+    { discard: true },
+  );
+}
+
 export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentAdapterOptions) {
   const PROVIDER = profile.provider;
   return Effect.gen(function* () {
@@ -378,6 +443,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
         if (ctx.stopped) return;
         ctx.stopped = true;
         yield* settleAsCancelled(ctx.pendingApprovals);
+        yield* settleUserInputs(ctx.pendingUserInputs);
         if (ctx.notificationFiber) {
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
@@ -392,8 +458,50 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
         });
       });
 
-    const applyModel = (ctx: SessionContext, model: string | undefined) =>
+    const applyModel = (
+      ctx: SessionContext,
+      model: string | undefined,
+      modelOptions?: ReadonlyArray<ProviderOptionSelection>,
+    ) =>
       Effect.gen(function* () {
+        if (profile.planModel) {
+          // A model switch changes which other options exist (thinking
+          // levels), so plan again after each round of writes.
+          let wrote = false;
+          for (let round = 0; round < 3; round += 1) {
+            const plan = profile.planModel({
+              configOptions: yield* ctx.acp.getConfigOptions,
+              model,
+              options: modelOptions,
+            });
+            if (!plan.ok) {
+              return yield* new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/set_config_option",
+                detail: plan.reason,
+              });
+            }
+            if (plan.model !== undefined) ctx.currentModel = plan.model;
+            if (plan.writes.length === 0) break;
+            for (const write of plan.writes) {
+              yield* ctx.acp
+                .setConfigOption(write.configId, write.value)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    mapAcpToAdapterError(
+                      PROVIDER,
+                      ctx.threadId,
+                      "session/set_config_option",
+                      cause,
+                    ),
+                  ),
+                );
+            }
+            wrote = true;
+          }
+          if (wrote) options.onConfigOptions?.(yield* ctx.acp.getConfigOptions);
+          return;
+        }
         const target = model?.trim() || undefined;
         if (!target || target === ctx.currentModel) return;
         const applied = yield* applyCustomHarnessModel({
@@ -500,6 +608,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
           ];
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
+          const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
           const sessionScope = yield* Scope.make("sequential");
           let sessionScopeTransferred = false;
           yield* Effect.addFinalizer(() =>
@@ -518,7 +627,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             childProcessSpawner,
             command: executable.command,
             args: executable.args,
-            environment: sessionEnvironment,
+            environment: executable.environment ?? sessionEnvironment,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             ...(mcpServers.length > 0 ? { mcpServers } : {}),
@@ -530,7 +639,13 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
               : {}),
             onStderr: stderr.append,
             ...(profile.dropAgentText ? { dropAgentText: profile.dropAgentText } : {}),
-            clientInfo: { name: "uno-work", version: options.clientVersion ?? "0.0.0" },
+            ...(profile.makeSessionUpdateTransform
+              ? { transformSessionUpdate: profile.makeSessionUpdateTransform() }
+              : {}),
+            clientInfo: executable.clientInfo ?? {
+              name: "uno-work",
+              version: options.clientVersion ?? "0.0.0",
+            },
             ...makeAcpNativeLoggers({
               nativeEventLogger,
               provider: PROVIDER,
@@ -553,6 +668,43 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             yield* acp.handleRequestPermission((params) =>
               Effect.gen(function* () {
                 yield* logNative(input.threadId, "session/request_permission", params);
+                const question = profile.userInputQuestion?.(params);
+                if (question !== undefined) {
+                  const requestId = ApprovalRequestId.make(crypto.randomUUID());
+                  const runtimeRequestId = RuntimeRequestId.make(requestId);
+                  const answers = yield* Deferred.make<ProviderUserInputAnswers | undefined>();
+                  pendingUserInputs.set(requestId, { answers });
+                  yield* offerRuntimeEvent({
+                    type: "user-input.requested",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    requestId: runtimeRequestId,
+                    payload: { questions: [question] },
+                    raw: {
+                      source: "acp.jsonrpc",
+                      method: "session/request_permission",
+                      payload: params,
+                    },
+                  });
+                  const resolved = yield* Deferred.await(answers);
+                  pendingUserInputs.delete(requestId);
+                  yield* offerRuntimeEvent({
+                    type: "user-input.resolved",
+                    ...(yield* makeEventStamp()),
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                    turnId: ctx?.activeTurnId,
+                    requestId: runtimeRequestId,
+                    payload: { answers: resolved ?? {} },
+                  });
+                  const response =
+                    resolved === undefined
+                      ? undefined
+                      : profile.userInputResponse?.(params, resolved);
+                  return response ?? { outcome: { outcome: "cancelled" as const } };
+                }
                 const runtimeMode = ctx?.session.runtimeMode ?? input.runtimeMode;
                 const autoOption =
                   profile.autoApprove?.(params) ??
@@ -632,6 +784,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
           const discovered = discoverSessionModels(started.sessionSetupResult);
           const modeState = started.sessionSetupResult.modes ?? undefined;
           if (discovered.models.length > 0) options.onModelsDiscovered?.(discovered);
+          options.onConfigOptions?.(started.sessionSetupResult.configOptions ?? []);
 
           const now = yield* nowIso;
           const session: ProviderSession = {
@@ -659,6 +812,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
             stderr,
             notificationFiber: undefined,
             pendingApprovals,
+            pendingUserInputs,
             turns: [],
             lastPlanFingerprint: undefined,
             currentModel: discovered.current,
@@ -673,7 +827,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
                 : options.harnessInstructions,
           };
 
-          yield* applyModel(ctx, modelSelection?.model);
+          yield* applyModel(ctx, modelSelection?.model, modelSelection?.options);
           yield* applyMode(ctx, { runtimeMode: input.runtimeMode, interactionMode: undefined });
 
           const nf = yield* Stream.runDrain(
@@ -821,6 +975,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
         const turnModelSelection =
           input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
         const model = turnModelSelection?.model ?? ctx.session.model;
+        const modelOptions = turnModelSelection?.options;
 
         yield* offerRuntimeEvent({
           type: "turn.started",
@@ -888,7 +1043,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
           input.threadId,
           Effect.gen(function* () {
             const liveCtx = yield* requireSession(input.threadId);
-            yield* applyModel(liveCtx, model);
+            yield* applyModel(liveCtx, model, modelOptions);
             yield* applyMode(liveCtx, {
               runtimeMode: liveCtx.session.runtimeMode,
               interactionMode: input.interactionMode,
@@ -1006,6 +1161,7 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
         yield* settleAsCancelled(ctx.pendingApprovals);
+        yield* settleUserInputs(ctx.pendingUserInputs);
         yield* Effect.ignore(ctx.acp.cancel);
       });
 
@@ -1028,19 +1184,24 @@ export function makeAcpAgentAdapter(profile: AcpAgentProfile, options: AcpAgentA
       });
 
     // ACP has no standard "ask the user a question" request (elicitation is
-    // not advertised by us), so there are never pending user-input requests.
+    // not advertised by us); only agents whose profile reads some permission
+    // requests as questions (Antigravity) have pending user-input requests.
     const respondToUserInput: AcpAgentAdapterShape["respondToUserInput"] = (
       threadId,
       requestId,
-      _answers: ProviderUserInputAnswers,
+      answers: ProviderUserInputAnswers,
     ) =>
       Effect.gen(function* () {
-        yield* requireSession(threadId);
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "session/user_input",
-          detail: `Unknown pending user-input request: ${requestId}`,
-        });
+        const ctx = yield* requireSession(threadId);
+        const pending = ctx.pendingUserInputs.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/user_input",
+            detail: `Unknown pending user-input request: ${requestId}`,
+          });
+        }
+        yield* Deferred.succeed(pending.answers, answers);
       });
 
     const readThread: AcpAgentAdapterShape["readThread"] = (threadId) =>

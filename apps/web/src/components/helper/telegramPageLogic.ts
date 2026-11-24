@@ -32,6 +32,7 @@ export const HARNESS_OPTIONS: ReadonlyArray<{ readonly value: string; readonly l
   { value: "codex", label: "Codex" },
   { value: "gemini", label: "Gemini CLI" },
   { value: "grok", label: "Grok" },
+  { value: "antigravity", label: "Antigravity" },
   { value: "cursor", label: "Cursor" },
 ];
 
