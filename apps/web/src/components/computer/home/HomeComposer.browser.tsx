@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { userEvent } from "vitest/browser";
 import { render } from "vitest-browser-react";
 
+import { useComposerDraftStore } from "../../../composerDraftStore";
 import { useComposerStashStore } from "../../../composerStashStore";
 import { isMacPlatform } from "../../../lib/utils";
 
@@ -84,8 +85,10 @@ const reasoning = createModelCapabilities({
       options: [
         { id: "low", label: "Low" },
         { id: "high", label: "High", isDefault: true },
+        { id: "ultrathink", label: "Ultrathink" },
       ],
       currentValue: "high",
+      promptInjectedValues: ["ultrathink"],
     },
   ],
 });
@@ -165,6 +168,11 @@ const withMod = (key: string) => userEvent.keyboard(`{${MOD}>}${key}{/${MOD}}`);
 afterEach(() => {
   document.body.innerHTML = "";
   useComposerStashStore.setState({ entries: [] });
+  // A level picked in one test is a sticky pick; the next test starts without it.
+  useComposerDraftStore.setState({
+    stickyModelSelectionByProvider: {},
+    stickyActiveProvider: null,
+  });
 });
 
 describe("Home's first screen after signing in to Claude", () => {
@@ -177,7 +185,7 @@ describe("Home's first screen after signing in to Claude", () => {
     const chips = screen.getByTestId("home-composer-chips");
     await expect.element(chips).toBeVisible();
     await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
-    await expect.element(screen.getByTestId("model-effort-glyph")).toBeVisible();
+    await expect.element(screen.getByTestId("model-effort-suffix")).toHaveTextContent("High");
     // Still the simple screen: no folder or permissions chips.
     await expect.element(screen.getByTestId("home-folder-chip")).not.toBeInTheDocument();
     await expect.element(screen.getByTestId("home-permissions")).not.toBeInTheDocument();
@@ -191,7 +199,7 @@ describe("Home's first screen after signing in to Claude", () => {
     const { screen } = await mountHome();
     const chips = screen.getByTestId("home-composer-chips");
     await expect.element(chips.getByText("Claude Opus 5.5")).toBeVisible();
-    await expect.element(screen.getByTestId("model-effort-glyph")).toBeVisible();
+    await expect.element(screen.getByTestId("model-effort-suffix")).toHaveTextContent("High");
     await chips.getByText("Claude Opus 5.5").click();
     await expect.element(screen.getByText("Reasoning")).toBeVisible();
     await screen.getByTestId("model-picker-permissions").click();
@@ -200,6 +208,37 @@ describe("Home's first screen after signing in to Claude", () => {
     await userEvent.keyboard("{Escape}");
     await userEvent.keyboard("{Escape}");
     await expect.element(screen.getByTestId("model-effort-column")).not.toBeInTheDocument();
+  });
+
+  it("the reasoning column works like T3 Code's: Default badge, no Ultrathink, keys, stays open", async () => {
+    providers.list = [
+      uno,
+      claudeWith({ status: "authenticated", type: "max", label: "Claude Max Subscription" }),
+    ];
+    const { screen } = await mountHome();
+    const chips = screen.getByTestId("home-composer-chips");
+    await chips.getByText("Claude Opus 5.5").click();
+    const column = screen.getByTestId("model-effort-column");
+    await expect.element(column).toBeVisible();
+    // The header names the model the levels belong to.
+    await expect.element(column.getByText("Opus 5.5")).toBeVisible();
+    // Ultrathink is a word in the prompt, not a level (upstream #28044).
+    await expect
+      .element(screen.getByTestId("model-effort-effort-ultrathink"))
+      .not.toBeInTheDocument();
+    // The default level that isn't picked carries a "Default" badge (upstream #28162).
+    await screen.getByTestId("model-effort-effort-low").click();
+    await expect
+      .element(screen.getByTestId("model-effort-effort-high"))
+      .toHaveTextContent("HighDefault");
+    // Picking a level keeps the picker open (upstream #28076).
+    await expect.element(column).toBeVisible();
+    await expect.element(screen.getByTestId("model-effort-suffix")).toHaveTextContent("Low");
+    // Down moves between levels.
+    await userEvent.keyboard("{ArrowDown}");
+    await expect.element(screen.getByTestId("model-effort-effort-high")).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(column).not.toBeInTheDocument();
   });
 
   it("without a Claude plan: Uno · Smart, and the model can still be changed", async () => {

@@ -106,7 +106,6 @@
   },
   "eslint-plugin-react-hooks(exhaustive-deps)": {
     "apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx": 1,
-    "apps/web/src/components/chat/ProviderModelPicker.tsx": 1,
     "apps/web/src/components/ChatView.tsx": 11,
     "apps/web/src/components/preview/FileBrowser.tsx": 1,
     "apps/web/src/components/settings/BrowserSettingsPanel.tsx": 1,

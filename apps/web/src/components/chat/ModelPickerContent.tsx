@@ -9,6 +9,7 @@ import { resolveSelectableModel } from "@t3tools/shared/model";
 import {
   memo,
   type ReactNode,
+  type RefObject,
   useMemo,
   useState,
   useCallback,
@@ -350,6 +351,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   environmentId: EnvironmentId | null;
   onRequestClose?: () => void;
   onInstanceModelChange: (instanceId: ProviderInstanceId, model: string) => void;
+  /** The search box, for a docked column's Left arrow to come back to. */
+  searchInputRef?: RefObject<HTMLInputElement | null>;
+  /** Docked: Right arrow at the end of the search moves to the effort column. */
+  onFocusEffort?: () => void;
 }) {
   const {
     keybindings: providedKeybindings,
@@ -359,7 +364,8 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     setup,
   } = props;
   const [searchQuery, setSearchQuery] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const ownSearchInputRef = useRef<HTMLInputElement>(null);
+  const searchInputRef = props.searchInputRef ?? ownSearchInputRef;
   const listRegionRef = useRef<HTMLDivElement>(null);
   const modelListRef = useRef<LegendListRef | null>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
@@ -396,7 +402,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const focusSearchInput = useCallback(() => {
     if (isTouchInput) return;
     searchInputRef.current?.focus({ preventScroll: true });
-  }, [isTouchInput]);
+  }, [isTouchInput, searchInputRef]);
 
   const searchTokens = useMemo(() => getModelPickerSearchTokens(searchQuery), [searchQuery]);
 
@@ -1082,6 +1088,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     };
   }, [filteredModelKeys, shouldVirtualizeModelList]);
 
+  // A second instance of a driver (or a colored one) gets a badge on its logo, as on the rail.
+  const badgedInstanceIds = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of instanceEntries) {
+      counts.set(entry.driverKind, (counts.get(entry.driverKind) ?? 0) + 1);
+    }
+    return new Set(
+      instanceEntries
+        .filter((entry) => entry.accentColor || (counts.get(entry.driverKind) ?? 0) > 1)
+        .map((entry) => entry.instanceId),
+    );
+  }, [instanceEntries]);
+
   const renderModelRow = useCallback(
     (modelKey: string, index: number) => {
       const setupInstanceId = parseProviderSetupKey(modelKey);
@@ -1111,9 +1130,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           driverKind={model.driverKind}
           providerDisplayName={model.instanceDisplayName}
           providerAccentColor={model.instanceAccentColor}
+          providerIconText={entryByInstanceId.get(model.instanceId)?.iconText}
+          showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
           isFavorite={favoritesSet.has(modelKey)}
-          showProvider={!showUnoGroups && (!isLocked || showLockedInstanceSidebar)}
-          preferShortName={!isLocked}
+          favoriteStarOnHover={selectedInstanceId === "favorites" && searchQuery.length === 0}
+          isSelected={model.instanceId === props.activeInstanceId && model.slug === props.model}
           useTriggerLabel={isLocked && !showLockedInstanceSidebar}
           showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
           jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
@@ -1124,15 +1145,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       );
     },
     [
+      badgedInstanceIds,
       entryByInstanceId,
       favoritesSet,
       filteredModelByKey,
       isLocked,
       modelJumpLabelByKey,
       paneStateByInstanceId,
+      props.activeInstanceId,
       props.allowImageGenerationModels,
+      props.model,
+      searchQuery.length,
+      selectedInstanceId,
       showLockedInstanceSidebar,
-      showUnoGroups,
       toggleFavorite,
     ],
   );
@@ -1184,12 +1209,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     <TooltipProvider delay={0}>
       <div
         className={cn(
-          "relative flex h-screen max-h-96 w-screen max-w-100 overflow-hidden rounded-lg border bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+          "relative flex h-screen max-h-86.5 w-screen max-w-90 overflow-hidden rounded-lg border bg-popover not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
           props.docked
             ? "h-full max-h-none rounded-none border-0 shadow-none before:hidden max-sm:h-56 max-sm:w-full max-sm:max-w-none"
             : undefined,
           isLocked && !showLockedInstanceSidebar ? "flex-col" : "flex-row",
         )}
+        data-model-picker-content="true"
       >
         {/* Locked provider header (only shown in locked mode) */}
         {isLocked && !showLockedInstanceSidebar && LockedProviderIcon && lockedHeaderLabel && (
@@ -1248,35 +1274,89 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         >
           <div
             className={cn(
-              "flex min-h-0 flex-1 flex-col overflow-hidden",
-              isLocked && !showLockedInstanceSidebar ? "min-w-0" : showSidebar && "border-l",
+              "flex min-h-0 flex-1 flex-col overflow-hidden bg-muted/40",
+              isLocked && !showLockedInstanceSidebar
+                ? "min-w-0"
+                : showSidebar && "border-l border-border/70",
             )}
           >
-            {props.note ? (
-              <p
-                className="border-b px-3 py-2 text-[11px] leading-snug text-muted-foreground"
-                data-testid="model-picker-note"
-              >
-                {props.note}
-              </p>
-            ) : null}
-            {/* Search bar */}
-            <div className="border-b px-3 py-2">
-              <div className="flex items-center gap-1">
+            {/* Search: T3's underlined row (upstream `ComboboxSearchInput`), level with the column's header. */}
+            <div className="shrink-0 px-3 pt-2.5">
+              <div className="relative flex -translate-y-px items-center gap-1 border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
+                <SearchIcon
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1.5 left-0 size-4 shrink-0 text-muted-foreground/55"
+                />
                 <ComboboxInput
                   ref={searchInputRef}
-                  className="[&_input]:font-sans min-w-0 flex-1 rounded-md"
-                  inputClassName="border-0 shadow-none ring-0 focus-visible:ring-0"
+                  className="min-w-0 flex-1 [&_input]:h-6.5 [&_input]:ps-5 [&_input]:font-sans [&_input]:leading-6.5"
+                  inputClassName="rounded-none bg-transparent text-sm"
                   placeholder="Search models..."
                   showTrigger={false}
-                  startAddon={<SearchIcon className="size-4 shrink-0 text-muted-foreground/50" />}
+                  unstyled
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) {
+                      (
+                        e as typeof e & { preventBaseUIHandler?: () => void }
+                      ).preventBaseUIHandler?.();
+                      e.stopPropagation();
+                      return;
+                    }
                     if (e.key === "Escape") {
                       e.preventDefault();
                       e.stopPropagation();
                       props.onRequestClose?.();
+                      return;
+                    }
+                    if (
+                      showSidebar &&
+                      !e.altKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      ((e.key === "ArrowLeft" && !e.shiftKey && searchQuery.length === 0) ||
+                        (e.key === "Tab" && e.shiftKey))
+                    ) {
+                      const sidebar = e.currentTarget
+                        .closest("[data-model-picker-content]")
+                        ?.querySelector("[data-model-picker-sidebar]");
+                      const button =
+                        sidebar?.querySelector<HTMLButtonElement>(
+                          'button[aria-pressed="true"]:not(:disabled)',
+                        ) ?? sidebar?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+                      if (button) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        button.focus();
+                        return;
+                      }
+                    }
+                    if (
+                      props.onFocusEffort &&
+                      e.key === "ArrowRight" &&
+                      !e.altKey &&
+                      !e.ctrlKey &&
+                      !e.metaKey &&
+                      !e.shiftKey &&
+                      e.currentTarget.selectionStart === searchQuery.length
+                    ) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      // The column shows the selected model's levels, so a highlighted model is
+                      // picked first; the popup then moves focus to that model's levels.
+                      const highlighted = highlightedModelKeyRef.current;
+                      const activeKey = `${props.activeInstanceId}:${props.model}`;
+                      if (
+                        highlighted &&
+                        highlighted !== activeKey &&
+                        parseProviderSetupKey(highlighted) === null
+                      ) {
+                        const { instanceId, slug } = splitInstanceModelKey(highlighted);
+                        handleModelSelect(slug, instanceId);
+                        return;
+                      }
+                      props.onFocusEffort();
                       return;
                     }
                     if (e.key === "Enter" && highlightedModelKeyRef.current) {
@@ -1303,10 +1383,19 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   size="sm"
                 />
                 {/* "Model" explained in place: the picker is the first screen where the word appears. */}
-                <Explain term="model" className="mr-0.5" />
+                <Explain term="model" className="shrink-0" />
               </div>
+              {/* Under the search, so its rule stays level with the column's header. */}
+              {props.note ? (
+                <p
+                  className="pt-2 text-[11px] leading-snug text-muted-foreground"
+                  data-testid="model-picker-note"
+                >
+                  {props.note}
+                </p>
+              ) : null}
               {showUnoFilters ? (
-                <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px] sm:grid-cols-4">
+                <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
                   <Select
                     modal={false}
                     value={unoProviderFilter}
@@ -1493,30 +1582,22 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
             ) : null}
             <div
               ref={listRegionRef}
-              className={cn(
-                "relative min-h-0 flex-1 before:pointer-events-none before:absolute before:inset-0 before:bg-muted/40",
-                setupPaneKind !== null && "hidden",
-              )}
+              className={cn("relative min-h-0 flex-1", setupPaneKind !== null && "hidden")}
             >
               {shouldVirtualizeModelList ? (
-                <ComboboxListVirtualized className="model-picker-list size-full divide-y px-2 py-1">
+                <ComboboxListVirtualized className="model-picker-list size-full px-2 py-1.5">
                   <LegendList<string>
                     ref={modelListRef}
                     data={filteredModelKeys}
                     keyExtractor={(modelKey) => modelKey}
                     renderItem={({ item, index }) => renderModelRow(item, index)}
-                    estimatedItemSize={64}
+                    estimatedItemSize={32}
                     drawDistance={512}
                     style={{ height: "100%" }}
                   />
                 </ComboboxListVirtualized>
               ) : (
-                <ComboboxList
-                  className={cn(
-                    "model-picker-list size-full px-2 py-1",
-                    showUnoGroups ? "space-y-px" : "divide-y",
-                  )}
-                >
+                <ComboboxList className="model-picker-list flex size-full flex-col gap-0.5 not-empty:px-2 not-empty:py-1.5">
                   {showUnoGroups
                     ? renderGroupedUnoRows()
                     : filteredModelKeys.map((modelKey, index) => renderModelRow(modelKey, index))}

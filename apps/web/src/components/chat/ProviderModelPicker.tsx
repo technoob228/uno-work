@@ -11,6 +11,7 @@ import { Button, buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+import { DockedPickerContext } from "./ModelEffort";
 import { ModelPickerContent } from "./ModelPickerContent";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
@@ -57,15 +58,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   /** The suffix in words, for the tooltip and screen readers. */
   triggerDetail?: string | null;
   /**
-   * Docks a column beside the list and a footer under both, in one card. A pick
-   * leaves the popup open on the new model's levels; null is a model with none.
+   * Docks a column beside the list and a footer under both, in one card, as T3
+   * Code's composer does (upstream `ProviderModelPicker.tsx` f99ef08b). The popup
+   * then stays open until Escape or an outside press, and a pick moves focus to
+   * the new model's levels.
    */
   effortColumn?: ReactNode;
   footer?: ReactNode;
 }) {
   const docked = props.effortColumn !== undefined;
-  const hasEffortColumn = Boolean(props.effortColumn);
-  const justPicked = useRef(false);
+  const popupRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false);
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen;
   const environmentId = props.environmentId ?? null;
@@ -122,24 +125,42 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     };
   }, [isMenuOpen]);
 
-  // The new model's options arrive with its render: with none, the pick is the whole choice.
-  useEffect(() => {
-    if (!justPicked.current) return;
-    justPicked.current = false;
-    if (!hasEffortColumn) setIsMenuOpen(false);
-  }, [props.activeInstanceId, props.model, hasEffortColumn]);
+  /**
+   * Focuses the selected reasoning level, else the first level; with `rows: "any"`
+   * the column's first enabled row. False when nothing took focus.
+   */
+  const focusEffort = (rows: "levels" | "any") => {
+    const column = popupRef.current?.querySelector("[data-model-picker-effort]");
+    const level =
+      column?.querySelector<HTMLElement>(
+        '[data-effort-level][aria-checked="true"]:not(:disabled)',
+      ) ?? column?.querySelector<HTMLElement>("[data-effort-level]:not(:disabled)");
+    const row =
+      level ??
+      (rows === "any"
+        ? column?.querySelector<HTMLElement>("[data-effort-row]:not(:disabled)")
+        : null);
+    row?.focus({ preventScroll: true });
+    row?.scrollIntoView({ block: "nearest" });
+    return row != null;
+  };
 
   const handleInstanceModelChange = (instanceId: ProviderInstanceId, model: string) => {
     if (props.disabled) return;
     props.onInstanceModelChange(instanceId, model);
-    if (docked) justPicked.current = true;
-    else setIsMenuOpen(false);
+    if (!docked) {
+      setIsMenuOpen(false);
+      return;
+    }
+    // The column renders the new model's levels on commit.
+    window.requestAnimationFrame(() => void focusEffort("levels"));
   };
 
   const picker = (
     <ModelPickerContent
       activeInstanceId={activeInstanceId}
-      {...(docked ? { docked } : {})}
+      searchInputRef={searchInputRef}
+      {...(docked ? { docked, onFocusEffort: () => void focusEffort("any") } : {})}
       model={props.model}
       lockedProvider={props.lockedProvider}
       lockedContinuationGroupKey={props.lockedContinuationGroupKey ?? null}
@@ -238,27 +259,39 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         </span>
       </PopoverTrigger>
       <PopoverPopup
+        ref={popupRef}
         align="start"
+        // Docked, it opens above the box like T3's; Floating UI flips it under when there is no room.
+        {...(docked ? { side: "top" as const } : {})}
         className="border-0 bg-transparent p-0 shadow-none before:hidden [--viewport-inline-padding:0] *:data-[slot=popover-viewport]:p-0"
       >
         {docked ? (
-          <div
-            className="flex max-h-(--available-height) flex-col overflow-hidden rounded-lg border bg-popover shadow-lg"
-            data-testid="model-picker-docked"
-          >
-            <div className="flex h-96 min-h-0 max-sm:h-auto max-sm:flex-col">
-              {picker}
-              {props.effortColumn ? (
+          <DockedPickerContext value={{ modelLabel: triggerTitle }}>
+            <div
+              className="flex max-h-(--available-height) flex-col overflow-hidden rounded-lg border bg-popover shadow-lg"
+              data-testid="model-picker-docked"
+            >
+              {/* One fixed height, so a model with more options never resizes the popup. */}
+              <div className="flex h-86.5 min-h-0 max-sm:h-auto max-sm:flex-col">
+                {picker}
                 <div
-                  className="flex min-h-0 w-44 flex-col gap-1 overflow-y-auto border-l border-border/70 bg-muted/40 p-1 max-sm:max-h-48 max-sm:w-full max-sm:border-t max-sm:border-l-0 sm:shrink-0"
+                  data-model-picker-effort
+                  className="flex min-h-0 w-48 flex-col border-l border-border/70 bg-muted/40 max-sm:h-64 max-sm:w-full max-sm:border-t max-sm:border-l-0 sm:shrink-0"
                   data-testid="model-effort-column"
+                  onKeyDown={(event) => {
+                    if (event.key !== "ArrowLeft" || event.altKey || event.ctrlKey || event.metaKey)
+                      return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    searchInputRef.current?.focus();
+                  }}
                 >
                   {props.effortColumn}
                 </div>
-              ) : null}
+              </div>
+              {props.footer}
             </div>
-            {props.footer}
-          </div>
+          </DockedPickerContext>
         ) : (
           picker
         )}
