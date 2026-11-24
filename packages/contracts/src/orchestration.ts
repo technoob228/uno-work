@@ -349,6 +349,22 @@ export const ThreadComputerWait = Schema.Struct({
 export type ThreadComputerWait = typeof ThreadComputerWait.Type;
 
 /**
+ * The agent's turn is over but its work isn't (T71, Misha 24.11: "it told me
+ * Ready though it hasn't finished the work"): background agents, commands or
+ * monitors it started are still running and will wake it when they finish.
+ * The chat is not Ready, yet not busy either — a message goes in at once.
+ * Kept by the daemon from the harness's own task events (sessionActivity);
+ * cleared when the work ends or the harness goes (a restart takes it along).
+ */
+export const ThreadBackgroundWork = Schema.Struct({
+  /** Live background tasks (agents, commands, monitors). */
+  count: NonNegativeInt,
+  /** When the oldest of them started. */
+  since: IsoDateTime,
+});
+export type ThreadBackgroundWork = typeof ThreadBackgroundWork.Type;
+
+/**
  * "Waiting for you" (T52, Misha 20.11/23.11): what in a chat still waits for
  * the person — a card (`show_card`) they haven't answered, links to their own
  * sites and reports (uno4.me) they haven't opened. The daemon keeps it
@@ -758,6 +774,8 @@ export const OrchestrationThread = Schema.Struct({
   source: Schema.optional(Schema.NullOr(ThreadSource)),
   // See ThreadComputerWait. Absent or null: not waiting for a computer.
   computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
+  // See ThreadBackgroundWork. Absent or null: nothing left running.
+  backgroundWork: Schema.optional(Schema.NullOr(ThreadBackgroundWork)),
   // See ThreadPendingForYou. Absent: an older daemon.
   pendingForYou: Schema.optional(Schema.NullOr(ThreadPendingForYou)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -851,6 +869,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   source: Schema.optional(Schema.NullOr(ThreadSource)),
   // See ThreadComputerWait.
   computerWait: Schema.optional(Schema.NullOr(ThreadComputerWait)),
+  // See ThreadBackgroundWork.
+  backgroundWork: Schema.optional(Schema.NullOr(ThreadBackgroundWork)),
   // See ThreadPendingForYou.
   pendingForYou: Schema.optional(Schema.NullOr(ThreadPendingForYou)),
   session: Schema.NullOr(OrchestrationSession),
@@ -1469,9 +1489,20 @@ const ThreadComputerWaitSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// See OrchestrationThread.backgroundWork. Daemon-only (system origin), like
+// the computer wait: it does not move the chat's updatedAt.
+const ThreadBackgroundWorkSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.background-work.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  backgroundWork: Schema.NullOr(ThreadBackgroundWork),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ProjectComputerSetCommand,
   ThreadComputerWaitSetCommand,
+  ThreadBackgroundWorkSetCommand,
   ThreadPersonCallCommand,
   ThreadPullRequestsSyncCommand,
   ThreadPersonReleaseCommand,
@@ -1504,6 +1535,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.source-updated",
   "thread.computer-wait-set",
+  "thread.background-work-set",
   "thread.snoozed",
   "thread.unsnoozed",
   "thread.settled",
@@ -1638,6 +1670,13 @@ export const ThreadSourceUpdatedPayload = Schema.Struct({
 export const ThreadComputerWaitSetPayload = Schema.Struct({
   threadId: ThreadId,
   computerWait: Schema.NullOr(ThreadComputerWait),
+  updatedAt: IsoDateTime,
+});
+
+// `updatedAt` is when it changed; the chat's own updatedAt stays put.
+export const ThreadBackgroundWorkSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  backgroundWork: Schema.NullOr(ThreadBackgroundWork),
   updatedAt: IsoDateTime,
 });
 
@@ -2019,6 +2058,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.computer-wait-set"),
     payload: ThreadComputerWaitSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.background-work-set"),
+    payload: ThreadBackgroundWorkSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

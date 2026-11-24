@@ -44,3 +44,9 @@ export function chatAgeTitle(timeMs: number): string | undefined {
     minute: "2-digit",
   })}`;
 }
+
+/** "In background · 12m": how long the work the agent left running has been going (T71). */
+export function backgroundWorkLabel(sinceMs: number, nowMs: number): string {
+  const age = chatAgeLabel(sinceMs, nowMs);
+  return age === "" || age === "now" ? "In background" : `In background · ${age}`;
+}

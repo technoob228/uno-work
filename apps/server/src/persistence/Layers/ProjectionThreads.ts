@@ -13,6 +13,7 @@ import {
 } from "../Services/ProjectionThreads.ts";
 import {
   ModelSelection,
+  ThreadBackgroundWork,
   ThreadComputerWait,
   ThreadPullRequest,
   ThreadSource,
@@ -26,6 +27,7 @@ const ProjectionThreadDbRow = ProjectionThread.mapFields(
     ),
     source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
     computerWait: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadComputerWait))),
+    backgroundWork: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadBackgroundWork))),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -73,6 +75,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_call_reason,
           source_json,
           computer_wait_json,
+          background_work_json,
           pending_for_you_json,
           latest_user_message_at,
           pending_approval_count,
@@ -116,6 +119,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.personCallReason ?? null},
           ${row.source ? JSON.stringify(row.source) : null},
           ${row.computerWait ? JSON.stringify(row.computerWait) : null},
+          ${row.backgroundWork ? JSON.stringify(row.backgroundWork) : null},
           ${row.pendingForYou ?? null},
           ${row.latestUserMessageAt},
           ${row.pendingApprovalCount},
@@ -159,6 +163,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_call_reason = excluded.person_call_reason,
           source_json = excluded.source_json,
           computer_wait_json = excluded.computer_wait_json,
+          background_work_json = excluded.background_work_json,
           pending_for_you_json = excluded.pending_for_you_json,
           latest_user_message_at = excluded.latest_user_message_at,
           pending_approval_count = excluded.pending_approval_count,
@@ -209,6 +214,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          background_work_json AS "backgroundWork",
           pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
@@ -261,6 +267,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          background_work_json AS "backgroundWork",
           pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",

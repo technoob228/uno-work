@@ -267,6 +267,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          background_work_json AS "backgroundWork",
           pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
@@ -577,6 +578,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           person_call_reason AS "personCallReason",
           source_json AS "source",
           computer_wait_json AS "computerWait",
+          background_work_json AS "backgroundWork",
           pending_for_you_json AS "pendingForYou",
           latest_user_message_at AS "latestUserMessageAt",
           pending_approval_count AS "pendingApprovalCount",
@@ -1004,6 +1006,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 personCallReason: row.personCallReason ?? null,
                 source: row.source ?? null,
                 ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                ...(row.backgroundWork != null ? { backgroundWork: row.backgroundWork } : {}),
                 ...pendingForYouOfRow(row.pendingForYou),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
@@ -1227,6 +1230,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   personCallReason: row.personCallReason ?? null,
                   source: row.source ?? null,
                   ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                  ...(row.backgroundWork != null ? { backgroundWork: row.backgroundWork } : {}),
                   ...pendingForYouOfRow(row.pendingForYou),
                   deletedAt: row.deletedAt,
                   messages: [],
@@ -1379,6 +1383,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     personCallReason: row.personCallReason ?? null,
                     source: row.source ?? null,
                     ...(row.computerWait != null ? { computerWait: row.computerWait } : {}),
+                    ...(row.backgroundWork != null ? { backgroundWork: row.backgroundWork } : {}),
                     ...pendingForYouOfRow(row.pendingForYou),
                     session: sessionByThread.get(row.threadId) ?? null,
                     latestUserMessageAt: row.latestUserMessageAt,
@@ -1619,6 +1624,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ...(threadRow.value.computerWait != null
           ? { computerWait: threadRow.value.computerWait }
           : {}),
+        ...(threadRow.value.backgroundWork != null
+          ? { backgroundWork: threadRow.value.backgroundWork }
+          : {}),
         ...pendingForYouOfRow(threadRow.value.pendingForYou),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
@@ -1738,6 +1746,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         source: threadRow.value.source ?? null,
         ...(threadRow.value.computerWait != null
           ? { computerWait: threadRow.value.computerWait }
+          : {}),
+        ...(threadRow.value.backgroundWork != null
+          ? { backgroundWork: threadRow.value.backgroundWork }
           : {}),
         ...pendingForYouOfRow(threadRow.value.pendingForYou),
         deletedAt: null,

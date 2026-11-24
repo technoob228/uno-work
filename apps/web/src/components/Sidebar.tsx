@@ -179,6 +179,7 @@ import {
   resolveSidebarProjectScope,
   resolveSidebarThreadEnvironmentAvailability,
   resolveSidebarThreadStatus,
+  isInBackground,
   resolveWorkingStartedAt,
   formatWorkingDurationLabel,
   searchSidebarThreads,
@@ -264,7 +265,7 @@ import {
 import { useAssistantChat } from "../assistant/useAssistantChat";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { SidebarThreadUndoNotice } from "./sidebar/SidebarThreadUndoNotice";
-import { chatAgeLabel, chatAgeTitle } from "./sidebar/chatAgeLabel";
+import { backgroundWorkLabel, chatAgeLabel, chatAgeTitle } from "./sidebar/chatAgeLabel";
 import {
   offerThreadUndo,
   snapshotThreadForUndo,
@@ -1351,6 +1352,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
 
   if (variant === "d") {
     const mark = dRowMark(status, turnKind);
+    // Its turn is over, its work isn't (T71): a quiet line, no spinner.
+    const background =
+      mark === "working" && isInBackground(thread) && thread.backgroundWork
+        ? backgroundWorkLabel(Date.parse(thread.backgroundWork.since), Date.parse(props.now))
+        : null;
     const markWantsPerson =
       mark === "your-turn" || mark === "called" || mark === "input" || mark === "approval";
     const parked = section === "settled" || section === "snoozed";
@@ -1493,7 +1499,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 </span>
               ) : null}
               <SidebarPendingCount count={thread.pendingForYouCount ?? 0} />
-              <SidebarDMark mark={mark} callReason={thread.personCallReason ?? null} />
+              {background !== null ? (
+                <span
+                  role="status"
+                  data-testid="sidebar-row-background"
+                  title="The agent finished its turn but left work running in the background. It reports back when it's done; you can write to it meanwhile."
+                  className="text-[11px] whitespace-nowrap tabular-nums text-sidebar-muted-foreground/70"
+                >
+                  {background}
+                </span>
+              ) : (
+                <SidebarDMark mark={mark} callReason={thread.personCallReason ?? null} />
+              )}
             </span>
           </div>
           {hasActions ? (

@@ -744,6 +744,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        // Nor is work left running in the background (T71).
+        case "thread.background-work-set": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            backgroundWork: event.payload.backgroundWork,
+          });
+          return;
+        }
+
         case "thread.snoozed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

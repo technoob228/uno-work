@@ -44,7 +44,8 @@ export interface ThreadStatusPill {
     | "Needs you"
     | "Pending Approval"
     | "Awaiting Input"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "In background";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -57,6 +58,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Working: 3,
   Connecting: 3,
   "Plan Ready": 2,
+  "In background": 2,
   Ready: 1,
 };
 
@@ -68,6 +70,7 @@ type ThreadStatusInput = Pick<
   | "interactionMode"
   | "latestTurn"
   | "session"
+  | "backgroundWork"
 > &
   YourTurnInput & {
     lastVisitedAt?: string | undefined;
@@ -484,6 +487,16 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
+  // The turn is over, the work isn't (T71): not Ready, not loud either.
+  if (isInBackground(thread)) {
+    return {
+      label: "In background",
+      colorClass: "text-muted-foreground",
+      dotClass: "bg-muted-foreground/50",
+      pulse: false,
+    };
+  }
+
   const hasPlanReadyPrompt =
     !thread.hasPendingUserInput &&
     thread.interactionMode === "plan" &&
@@ -756,8 +769,38 @@ export function shouldRecedeSidebarThread(input: {
   return false;
 }
 
+/**
+ * The agent's turn is over but its work isn't (T71, Misha 24.11: "it told me
+ * Ready though it hasn't finished the work"): background agents, commands or
+ * monitors it started still run and will wake it. Shown under Working, as a
+ * quiet "In background" (no spinner, no badge); a message goes in at once.
+ * Only the daemon's record of live background tasks counts — never a promise
+ * in the agent's text ("I'll tell you when it's done" with nothing running
+ * stays Ready: a candidate for a later heuristic).
+ */
+export function isInBackground(
+  thread: Pick<
+    SidebarThreadSummary,
+    "hasPendingApprovals" | "hasPendingUserInput" | "session" | "backgroundWork"
+  >,
+): boolean {
+  if (thread.backgroundWork == null || thread.backgroundWork.count <= 0) return false;
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
+  const session = thread.session;
+  if (!session || session.status === "error" || session.status === "closed") return false;
+  return !(
+    session.status === "running" ||
+    session.status === "connecting" ||
+    session.orchestrationStatus === "running" ||
+    session.orchestrationStatus === "starting"
+  );
+}
+
 export function resolveSidebarThreadStatus(
-  thread: Pick<SidebarThreadSummary, "hasPendingApprovals" | "hasPendingUserInput" | "session">,
+  thread: Pick<
+    SidebarThreadSummary,
+    "hasPendingApprovals" | "hasPendingUserInput" | "session" | "backgroundWork"
+  >,
 ): SidebarThreadStatus {
   if (thread.hasPendingApprovals) return "approval";
   if (thread.hasPendingUserInput) return "input";
@@ -774,6 +817,7 @@ export function resolveSidebarThreadStatus(
   if (session?.status === "error") {
     return isRestartCutOffError(session.lastError) ? "stopped" : "failed";
   }
+  if (isInBackground(thread)) return "working";
   return "ready";
 }
 

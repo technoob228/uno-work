@@ -250,6 +250,42 @@ describe("nextQueuedMessageToSend", () => {
   });
 });
 
+describe("T71: a card's answer never waits in Up next", () => {
+  const base = { phase: "ready" as const, busy: false, waitingForPerson: false, hasError: false };
+
+  it("goes while the agent works, after an error, and ahead of typed messages", () => {
+    const typed = store().enqueue(KEY, "typed while it worked");
+    const answer = store().enqueue(KEY, "[from the card «Ship?»]\nYes", { steer: true });
+    expect(answer.steer).toBe(true);
+    expect(typed.steer).toBeUndefined();
+    for (const input of [
+      { ...base, phase: "running" as const },
+      { ...base, hasError: true },
+      base,
+      { ...base, phase: "disconnected" as const },
+    ]) {
+      expect(nextQueuedMessageToSend({ ...input, queue: queue() })?.id).toBe(answer.id);
+    }
+    // Once it went, the typed message waits for the turn as before.
+    store().take(KEY, answer.id);
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), phase: "running" })).toBeNull();
+    expect(nextQueuedMessageToSend({ ...base, queue: queue() })?.id).toBe(typed.id);
+  });
+
+  it("still waits for a send on its way, a connecting session, or a question to the person", () => {
+    store().enqueue(KEY, "[from the card «Ship?»]\nYes", { steer: true });
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), busy: true })).toBeNull();
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), phase: "connecting" })).toBeNull();
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), waitingForPerson: true })).toBeNull();
+  });
+
+  it("held by Stop like everything else: then it is the person's Send now", () => {
+    store().enqueue(KEY, "[from the card «Ship?»]\nYes", { steer: true });
+    store().holdAll(KEY);
+    expect(nextQueuedMessageToSend({ ...base, queue: queue(), phase: "running" })).toBeNull();
+  });
+});
+
 describe("T48: Up next goes once the agent is done, however the turn ended", () => {
   const base = { phase: "ready" as const, busy: false, waitingForPerson: false, hasError: false };
 
