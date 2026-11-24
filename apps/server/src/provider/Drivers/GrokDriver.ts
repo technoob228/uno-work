@@ -33,11 +33,7 @@ import {
 } from "../../mcp/customMcpServers.ts";
 import type { TextGenerationShape } from "../../textGeneration/TextGeneration.ts";
 import { harnessPath } from "../acp/CustomAcpSupport.ts";
-import {
-  GROK_DISPLAY_NAME,
-  GROK_DRIVER_KIND,
-  GROK_PROCESS_ENV,
-} from "../acp/GrokAcpSupport.ts";
+import { GROK_DISPLAY_NAME, GROK_DRIVER_KIND, GROK_PROCESS_ENV } from "../acp/GrokAcpSupport.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
 import { buildInitialGrokSnapshot, checkGrokProviderStatus } from "../Layers/GrokProvider.ts";

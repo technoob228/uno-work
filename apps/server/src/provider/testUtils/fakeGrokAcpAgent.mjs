@@ -85,7 +85,11 @@ async function permission(sessionId, toolCall) {
     toolCall,
     options: [
       { optionId: "cancel", name: "Cancel", kind: "reject_once" },
-      { optionId: "allow-edits-session", name: "Allow all edits this session", kind: "allow_always" },
+      {
+        optionId: "allow-edits-session",
+        name: "Allow all edits this session",
+        kind: "allow_always",
+      },
       { optionId: "approve", name: "Approve", kind: "allow_once" },
     ],
   });

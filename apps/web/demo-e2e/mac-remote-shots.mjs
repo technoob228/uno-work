@@ -116,11 +116,6 @@ async function openNeedsYou() {
   await page.waitForTimeout(600);
 }
 
-async function closePopover() {
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(400);
-}
-
 /** Settings → Computer for the MacBook (the demo's page belongs to uno-work). */
 async function settingsForMac() {
   await go("#/settings/workspace");

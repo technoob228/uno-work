@@ -880,7 +880,9 @@ function isReplayNotification(params: EffectAcpSchema.SessionNotification): bool
   const meta = (value: unknown): unknown =>
     typeof value === "object" && value !== null ? (value as { _meta?: unknown })._meta : undefined;
   const isReplay = (value: unknown): boolean =>
-    typeof value === "object" && value !== null && (value as { isReplay?: unknown }).isReplay === true;
+    typeof value === "object" &&
+    value !== null &&
+    (value as { isReplay?: unknown }).isReplay === true;
   return isReplay(meta(params)) || isReplay(meta(params.update));
 }
 

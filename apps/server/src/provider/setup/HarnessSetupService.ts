@@ -1135,11 +1135,7 @@ export const HarnessSetupLive = Layer.effect(
       }).pipe(Effect.provideService(Path.Path, path));
 
     /** A key into the default instance's environment, stored as sensitive. */
-    const storeApiKey = (
-      driver: "claudeAgent" | "gemini" | "grok",
-      name: string,
-      apiKey: string,
-    ) =>
+    const storeApiKey = (driver: "claudeAgent" | "gemini" | "grok", name: string, apiKey: string) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
