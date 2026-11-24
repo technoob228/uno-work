@@ -132,7 +132,15 @@ export function redactProjectText(text: string): string {
   next = next.replace(SECRET_ASSIGNMENT, (match, name: string, glue: string, value: string) =>
     PLACEHOLDER.test(value) || !keyLike(value) ? match : `${name}${glue}${REDACTED}`,
   );
-  return next.replace(RANDOM_RUN, (run) => (looksRandom(run) ? REDACTED : run));
+  return next.replace(RANDOM_RUN, (run) => {
+    if (!looksRandom(run)) return run;
+    // A path (a Drive link's folders/<id>): only its random part goes.
+    const parts = run.split("/");
+    const masked = parts.map((part) => (part.length >= 20 && looksRandom(part) ? REDACTED : part));
+    return parts.length > 1 && masked.some((part) => part === REDACTED)
+      ? masked.join("/")
+      : REDACTED;
+  });
 }
 
 /**

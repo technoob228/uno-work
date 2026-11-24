@@ -62,6 +62,14 @@ describe("redactProjectText — a key pasted into a project's files never reache
     ].join("\n");
     expect(redactProjectText(text)).toBe(text);
   });
+
+  it("masks a link's random id, not the whole link", () => {
+    expect(
+      redactProjectText(
+        "Drive: https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345",
+      ),
+    ).toBe("Drive: https://drive.google.com/drive/folders/[redacted]");
+  });
 });
 
 describe("isSecretFileName — files the tool never opens", () => {
