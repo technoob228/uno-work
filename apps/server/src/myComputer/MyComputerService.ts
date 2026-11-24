@@ -33,6 +33,7 @@ import {
   type MyComputerCore,
   type ReadInput,
   type ReadResult,
+  type MyComputerToolsShown,
   type WriteInput,
 } from "./myComputerCore.ts";
 import { makeTrustJudge, type TrustJudge } from "./trust/judge.ts";
@@ -53,8 +54,8 @@ export interface MyComputerShape {
     computerId: string,
     limit?: number,
   ) => Effect.Effect<MyComputerActivity, MyComputerError>;
-  /** For `tools/list`: bounded and cached, never fails. */
-  readonly toolsVisible: Effect.Effect<boolean>;
+  /** For `tools/list`: which of the tools to show; bounded and cached, never fails. */
+  readonly toolsShown: Effect.Effect<MyComputerToolsShown>;
   readonly exec: (input: ExecInput) => Effect.Effect<ExecResult, MyComputerError>;
   readonly read: (input: ReadInput) => Effect.Effect<ReadResult, MyComputerError>;
   readonly write: (input: WriteInput) => Effect.Effect<{ readonly bytes: number }, MyComputerError>;
@@ -138,7 +139,9 @@ export function myComputerShape(
         judge.forget(computerId);
       }),
     activity: (computerId, limit) => attempt(() => core.activity(computerId, limit)),
-    toolsVisible: attempt(() => core.toolsVisible()).pipe(Effect.orElseSucceed(() => false)),
+    toolsShown: attempt(() => core.toolsShown()).pipe(
+      Effect.orElseSucceed((): MyComputerToolsShown => "none"),
+    ),
     exec: (input) => attempt((signal) => core.exec(input, signal)),
     read: (input) => attempt((signal) => core.read(input, signal)),
     write: (input) => attempt((signal) => core.write(input, signal)),

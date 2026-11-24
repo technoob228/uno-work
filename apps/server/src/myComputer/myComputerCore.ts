@@ -68,6 +68,20 @@ const HELPER_UPDATE_TIMEOUT_MS = 120_000;
 /** `tools/list` must stay quick: past this it answers from what it knew. */
 const TOOLS_VISIBLE_WAIT_MS = 2_500;
 
+/**
+ * Which `my_computer_*` tools a chat is shown (`tools/list`):
+ * - "none": no console access here, or the account doesn't have the feature;
+ * - "list": the feature is on and no computer is connected yet: only
+ *   `my_computers_list`, whose answer says how the person connects one (with
+ *   no tool at all an agent can't tell the person what to do, 24.11);
+ * - "all": a computer is connected.
+ */
+export type MyComputerToolsShown = "none" | "list" | "all";
+
+/** What an agent hears when the person has no computer connected: what to tell them. */
+export const NO_COMPUTER_CONNECTED =
+  "No computer of the person is connected to this Uno account, so nothing can run or start there yet. They connect one in Uno Work: Add computer → Your own computer (one command in a terminal on that computer, about a minute). If Uno Work runs on that computer too, cloud agents stay off there until they turn on Settings → Computer → Cloud agents in it. Tell them this in a line or two; don't try another way.";
+
 export type MyComputerFailureKind =
   | "off"
   | "console"
@@ -228,8 +242,8 @@ export interface MyComputerCore {
     summary: string,
     threadId?: string,
   ) => Promise<void>;
-  /** Show the `my_computer_*` tools: the feature is on and a computer is connected. */
-  readonly toolsVisible: () => Promise<boolean>;
+  /** Which `my_computer_*` tools to show: bounded and cached for `tools/list`. */
+  readonly toolsShown: () => Promise<MyComputerToolsShown>;
   readonly exec: (input: ExecInput, signal?: AbortSignal) => Promise<ExecResult>;
   readonly read: (input: ReadInput, signal?: AbortSignal) => Promise<ReadResult>;
   readonly write: (input: WriteInput, signal?: AbortSignal) => Promise<{ readonly bytes: number }>;
@@ -393,10 +407,7 @@ const describe = (computer: MyComputer) =>
  */
 export function pickComputer(status: MyComputerStatus, selector: string | undefined): MyComputer {
   if (!status.enabled || status.computers.length === 0) {
-    throw new MyComputerFailure(
-      "off",
-      "No computer of the person is connected. They can connect one in Uno Work (one command in a terminal); don't try another way.",
-    );
+    throw new MyComputerFailure("off", NO_COMPUTER_CONNECTED);
   }
   const wanted = selector?.trim().toLowerCase();
   let found: MyComputer | undefined;
@@ -493,8 +504,8 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
   };
 
   // What `tools/list` asks for every chat that starts: cheap and never slow.
-  let visible: { readonly value: boolean; readonly at: number } | null = null;
-  let checking: Promise<boolean> | null = null;
+  let visible: { readonly value: MyComputerToolsShown; readonly at: number } | null = null;
+  let checking: Promise<MyComputerToolsShown> | null = null;
   const forgetVisible = () => {
     visible = null;
   };
@@ -625,14 +636,18 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     }
   };
 
-  const checkVisible = (): Promise<boolean> => {
+  const checkVisible = (): Promise<MyComputerToolsShown> => {
     checking ??= status()
       .then((current) => {
-        const value = current.enabled && current.computers.length > 0;
+        const value: MyComputerToolsShown = !current.enabled
+          ? "none"
+          : current.computers.length > 0
+            ? "all"
+            : "list";
         visible = { value, at: Date.now() };
         return value;
       })
-      .catch(() => visible?.value ?? false)
+      .catch(() => visible?.value ?? "none")
       .finally(() => {
         checking = null;
       });
@@ -894,8 +909,8 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
     note: async (computerId, kind, summary, threadId) => {
       await record(computerId, kind, summary, threadId);
     },
-    toolsVisible: async () => {
-      if ((await options.token()).length === 0) return false;
+    toolsShown: async () => {
+      if ((await options.token()).length === 0) return "none";
       if (
         visible !== null &&
         Date.now() - visible.at < (timings.toolsVisibleTtlMs ?? TOOLS_VISIBLE_TTL_MS)
@@ -903,9 +918,9 @@ export function createMyComputerCore(options: MyComputerCoreOptions): MyComputer
         return visible.value;
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
-      const late = new Promise<boolean>((resolve) => {
+      const late = new Promise<MyComputerToolsShown>((resolve) => {
         timer = setTimeout(
-          () => resolve(visible?.value ?? false),
+          () => resolve(visible?.value ?? "none"),
           timings.toolsVisibleWaitMs ?? TOOLS_VISIBLE_WAIT_MS,
         );
       });

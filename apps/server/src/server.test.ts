@@ -126,7 +126,11 @@ import { ChatRequests, type ChatRequestsShape } from "./chatRequests/ChatRequest
 import { TeamCollab, type TeamCollabShape } from "./team/TeamCollab.ts";
 import { makePartsCache } from "./team/teamCloud.ts";
 import { NO_PARTS } from "./team/teamCloud.logic.ts";
-import { MyComputerFailure, type MyComputerCore } from "./myComputer/myComputerCore.ts";
+import {
+  MyComputerFailure,
+  type MyComputerCore,
+  type MyComputerToolsShown,
+} from "./myComputer/myComputerCore.ts";
 import { MyComputerService, type MyComputerShape } from "./myComputer/MyComputerService.ts";
 import { DEFAULT_TRUST_SETTINGS } from "./myComputer/trust/trustStore.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
@@ -669,7 +673,7 @@ const buildAppUnderTest = (options?: {
             trust: {} as MyComputerShape["trust"],
             judge: {} as MyComputerShape["judge"],
             status: Effect.succeed({ enabled: false, computers: [] }),
-            toolsVisible: Effect.succeed(false),
+            toolsShown: Effect.succeed("none" as const),
             ...options?.layers?.myComputer,
           }),
           Layer.mock(ProjectSyncService)({
@@ -1260,7 +1264,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("uno-work MCP: my_computer_* show with a computer, and a cancel stops the call", () =>
     Effect.gen(function* () {
-      let visible = false;
+      let shown: MyComputerToolsShown = "none";
       const stopped = yield* Deferred.make<void>();
       const started = yield* Deferred.make<void>();
       const computer = {
@@ -1276,7 +1280,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           myComputer: {
-            toolsVisible: Effect.sync(() => visible),
+            toolsShown: Effect.sync(() => shown),
             status: Effect.succeed({ enabled: true, computers: [computer] }),
             // The trust gate runs before every my_computer_* call (13.11):
             // listing is "free" here, so the call reaches `list` below.
@@ -1326,8 +1330,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.isFalse((yield* listed).includes("my_computer_run"));
-      visible = true;
+      assert.isFalse((yield* listed).includes("my_computers_list"));
+      // The feature is on, no computer yet: the list alone, to say how to connect one.
+      shown = "list";
+      assert.isTrue((yield* listed).includes("my_computers_list"));
+      assert.isFalse((yield* listed).includes("my_computer_run"));
+      assert.isFalse((yield* listed).includes("my_computer_start_chat"));
+      shown = "all";
       assert.isTrue((yield* listed).includes("my_computer_run"));
+      assert.isTrue((yield* listed).includes("my_computer_start_chat"));
 
       const call = post({
         jsonrpc: "2.0",

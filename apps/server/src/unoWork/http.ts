@@ -96,7 +96,7 @@ import { ChatRequests } from "../chatRequests/ChatRequests.ts";
 import { TeamCollab } from "../team/TeamCollab.ts";
 import { TEAM_TOOL_NAMES } from "../team/teamTools.ts";
 import { CommandGuardPolicy } from "../provider/Services/CommandGuardPolicy.ts";
-import { MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
+import { hiddenMyComputerTools, MY_COMPUTER_TOOL_NAMES } from "../myComputer/myComputerTools.ts";
 import { WORKSPACE_TOOL_NAMES, type ComputerWaitMark } from "../myComputer/workspaceTools.ts";
 import {
   makeComputerWorkspaceReader,
@@ -1139,15 +1139,17 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
     // cloud computer). Resolved only for authorized calls.
     const connectorsService = Option.getOrNull(yield* Effect.serviceOption(ConnectorsService));
     const connectorTools = connectorsService ? connectorsService.tools : Effect.succeed([]);
-    // The person's computers only show once one is connected. Only `tools/list`
-    // asks: a chat that knew these tools still gets their own clear error.
+    // The person's computers: all the tools once one is connected; before
+    // that only `my_computers_list`, which says how the person connects one.
+    // Only `tools/list` asks: a chat that knew these tools still gets their
+    // own clear error.
     const myComputer = Option.getOrNull(yield* Effect.serviceOption(MyComputerService));
     const settingsService = Option.getOrNull(yield* Effect.serviceOption(ServerSettingsService));
     const teamService = Option.getOrNull(yield* Effect.serviceOption(TeamCollab));
     const hiddenTools = !isMethod(body, "tools/list")
       ? Effect.succeed(NO_HIDDEN_TOOLS)
       : Effect.all([
-          myComputer?.toolsVisible ?? Effect.succeed(false),
+          myComputer?.toolsShown ?? Effect.succeed("none" as const),
           settingsService === null
             ? Effect.succeed(false)
             : settingsService.getSettings.pipe(
@@ -1161,9 +1163,9 @@ export const unoWorkMcpRouteLayer = HttpRouter.add(
               Effect.sync(() => teamService.parts.peek().requests),
         ]).pipe(
           Effect.map(
-            ([computersVisible, inDevMode, teamOn]): ReadonlySet<string> =>
+            ([computersShown, inDevMode, teamOn]): ReadonlySet<string> =>
               new Set([
-                ...(computersVisible ? [] : MY_COMPUTER_TOOL_NAMES),
+                ...hiddenMyComputerTools(computersShown),
                 ...(teamOn ? [] : TEAM_TOOL_NAMES),
                 ...(inDevMode ? [] : DEV_MODE_TOOL_NAMES),
                 // Listed only to a chat whose project is on the person's

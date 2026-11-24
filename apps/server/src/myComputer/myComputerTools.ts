@@ -30,7 +30,13 @@ import type {
 import { decideUnoWorkGate } from "../unoWork/policy.ts";
 import { summarize } from "./activitySummary.ts";
 import type { MyComputerShape } from "./MyComputerService.ts";
-import { MAX_FILE_BYTES, MyComputerFailure, pickComputer } from "./myComputerCore.ts";
+import {
+  MAX_FILE_BYTES,
+  MyComputerFailure,
+  NO_COMPUTER_CONNECTED,
+  pickComputer,
+  type MyComputerToolsShown,
+} from "./myComputerCore.ts";
 import { OUTPUT_LIMIT_BYTES } from "./outputCollector.ts";
 import { computerTrustGate } from "./trust/gate.ts";
 import { START_CHAT_TOOL_NAMES, startChatTools } from "../chatRequests/startChatTools.ts";
@@ -55,6 +61,17 @@ export interface MyComputerToolKit {
   /** "Agent access: off" in the person's settings stops these tools too. */
   readonly requireAccess: (deps: Deps) => Effect.Effect<void, UnoWorkToolError>;
   readonly fail: (message: string) => UnoWorkToolError;
+}
+
+/**
+ * The `my_computer_*` tools a chat isn't shown (`tools/list`). With the
+ * feature on and no computer connected, `my_computers_list` stays: its answer
+ * tells the agent how the person connects one.
+ */
+export function hiddenMyComputerTools(shown: MyComputerToolsShown): ReadonlyArray<string> {
+  if (shown === "all") return [];
+  const names = [...MY_COMPUTER_TOOL_NAMES];
+  return shown === "list" ? names.filter((name) => name !== "my_computers_list") : names;
 }
 
 const NOT_HERE_MESSAGE =
@@ -346,7 +363,7 @@ export function myComputerTools(kit: MyComputerToolKit): ReadonlyArray<UnoWorkTo
             return {
               enabled: status.enabled,
               computers: [],
-              note: "No computer is connected. The person can connect one in Uno Work (one command in a terminal).",
+              note: NO_COMPUTER_CONNECTED,
             };
           }
           const computers = yield* Effect.forEach(
