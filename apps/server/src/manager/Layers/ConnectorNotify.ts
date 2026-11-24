@@ -27,7 +27,8 @@ import {
   formatChannelNotifyText,
   pickPersonChats,
 } from "../connectorNotify.ts";
-import { chatHeaderLine } from "../connectorButtons.ts";
+import { APPROVAL_BUTTONS_TTL_MS, chatHeaderLine } from "../connectorButtons.ts";
+import { slackPressableRows } from "../slackButtons.ts";
 import {
   slackNumberHint,
   slackOptionsText,
@@ -481,10 +482,16 @@ const makeConnectorNotifyService = Effect.gen(function* () {
                 value: option.prompt ?? option.label,
               }))
             : null;
-        const options = cardOptions ?? (plainText === text ? slackReplyOptions(buttons) : []);
+        // Allow / Decline: real Slack buttons (slackButtons.ts); the text
+        // without them is what goes if Slack refuses the buttons.
+        const pressable = input.approval === true ? slackPressableRows(buttons) : [];
+        const options =
+          pressable.length > 0
+            ? []
+            : (cardOptions ?? (plainText === text ? slackReplyOptions(buttons) : []));
         const routeReplies = !fromAssistant && input.approval !== true;
         const slackText = [
-          plainText,
+          pressable.length > 0 ? text : plainText,
           cardOptions !== null && cardOptions.length > 0
             ? slackNumberHint(language)
             : options.length > 0
@@ -509,6 +516,17 @@ const makeConnectorNotifyService = Effect.gen(function* () {
           text: slackText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
           ...(routeReplies || options.length > 0
             ? { routeReplies: { threadId: input.threadId, options } }
+            : {}),
+          ...(pressable.length > 0
+            ? {
+                buttons: {
+                  rows: pressable,
+                  threadId: input.threadId,
+                  ttlMs: input.buttonsTtlMs ?? APPROVAL_BUTTONS_TTL_MS,
+                  language,
+                  fallbackText: plainText.slice(0, CHANNEL_NOTIFY_MAX_TEXT_CHARS),
+                },
+              }
             : {}),
         });
         if (ok) {
@@ -555,7 +573,10 @@ const makeConnectorNotifyService = Effect.gen(function* () {
     );
 
   const retireButtons: ConnectorNotifyServiceShape["retireButtons"] = (requestId, line) =>
-    telegram.retireRequestButtons(requestId, line);
+    Effect.andThen(
+      telegram.retireRequestButtons(requestId, line),
+      slack.retireRequestButtons(requestId, line),
+    );
 
   return {
     resolveChats,

@@ -23,13 +23,19 @@ describe("Create your own Slack bot", () => {
   const url = new URL(SLACK_NEW_APP_URL);
   const manifest = JSON.parse(url.searchParams.get("manifest_json") ?? "null") as {
     oauth_config: { scopes: { bot: string[] } };
-    settings: { event_subscriptions: { bot_events: string[] }; socket_mode_enabled: boolean };
+    settings: {
+      event_subscriptions: { bot_events: string[] };
+      interactivity: { is_enabled: boolean };
+      socket_mode_enabled: boolean;
+    };
   };
 
   it("opens Slack's app builder with the manifest prefilled (manifest_json)", () => {
     expect(url.origin + url.pathname).toBe("https://api.slack.com/apps");
     expect(url.searchParams.get("new_app")).toBe("1");
     expect(manifest.settings.socket_mode_enabled).toBe(true);
+    // Allow / Decline buttons (slackButtons.ts) need Interactivity.
+    expect(manifest.settings.interactivity.is_enabled).toBe(true);
   });
 
   it("asks for what docs/slack-app-manifest.yaml asks for", () => {

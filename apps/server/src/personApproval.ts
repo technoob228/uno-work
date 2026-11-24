@@ -186,7 +186,7 @@ export const askPersonApproval = (
     });
 
     // Nobody looking: ask where the person is — Allow / Deny buttons in
-    // their Telegram (a plain "open Uno Work" line in Slack or Uno's bot).
+    // their Telegram or Slack (a plain "open Uno Work" line in Uno's bot).
     // The buttons need the request id, so the message goes once it exists.
     const askMessenger =
       !(yield* bridge.hasSubscribers) && notify !== null && input.threadId !== null ? notify : null;

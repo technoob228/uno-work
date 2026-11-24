@@ -54,7 +54,8 @@ const SLACK_MANIFEST = {
         "message.groups",
       ],
     },
-    interactivity: { is_enabled: false },
+    // Allow / Decline under approvals: presses come over Socket Mode.
+    interactivity: { is_enabled: true },
     org_deploy_enabled: false,
     socket_mode_enabled: true,
     token_rotation_enabled: false,

@@ -66,6 +66,14 @@ import {
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { slackCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import {
+  addButtonGroup,
+  type ButtonGroup,
+  type ConnectorButton,
+  newButtonGroupId,
+} from "../connectorButtons.ts";
+import { slackButtonBlocks, slackPressableRows, type SlackBlock } from "../slackButtons.ts";
+import { makeSlackPresses } from "./slackPresses.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
@@ -174,7 +182,27 @@ export interface ManagerSlackServiceShape {
       readonly threadId: ThreadId;
       readonly options: ReadonlyArray<SlackReplyOption>;
     };
+    /**
+     * Allow / Decline under the message (slackButtons.ts): approvals only;
+     * other buttons stay numbered options. The press answers `threadId`.
+     */
+    readonly buttons?: {
+      readonly rows: ReadonlyArray<ReadonlyArray<ConnectorButton>>;
+      readonly threadId: ThreadId;
+      readonly ttlMs: number;
+      readonly language: ReplyLanguage;
+      /** Sent instead when Slack refuses the buttons ("open Uno Work to answer"). */
+      readonly fallbackText?: string;
+    };
   }) => Effect.Effect<boolean>;
+  /**
+   * An approval was answered (anywhere): its Slack buttons go, the message
+   * says `line` ("✔ Already answered" by default).
+   */
+  readonly retireRequestButtons: (
+    requestId: string,
+    line?: (language: ReplyLanguage) => string,
+  ) => Effect.Effect<void>;
   /** Upload a file to a channel/DM; a failure is told in the chat. `false`: no live bot. */
   readonly sendFile: (input: {
     readonly projectId: ProjectId;
@@ -519,10 +547,24 @@ const makeSlackConnector = Effect.gen(function* () {
       }),
     );
 
+  // Allow / Decline under approvals (slackPresses.ts).
+  const presses = yield* makeSlackPresses({
+    stateDir: serverConfig.stateDir,
+    orchestrationEngine,
+    routedSlackRowsOf: (holder) => routedSlackRowsOf(holder),
+    webOf: (projectId) => runtimes.get(projectId)?.web ?? null,
+    slackText: (text) => slackText(text),
+  });
+  const { updateButtons, handlePress, retireRequestButtons } = presses;
+
   const getUnoApiKey = serverSettingsService.getSettings.pipe(
     Effect.map((settings) => settings.uno.apiKey?.trim() ?? ""),
     Effect.orElseSucceed(() => ""),
   );
+
+  /** Our markdown as Slack mrkdwn. */
+  const slackText = (text: string) =>
+    boldForSlack(markdownLinksForSlack(text)).slice(0, SLACK_MESSAGE_LIMIT);
 
   const postMessage = (
     web: WebClient,
@@ -532,12 +574,15 @@ const makeSlackConnector = Effect.gen(function* () {
     identity: SlackIdentity | null = null,
     /** In a thread, also show the message in the channel / DM itself. */
     broadcast = false,
+    /** Block Kit blocks (buttons); `text` stays the notification's text. */
+    blocks: ReadonlyArray<SlackBlock> | null = null,
   ) =>
     Effect.tryPromise({
       try: async () => {
         const base = {
           channel,
-          text: boldForSlack(markdownLinksForSlack(text)).slice(0, SLACK_MESSAGE_LIMIT),
+          text: slackText(text),
+          ...(blocks === null ? {} : { blocks: blocks as never }),
           ...(hidesLinkPreview(text) ? { unfurl_links: false, unfurl_media: false } : {}),
           ...(threadTs === undefined
             ? {}
@@ -1491,6 +1536,11 @@ const makeSlackConnector = Effect.gen(function* () {
   }): (() => void) => {
     const handle = (payload: SlackEventsApiPayload) =>
       Effect.sync(() => {
+        // A button press (Interactivity through Uno's console).
+        if ((payload as { readonly type?: unknown }).type === "block_actions") {
+          runFork(handlePress(input.projectId, input.config, input.web, payload));
+          return;
+        }
         const event = payload.event as SlackRawEvent | undefined;
         if (
           payload.type === "event_callback" &&
@@ -1603,6 +1653,15 @@ const makeSlackConnector = Effect.gen(function* () {
         dispatchRawEvent(projectId, config, web, botUserId, payload?.event);
       client.on("message", handler);
       client.on("app_mention", handler);
+      // Button presses (the own app's Interactivity over Socket Mode): ack
+      // at once — Slack shows the person an error after 3 seconds.
+      client.on(
+        "interactive",
+        (args: { readonly ack?: () => Promise<void>; readonly body?: unknown }): void => {
+          void args.ack?.().catch(() => undefined);
+          runFork(handlePress(projectId, config, web, args.body));
+        },
+      );
 
       const started = yield* Effect.tryPromise({
         try: () => client.start(),
@@ -1705,19 +1764,47 @@ const makeSlackConnector = Effect.gen(function* () {
         );
         return false;
       }
-      const posted = yield* postMessage(
-        runtime.web,
-        input.channelId,
-        input.text,
-        input.threadTs,
-        identity,
-      ).pipe(Effect.option);
+      const rows = input.buttons === undefined ? [] : slackPressableRows(input.buttons.rows);
+      const nowMs = Date.now();
+      const group: ButtonGroup | null =
+        input.buttons === undefined || rows.length === 0
+          ? null
+          : {
+              id: newButtonGroupId(),
+              connectorProjectId: holder,
+              chatId: input.channelId,
+              messageId: null,
+              threadId: input.buttons.threadId,
+              rows,
+              text: input.text,
+              language: input.buttons.language,
+              createdAtMs: nowMs,
+              expiresAtMs: nowMs + input.buttons.ttlMs,
+            };
+      const web = runtime.web;
+      const post = (blocks: ReadonlyArray<SlackBlock> | null, text = input.text) =>
+        postMessage(web, input.channelId, text, input.threadTs, identity, false, blocks);
+      let posted =
+        group === null
+          ? yield* post(null).pipe(Effect.option)
+          : yield* post(
+              slackButtonBlocks(slackText(input.text), group, group.language ?? "en"),
+            ).pipe(Effect.option);
+      let withButtons = group !== null && Option.isSome(posted);
+      if (group !== null && Option.isNone(posted)) {
+        // Slack refused the blocks (or the call failed): the text alone,
+        // with its "open Uno Work" line, still asks.
+        posted = yield* post(null, input.buttons?.fallbackText ?? input.text).pipe(Effect.option);
+        withButtons = false;
+      }
       if (Option.isNone(posted)) return false;
       const ts = posted.value.ts;
+      if (group !== null && withButtons && typeof ts === "string") {
+        yield* updateButtons((state) => addButtonGroup(state, { ...group, slackTs: ts }, nowMs));
+      }
       const route = input.routeReplies;
       if (route !== undefined && typeof ts === "string") {
         // A message posted into a thread is answered in that same thread.
-        const nowMs = Date.now();
         yield* updateReplyRoutes((state) =>
           addSlackReplyRoute(
             state,
@@ -1750,6 +1837,7 @@ const makeSlackConnector = Effect.gen(function* () {
         };
       }),
     sendText,
+    retireRequestButtons,
     sendFile,
     listChannels: (projectId) =>
       Effect.gen(function* () {

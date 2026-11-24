@@ -25,6 +25,8 @@ import {
 } from "../connectorButtons.ts";
 import { detectReplyLanguage } from "../connectorReplyText.ts";
 import { ManagerTelegramService } from "./TelegramConnector.ts";
+import { ManagerSlackService } from "./SlackConnector.ts";
+import { parseSlackChatKey } from "@t3tools/contracts";
 
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -56,6 +58,8 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
   const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
 
   const telegram = yield* ManagerTelegramService;
+  // Optional: wirings without Slack (tests) keep the /approve text there.
+  const slack = Option.getOrNull(yield* Effect.serviceOption(ManagerSlackService));
   const pendingApprovals = yield* ProjectionPendingApprovalRepository;
 
   const trackerRef = yield* Ref.make<NotifyTrackerState>(INITIAL_NOTIFY_TRACKER_STATE);
@@ -69,8 +73,9 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
     );
 
   /**
-   * An approval request as ONE Telegram message with Allow / Deny (the
-   * press resolves it, TelegramConnector.ts); Slack keeps the /approve text.
+   * An approval request as ONE message with Allow / Deny — Telegram buttons
+   * (TelegramConnector.ts) or Slack buttons (slackButtons.ts, 23.11); the
+   * /approve text is what Slack gets if it refuses the buttons.
    */
   const sendApproval = (
     chats: ReadonlyArray<ResolvedNotifyChat>,
@@ -86,8 +91,30 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
         detail: notification.detail,
         language,
       });
-      const plain = chats.filter((chat) => chat.kind !== "telegram" || requestId === null);
+      const withSlackButtons = (chat: ResolvedNotifyChat) =>
+        chat.kind === "slack" && slack !== null && requestId !== null;
+      const plain = chats.filter(
+        (chat) => (chat.kind !== "telegram" || requestId === null) && !withSlackButtons(chat),
+      );
       let delivered = 0;
+      for (const chat of chats) {
+        if (slack === null || requestId === null || !withSlackButtons(chat)) continue;
+        const target = parseSlackChatKey(chat.chatId);
+        const ok = yield* slack.sendText({
+          projectId: chat.connectorProjectId,
+          channelId: target.channelId,
+          ...(target.threadTs !== null ? { threadTs: target.threadTs } : {}),
+          text,
+          buttons: {
+            rows: approvalButtons(requestId, language),
+            threadId: notification.threadId,
+            ttlMs: APPROVAL_BUTTONS_TTL_MS,
+            language,
+            fallbackText: formatNotificationText(notification, threadTitle),
+          },
+        });
+        if (ok) delivered += 1;
+      }
       for (const chat of chats) {
         if (chat.kind !== "telegram" || requestId === null) continue;
         const sent = yield* telegram.sendRich({
@@ -129,16 +156,18 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
       if (requestId === null) return;
       yield* Effect.sleep(APPROVAL_FALLBACK_DELAY_MS);
       if (!(yield* isStillPending(notification.threadId, requestId))) return;
+      // Their private Telegram chat; no Telegram — their Slack DM (buttons there too).
       const chats = pickPersonChats(
         yield* notifyService.resolveChats({
           threadId: notification.threadId,
           projectId,
           includeAssistantFallback: true,
+          includeSlack: slack !== null,
         }),
-      ).filter((chat) => chat.kind === "telegram" && chat.via === "assistant");
+      ).filter((chat) => chat.via === "assistant");
       if (chats.length === 0) return;
       const delivered = yield* sendApproval(chats, notification, threadTitle);
-      yield* Effect.logInfo("approval request sent to the person's Telegram").pipe(
+      yield* Effect.logInfo("approval request sent to the person's messenger").pipe(
         Effect.annotateLogs({ threadId: notification.threadId, delivered }),
       );
     }).pipe(
@@ -157,6 +186,7 @@ const makeConnectorEventsForwarder = Effect.gen(function* () {
       const resolvedRequestId = resolvedApprovalRequestId(event);
       if (resolvedRequestId !== null) {
         yield* telegram.retireRequestButtons(resolvedRequestId);
+        if (slack !== null) yield* slack.retireRequestButtons(resolvedRequestId);
         return;
       }
       const notification = yield* Ref.modify(trackerRef, (state) => {
