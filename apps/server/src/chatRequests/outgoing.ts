@@ -342,14 +342,14 @@ export function makeOutgoing(deps: OutgoingDeps) {
     }
     if (!hostState.value.allow) return settle(record, "refused", REASONS.off);
     const provider = record.request.provider?.trim().toLowerCase();
-    const accepted = (hostState.value.providers ?? ["claudeAgent"]).map((name) =>
-      name.toLowerCase(),
+    const accepted = new Set(
+      (hostState.value.providers ?? ["claudeAgent"]).map((name) => name.toLowerCase()),
     );
     if (
       provider !== undefined &&
       provider !== "" &&
-      !accepted.includes(provider) &&
-      !(provider.startsWith("claude") && accepted.includes("claudeagent"))
+      !accepted.has(provider) &&
+      !(provider.startsWith("claude") && accepted.has("claudeagent"))
     ) {
       return settle(record, "refused", OUT_REASONS.harnessThere(record.computerName));
     }

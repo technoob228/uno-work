@@ -2,7 +2,12 @@ import type { ChatRequestView, ChatRequestsState } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  COMMANDS_SHOWN,
   JOURNAL_MAX,
+  cloudAgentsStatus,
+  commandChip,
+  commandEntries,
+  commandSummary,
   failureMessage,
   folderLabel,
   harnessLabel,
@@ -136,5 +141,45 @@ describe("T51 session requests from a colleague", () => {
     expect(requestTitle(request({ team: { ...team, viaAgent: false } }))).toBe(
       "Andrei suggests starting a session here",
     );
+  });
+});
+
+describe("cloud agents on this computer", () => {
+  const line = (outcome: string, kind = "run") => ({
+    at: "2026-11-20T11:59:00Z",
+    kind,
+    summary: "git status",
+    outcome,
+    tier: "free",
+    computerName: "uno-work",
+    threadTitle: "Bakery",
+  });
+
+  it("says what each command came to", () => {
+    expect(commandChip(line("ran")).label).toBe("Ran");
+    expect(commandChip(line("allowed")).tone).toBe("allowed");
+    expect(commandChip(line("refused")).tone).toBe("refused");
+    expect(commandSummary(line("ran", "write"))).toBe("Wrote: git status");
+  });
+
+  it("shows the last ones only", () => {
+    const state = {
+      allow: true,
+      limit: 2,
+      active: 0,
+      requests: [],
+      commands: Array.from({ length: COMMANDS_SHOWN + 5 }, () => line("ran")),
+    } as ChatRequestsState;
+    expect(commandEntries(state)).toHaveLength(COMMANDS_SHOWN);
+    expect(commandEntries(null)).toEqual([]);
+  });
+
+  it("says when they were stopped", () => {
+    const base = { allow: false, limit: 2, active: 0, requests: [] } as ChatRequestsState;
+    expect(cloudAgentsStatus(base)).toMatch(/^Off\./);
+    expect(cloudAgentsStatus({ ...base, stoppedAt: "2026-11-20T11:00:00Z" })).toMatch(
+      /^Stopped at /,
+    );
+    expect(cloudAgentsStatus({ ...base, allow: true })).toMatch(/^On\./);
   });
 });

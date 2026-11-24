@@ -5,6 +5,7 @@ const api = {
   state: vi.fn(),
   decide: vi.fn(),
   setAllowed: vi.fn(),
+  revokeTrust: vi.fn(),
 };
 vi.mock("../environmentApi", () => ({
   readEnvironmentApi: () => ({ chatRequests: api }),
@@ -15,8 +16,10 @@ vi.mock("../hooks/useMachineRows", () => ({ useMachineRows: () => [] }));
 import {
   decideChatRequest,
   refreshChatRequests,
+  revokeChatRequestTrust,
   setChatRequestsAllowed,
   setChatRequestsHost,
+  stopCloudAgents,
   useChatRequestsStore,
 } from "./chatRequestsStore";
 
@@ -28,6 +31,7 @@ describe("chat requests store", () => {
     api.state.mockReset().mockResolvedValue(STATE);
     api.decide.mockReset();
     api.setAllowed.mockReset();
+    api.revokeTrust.mockReset();
     setChatRequestsHost(null);
   });
 
@@ -68,5 +72,30 @@ describe("chat requests store", () => {
     expect(await setChatRequestsAllowed(false)).toBeNull();
     expect(api.setAllowed).toHaveBeenCalledWith({ allow: false });
     expect(useChatRequestsStore.getState().state?.allow).toBe(false);
+  });
+
+  it("Start with “Don't ask again” trusts that chat; Decline never does", async () => {
+    setChatRequestsHost(HOST);
+    api.decide.mockResolvedValue({ state: STATE, threadId: "t-new" });
+    await decideChatRequest("a", "start", true);
+    expect(api.decide).toHaveBeenLastCalledWith({ id: "a", decision: "start", trustChat: true });
+    await decideChatRequest("b", "decline", true);
+    expect(api.decide).toHaveBeenLastCalledWith({ id: "b", decision: "decline" });
+  });
+
+  it("Stop cloud agents turns the switch off and stops what runs", async () => {
+    setChatRequestsHost(HOST);
+    api.setAllowed.mockResolvedValue({ ...STATE, allow: false, stoppedAt: "2026-11-23T10:00:00Z" });
+    expect(await stopCloudAgents()).toBeNull();
+    expect(api.setAllowed).toHaveBeenCalledWith({ allow: false, stopRunning: true });
+    expect(useChatRequestsStore.getState().state?.stoppedAt).toBe("2026-11-23T10:00:00Z");
+  });
+
+  it("Revoke asks the server and keeps its answer", async () => {
+    setChatRequestsHost(HOST);
+    api.revokeTrust.mockResolvedValue({ ...STATE, trustedChats: [] });
+    expect(await revokeChatRequestTrust({ boxId: 395, threadId: "t-1" })).toBeNull();
+    expect(api.revokeTrust).toHaveBeenCalledWith({ boxId: 395, threadId: "t-1" });
+    expect(useChatRequestsStore.getState().state?.trustedChats).toEqual([]);
   });
 });

@@ -85,6 +85,7 @@ const rpcClientMock = {
     state: vi.fn(),
     decide: vi.fn(),
     setAllowed: vi.fn(),
+    revokeTrust: vi.fn(),
   },
   team: {
     state: vi.fn(),

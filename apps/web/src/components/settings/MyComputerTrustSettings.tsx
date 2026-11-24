@@ -170,6 +170,12 @@ function StatusSection({
           </Button>
         }
       />
+      {computers.length > 0 ? (
+        <SettingsRow
+          title="On a computer with Uno Work"
+          description="If Uno Work runs on that computer too, its own switch decides: Settings → Computer → Cloud agents there. It's off until you turn it on, shows every command agents run there, and has its own Stop."
+        />
+      ) : null}
       <StopAllAgentsDialog open={stopOpen} onOpenChange={setStopOpen} />
     </SettingsSection>
   );
