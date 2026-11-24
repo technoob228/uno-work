@@ -8,6 +8,14 @@
 
 ---
 
+## v0.0.192 — 2026-11-24
+
+- "Waiting for you": cards an agent is waiting on and links to its sites you haven't opened yet show as a strip above the input, a number on the chat in the sidebar and one "Waiting for you · N" line in Inbox. The computer keeps the list, so Not needed and opened links are remembered on every device.
+- The assistant knows your projects. It sees a short passport of each project (recent chats with their results, the rules from AGENTS.md / CLAUDE.md, the project memory) and answers "what did we do there last" by itself instead of starting a separate chat.
+- Grok CLI joins Claude Code, Codex and Gemini: Install in Settings → AI, sign in with an xAI account (a link and a code) or an xAI API key, and its models show up in the model picker, onboarding and the model roles. Gemini, Grok and your own ACP agents now show the agent's real error text, show thinking separately, don't repeat the history when a chat continues and stop cleanly on Stop.
+- Cloud agents on your Mac work only while the Cloud agents switch in Settings → Computer is on there. Every command they run shows in a log on the Mac, Stop cloud agents turns the switch off and stops what they started, and they can't ssh from the Mac to other machines. A git push or an install from a cloud agent asks you each time, a request can be marked "Don't ask again for this chat", and a cloud chat can start Codex on the Mac in Codex's sandbox without network.
+- Slack: approvals get Allow and Deny buttons, as in Telegram, and only the owner's press counts. The buttons start working once Interactivity is on in the Slack app; until then the message still says to open Uno Work.
+
 ## v0.0.191 — 2026-11-23
 
 - Gemini CLI joins Claude Code and Codex. Settings → AI has a Gemini CLI row with Install and Sign in: a Google account (open the link, paste the code) or a Gemini API key. Once signed in, Gemini models (Auto by default) show up in the model picker, on Home and in the model roles.
