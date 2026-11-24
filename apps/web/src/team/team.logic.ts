@@ -267,31 +267,43 @@ export function waitingInbox(
 /** The card's first line. */
 export function requestHeadline(request: TeamRequest): string {
   const name = firstName(request.from);
+  const sender = senderOf(name, request.viaAgent, request.fromAssistant);
   switch (request.kind) {
     case "write_access":
       return `${name} asks to write in your chat`;
     case "question":
-      return request.viaAgent ? `${possessive(name)} agent asks your agent` : `${name} asks`;
+      return request.viaAgent ? `${sender} asks your agent` : `${name} asks`;
     case "session":
-      return sessionHeadline(name, request.viaAgent);
+      return sessionHeadline(name, request.viaAgent, request.fromAssistant);
     case "message":
-      return request.viaAgent ? `${possessive(name)} agent` : name;
+      return sender;
   }
+}
+
+/**
+ * Who sent it: "Andrei", "Andrei's agent", or — from his Uno assistant
+ * computer — "Andrei's assistant", never just "Andrei" (Misha 23.11).
+ */
+export function senderOf(name: string, viaAgent: boolean, fromAssistant = false): string {
+  if (fromAssistant) return `${possessive(name)} assistant`;
+  return viaAgent ? `${possessive(name)} agent` : name;
 }
 
 /**
  * "Andrei's agent suggests starting a session here". Without a pronoun: we
  * don't know whose "his" or "her" it would be.
  */
-export function sessionHeadline(name: string, viaAgent: boolean): string {
-  return viaAgent
-    ? `${possessive(name)} agent suggests starting a session here`
-    : `${name} suggests starting a session here`;
+export function sessionHeadline(name: string, viaAgent: boolean, fromAssistant = false): string {
+  return `${senderOf(name, viaAgent, fromAssistant)} suggests starting a session here`;
 }
 
 /** A T50 request that came from a colleague (the daemon's `team` field). */
 export function teamSessionHeadline(team: ChatRequestTeam): string {
-  return sessionHeadline(firstNameOfText(team.fromName), team.viaAgent);
+  return sessionHeadline(
+    firstNameOfText(team.fromName),
+    team.viaAgent,
+    team.fromAssistant === true,
+  );
 }
 
 /** "Andrei" from "Andrei Sokolov" or "andrei@example.com". */
@@ -332,7 +344,8 @@ export function sessionCantLines(name: string, projectName: string): ReadonlyArr
  */
 export interface TeamOutsideText {
   readonly name: string;
-  readonly kind: "agent" | "colleague";
+  /** "assistant": from their Uno assistant computer (Misha 23.11). */
+  readonly kind: "agent" | "assistant" | "colleague";
   readonly chatTitle: string | null;
   readonly project: string | null;
   readonly level: AgentLevel | null;
@@ -344,14 +357,17 @@ const NOTE = "[Uno Work · team] ";
 const COLLEAGUE_MESSAGE =
   /^A message from (.+?), a colleague in (.+?): the person shared this chat/;
 const AGENT_QUESTION =
-  /^(.+?)['’]s agent \(a colleague in (.+?), from their chat “(.*?)”\) asks a question/;
+  /^(.+?)['’]s (agent|assistant) \(a colleague in (.+?), from their chat “(.*?)”\) asks a question/;
 const REQUEST_ANSWER = /^About this chat's request to (.+?) \(a colleague in (.+?)\) /;
 const SESSION_BRIEF =
   /^\[Uno Work: this chat was started at the request of (.+?) \(a colleague in (.+?), from their chat “(.*?)”\); /;
 // The block opens on a line of its own: the line before it names the tag too.
 const OUTSIDE_BLOCK = /(?:^|\n)<(outside_input_[A-Za-z0-9_-]+)>[ \t]*\n([\s\S]*?)\n?<\/\1>/;
 
-const agentName = (who: string) => /^(.+?)['’]s agent$/.exec(who)?.[1] ?? null;
+const agentName = (who: string) => {
+  const match = /^(.+?)['’]s (agent|assistant)$/.exec(who);
+  return match ? { name: match[1]!, kind: match[2] as "agent" | "assistant" } : null;
+};
 
 export function parseTeamOutsideText(text: string): TeamOutsideText | null {
   const block = OUTSIDE_BLOCK.exec(text);
@@ -360,7 +376,7 @@ export function parseTeamOutsideText(text: string): TeamOutsideText | null {
   const firstLine = text.slice(0, text.indexOf("\n") === -1 ? text.length : text.indexOf("\n"));
   const make = (
     who: string,
-    kind: "agent" | "colleague",
+    kind: TeamOutsideText["kind"],
     project: string,
     chatTitle: string | null,
     level: AgentLevel | null,
@@ -374,8 +390,8 @@ export function parseTeamOutsideText(text: string): TeamOutsideText | null {
     const agent = agentName(session[1]!);
     const level = firstLine.includes("is Do tasks") ? "tasks" : null;
     return make(
-      agent ?? session[1]!,
-      agent ? "agent" : "colleague",
+      agent?.name ?? session[1]!,
+      agent?.kind ?? "colleague",
       session[2]!,
       session[3] || null,
       level,
@@ -388,7 +404,13 @@ export function parseTeamOutsideText(text: string): TeamOutsideText | null {
   const question = AGENT_QUESTION.exec(rest);
   if (question) {
     const level = rest.includes("is Answer questions") ? "answer" : "ask";
-    return make(question[1]!, "agent", question[2]!, question[3] || null, level);
+    return make(
+      question[1]!,
+      question[2] as "agent" | "assistant",
+      question[3]!,
+      question[4] || null,
+      level,
+    );
   }
   const answer = REQUEST_ANSWER.exec(rest);
   if (answer) {
@@ -396,6 +418,11 @@ export function parseTeamOutsideText(text: string): TeamOutsideText | null {
     return make(answer[1]!, byAgent ? "agent" : "colleague", answer[2]!, null, null);
   }
   return null;
+}
+
+/** "Andrei's agent" / "Andrei's assistant" / "Andrei". */
+export function outsideWho(parsed: Pick<TeamOutsideText, "name" | "kind">): string {
+  return parsed.kind === "colleague" ? parsed.name : `${possessive(parsed.name)} ${parsed.kind}`;
 }
 
 /** "Andrei's agent" / "Andrei": whose text the chat holds, by the latest such message. */
@@ -406,7 +433,7 @@ export function teamOutsideFrom(
     const message = messages[index]!;
     if (message.role !== "user") continue;
     const parsed = parseTeamOutsideText(message.text);
-    if (parsed) return parsed.kind === "agent" ? `${possessive(parsed.name)} agent` : parsed.name;
+    if (parsed) return outsideWho(parsed);
   }
   return null;
 }

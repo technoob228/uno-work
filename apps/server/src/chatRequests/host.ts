@@ -327,7 +327,12 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
             startedBy:
               team !== undefined
                 ? {
-                    assistantName: team.viaAgent ? `${team.fromName}'s agent` : team.fromName,
+                    assistantName:
+                      team.fromAssistant === true
+                        ? `${team.fromName}'s assistant`
+                        : team.viaAgent
+                          ? `${team.fromName}'s agent`
+                          : team.fromName,
                     assistantProjectId: null,
                     fromComputerName: `a colleague in ${team.projectName}`,
                     fromBoxId: null,
@@ -424,7 +429,16 @@ export const makeChatRequestsHost = (deps: HostDeps): Effect.Effect<HostShape> =
         ),
       autoStart: (id) =>
         lock.withPermits(1)(
-          decideNow({ id, decision: "start" }, "here").pipe(
+          // Only a colleague's request marked auto, never one from their
+          // assistant computer (Misha 23.11): that one waits for the button.
+          io(() => readHostStore(stateDir)).pipe(
+            Effect.flatMap((store) => {
+              const team = store.records.find((entry) => entry.id === id)?.team;
+              return team?.auto === true && team.fromAssistant !== true
+                ? Effect.void
+                : Effect.fail(fail("This request waits for the person's Start."));
+            }),
+            Effect.andThen(decideNow({ id, decision: "start" }, "here")),
             Effect.flatMap((result) =>
               result.threadId === null
                 ? Effect.fail(fail("The chat couldn't start here."))

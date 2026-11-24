@@ -25,7 +25,13 @@ import {
 
 import { GUARDED_PROVIDER, teamRecordId, type HostRecord } from "../chatRequests/hostLogic.ts";
 import type { StatusInput } from "./teamCloud.ts";
-import { levelAtLeast, personName, type TeamLevels, type TeamRequest } from "./teamCloud.logic.ts";
+import {
+  agentOf,
+  levelAtLeast,
+  personName,
+  type TeamLevels,
+  type TeamRequest,
+} from "./teamCloud.logic.ts";
 
 /** A colleague's agent's answer, at most (the cloud's limit is wider). */
 export const ANSWER_MAX_CHARS = 8_000;
@@ -42,7 +48,11 @@ export function teamFileOf(
   folder: string,
 ): ChatRequestFile & { readonly team: ChatRequestTeam } {
   const fromName = personName(request.from);
-  const title = cut(request.title, CHAT_REQUEST_TITLE_MAX_CHARS, `A task from ${fromName}`);
+  const title = cut(
+    request.title,
+    CHAT_REQUEST_TITLE_MAX_CHARS,
+    `A task from ${request.fromAssistant ? agentOf(fromName, true) : fromName}`,
+  );
   const team: ChatRequestTeam = {
     requestId: request.id,
     projectId: request.projectId,
@@ -51,7 +61,8 @@ export function teamFileOf(
     fromName: cut(fromName, 200, "A colleague"),
     viaAgent: request.viaAgent,
     level: request.levelNow,
-    auto: request.auto && request.levelNow === "tasks",
+    auto: request.auto && !request.fromAssistant && request.levelNow === "tasks",
+    ...(request.fromAssistant ? { fromAssistant: true } : {}),
   };
   return {
     v: 1,
@@ -141,6 +152,7 @@ export function dueReports(record: HostRecord, told: ReadonlyArray<string>): Rea
 export function answersOnItsOwn(request: TeamRequest, parts: TeamParts): boolean {
   return (
     request.kind === "question" &&
+    !request.fromAssistant &&
     request.status === "waiting" &&
     parts.agents &&
     levelAtLeast(request.levelNow, "answer")
@@ -153,7 +165,8 @@ export function startsOnItsOwn(
   parts: TeamParts,
   levels: TeamLevels | null,
 ): boolean {
-  if (request.kind !== "session" || !request.auto || !parts.tasks) return false;
+  if (request.kind !== "session" || !request.auto || request.fromAssistant || !parts.tasks)
+    return false;
   if (request.levelNow !== "tasks") return false;
   return levels?.effectiveIn[String(request.from.userId)] === "tasks";
 }

@@ -39,7 +39,7 @@ import {
 import type { TeamPorts } from "./ports.ts";
 import { scrubSecrets } from "./scrub.logic.ts";
 import { LONG_POLL_WAIT_S, TeamCloudError, type StatusInput } from "./teamCloud.ts";
-import { personName, type TeamRequest } from "./teamCloud.logic.ts";
+import { agentOf, personName, type TeamRequest } from "./teamCloud.logic.ts";
 import { asNumber, asRecord, readTeamFile, writeTeamFile } from "./teamFiles.ts";
 import {
   digestText,
@@ -329,13 +329,15 @@ export function makeTeamBridge(ports: TeamPorts) {
       throw new TeamBridgeError("Another computer of yours is answering it already.");
     }
     const fromName = personName(request.from);
+    const asker = request.fromAssistant ? agentOf(fromName, true) : fromName;
     const started = await ports.host.startReadOnly({
-      title: `Question from ${fromName}: ${request.title || request.gist || "a question"}`.slice(
+      title: `Question from ${asker}: ${request.title || request.gist || "a question"}`.slice(
         0,
         120,
       ),
       text: questionBrief({
         fromName,
+        fromAssistant: request.fromAssistant,
         projectName: request.projectName,
         fromChatTitle: request.fromChatTitle,
         title: request.title,

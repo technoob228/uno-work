@@ -75,9 +75,6 @@ function problem(status: number, code: string): string {
   if (code === "CHAT_IN_OTHER_PROJECT") return "That chat is shared in another project.";
   if (code === "NOT_CLAIMER") return "Another computer of this person took that request.";
   if (code === "REQUEST_NOT_WAITING") return "That request isn't waiting any more.";
-  if (code === "ASSISTANT_COMPUTER_NO_TEAM_REQUESTS") {
-    return "An assistant's computer doesn't send requests to colleagues.";
-  }
   if (code === "CANNOT_TARGET_SELF") return "That's the person themself.";
   if (code === "INVALID_FIELD") return "The Uno cloud didn't accept a field.";
   if (code === "BODY_TOO_LARGE" || status === 413) return "It is too long for the Uno cloud.";

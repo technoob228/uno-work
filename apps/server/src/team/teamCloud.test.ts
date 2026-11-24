@@ -168,6 +168,17 @@ describe("the cloud's answers", () => {
       auto: true,
     });
     expect(personName(request!.from)).toBe("andrei");
+    // From their assistant computer: marked, and never auto whatever the cloud says.
+    expect(
+      parseRequest({
+        id: 5,
+        project_id: 2,
+        kind: "session",
+        status: "waiting",
+        auto: true,
+        from_assistant: true,
+      }),
+    ).toMatchObject({ fromAssistant: true, viaAgent: true, auto: false });
     expect(parseRequest({ id: 4, project_id: 2, kind: "teleport", status: "waiting" })).toBeNull();
   });
 

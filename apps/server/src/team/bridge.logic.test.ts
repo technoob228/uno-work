@@ -23,6 +23,7 @@ const request = (over: Partial<TeamRequest> = {}): TeamRequest => ({
   to: { userId: 3, email: "misha@example.com", username: "misha" },
   kind: "session",
   viaAgent: true,
+  fromAssistant: false,
   fromChatTitle: "Checkout bug",
   fromThread: null,
   title: "Fix the cart total",
@@ -86,6 +87,14 @@ describe("a colleague's session as a host record", () => {
     expect(teamFileOf(request({ auto: false }), "/p").team.auto).toBe(false);
   });
 
+  it("from their assistant computer: marked, never auto, named as the assistant", () => {
+    const file = teamFileOf(request({ fromAssistant: true, title: "", gist: "" }), "/p");
+    expect(file.team.auto).toBe(false);
+    expect(file.team.fromAssistant).toBe(true);
+    expect(file.title).toBe("A task from andrei's assistant");
+    expect(teamFileOf(request(), "/p").team.fromAssistant).toBeUndefined();
+  });
+
   it("empty fields get words, long ones are cut", () => {
     const file = teamFileOf(request({ title: " ", body: "", gist: "" }), "/p");
     expect(file.title).toBe("A task from andrei");
@@ -141,6 +150,7 @@ describe("who starts what on their own", () => {
     expect(answersOnItsOwn(question, { ...ALL, agents: false })).toBe(false);
     expect(answersOnItsOwn({ ...question, status: "answered" }, ALL)).toBe(false);
     expect(answersOnItsOwn(request(), ALL)).toBe(false);
+    expect(answersOnItsOwn({ ...question, fromAssistant: true }, ALL)).toBe(false);
   });
 
   it("a session at Do tasks only when the level read again says so", () => {
@@ -153,6 +163,7 @@ describe("who starts what on their own", () => {
     expect(startsOnItsOwn(request(), { ...ALL, tasks: false }, levels)).toBe(false);
     expect(startsOnItsOwn(request({ auto: false }), ALL, levels)).toBe(false);
     expect(startsOnItsOwn(request(), NO_PARTS, levels)).toBe(false);
+    expect(startsOnItsOwn(request({ fromAssistant: true }), ALL, levels)).toBe(false);
   });
 });
 

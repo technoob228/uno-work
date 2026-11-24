@@ -115,6 +115,8 @@ export interface TeamRequest {
   readonly to: TeamPersonRef | null;
   readonly kind: TeamRequestKind;
   readonly viaAgent: boolean;
+  /** From their Uno assistant computer: "<name>'s assistant", never on its own. */
+  readonly fromAssistant: boolean;
   readonly fromChatTitle: string;
   readonly title: string;
   readonly gist: string;
@@ -311,7 +313,8 @@ export function parseTeamRequest(value: unknown): TeamRequest | null {
     from: parsePerson(r["from"]),
     to: parsePerson(r["to"]),
     kind,
-    viaAgent: bool(r["via_agent"]),
+    viaAgent: bool(r["via_agent"]) || bool(r["from_assistant"]),
+    fromAssistant: bool(r["from_assistant"]),
     fromChatTitle: str(r["from_chat_title"]),
     title: str(r["title"]),
     gist: str(r["gist"]),

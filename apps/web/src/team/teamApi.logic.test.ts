@@ -119,6 +119,7 @@ describe("requests, levels, journal", () => {
     expect(page.requests).toHaveLength(1);
     expect(page.requests[0]).toMatchObject({
       viaAgent: true,
+      fromAssistant: false,
       levelNow: "answer",
       kind: "question",
     });

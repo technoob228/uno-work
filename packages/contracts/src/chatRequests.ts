@@ -88,6 +88,8 @@ export const ChatRequestTeam = Schema.Struct({
   level: TeamAgentLevel,
   /** Started without a button (level `tasks`). */
   auto: Schema.Boolean,
+  /** Sent from the sender's Uno assistant computer: "<name>'s assistant", never `auto`. */
+  fromAssistant: Schema.optional(Schema.Boolean),
 });
 export type ChatRequestTeam = typeof ChatRequestTeam.Type;
 

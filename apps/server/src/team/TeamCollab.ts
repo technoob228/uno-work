@@ -56,6 +56,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectSyncService } from "../projectSync/ProjectSyncService.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { ASSISTANT_COMPUTER_ROLE, makeOwnComputerRoleReader } from "../assistants/computerRole.ts";
 import { consoleToken } from "../unoWork/consoleClient.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { makeTeamBridge, type TeamBridge } from "./bridge.ts";
@@ -94,6 +95,13 @@ export interface TeamCollabShape {
   readonly teamProjects: Effect.Effect<ReadonlyArray<TeamProject>, TeamError>;
   /** The team project of a folder here, if it is one. */
   readonly projectOfFolder: (folder: string) => Effect.Effect<TeamProjectHere | null>;
+  /**
+   * This is the person's Uno assistant computer (`computer_role`). Misha
+   * 23.11: its chats may write to colleagues; the cloud marks those requests
+   * "from the assistant" and never lets them start anything on their own.
+   * Unknown reads as false.
+   */
+  readonly onAssistantComputer: Effect.Effect<boolean>;
 }
 
 export class TeamCollab extends Context.Service<TeamCollab, TeamCollabShape>()(
@@ -155,6 +163,13 @@ export const TeamCollabLive = Layer.effect(
     };
 
     const source = environment.getEnvironmentId.pipe(Effect.map(String));
+    const readComputerRole = makeOwnComputerRoleReader();
+    const onAssistantComputer = settings.getSettings.pipe(
+      Effect.map((value) => value.uno),
+      Effect.orElseSucceed(() => null),
+      Effect.flatMap((uno) => Effect.promise(() => readComputerRole(uno))),
+      Effect.map((role) => role === ASSISTANT_COMPUTER_ROLE),
+    );
 
     // ── Projects here ────────────────────────────────────────────────────
     let teamProjectsCache: {
@@ -582,6 +597,7 @@ export const TeamCollabLive = Layer.effect(
       cloud,
       parts,
       source,
+      onAssistantComputer,
       teamProjects: Effect.tryPromise({ try: loadTeamProjects, catch: teamError }),
       projectOfFolder: (folder) =>
         Effect.promise(() => here().catch(() => [])).pipe(

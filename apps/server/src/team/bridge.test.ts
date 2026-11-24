@@ -23,6 +23,7 @@ const request = (over: Partial<TeamRequest> = {}): TeamRequest => ({
   to: { userId: 3, email: "misha@example.com", username: "misha" },
   kind: "session",
   viaAgent: true,
+  fromAssistant: false,
   fromChatTitle: "Checkout bug",
   fromThread: null,
   title: "Fix the cart total",
@@ -219,6 +220,14 @@ describe("a colleague's session at Do tasks", () => {
     expect(w.records[0]?.status).toBe("waiting");
   });
 
+  it("from the colleague's assistant computer: never on its own, even at Do tasks", async () => {
+    const w = world();
+    w.inboxRequests = [request({ fromAssistant: true })];
+    await makeTeamBridge(w.ports).inboxRound();
+    expect(w.records[0]?.status).toBe("waiting");
+    expect(w.statuses).toEqual([]);
+  });
+
   it("another computer of the person took it: nothing here", async () => {
     const w = world();
     w.inboxRequests = [request()];
@@ -252,6 +261,19 @@ describe("a colleague's agent's question at Answer questions", () => {
     expect(input).toMatchObject({ status: "answered", decidedVia: "auto" });
     expect(input.answer).toContain("42");
     expect(input.answer).not.toContain("sk-live-SECRET-123456");
+  });
+});
+
+describe("a question from a colleague's assistant computer", () => {
+  it("waits for the person's button even at Answer questions", async () => {
+    const w = world();
+    w.inboxRequests = [
+      request({ kind: "question", levelNow: "answer", level: "answer", fromAssistant: true }),
+    ];
+    const bridge = makeTeamBridge(w.ports);
+    await bridge.inboxRound();
+    await bridge.followRound();
+    expect(w.statuses).toEqual([]);
   });
 });
 

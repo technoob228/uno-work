@@ -210,6 +210,21 @@ if (!TEAM_DEMO_AS_ANDREI) {
       chat_id: SHARED_CHAT,
       created_at: at(-1 * MIN),
     }),
+    // Misha 23.11: from Olga's Uno assistant computer — marked, never on its own.
+    inboxItem({
+      id: 304,
+      from: person(OLGA),
+      kind: "question",
+      via_agent: true,
+      from_assistant: true,
+      from_chat_title: "Mail from the print shop",
+      title: "Which menu PDF is current?",
+      gist: "The print shop asks which menu PDF to print: menu-v3 or menu-final? Their deadline is Friday.",
+      level: "answer",
+      level_now: "answer",
+      auto: false,
+      created_at: at(-30 * 1000),
+    }),
   );
 }
 

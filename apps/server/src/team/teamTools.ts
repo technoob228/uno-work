@@ -12,6 +12,10 @@
  * Only the person's own chats ask: not an assistant's, not a chat holding
  * text from outside (a colleague's words included), not a chat started at
  * a cloud chat's or a colleague's request (those keep to a few tools).
+ * Except on the person's Uno assistant computer (Misha 23.11): there its
+ * chats may ask; the cloud marks the request "from <name>'s assistant",
+ * never lets it start or answer anything on its own, and the colleague's
+ * side reads it as outside text.
  *
  * @module team/teamTools
  */
@@ -112,8 +116,6 @@ export function requestRefusal(
       return `TOO_MANY_ROUNDS: the agents went back and forth too many times on this. Call people: tell the person here what is open (chat_call_person) instead of asking again.`;
     case "TOO_MANY_SESSIONS":
       return `TOO_MANY_SESSIONS: ${name} already has 2 sessions from colleagues. Try later, or send a message instead.`;
-    case "ASSISTANT_COMPUTER_NO_TEAM_REQUESTS":
-      return "ASSISTANT_COMPUTER: this is an assistant's computer (it reads outside text), so it doesn't write to the person's colleagues. Tell the person what you'd want to ask; they can ask from their own Uno Work.";
     case "PERSON_NOT_ENABLED":
       return `PERSON_NOT_ENABLED: working with the team isn't on for ${name} yet (or not for questions to their agent). Send a message instead, or tell the person.`;
     case "CANNOT_TARGET_SELF":
@@ -180,6 +182,7 @@ export function teamTools(kit: TeamToolKit): ReadonlyArray<UnoWorkTool> {
   const mayAsk = (deps: UnoWorkToolDeps) =>
     Effect.gen(function* () {
       const team = yield* teamOf(deps);
+      if (yield* team.onAssistantComputer) return team;
       const assistant = deps.callerAssistantName ? yield* deps.callerAssistantName : null;
       if (assistant !== null) return yield* kit.fail(TEAM_REFUSALS.assistant(assistant));
       if (deps.outsideText && (yield* deps.outsideText)) {
