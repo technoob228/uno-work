@@ -431,7 +431,7 @@ export function activityTimeLabel(
 
 /** The line under "Settings → Computer" when the helper isn't on the signed-in account. */
 export const MAC_LINK_MISMATCH_LINE =
-  "Этот Мак подключён к другому аккаунту (не к тому, под которым вы вошли в Uno Work) — облако его не видит.";
+  "This Mac is connected to another Uno account, not the one you're signed in to here, so the cloud can't see it.";
 
 /**
  * The helper here exists, but the account's own computers don't list it: it is

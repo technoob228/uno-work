@@ -34,8 +34,7 @@ describe("MacLinkMismatch", () => {
       </div>,
     );
     await expect.element(screen.getByTestId("mac-link-mismatch")).toBeVisible();
-    await expect.element(screen.getByText(/подключён к другому аккаунту/)).toBeVisible();
-    await page_screenshot();
+    await expect.element(screen.getByText(/connected to another Uno account/)).toBeVisible();
     await screen.getByTestId("mac-link-reconnect").click();
     expect(lifecycleOpenOwn).toHaveBeenCalledTimes(1);
   });
@@ -46,10 +45,3 @@ describe("MacLinkMismatch", () => {
     expect(screen.container.querySelector("[data-testid=mac-link-mismatch]")).toBeNull();
   });
 });
-
-async function page_screenshot() {
-  const { page } = await import("vitest/browser");
-  await page.screenshot({
-    path: "/home/unowork/projects/uno-project/reports/day_2026-11-24/mac-link/mismatch-line.png",
-  });
-}
