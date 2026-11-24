@@ -14,6 +14,7 @@ import {
   isHomePath,
   isRunningStatus,
   moveStatusSection,
+  inboxLabel,
   needsYouPlace,
   parseFoldedProjects,
   placeNamesThatFit,
@@ -215,6 +216,14 @@ describe('needsYouPlace (Misha 08.10: no "Needs you 0")', () => {
   it("never shows a zero or a junk count", () => {
     expect(needsYouPlace(-1).shown).toBe(false);
     expect(needsYouPlace(Number.NaN).shown).toBe(false);
+  });
+});
+
+describe("inboxLabel (T65: the Inbox icon is always there)", () => {
+  it("is plain Inbox when nothing waits, and says how many wait otherwise", () => {
+    expect(inboxLabel(0)).toBe("Inbox");
+    expect(inboxLabel(Number.NaN)).toBe("Inbox");
+    expect(inboxLabel(2)).toBe("Inbox · 2 waiting for you");
   });
 });
 

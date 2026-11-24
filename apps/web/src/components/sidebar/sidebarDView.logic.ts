@@ -33,16 +33,19 @@ const LEVEL_NAME: Readonly<Record<SidebarGroupLevel, string>> = {
   computer: "Computer",
 };
 
+/** Until the person picks a grouping: by status (T65, Misha 24.11; before — by project). */
+export const DEFAULT_GROUP_LEVELS: ReadonlyArray<SidebarGroupLevel> = ["status"];
+
 /**
- * The levels to group by: the stored choice, else what the older "Inbox
- * sidebar" switch said (devices from before 0.0.138 keep what they had).
+ * The levels to group by: the stored choice, else the default — By status,
+ * for everyone who never picked one (T65, Misha 24.11). The older "Inbox
+ * sidebar" switch no longer decides: off was its default, not a choice, and
+ * on already meant by status.
  */
 export function resolveGroupLevels(
   stored: ReadonlyArray<SidebarGroupLevel> | null,
-  inboxMode: boolean,
 ): ReadonlyArray<SidebarGroupLevel> {
-  if (stored !== null) return stored;
-  return inboxMode ? ["status"] : ["project"];
+  return stored ?? DEFAULT_GROUP_LEVELS;
 }
 
 /** The levels that apply: each once, in order; Computer only with 2+ computers in view. */

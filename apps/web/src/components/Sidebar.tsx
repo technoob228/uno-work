@@ -279,6 +279,7 @@ import {
 import {
   LegacySidebarDChatsBar,
   SidebarDChatsBar,
+  SidebarDNewChatButton,
   type SidebarDPickOption,
 } from "./sidebar/SidebarDChatsBar";
 import { SidebarAddProjectButton } from "./sidebar/SidebarAddProjectButton";
@@ -1455,7 +1456,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 {thread.title}
               </span>
             )}
-            {pinnedRow ? null : pinIndicator}
+            {/* Pinned chats lead the list (T65): a quiet pin says why; Unpin
+                is the row's hover action. */}
+            {pinnedRow ? (
+              <PinIcon
+                aria-label="Pinned"
+                data-testid="sidebar-row-pinned-mark"
+                className="size-3 shrink-0 text-sidebar-muted-foreground/55"
+              />
+            ) : (
+              pinIndicator
+            )}
             {props.computerIcon ? (
               (props.showMachine ?? isRemote) ? (
                 <span className={cn("contents", tailHide)}>
@@ -2436,14 +2447,10 @@ export default function Sidebar() {
     [dStatusOrder, setDStoredStatusOrder],
   );
   // Grouping (0.0.138, Misha 16.10): Project / Status / Computer in the order
-  // picked, none — one list, newest first. Devices that never chose keep what
-  // the older "Inbox sidebar" switch said.
+  // picked, none — one list, newest first. Never chose: by status (T65, 24.11).
   const dInboxSetting = useSettings((settings) => settings.sidebarInboxMode);
   const dStoredLevels = useSettings((settings) => settings.sidebarGroupLevels);
-  const dLevelsChosen = useMemo(
-    () => resolveGroupLevels(dStoredLevels, dInboxSetting),
-    [dInboxSetting, dStoredLevels],
-  );
+  const dLevelsChosen = useMemo(() => resolveGroupLevels(dStoredLevels), [dStoredLevels]);
   // Where grouping is picked: the title's menu (A) or only Settings (B).
   const dGroupInHeader = useDemoSwitch("sidebarViewSwitch") === "header";
   const { updateSettings: updateSidebarSettings } = useUpdateSettings();
@@ -2652,8 +2659,10 @@ export default function Sidebar() {
   // Only mine (Misha 28.10): hide the chats agents, Uno, assistants or apps run
   // on their own — the one filter of its kind (29.10: 0.0.161's "Chats
   // assistants started" switch went into it).
-  // On by default (Misha 13.11), for everyone who never switched it either
-  // way; only the view menu shows the switch, so without it nothing is hidden.
+  // On by default (Misha 13.11, again 24.11 in T65), for everyone who never
+  // switched it either way — the key is written only by the switch and the
+  // title's ×, so an untouched device has none and gets the default. Only
+  // the view menu shows the switch, so without it nothing is hidden.
   const [dOnlyMineChoice, setDOnlyMine] = useLocalStorage<boolean, boolean>(
     SIDEBAR_D_ONLY_MINE_KEY,
     true,
@@ -4916,26 +4925,18 @@ export default function Sidebar() {
               </>
             )}
             {/* Pinned sits under the assistants (Misha 30.10) and scrolls with
-                the chats: a block of its own held 40% of the sidebar. */}
+                the chats: a block of its own held 40% of the sidebar. Links,
+                folders and files only: pinned chats lead the chats (T65,
+                24.11). With only chats pinned it is the bare header, for + Link. */}
             {/* Apps and widgets may live in the icon row: nothing to list then. */}
             {pins.some((item) => !appPinsInRow || item.kind !== "app") ||
             pinnedThreads.length > 0 ? (
               <li className="mt-2 list-none" data-testid="sidebar-d-pinned">
-                <SidebarPinned
-                  hasPinnedChats={pinnedThreads.length > 0}
-                  pinnedChats={pinnedThreads.map((thread) =>
-                    // Pinned isn't grouped: each chat says its project (Misha 30.10).
-                    renderRow(thread, "pinned", { d: true, place: dRowPlace(thread) }),
-                  )}
-                />
+                <SidebarPinned hasPinnedChats={false} pinnedChats={null} emptyHint={false} />
               </li>
             ) : null}
             {!sidebarViewMenu ? (
-              <LegacySidebarDChatsBar
-                onNewChat={handleNewThreadClick}
-                newChatShortcutLabel={newChatShortcutLabel}
-                onAddProject={handleAddProject}
-              />
+              <LegacySidebarDChatsBar onAddProject={handleAddProject} />
             ) : (
               <SidebarDChatsBar
                 title={sidebarDTitle({
@@ -4989,12 +4990,19 @@ export default function Sidebar() {
                   setDComputerPicks(null);
                   setDOnlyMine(false);
                 }}
-                onNewChat={handleNewThreadClick}
-                newChatShortcutLabel={newChatShortcutLabel}
                 onAddProject={handleAddProject}
               />
             )}
+            <SidebarDNewChatButton
+              onNewChat={handleNewThreadClick}
+              newChatShortcutLabel={newChatShortcutLabel}
+            />
             {dShowAddProject ? <SidebarAddProjectButton onAddProject={handleAddProject} /> : null}
+            {/* Pinned chats lead the chats, in any grouping (T65, Misha 24.11);
+                not grouped, so each says its project (Misha 30.10). */}
+            {pinnedThreads.map((thread) =>
+              renderRow(thread, "pinned", { d: true, place: dRowPlace(thread) }),
+            )}
             {sidebarViewMenu ? dProjectList : dLegacyInbox ? dLegacyStatusList : dLegacyProjectList}
             {sidebarViewMenu && dHiddenAgentChats > 0 ? (
               <li
@@ -5095,12 +5103,8 @@ export default function Sidebar() {
             // a fresh computer had an empty sidebar — 08.10.)
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               <span>No chats yet</span>
-              <Button size="xs" variant="outline" onClick={() => handleNewThreadClick()}>
-                <PlusIcon className="-mx-0.5 size-3" />
-                New chat
-              </Button>
-              {/* Add a project: the full-width button under the chats bar
-                  (dShowAddProject) — it is always there in this case. */}
+              {/* New chat and Add a project: the full-width buttons under the
+                  chats bar — always there in this case. */}
             </div>
           ) : (sidebarViewMenu ? dLevels.includes("project") : !dInboxSetting) ? null : (
             <SidebarEmptyProjects

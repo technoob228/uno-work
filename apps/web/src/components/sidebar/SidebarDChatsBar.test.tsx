@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { LegacySidebarDChatsBar, SidebarDChatsBar, newChatTooltipLabel } from "./SidebarDChatsBar";
+import {
+  LegacySidebarDChatsBar,
+  SidebarDChatsBar,
+  SidebarDNewChatButton,
+} from "./SidebarDChatsBar";
 
 const base = {
   title: "All chats",
@@ -23,53 +27,30 @@ const base = {
   onShowSnoozed: () => {},
   onOpenArchive: () => {},
   onClearFilters: () => {},
-  onNewChat: () => {},
-  newChatShortcutLabel: "⌘N",
   onAddProject: () => {},
 };
 
 describe("LegacySidebarDChatsBar (Sidebar view menu off, as in 0.0.137)", () => {
-  it("has New chat right before Add a project", () => {
-    const html = renderToStaticMarkup(
-      <LegacySidebarDChatsBar
-        onNewChat={() => {}}
-        newChatShortcutLabel="⌘N"
-        onAddProject={() => {}}
-      />,
-    );
-    const newChat = html.indexOf('data-testid="sidebar-d-new-chat"');
-    const addProject = html.indexOf('data-testid="sidebar-d-add-project"');
-    expect(newChat).toBeGreaterThan(-1);
-    expect(addProject).toBeGreaterThan(newChat);
-    expect(html).toContain('aria-label="New chat"');
-    expect(html).toContain('aria-label="Add a project"');
-  });
-
-  it("is the quiet Chats label, with no view menu", () => {
-    const html = renderToStaticMarkup(
-      <LegacySidebarDChatsBar
-        onNewChat={() => {}}
-        newChatShortcutLabel={null}
-        onAddProject={() => {}}
-      />,
-    );
+  it("is the quiet Chats label and Add a project — New chat is the button under it (T65)", () => {
+    const html = renderToStaticMarkup(<LegacySidebarDChatsBar onAddProject={() => {}} />);
     expect(html).toContain(">Chats<");
+    expect(html).toContain('aria-label="Add a project"');
+    expect(html).not.toContain("sidebar-d-new-chat");
     expect(html).not.toContain("sidebar-d-view-trigger");
     expect(html).not.toContain("sidebar-d-project-filter");
-    expect(html.match(/<button/g)?.length).toBe(2);
+    expect(html.match(/<button/g)?.length).toBe(1);
   });
 });
 
 describe("SidebarDChatsBar (Sidebar view menu on)", () => {
-  it("has the title menu, Add a project, then New chat rightmost — nothing else", () => {
+  it("has the title menu and Add a project — no pencil since T65, nothing else", () => {
     const html = renderToStaticMarkup(<SidebarDChatsBar {...base} />);
     const trigger = html.indexOf('data-testid="sidebar-d-view-trigger"');
     const addProject = html.indexOf('data-testid="sidebar-d-add-project"');
-    const newChat = html.indexOf('data-testid="sidebar-d-new-chat"');
     expect(trigger).toBeGreaterThan(-1);
     expect(addProject).toBeGreaterThan(trigger);
-    expect(newChat).toBeGreaterThan(addProject);
-    expect(html.match(/<button/g)?.length).toBe(3);
+    expect(html).not.toContain("sidebar-d-new-chat");
+    expect(html.match(/<button/g)?.length).toBe(2);
     expect(html).toContain("All chats");
   });
 
@@ -104,10 +85,24 @@ describe("SidebarDChatsBar (Sidebar view menu on)", () => {
     expect(html.indexOf(funnel)).toBeGreaterThan(html.indexOf("sidebar-d-view-trigger"));
     expect(html.indexOf(funnel)).toBeLessThan(html.indexOf("sidebar-d-add-project"));
   });
+});
 
-  it("names the shortcut in the tooltip only when one is bound", () => {
-    expect(newChatTooltipLabel("⌘N")).toBe("New chat ⌘N");
-    expect(newChatTooltipLabel("Ctrl+N")).toBe("New chat Ctrl+N");
-    expect(newChatTooltipLabel(null)).toBe("New chat");
+describe("SidebarDNewChatButton (T65, Misha 24.11)", () => {
+  it('says "New chat" in words, with the shortcut when one is bound', () => {
+    const html = renderToStaticMarkup(
+      <SidebarDNewChatButton onNewChat={() => {}} newChatShortcutLabel="⌘N" />,
+    );
+    expect(html).toContain('data-testid="sidebar-d-new-chat"');
+    expect(html).toContain('aria-label="New chat"');
+    expect(html).toContain("New chat");
+    expect(html).toContain("⌘N");
+    expect(html.match(/<button/g)?.length).toBe(1);
+  });
+
+  it("has no shortcut hint when none is bound", () => {
+    const html = renderToStaticMarkup(
+      <SidebarDNewChatButton onNewChat={() => {}} newChatShortcutLabel={null} />,
+    );
+    expect(html).not.toContain("<kbd");
   });
 });

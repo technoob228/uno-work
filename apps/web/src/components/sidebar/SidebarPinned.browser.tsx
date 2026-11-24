@@ -144,3 +144,17 @@ describe("a pinned app's widget on hover", () => {
     expect(document.querySelector('[data-testid="pin-peek-card"]')).toBeNull();
   });
 });
+
+describe("+ Link (T65, Misha 24.11)", () => {
+  it("sits right after the word Pinned, visible at rest, far from the right edge", async () => {
+    const screen = await mount();
+    const label = screen.getByText("Pinned", { exact: true }).element().getBoundingClientRect();
+    const link = screen.getByTestId("sidebar-pin-link");
+    await expect.element(link).toBeVisible();
+    expect(getComputedStyle(link.element()).opacity).toBe("1");
+    const box = link.element().getBoundingClientRect();
+    expect(box.left).toBeGreaterThan(label.right);
+    expect(box.left - label.right).toBeLessThan(12);
+    expect(box.right).toBeLessThan(256 / 2);
+  });
+});
