@@ -17,10 +17,18 @@
  *   may come from the very computer that asks, so it can't be the one to say
  *   yes. Back-end: fishcode knowledge/ops-gate.md «Из Uno Work».
  *
+ * A waiting card always has both «Открыть» and «Отказать» (Misha 24.11: "only
+ * Deny, no Allow — nonsense"). When the Touch ID page isn't available (the
+ * console's Touch ID mode is off, no passkey yet, everything frozen) «Открыть»
+ * stays and says in place why it can't open from here and what to press.
+ *
  * Pure: parsing the console's answer and what each card shows.
  */
 
 export type DeployRequestStatus = "requested" | "approved" | "denied" | "expired" | "closed";
+
+/** The console's kind: a plain window, a critical one (its own button always), a shift. */
+export type DeployRequestKind = "window" | "critical" | "shift";
 
 export interface DeployRequest {
   readonly id: number;
@@ -28,6 +36,9 @@ export interface DeployRequest {
   readonly summary: string;
   readonly minutes: number;
   readonly status: DeployRequestStatus;
+  readonly kind: DeployRequestKind;
+  /** The agent session that asked (`--as`), "" — not given. */
+  readonly session: string;
   readonly createdAt: string | null;
   readonly decidedAt: string | null;
   readonly decidedBy: string;
@@ -90,6 +101,8 @@ function parseRequest(raw: unknown): DeployRequest | null {
     summary: str(r.summary),
     minutes,
     status: status as DeployRequestStatus,
+    kind: r.kind === "critical" || r.kind === "shift" ? r.kind : "window",
+    session: str(r.session),
     createdAt: strOrNull(r.created_at),
     decidedAt: strOrNull(r.decided_at),
     decidedBy: str(r.decided_by),
@@ -136,6 +149,15 @@ export function safeApproveUrl(value: unknown): string | null {
 
 export type DeployCardAction = "open" | "deny" | "close";
 
+/**
+ * Whether «Открыть» on a waiting card can open the Touch ID page now:
+ * - `ready`      — yes;
+ * - `frozen`     — everything is frozen, nothing opens (as in Telegram);
+ * - `touch-id-off` — the console's Touch ID mode is off: only Telegram opens;
+ * - `no-passkey` — the mode is on, this person hasn't bound Touch ID yet.
+ */
+export type DeployOpenState = "ready" | "frozen" | "touch-id-off" | "no-passkey";
+
 export interface DeployCardView {
   readonly key: string;
   readonly tone: "waiting" | "open" | "done";
@@ -143,8 +165,12 @@ export interface DeployCardView {
   readonly summary: string;
   readonly meta: string;
   readonly actions: ReadonlyArray<DeployCardAction>;
-  /** "Открыть на N мин". */
+  /** "Открыть на N мин" (a critical one: "Разрешить на N мин", as in Telegram). */
   readonly openLabel: string;
+  /** Waiting cards only; anything but `ready` — «Открыть» explains instead of opening. */
+  readonly openState: DeployOpenState;
+  /** Why «Открыть» can't open from here and what to press; null — it opens. */
+  readonly openBlocked: string | null;
 }
 
 function minutesWord(n: number): string {
@@ -171,16 +197,26 @@ export function deployCardView(
 ): DeployCardView {
   const machine = request.machine || "машина";
   const summary = request.summary || "без описания";
-  const base = { key: `ops-gate:${request.id}`, summary, openLabel: "" };
+  const base = {
+    key: `ops-gate:${request.id}`,
+    summary,
+    openLabel: "",
+    openState: "ready" as const,
+    openBlocked: null,
+  };
   if (request.status === "requested") {
-    const canOpen = gate.web && gate.passkeys > 0 && !gate.frozen && request.approveUrl !== null;
+    const openState = deployOpenState(request, gate);
+    const critical = request.kind === "critical";
+    const session = request.session ? ` · ${request.session}` : "";
     return {
       ...base,
       tone: "waiting",
-      title: `${machine} просит окно в прод`,
-      meta: `на ${minutesWord(request.minutes)} · запрос #${request.id}`,
-      actions: canOpen ? ["open", "deny"] : ["deny"],
-      openLabel: `Открыть на ${minutesWord(request.minutes)}`,
+      title: `${critical ? "Критичное: " : ""}${machine} просит окно в прод`,
+      meta: `на ${minutesWord(request.minutes)}${session} · запрос #${request.id}`,
+      actions: ["open", "deny"],
+      openLabel: `${critical ? "Разрешить" : "Открыть"} на ${minutesWord(request.minutes)}`,
+      openState,
+      openBlocked: openBlockedText(openState),
     };
   }
   if (isOpenWindow(request, nowMs)) {
@@ -203,16 +239,27 @@ export function deployCardView(
   };
 }
 
-/** Why "Открыть" is missing from a waiting card, in a sentence; null — it's there. */
-export function openUnavailableHint(gate: DeployApprovals): string | null {
-  if (!gate.approver) return null;
-  if (!gate.requests.some((q) => q.status === "requested")) return null;
-  if (gate.frozen) return "Всё заморожено: открыть окно нельзя. Разморозить — пульт в Telegram.";
-  if (!gate.web) return "Открыть окно отсюда пока нельзя — только кнопкой в Telegram.";
-  if (gate.passkeys === 0) {
-    return "Чтобы открывать окна отсюда, привяжите Touch ID: пульт в Telegram → «🔑 Touch ID для Uno Work».";
+export function deployOpenState(
+  request: Pick<DeployRequest, "approveUrl">,
+  gate: Pick<DeployApprovals, "web" | "passkeys" | "frozen">,
+): DeployOpenState {
+  if (gate.frozen) return "frozen";
+  if (!gate.web || request.approveUrl === null) return "touch-id-off";
+  if (gate.passkeys === 0) return "no-passkey";
+  return "ready";
+}
+
+function openBlockedText(state: DeployOpenState): string | null {
+  switch (state) {
+    case "ready":
+      return null;
+    case "frozen":
+      return "Всё заморожено — окно не откроется. Разморозить можно на пульте в Telegram.";
+    case "touch-id-off":
+      return "Открыть отсюда можно только с Touch ID, а он на консоли выключен. Сейчас — кнопкой «✅» под этим запросом в Telegram.";
+    case "no-passkey":
+      return "Сначала привяжите Touch ID: пульт в Telegram → «🔑 Touch ID для Uno Work». Сейчас — кнопкой «✅» в Telegram.";
   }
-  return null;
 }
 
 /** Requests that wait for a decision (the badge). */

@@ -5,7 +5,6 @@ import {
   deployCardView,
   minutesLeft,
   newlyWaiting,
-  openUnavailableHint,
   parseDeployApprovals,
   safeApproveUrl,
   visibleRequests,
@@ -90,13 +89,39 @@ describe("deployCardView", () => {
     expect(view.actions).toEqual(["open", "deny"]);
   });
 
-  it("no Open without the gate page, a passkey, or while frozen", () => {
-    for (const extra of [{ web: false }, { passkeys: 0 }, { frozen: true }]) {
+  it("Open is always there next to Deny; without the page it says why (T68)", () => {
+    expect(deployCardView(w!, NOW, gate).openState).toBe("ready");
+    expect(deployCardView(w!, NOW, gate).openBlocked).toBeNull();
+    const cases = [
+      [{ web: false }, "touch-id-off"],
+      [{ passkeys: 0 }, "no-passkey"],
+      [{ frozen: true }, "frozen"],
+    ] as const;
+    for (const [extra, state] of cases) {
       const g = parseDeployApprovals(raw([waiting], extra));
-      expect(deployCardView(g.requests[0]!, NOW, g).actions).toEqual(["deny"]);
-      expect(openUnavailableHint(g)).not.toBeNull();
+      const view = deployCardView(g.requests[0]!, NOW, g);
+      expect(view.actions).toEqual(["open", "deny"]);
+      expect(view.openState).toBe(state);
+      expect(view.openBlocked).toMatch(/Telegram/);
     }
-    expect(openUnavailableHint(gate)).toBeNull();
+    // The console without Touch ID sends no page address at all (prod today).
+    const off = parseDeployApprovals({
+      approver: true,
+      web: false,
+      passkeys: 0,
+      requests: [{ ...waiting, approve_url: undefined }],
+    });
+    expect(deployCardView(off.requests[0]!, NOW, off).openState).toBe("touch-id-off");
+  });
+
+  it("a critical request says so and asks to Allow, as in Telegram", () => {
+    const g = parseDeployApprovals(raw([{ ...waiting, kind: "critical", session: "t51" }]));
+    const view = deployCardView(g.requests[0]!, NOW, g);
+    expect(view.title).toBe("Критичное: box-395 просит окно в прод");
+    expect(view.openLabel).toBe("Разрешить на 20 мин");
+    expect(view.meta).toContain("t51");
+    expect(g.requests[0]!.kind).toBe("critical");
+    expect(parseDeployApprovals(raw([waiting])).requests[0]!.kind).toBe("window");
   });
 
   it("an open window: minutes left and Close now", () => {
