@@ -878,6 +878,10 @@ export const makeServerBrowser = Effect.gen(function* () {
           "--disable-backgrounding-occluded-windows",
           "--disable-renderer-backgrounding",
           "--disable-background-timer-throttling",
+          // FedCM asks for the account in Chrome's own dialog, which the
+          // screencast doesn't show: Google's button (Pinterest, …) then does
+          // nothing. Without FedCM it opens its sign-in popup, a tab here.
+          "--disable-features=FedCm",
         ],
       });
     const launched = yield* Effect.tryPromise({
