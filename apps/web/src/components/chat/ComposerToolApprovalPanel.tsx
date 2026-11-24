@@ -106,7 +106,7 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
   };
 
   return (
-    <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20 px-4 py-3 sm:px-5">
+    <div data-testid="tool-approval-card" className="rounded-t-[19px] border-b border-border/65 bg-muted/20 px-4 py-3 sm:px-5">
       <div className="flex items-center gap-2">
         <ShieldQuestionIcon className="size-3.5 text-muted-foreground/60" />
         <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
@@ -124,9 +124,7 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
           Allow takes your site “{unpublishSlug}” off the internet.
         </p>
       ) : null}
-      {event.detail ? (
-        <p className="mt-1 text-xs text-muted-foreground/65">{event.detail}</p>
-      ) : null}
+      {event.detail ? <ApprovalDetail detail={event.detail} /> : null}
       <div className="mt-3 flex items-center justify-end gap-2">
         <Button
           type="button"
@@ -145,3 +143,22 @@ const ToolApprovalCard = memo(function ToolApprovalCard({
     </div>
   );
 });
+
+/** What Allow does: two lines, the rest on "More". */
+function ApprovalDetail({ detail }: { detail: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-1 text-xs text-muted-foreground/75">
+      <p className={open ? "whitespace-pre-wrap" : "line-clamp-2"}>{detail}</p>
+      {detail.length > 140 ? (
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          className="mt-0.5 cursor-pointer font-medium text-foreground/80 hover:underline"
+        >
+          {open ? "Less" : "More"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
