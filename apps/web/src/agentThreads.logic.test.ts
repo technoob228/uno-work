@@ -4,6 +4,7 @@ import {
   describeAgentSentMessage,
   describeSpawnedThreadOrigin,
   normalizeThreadController,
+  resolveComposerOriginChip,
   resolveThreadControlBarState,
 } from "./agentThreads.logic";
 
@@ -108,7 +109,7 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
       action: { kind: "handoff", label: "Join", nextController: "human" },
       secondaryAction: {
         kind: "agents-access",
-        label: "Don't let agents write here",
+        label: "Keep other agents out",
         nextClosed: true,
       },
     });
@@ -142,7 +143,7 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
     expect(own).toMatchObject({
       closedToAgents: true,
       parentLinkText: null,
-      summary: "Agents can't write here",
+      summary: "Agents kept out",
       action: { kind: "agents-access", label: "Let agents write here", nextClosed: false },
     });
     const spawned = resolveThreadControlBarState({
@@ -152,7 +153,7 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
       controller: "agent",
       parentTitle: "Parent",
     });
-    expect(spawned?.summary).toBe("Agents can't write here · started by the agent in “Parent”");
+    expect(spawned?.summary).toBe("Agents kept out · started by the agent in “Parent”");
     expect(spawned?.action).toMatchObject({ nextClosed: false });
     expect(spawned?.secondaryAction).toBeNull();
   });
@@ -192,6 +193,54 @@ describe("resolveThreadControlBarState (0.0.115: Don't let agents write here)", 
         controller: "human",
         parentTitle: null,
         agentsClosedAt: "2026-10-08T12:00:00.000Z",
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("resolveComposerOriginChip (T63: one chip instead of the strip)", () => {
+  const base = {
+    parentTitle: "Так тебе задание",
+    agentsClosedAt: null,
+    supportsAgentsAccess: true,
+  } as const;
+  it("a chat another chat's agent started: From “…”, the strip's buttons in the popover", () => {
+    const chip = resolveComposerOriginChip({
+      ...base,
+      spawnedByThreadId: "parent-1",
+      controller: "human",
+    });
+    expect(chip?.kind).toBe("from");
+    expect(chip?.label).toBe("From “Так тебе задание”");
+    expect(chip?.state.action?.label).toBe("Hand to agent");
+    expect(chip?.state.secondaryAction?.label).toBe("Keep other agents out");
+  });
+  it("the person's own chat handed to its agent: Handled by its agent, Join", () => {
+    const chip = resolveComposerOriginChip({
+      ...base,
+      spawnedByThreadId: null,
+      controller: "agent",
+    });
+    expect(chip?.kind).toBe("handled");
+    expect(chip?.state.action?.label).toBe("Join");
+  });
+  it("a closed chat: a lock, Let agents write here", () => {
+    const chip = resolveComposerOriginChip({
+      ...base,
+      spawnedByThreadId: null,
+      controller: "human",
+      agentsClosedAt: "2026-11-24T10:00:00.000Z",
+    });
+    expect(chip).toMatchObject({ kind: "closed", label: "Agents kept out" });
+    expect(chip?.state.action?.label).toBe("Let agents write here");
+  });
+  it("agents talking in the person's own chat: no chip (the feed's fold lines say it)", () => {
+    expect(
+      resolveComposerOriginChip({
+        ...base,
+        spawnedByThreadId: null,
+        controller: "human",
+        agentLed: true,
       }),
     ).toBeNull();
   });

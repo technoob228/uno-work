@@ -246,10 +246,8 @@ import { refreshEnvironmentProviders } from "~/environments/settings/serverSetti
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { useReconnectWarningVisible } from "./chat/reconnectWarningGrace";
 import { AssistantEngineBanner } from "./chat/AssistantEngine";
-import { AgentTasksBar } from "./chat/AgentTasksBar";
-import { PendingForYouStrip } from "./chat/PendingForYouStrip";
+import { ComposerContextLine, useComposerAskWaiting } from "./chat/ComposerContextLine";
 import { usePendingForYou } from "./chat/usePendingForYou";
-import { ThreadControlBar } from "./chat/ThreadControlBar";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -1650,6 +1648,7 @@ export default function ChatView(props: ChatViewProps) {
     latestTurnSettled &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
+  const composerAskWaiting = useComposerAskWaiting(activeThread?.id);
   const {
     beginLocalDispatch,
     resetLocalDispatch,
@@ -5474,21 +5473,25 @@ export default function ChatView(props: ChatViewProps) {
                       markdownCwd={gitCwd ?? undefined}
                     />
                   ) : null}
-                  {/* Every chat: the strip itself decides (agents may lead the person's own, 13.11). */}
-                  {isServerThread && activeThread ? (
-                    <ThreadControlBar
+                  {/* One thing above the composer (T63): an Allow or a question that waits
+                      stands alone; otherwise one line of chips — Waiting for you, Tasks,
+                      where the chat came from / who handles it. */}
+                  {isServerThread &&
+                  activeThread &&
+                  activePendingApproval === null &&
+                  pendingUserInputs.length === 0 &&
+                  !composerAskWaiting ? (
+                    <ComposerContextLine
                       environmentId={activeThread.environmentId}
                       threadId={activeThread.id}
                       spawnedByThreadId={activeThread.spawnedByThreadId}
                       controller={activeThread.controller}
                       agentsClosedAt={activeThread.agentsClosedAt}
-                    />
-                  ) : null}
-                  {/* The chats this chat's agent started: its tasks (Misha 13.11). */}
-                  {isServerThread && activeThread ? (
-                    <AgentTasksBar
-                      environmentId={activeThread.environmentId}
-                      threadId={activeThread.id}
+                      pending={
+                        pendingForYou.enabled && importedSource === null
+                          ? pendingForYou.strip
+                          : null
+                      }
                     />
                   ) : null}
                   {activeThread && isAssistantConversation(activeThread) ? (
@@ -5553,9 +5556,6 @@ export default function ChatView(props: ChatViewProps) {
                       onStop={() => void onStopGoal()}
                       onDismiss={() => setDismissedGoalId(threadGoal.goalId)}
                     />
-                  ) : null}
-                  {pendingForYou.enabled && importedSource === null ? (
-                    <PendingForYouStrip {...pendingForYou.strip} />
                   ) : null}
                   <div className="relative z-10">
                     {importedSource !== null ? (

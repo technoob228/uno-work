@@ -13,7 +13,7 @@ const ALL = [
   { id: "copy-path", label: "Copy Path" },
   { id: "copy-thread-id", label: "Copy chat ID" },
   { id: "continue-on-machine", label: "Continue on another machine…" },
-  { id: "agents-access", label: "Don't let agents write here" },
+  { id: "agents-access", label: "Keep other agents out" },
   { id: "archive", label: "Archive" },
   { id: "delete", label: "Delete", destructive: true },
 ];
