@@ -53,6 +53,7 @@ describe("detectHarnessAuthLoss — provider snapshot", () => {
     ["cursor", "cursorCli", "Cursor"],
     ["uno", "unoAccount", "Uno AI"],
     ["grok", "signIn", "Grok"],
+    ["antigravity", "signIn", "Antigravity"],
   ] as const)("%s signed out → %s", (driver, kind, label) => {
     const loss = detectHarnessAuthLoss(input({ driver, providerStatus: signedOut(driver) }));
     expect(loss?.kind).toBe(kind);
@@ -157,6 +158,12 @@ describe("detectHarnessAuthLoss — error text", () => {
       "grok",
       "Grok is not signed in on this computer. Sign in on this computer: Settings → AI → Grok → Sign in (xAI account or an xAI API key).",
     ],
+    ["antigravity", "Authentication required"],
+    [
+      "antigravity",
+      "No browser is available here. Run `agy acp --login` to sign in with your Google account.",
+    ],
+    ["antigravity", "API key not valid. Please pass a valid API key."],
   ])("%s: %s", (driver, text) => {
     const loss = detectHarnessAuthLoss(
       input({ driver, providerStatus: makeProvider(driver), threadError: text }),

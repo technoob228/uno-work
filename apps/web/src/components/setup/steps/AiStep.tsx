@@ -32,15 +32,28 @@ import {
 } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
 import { openInstallDocs } from "../../onboarding/harnessInstallLinks";
-import { ClaudeAI, Gemini, GrokIcon, OpenAI, OpenCodeIcon, UnoIcon, type Icon } from "../../Icons";
+import {
+  AntigravityIcon,
+  ClaudeAI,
+  Gemini,
+  GrokIcon,
+  OpenAI,
+  OpenCodeIcon,
+  UnoIcon,
+  type Icon,
+} from "../../Icons";
 import { Button } from "../../ui/button";
 import { ConnectedBadge, SetupHeading, SetupNote, SetupShell } from "../SetupShell";
 import { useSetupNavigation } from "../useSetupNavigation";
 
-type AiId = "uno" | "claudeAgent" | "codex" | "gemini" | "grok" | "opencode";
-type AuthAiId = "claudeAgent" | "codex" | "gemini" | "grok";
+type AiId = "uno" | "claudeAgent" | "codex" | "antigravity" | "gemini" | "grok" | "opencode";
+type AuthAiId = "claudeAgent" | "codex" | "antigravity" | "gemini" | "grok";
 const isAuthAi = (id: AiId): id is AuthAiId =>
-  id === "claudeAgent" || id === "codex" || id === "gemini" || id === "grok";
+  id === "claudeAgent" ||
+  id === "codex" ||
+  id === "antigravity" ||
+  id === "gemini" ||
+  id === "grok";
 
 interface AiRow {
   readonly id: AiId;
@@ -71,10 +84,17 @@ const AI_ROWS: ReadonlyArray<AiRow> = [
     description: () => "Use your ChatGPT Plus or Pro plan, or an OpenAI API key.",
   },
   {
+    id: "antigravity",
+    name: "Antigravity",
+    icon: AntigravityIcon,
+    description: () =>
+      "Gemini, the recommended way. Use the Antigravity on this computer, your Google account, or a Gemini API key.",
+  },
+  {
     id: "gemini",
     name: "Gemini CLI",
     icon: Gemini,
-    description: () => "Use your Google account, or a Gemini API key.",
+    description: () => "Google's older Gemini CLI. Use your Google account, or a Gemini API key.",
   },
   {
     id: "grok",

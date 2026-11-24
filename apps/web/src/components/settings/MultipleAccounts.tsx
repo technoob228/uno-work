@@ -49,9 +49,10 @@ export const MULTIPLE_ACCOUNTS_WARNING =
 const PROVIDER_LABEL: Readonly<Record<ProviderAuthDriver, string>> = {
   claudeAgent: "Claude",
   codex: "ChatGPT",
-  // Never offered here: Gemini CLI and Grok have one account per computer.
+  // Never offered here: Gemini CLI, Grok and Antigravity have one account per computer.
   gemini: "Gemini",
   grok: "Grok",
+  antigravity: "Google",
 };
 
 export { isSecondAccountInstance };

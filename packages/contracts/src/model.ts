@@ -194,6 +194,12 @@ const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GEMINI_DRIVER_KIND = ProviderDriverKind.make("gemini");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
+const ANTIGRAVITY_DRIVER_KIND = ProviderDriverKind.make("antigravity");
+/**
+ * Antigravity's "whatever model the session already uses" (upstream T3
+ * Code): never sent to the agent, so a resumed session keeps its own model.
+ */
+export const ANTIGRAVITY_DEFAULT_MODEL = "antigravity-default";
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 const UNO_DRIVER_KIND = ProviderDriverKind.make("uno");
@@ -228,6 +234,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [GEMINI_DRIVER_KIND]: "auto",
   // Grok CLI's own default (grok-4.6 on 1.0.92); the CLI's list replaces it.
   [GROK_DRIVER_KIND]: "grok-4.6",
+  [ANTIGRAVITY_DRIVER_KIND]: ANTIGRAVITY_DEFAULT_MODEL,
   // Hermes — прежде всего оркестратор: "Smart" из часов Uno AI (id шлюза,
   // без префикса харнесса). Тяжёлые модели выбираются явно (ROUTING.md).
   [HERMES_DRIVER_KIND]: UNO_SMART_GATEWAY_MODEL,
@@ -333,5 +340,6 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GEMINI_DRIVER_KIND]: "Gemini CLI",
   [GROK_DRIVER_KIND]: "Grok",
+  [ANTIGRAVITY_DRIVER_KIND]: "Antigravity",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

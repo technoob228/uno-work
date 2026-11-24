@@ -6,6 +6,7 @@ export const HARNESS_INSTALL_LINKS: Record<string, string> = {
   claudeAgent: "https://docs.claude.com/en/docs/claude-code/overview",
   gemini: "https://github.com/google-gemini/gemini-cli",
   grok: "https://www.npmjs.com/package/@xai-official/grok",
+  antigravity: "https://antigravity.google/",
   opencode: "https://opencode.ai",
   cursor: "https://docs.cursor.com/cli",
 };

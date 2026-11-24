@@ -37,6 +37,8 @@ const PROVIDER_NAME: Readonly<Record<ProviderAuthDriver, string>> = {
   // for the exhaustive table only.
   gemini: "Gemini",
   grok: "Grok",
+  // One Antigravity per computer (its own sign-in); here for the exhaustive table only.
+  antigravity: "Google",
 };
 
 /**

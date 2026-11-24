@@ -146,6 +146,7 @@ export function ownAgentStartSelection(input: {
     ...(input.picked ? [input.picked] : []),
     "claudeAgent",
     "codex",
+    "antigravity",
     "gemini",
     "grok",
   ];

@@ -157,13 +157,15 @@ export function pollDemoAuth(jobId: string) {
         ...base,
         state: "running",
         verificationUrl:
-          job.driver === "gemini"
+          job.driver === "gemini" || job.driver === "antigravity"
             ? "https://accounts.google.com/o/oauth2/v2/auth?demo"
             : job.driver === "grok"
               ? "https://accounts.x.ai/oauth2/device?user_code=DEMO-GROK"
               : "https://claude.ai/oauth/authorize?demo",
-        // Gemini CLI shows a code on Google's page to paste back here.
-        ...(job.driver === "gemini" ? { needsCodeInput: true } : {}),
+        // Gemini CLI and Antigravity show a code on Google's page to paste back here.
+        ...(job.driver === "gemini" || job.driver === "antigravity"
+          ? { needsCodeInput: true }
+          : {}),
         // Grok shows a device code here to confirm on xAI's page; nothing comes back.
         ...(job.driver === "grok" ? { userCode: "DEMO-GROK" } : {}),
       },
@@ -409,7 +411,29 @@ function signInProvidersFor(machineKey: string, checkedAt: string, version: stri
       { slug: "grok-4.5", name: "Grok 4.5", isCustom: false, capabilities: null },
     ],
   };
-  return [agent("claudeAgent"), agent("codex"), gemini, grok];
+  // Antigravity (T66, 24.11): Gemini's recommended path, signs in with a Google account.
+  const antigravity = {
+    ...agent("claudeAgent"),
+    driver: "antigravity",
+    instanceId: "antigravity",
+    displayName: "Antigravity",
+    version: "1.5.16",
+    auth: signedInHere.has("antigravity")
+      ? { status: "authenticated", type: "google-file", label: "Google account" }
+      : { status: "unauthenticated" },
+    models: [
+      {
+        slug: "antigravity-default",
+        name: "Antigravity default",
+        isCustom: false,
+        capabilities: null,
+        isDefault: true,
+      },
+      { slug: "gemini-3.5-pro", name: "Gemini 3.5 Pro", isCustom: false, capabilities: null },
+      { slug: "gemini-3.5-flash", name: "Gemini 3.5 Flash", isCustom: false, capabilities: null },
+    ],
+  };
+  return [agent("claudeAgent"), agent("codex"), antigravity, gemini, grok];
 }
 
 /** Claude Code (and Codex on the MacBook) signed in with the person's own accounts. */

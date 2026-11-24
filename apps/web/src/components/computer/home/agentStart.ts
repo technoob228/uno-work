@@ -70,6 +70,9 @@ export function parseAgentDriver(value: unknown): ProviderAuthDriver | null {
     case "grok":
     case "grok-cli":
       return "grok";
+    case "antigravity":
+    case "agy":
+      return "antigravity";
     default:
       return null;
   }
@@ -111,6 +114,7 @@ export const AGENT_LABEL: Readonly<Record<ProviderAuthDriver, string>> = {
   codex: "Codex",
   gemini: "Gemini CLI",
   grok: "Grok",
+  antigravity: "Antigravity",
 };
 
 /**

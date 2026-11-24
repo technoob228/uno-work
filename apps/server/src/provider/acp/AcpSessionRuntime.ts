@@ -142,6 +142,14 @@ export interface AcpSessionRuntimeOptions {
    * assistant message.
    */
   readonly dropAgentText?: (text: string) => boolean;
+  /**
+   * Rewrites (or drops, with `undefined`) a `session/update` before it is
+   * parsed. Antigravity: its tool payloads are bounded, and its own
+   * `update_steps` checklist becomes a plan (upstream T3 Code).
+   */
+  readonly transformSessionUpdate?: (
+    notification: EffectAcpSchema.SessionNotification,
+  ) => EffectAcpSchema.SessionNotification | undefined;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -384,8 +392,11 @@ const makeAcpSessionRuntime = (
 
     const acp = yield* Effect.service(EffectAcpClient.AcpClient).pipe(Effect.provide(acpContext));
 
-    yield* acp.handleSessionUpdate((notification) =>
-      handleSessionUpdate({
+    const transformSessionUpdate = options.transformSessionUpdate;
+    yield* acp.handleSessionUpdate((incoming) => {
+      const notification = transformSessionUpdate ? transformSessionUpdate(incoming) : incoming;
+      if (notification === undefined) return Effect.void;
+      return handleSessionUpdate({
         queue: eventQueue,
         modeStateRef,
         toolCallsRef,
@@ -393,8 +404,8 @@ const makeAcpSessionRuntime = (
         runNonce: assistantSegmentRunNonce,
         params: notification,
         ...(options.dropAgentText ? { dropAgentText: options.dropAgentText } : {}),
-      }),
-    );
+      });
+    });
 
     const initializeClientCapabilities = {
       fs: {

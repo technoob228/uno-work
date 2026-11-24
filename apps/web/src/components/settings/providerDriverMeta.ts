@@ -1,4 +1,5 @@
 import {
+  AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
@@ -10,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import type { Schema } from "effect";
 import {
+  AntigravityIcon,
   ClaudeAI,
   CursorIcon,
   Gemini,
@@ -73,6 +75,12 @@ export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = 
     label: "Claude",
     icon: ClaudeAI,
     settingsSchema: ClaudeSettings,
+  },
+  {
+    value: ProviderDriverKind.make("antigravity"),
+    label: "Antigravity",
+    icon: AntigravityIcon,
+    settingsSchema: AntigravitySettings,
   },
   {
     value: ProviderDriverKind.make("gemini"),

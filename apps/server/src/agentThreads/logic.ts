@@ -322,6 +322,8 @@ const PROVIDER_ALIASES: Readonly<Record<string, string>> = {
   claudecode: "claudeAgent",
   "gemini-cli": "gemini",
   "grok-cli": "grok",
+  agy: "antigravity",
+  "google-antigravity": "antigravity",
 };
 
 export type ProviderModelResolution =
