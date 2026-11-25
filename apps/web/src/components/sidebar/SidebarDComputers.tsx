@@ -108,7 +108,8 @@ export function SidebarDComputerChip(props: { environmentId: EnvironmentId | str
             aria-label={`On ${label}`}
             data-testid="sidebar-d-computer-mark"
             className={cn(
-              "inline-flex shrink-0 items-center text-muted-foreground/70",
+              // Shrinks before the chat title, down to the icon alone.
+              "inline-flex min-w-3 shrink-[4] items-center overflow-hidden text-muted-foreground/70",
               dimmed && "opacity-50",
             )}
           />
@@ -118,7 +119,7 @@ export function SidebarDComputerChip(props: { environmentId: EnvironmentId | str
         {/* The name, not only the icon (Misha 10.11: every cloud computer had the
             same cloud — "непонятно, на каком компьютере какой чат"). */}
         {computer ? (
-          <span className="ml-0.5 max-w-16 truncate text-[10px] leading-none">{label}</span>
+          <span className="ml-0.5 min-w-0 max-w-16 truncate text-[10px] leading-none">{label}</span>
         ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top">

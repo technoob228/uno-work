@@ -1450,7 +1450,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 data-testid={`thread-title-${thread.id}`}
                 title={thread.title}
                 className={cn(
-                  "min-w-0 flex-1 truncate text-sm",
+                  // Basis = its text, so it gives way last: the computer's
+                  // name shrinks before the title does (25.11).
+                  "min-w-0 flex-[1_1_auto] truncate text-sm",
                   props.isActive || markWantsPerson
                     ? "text-foreground"
                     : shouldRecede
@@ -2642,6 +2644,11 @@ export default function Sidebar() {
     const underUno = new Set(dGroups.unoRunning.map(threadKeyOf));
     return activeThreads.filter((thread) => !underUno.has(threadKeyOf(thread)));
   }, [activeThreads, dGroups.unoRunning]);
+  // How many computers the live chats are on: one — no row names it (25.11).
+  const dLiveComputerCount = useMemo(
+    () => new Set(dLiveChats.map((thread) => thread.environmentId)).size,
+    [dLiveChats],
+  );
   // Flag off, inbox: the same live chats by status (0.0.137).
   const dHideWorkingChats = useSettings((settings) => settings.sidebarHideWorkingChats);
   const dStatusViewChats = useCallback(
@@ -4482,6 +4489,7 @@ export default function Sidebar() {
       multiComputer: dMultiComputer,
       underComputerHeader: underComputer,
       projectComputers,
+      listComputerCount: dLiveComputerCount,
     });
   const dNewChatIn = (project: Project) => () => {
     if (isMobile) setOpenMobile(false);

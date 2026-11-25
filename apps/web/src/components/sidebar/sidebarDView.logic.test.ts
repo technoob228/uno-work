@@ -270,3 +270,22 @@ describe("chatProjectFilterAction", () => {
     ).toBeNull();
   });
 });
+
+describe("chatRowShowsComputer: one computer in the list (25.11)", () => {
+  const base = {
+    chatComputer: "uno-work",
+    thisComputer: "mac",
+    multiComputer: true,
+    underComputerHeader: false,
+    projectComputers: null,
+  } as const;
+  it("hides the chip when every chat in the list is on the same computer", () => {
+    expect(chatRowShowsComputer({ ...base, listComputerCount: 1 })).toBe(false);
+  });
+  it("shows it when the list spans several computers", () => {
+    expect(chatRowShowsComputer({ ...base, listComputerCount: 2 })).toBe(true);
+  });
+  it("keeps the old rule when the count is unknown", () => {
+    expect(chatRowShowsComputer(base)).toBe(true);
+  });
+});

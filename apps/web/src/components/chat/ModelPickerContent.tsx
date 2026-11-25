@@ -1597,7 +1597,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   />
                 </ComboboxListVirtualized>
               ) : (
-                <ComboboxList className="model-picker-list flex size-full flex-col gap-0.5 not-empty:px-2 not-empty:py-1.5">
+                <ComboboxList className="model-picker-list flex size-full flex-col gap-0.5 not-empty:px-2 not-empty:py-1.5 [&>*]:shrink-0">
                   {showUnoGroups
                     ? renderGroupedUnoRows()
                     : filteredModelKeys.map((modelKey, index) => renderModelRow(modelKey, index))}
