@@ -51,6 +51,8 @@ import { setupToolsRouteLayers } from "./setupTools/http.ts";
 import { assistantCallsRouteLayers } from "./assistants/assistantCallsHttp.ts";
 import { AssistantCallsServiceLive } from "./assistants/AssistantCallsService.ts";
 import { automationsRouteLayers } from "./automations/http.ts";
+import { networkRouteLayers } from "./network/http.ts";
+import { NetworkServiceLive } from "./network/NetworkService.ts";
 import { assistantMoveRouteLayers } from "./assistants/assistantMoveHttp.ts";
 import { AutomationEventLoopLive } from "./automations/eventLoop.ts";
 import { AssistantDraftServiceLive } from "./setupTools/AssistantDraftService.ts";
@@ -704,6 +706,9 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Keys the person brought for other AI providers (the assistant's "Your
   // key"): same secret store; read by the Hermes driver and the routes.
   Layer.provideMerge(AiProviderKeysLive.pipe(Layer.provide(ServerSecretStoreLive))),
+  // Network (the sidebar's shield): the person's proxy in the environment of
+  // everything Uno Work starts. Built before the layers that spawn children.
+  Layer.provideMerge(NetworkServiceLive.pipe(Layer.provide(ServerSecretStoreLive))),
   Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),
 );
@@ -845,6 +850,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   ...setupToolsRouteLayers,
   ...assistantCallsRouteLayers,
   ...automationsRouteLayers,
+  ...networkRouteLayers,
   // An assistant moves to another computer of the account (10.11).
   ...assistantMoveRouteLayers,
 ).pipe(

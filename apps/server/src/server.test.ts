@@ -199,6 +199,7 @@ import { ManagerSlackService } from "./manager/Layers/SlackConnector.ts";
 import { ManagerAssistantService } from "./manager/Services/AssistantService.ts";
 import { ManagerAssistantLlm } from "./manager/Services/AssistantLlmService.ts";
 import { AiProviderKeys } from "./aiProviders/AiProviderKeys.ts";
+import { NetworkService } from "./network/NetworkService.ts";
 import { ManagerAccountDefaultAi } from "./manager/Layers/AccountDefaultAi.ts";
 import {
   ConnectorNotifyService,
@@ -821,6 +822,7 @@ const buildAppUnderTest = (options?: {
           Layer.mock(HarnessSetup)({}),
           Layer.mock(ManagerAssistantLlm)({}),
           Layer.mock(AiProviderKeys)({}),
+          Layer.mock(NetworkService)({}),
           Layer.mock(ManagerAccountDefaultAi)({}),
           Layer.mock(CustomHarnessService)({}),
         ),
