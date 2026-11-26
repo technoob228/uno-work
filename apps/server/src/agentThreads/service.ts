@@ -32,6 +32,7 @@ import {
   type OrchestrationThreadShell,
   PERSON_CALL_REASON_MAX_CHARS,
   ProjectId,
+  type RuntimeMode,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
@@ -186,6 +187,35 @@ export interface AgentThreadsDeps {
    * Absent: Auto.
    */
   readonly getDefaultModelSelection?: Effect.Effect<ModelSelection | null>;
+  /**
+   * Chats of ANOTHER computer the person handed to a chat here ("Hand to…"
+   * across computers, T63-C, `remoteComputers/handedRemote.ts`): the
+   * handler's `chat_message` waits here until that computer fetches it,
+   * `chat_status` reads the status it brought last. Null: not such a chat
+   * of this caller. Absent: none.
+   */
+  readonly handedElsewhere?: {
+    readonly send: (input: {
+      readonly callerThreadId: string;
+      readonly callerRuntimeMode: RuntimeMode;
+      readonly chatThreadId: string;
+      readonly text: string;
+    }) => Effect.Effect<AgentThreadsReply | null>;
+    readonly status: (input: {
+      readonly callerThreadId: string;
+      readonly chatThreadId: string;
+    }) => Effect.Effect<AgentThreadsReply | null>;
+  };
+  /**
+   * The caller's own handler lives on another computer (T63-C): its
+   * `chat_message` to that handler goes there as a letter. Null: not
+   * handed that way. Absent: never.
+   */
+  readonly toRemoteHandler?: (input: {
+    readonly chatThreadId: string;
+    readonly handlerThreadId: string;
+    readonly text: string;
+  }) => Effect.Effect<{ readonly computer: string } | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -947,6 +977,8 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
   ) =>
     run("get", authorization, (caller) =>
       Effect.gen(function* () {
+        const elsewhere = yield* handedElsewhereStatus(caller, input.threadId);
+        if (elsewhere !== null) return elsewhere;
         let shell = yield* loadReachable(caller, input.threadId);
         const limit = clampInteger(input.limit, {
           fallback: AGENT_THREAD_DEFAULT_MESSAGE_LIMIT,
@@ -1015,6 +1047,72 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
       }),
     );
 
+  /** Not a chat of this computer, but one of another computer handed to the caller (T63-C). */
+  const notHere = (rawThreadId: string | undefined) =>
+    Effect.gen(function* () {
+      const trimmed = rawThreadId?.trim() ?? "";
+      if (deps.handedElsewhere === undefined || trimmed.length === 0) return null;
+      const local = yield* deps.projections.getThreadShellById(ThreadId.make(trimmed));
+      return Option.isNone(local) ? trimmed : null;
+    });
+
+  const handedElsewhereSend = (
+    caller: OrchestrationThreadShell,
+    callerMode: RuntimeMode,
+    input: { readonly threadId: string | undefined; readonly body: unknown },
+  ) =>
+    Effect.gen(function* () {
+      // The caller's own handler, on another computer: a letter goes there.
+      const target = input.threadId?.trim() ?? "";
+      const handler = caller.handler ?? null;
+      if (
+        deps.toRemoteHandler !== undefined &&
+        handler?.computer &&
+        target.length > 0 &&
+        handler.threadId === target
+      ) {
+        const text = checkMessageText(asBody(input.body)?.text);
+        if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
+        const sent = yield* deps.toRemoteHandler({
+          chatThreadId: caller.id,
+          handlerThreadId: target,
+          text: text.value,
+        });
+        if (sent !== null) {
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              threadId: target,
+              relation: "handler",
+              computer: sent.computer,
+              note: `Sent to the chat that handles this one, on ${sent.computer}: it gets it within a minute.`,
+            },
+          } satisfies AgentThreadsReply;
+        }
+      }
+      const chatThreadId = yield* notHere(input.threadId);
+      if (chatThreadId === null || deps.handedElsewhere === undefined) return null;
+      const text = checkMessageText(asBody(input.body)?.text);
+      if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
+      return yield* deps.handedElsewhere.send({
+        callerThreadId: caller.id,
+        callerRuntimeMode: callerMode,
+        chatThreadId,
+        text: text.value,
+      });
+    });
+
+  const handedElsewhereStatus = (
+    caller: OrchestrationThreadShell,
+    rawThreadId: string | undefined,
+  ) =>
+    Effect.gen(function* () {
+      const chatThreadId = yield* notHere(rawThreadId);
+      if (chatThreadId === null || deps.handedElsewhere === undefined) return null;
+      return yield* deps.handedElsewhere.status({ callerThreadId: caller.id, chatThreadId });
+    });
+
   const sendMessage = (
     authorization: BridgeAuthorization | null,
     input: { readonly threadId: string | undefined; readonly body: unknown },
@@ -1024,6 +1122,8 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
         const { assistant } = yield* callerAccess(caller);
         yield* presetCheck(assistant, "write-chat");
         const callerMode = effectiveRuntime(caller, assistant);
+        const elsewhere = yield* handedElsewhereSend(caller, callerMode, input);
+        if (elsewhere !== null) return elsewhere;
         let target = yield* loadReachable(caller, input.threadId, { assistantChat: true });
         if (target.id === caller.id) {
           return yield* fail(400, "cannot_message_self", "Нельзя написать самому себе.");

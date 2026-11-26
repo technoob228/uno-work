@@ -16,7 +16,13 @@
  * - `handler_loop`        — the handler is (through its own handlers) handled
  *                            by this chat: A → B → A;
  * - `handler_too_deep`    — the chain would be longer than
- *                            THREAD_HANDLER_MAX_DEPTH hops (A → B → C is fine).
+ *                            THREAD_HANDLER_MAX_DEPTH hops (A → B → C is fine);
+ * - `handler_remote`      — the handler is itself handed to another computer
+ *                            (T63-C): a chat handed across stays a leaf;
+ * - `handler_remote_busy` — handing to another computer a chat that handles
+ *                            chats itself (T63-C). With `handler_remote` a
+ *                            loop can't cross computers, and the handler's
+ *                            side counts the whole depth.
  *
  * @module orchestration/threadHandler
  */
@@ -25,7 +31,7 @@ import { THREAD_HANDLER_MAX_DEPTH, type ThreadHandler, type ThreadId } from "@t3
 export interface HandlerThreadView {
   readonly id: string;
   readonly spawnedByThreadId?: string | null | undefined;
-  readonly handler?: Pick<ThreadHandler, "threadId"> | null | undefined;
+  readonly handler?: Pick<ThreadHandler, "threadId" | "computer"> | null | undefined;
   readonly archivedAt?: string | null | undefined;
   readonly deletedAt?: string | null | undefined;
 }
@@ -36,7 +42,9 @@ export type HandlerRefusalCode =
   | "handler_missing"
   | "handler_archived"
   | "handler_loop"
-  | "handler_too_deep";
+  | "handler_too_deep"
+  | "handler_remote"
+  | "handler_remote_busy";
 
 export interface HandlerRefusal {
   readonly code: HandlerRefusalCode;
@@ -143,6 +151,12 @@ export function handlerRefusal(input: {
   if ((handler.archivedAt ?? null) !== null || (handler.deletedAt ?? null) !== null) {
     return { code: "handler_archived", detail: "That chat is archived or deleted." };
   }
+  if ((handler.handler?.computer ?? null) !== null) {
+    return {
+      code: "handler_remote",
+      detail: "That chat is handed to another computer, so it can't take chats itself.",
+    };
+  }
   if (isSubordinateOf(threads, handlerThreadId, threadId)) {
     return {
       code: "handler_subordinate",
@@ -160,6 +174,25 @@ export function handlerRefusal(input: {
     return {
       code: "handler_too_deep",
       detail: `Chats can be handed at most ${THREAD_HANDLER_MAX_DEPTH} levels deep.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Why `threadId` may not be handed to a chat on ANOTHER computer (T63-C), or
+ * null: it may. The handler's computer checks its side (a handler handed on
+ * itself, the depth there).
+ */
+export function remoteHandlerRefusal(input: {
+  readonly threads: ReadonlyArray<HandlerThreadView>;
+  readonly threadId: string;
+}): HandlerRefusal | null {
+  if (chatsHandledBy(input.threads, input.threadId).length > 0) {
+    return {
+      code: "handler_remote_busy",
+      detail:
+        "This chat handles other chats itself, so it stays on this computer: hand it to a chat here.",
     };
   }
   return null;

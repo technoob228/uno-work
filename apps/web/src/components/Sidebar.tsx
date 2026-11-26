@@ -231,6 +231,7 @@ import { SidebarPendingCount } from "./chat/SidebarPendingCount";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
 import { HandedChatLines } from "./sidebar/HandedChatLines";
+import { useEnvironmentIdByBoxId } from "../hooks/useHandToComputers";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
@@ -2298,6 +2299,8 @@ export default function Sidebar() {
     }),
     [dAgentsShelfOff, dInlineAgentThreadsChoice, dInlineSubagentsChoice],
   );
+  // Chats handled on another computer sit under their handler there (T63-C).
+  const environmentIdByBoxId = useEnvironmentIdByBoxId();
   const threadByKey = useMemo(
     () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
     [threads],
@@ -2374,6 +2377,7 @@ export default function Sidebar() {
         shelf: agentHandled,
         keyOf: threadKeyOf,
         hosts: assistantHosts,
+        environmentOfBox: (boxId) => environmentIdByBoxId.get(boxId) ?? null,
       });
       const sections = partitionSidebarThreads([...handed.listed], {
         now,
@@ -2400,6 +2404,7 @@ export default function Sidebar() {
       startedBy.byKey,
       threadByKey,
       threads,
+      environmentIdByBoxId,
     ]);
 
   const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);

@@ -326,3 +326,69 @@ describe("decider: thread.handler.set (Hand to…, T63)", () => {
     });
   });
 });
+
+describe("decider: Hand to… a chat on another computer (T63-C)", () => {
+  const REMOTE_ID = ThreadId.make("thread-on-uno-work");
+  const UNO_WORK = { boxId: 2531, name: "uno-work" };
+  const handRemote = (
+    threadId: ThreadId,
+    id = `cmd-hand-remote-${threadId}`,
+  ): OrchestrationCommand => ({
+    type: "thread.handler.set",
+    commandId: CommandId.make(id),
+    threadId,
+    handler: { threadId: REMOTE_ID, kind: "chat", computer: UNO_WORK, title: "Coordinator" },
+    createdAt: new Date().toISOString(),
+  });
+
+  it("hands a chat to a chat that isn't on this computer, naming its computer", async () => {
+    const { events, readModel } = await decideAndApply(await seedFour(), handRemote(OTHER_ID));
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.handler-changed",
+      "thread.control-changed",
+    ]);
+    expect(threadOf(readModel, OTHER_ID)).toMatchObject({
+      controller: "agent",
+      handler: { threadId: REMOTE_ID, computer: UNO_WORK, title: "Coordinator" },
+    });
+  });
+
+  it("lets the remote handler's messages into a chat closed to other agents", async () => {
+    let readModel = (await decideAndApply(await seedFour(), handRemote(OTHER_ID))).readModel;
+    readModel = (await decideAndApply(readModel, agentsAccess(OTHER_ID, CLOSED_AT))).readModel;
+    const events = await decide(readModel, turnStart(OTHER_ID, "cmd-r"), agentOrigin(REMOTE_ID));
+    expect(events.map((event) => event.type)).toContain("thread.turn-start-requested");
+    expect(events.find((event) => event.type === "thread.message-sent")?.payload).toMatchObject({
+      sentByThreadId: REMOTE_ID,
+    });
+  });
+
+  it("refuses to send away a chat that handles chats itself (no loop across computers)", async () => {
+    const readModel = (await decideAndApply(await seedFour(), handTo(C_ID, OTHER_ID))).readModel;
+    expect(await errorOf(readModel, handRemote(OTHER_ID))).toMatch(/^handler_remote_busy:/);
+  });
+
+  it("refuses a handler here that is itself handed to another computer", async () => {
+    const readModel = (await decideAndApply(await seedFour(), handRemote(OTHER_ID))).readModel;
+    expect(await errorOf(readModel, handTo(C_ID, OTHER_ID))).toMatch(/^handler_remote:/);
+  });
+
+  it("only the person hands across; the daemon gives it back", async () => {
+    expect(await errorOf(await seedFour(), handRemote(OTHER_ID), agentOrigin(C_ID))).toMatch(
+      /^handler_person_only:/,
+    );
+    const readModel = (await decideAndApply(await seedFour(), handRemote(OTHER_ID))).readModel;
+    const { readModel: back } = await decideAndApply(
+      readModel,
+      {
+        ...(handTo(OTHER_ID, null, "cmd-gone") as Extract<
+          OrchestrationCommand,
+          { type: "thread.handler.set" }
+        >),
+        reason: "handler-gone",
+      },
+      { kind: "system", component: "hand-to-remote" },
+    );
+    expect(threadOf(back, OTHER_ID)).toMatchObject({ controller: "human", handler: null });
+  });
+});

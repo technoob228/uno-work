@@ -28,6 +28,7 @@ import {
 import { setThreadAgentsClosed, setThreadHandedTo, setThreadHandler } from "../../agentsAccess";
 import { HAND_TO_COPY, useHandToStore } from "../../handTo.logic";
 import { useEnvironmentSupportsHandTo } from "../../environments/handToSupport";
+import { useEnvironmentIdByBoxId } from "../../hooks/useHandToComputers";
 import { useEnvironmentSupportsAgentsCloseChat } from "../../environments/agentsCloseChatSupport";
 import { useEnvironmentSupportsAgentThreads } from "../../environments/agentThreadsSupport";
 import { useThreadTitle } from "../../hooks/useThreadTitle";
@@ -155,24 +156,31 @@ function OriginPopup(props: {
 /** The chat is handed to another chat or an assistant (T63): who, and Take back. */
 function HandledPopup(props: {
   readonly title: string;
+  /** The handler's computer when it is another one (T63-C). */
+  readonly computer: string | null;
   readonly busy: boolean;
-  readonly onOpenHandler: () => void;
+  /** Null: the handler's computer isn't connected to this app. */
+  readonly onOpenHandler: (() => void) | null;
   readonly onTakeBack: () => void;
   readonly onHandTo: () => void;
 }) {
   return (
     <div className="flex flex-col gap-2.5 text-xs" data-testid="composer-handled-popup">
       <p className="text-foreground">
-        <button
-          type="button"
-          onClick={props.onOpenHandler}
-          title="Open the chat that handles this one"
-          className="cursor-pointer rounded-sm font-medium underline-offset-2 outline-hidden hover:underline focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          “{props.title}”
-        </button>{" "}
-        handles this chat: it gets its Ready and questions and writes here. Approvals, secrets,
-        payments and sign-ins still come to you.
+        {props.onOpenHandler ? (
+          <button
+            type="button"
+            onClick={props.onOpenHandler}
+            title="Open the chat that handles this one"
+            className="cursor-pointer rounded-sm font-medium underline-offset-2 outline-hidden hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            “{props.title}”
+          </button>
+        ) : (
+          <span className="font-medium">“{props.title}”</span>
+        )}
+        {props.computer ? ` on ${props.computer}` : ""} handles this chat: it gets its Ready and
+        questions and writes here. Approvals, secrets, payments and sign-ins still come to you.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -226,7 +234,13 @@ export function ComposerContextLine(props: {
     selectSidebarThreadSummaryByRef(store, { environmentId, threadId }),
   );
   const handler = supportsHandTo ? (summary?.handler ?? null) : null;
-  const handlerLiveTitle = useThreadTitle(environmentId, handler?.threadId ?? null);
+  // A handler on another of the person's computers (T63-C): its chat lives there.
+  const environmentIdByBoxId = useEnvironmentIdByBoxId();
+  const handlerComputer = handler?.computer ?? null;
+  const handlerEnvironmentId = handlerComputer
+    ? (environmentIdByBoxId.get(handlerComputer.boxId) ?? null)
+    : environmentId;
+  const handlerLiveTitle = useThreadTitle(handlerEnvironmentId, handler?.threadId ?? null);
   const handlerTitle = handlerLiveTitle ?? handler?.title ?? "another chat";
   const openHandTo = summary
     ? () => useHandToStore.getState().open({ environmentId, threadId, title: summary.title })
@@ -335,16 +349,24 @@ export function ComposerContextLine(props: {
     <Chip
       testId="composer-chip-handled"
       icon={<ArrowRightLeftIcon aria-hidden className="size-3.5 shrink-0" />}
-      label={`Handled by “${handlerTitle}”`}
+      label={HAND_TO_COPY.handledBy(handlerTitle, handlerComputer?.name)}
       popupClassName="w-[min(22rem,calc(100vw-1rem))]"
       popup={(close) => (
         <HandledPopup
           title={handlerTitle}
+          computer={handlerComputer?.name ?? null}
           busy={busy}
-          onOpenHandler={() => {
-            close();
-            open(handler.threadId);
-          }}
+          onOpenHandler={
+            handlerEnvironmentId === null
+              ? null
+              : () => {
+                  close();
+                  void navigate({
+                    to: "/$environmentId/$threadId",
+                    params: { environmentId: handlerEnvironmentId, threadId: handler.threadId },
+                  });
+                }
+          }
           onTakeBack={() => {
             setBusy(true);
             void setThreadHandedTo({ environmentId, threadId, handler: null }).finally(() => {

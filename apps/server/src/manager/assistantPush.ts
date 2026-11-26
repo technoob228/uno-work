@@ -95,6 +95,18 @@ export interface PushWatch {
    * not the handler's (they stay in the person's Needs you).
    */
   readonly handed?: true | undefined;
+  /**
+   * The handler of a handed chat lives on ANOTHER computer (T63-C): its
+   * notices and letters go there through the console's pairing
+   * (`remoteComputers/handedRemote.ts`) instead of a turn here.
+   */
+  readonly handlerComputer?: HandlerComputer | undefined;
+}
+
+/** The computer a handler lives on (T63-C). */
+export interface HandlerComputer {
+  readonly boxId: number;
+  readonly name: string;
 }
 
 export type PushOutcome = "completed" | "failed" | "stopped" | "needs_you";
@@ -127,6 +139,8 @@ export interface PushNotice {
   readonly report?: { readonly title: string; readonly url: string } | undefined;
   /** The chat is handed to the conversation (T63): it drives it, not the person. */
   readonly handed?: true | undefined;
+  /** See PushWatch.handlerComputer. */
+  readonly handlerComputer?: HandlerComputer | undefined;
 }
 
 /**
@@ -138,6 +152,18 @@ export interface PushLetter {
   readonly key: string;
   readonly conversationThreadId: string;
   readonly text: string;
+  /**
+   * The handler is on another computer (T63-C): the letter goes there, about
+   * this chat, of this kind (a brief registers the chat there, "off"
+   * unregisters it).
+   */
+  readonly remote?:
+    | {
+        readonly computer: HandlerComputer;
+        readonly chatThreadId: string;
+        readonly kind: "brief" | "update" | "off";
+      }
+    | undefined;
   readonly at: string;
 }
 
@@ -376,13 +402,21 @@ export const noticeFromProbe = (input: {
       via: watch.via,
       elapsedMs: Math.max(0, endedMs - toMs(watch.startedAt)),
       changedFiles: files.files === null ? null : files.total,
+      // A handler on another computer can't read the transcript: the answer is all it gets.
       excerpt:
-        replyText.length > 0 ? wrapUntrustedContent(clip(replyText, PUSH_EXCERPT_CHARS)) : null,
+        replyText.length > 0
+          ? wrapUntrustedContent(
+              watch.handlerComputer !== undefined
+                ? clipMiddle(replyText, PUSH_REMOTE_EXCERPT_CHARS)
+                : clip(replyText, PUSH_EXCERPT_CHARS),
+            )
+          : null,
       request: outcome === "needs_you" ? probe.pendingRequest : null,
       error: probe.verdict.error === null ? null : clip(probe.verdict.error, 300),
       ...(probe.verdict.notStarted === true ? { notStarted: true } : {}),
       ...(input.report ? { report: input.report } : {}),
       ...(watch.handed === true ? { handed: true as const } : {}),
+      ...(watch.handlerComputer !== undefined ? { handlerComputer: watch.handlerComputer } : {}),
       at: new Date(input.nowMs).toISOString(),
     },
   };
@@ -398,6 +432,8 @@ export const watchHanded = (
     readonly handlerThreadId: string;
     readonly handlerProjectId: string;
     readonly at: string;
+    /** The handler's computer when it is another one (T63-C). */
+    readonly computer?: HandlerComputer | null | undefined;
   },
 ): PushState => ({
   ...state,
@@ -411,6 +447,7 @@ export const watchHanded = (
       since: input.at,
       startedAt: input.at,
       handed: true,
+      ...(input.computer ? { handlerComputer: input.computer } : {}),
     },
   ],
 });

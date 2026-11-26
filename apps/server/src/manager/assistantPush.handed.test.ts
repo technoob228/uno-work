@@ -191,3 +191,66 @@ describe("handed chats (T63 Hand to…)", () => {
     expect(shown.outbox).toHaveLength(4);
   });
 });
+
+describe("handed to a chat on another computer (T63-C)", () => {
+  const UNO_WORK = { boxId: 2531, name: "uno-work" };
+  const remote = handedWatchOf(
+    watchHanded(EMPTY_PUSH_STATE, {
+      threadId: "pricing",
+      handlerThreadId: "coordinator-there",
+      handlerProjectId: "",
+      at: HANDED_AT,
+      computer: UNO_WORK,
+    }),
+    "pricing",
+  )!;
+
+  it("the watch and its notices name the handler's computer", () => {
+    expect(remote).toMatchObject({ handed: true, handlerComputer: UNO_WORK });
+    const result = noticeFromProbe({
+      watch: remote,
+      probe: probe("completed"),
+      title: "Pricing",
+      project: null,
+      sentKeys: new Set(),
+      nowMs,
+    });
+    expect(result?.notice).toMatchObject({ handed: true, handlerComputer: UNO_WORK });
+  });
+
+  it("carries the long answer: the handler there can't read the transcript", () => {
+    const long = `${"a".repeat(3_000)} the conclusion`;
+    const settled = probe("completed");
+    const result = noticeFromProbe({
+      watch: remote,
+      probe: { ...settled, reply: { ...settled.reply!, text: long } },
+      title: "Pricing",
+      project: null,
+      sentKeys: new Set(),
+      nowMs,
+    });
+    expect(result?.notice.excerpt).toContain("the conclusion");
+    const local = noticeFromProbe({
+      watch,
+      probe: { ...settled, reply: { ...settled.reply!, text: long } },
+      title: "Pricing",
+      project: null,
+      sentKeys: new Set(),
+      nowMs,
+    });
+    expect(local?.notice.excerpt).not.toContain("the conclusion");
+  });
+
+  it("an approval there stays with the person, like here", () => {
+    expect(
+      noticeFromProbe({
+        watch: remote,
+        probe: probe("needs_user"),
+        title: "Pricing",
+        project: null,
+        sentKeys: new Set(),
+        nowMs,
+      }),
+    ).toBeNull();
+  });
+});

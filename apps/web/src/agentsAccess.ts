@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   ThreadController,
+  ThreadHandlerComputer,
   ThreadHandlerKind,
   ThreadId,
 } from "@t3tools/contracts";
@@ -105,6 +106,8 @@ export async function setThreadHandedTo(input: {
     readonly kind: ThreadHandlerKind;
     readonly title: string;
     readonly note?: string | null;
+    /** On another of the person's computers (T63-C). */
+    readonly computer?: ThreadHandlerComputer | null;
   } | null;
 }): Promise<boolean> {
   const api = readEnvironmentApi(input.environmentId);
@@ -123,6 +126,7 @@ export async function setThreadHandedTo(input: {
               kind: handler.kind,
               title: handler.title,
               note: handler.note?.trim() ? handler.note.trim() : null,
+              ...(handler.computer ? { computer: handler.computer } : {}),
             },
       ...(handler === null ? { reason: "taken-back" as const } : {}),
       createdAt: new Date().toISOString(),
@@ -133,7 +137,7 @@ export async function setThreadHandedTo(input: {
           ? { type: "success", title: HAND_TO_COPY.takenBackToast }
           : {
               type: "success",
-              title: HAND_TO_COPY.handedToast(handler.title),
+              title: HAND_TO_COPY.handedToast(handler.title, handler.computer?.name),
               description: HAND_TO_COPY.handedDescription,
             },
       ),

@@ -9,6 +9,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 
 import { latestReportIdBySender } from "~/agentTasks.logic";
 import { describeAgentSentMessage } from "~/agentThreads.logic";
+import { useEnvironmentIdByBoxId } from "~/hooks/useHandToComputers";
 import { useThreadTitle } from "~/hooks/useThreadTitle";
 import type { deriveTimelineEntries, TimelineEntry } from "../../session-logic";
 import { selectEnvironmentState, useStore } from "../../store";
@@ -41,20 +42,37 @@ export const AgentSentMessageLabel = memo(function AgentSentMessageLabel({
   environmentId: EnvironmentId;
   sentByThreadId: ThreadId;
 }) {
-  const senderTitle = useThreadTitle(environmentId, sentByThreadId);
+  const localTitle = useThreadTitle(environmentId, sentByThreadId);
+  // Not a chat here: the handler of a chat here, on another computer (T63-C).
+  const remoteHandler = useStore((state) =>
+    localTitle !== null
+      ? null
+      : (Object.values(selectEnvironmentState(state, environmentId).sidebarThreadSummaryById).find(
+          (thread) => thread?.handler?.threadId === sentByThreadId && thread.handler.computer,
+        )?.handler ?? null),
+  );
+  const environmentIdByBoxId = useEnvironmentIdByBoxId();
+  const senderEnvironmentId = remoteHandler?.computer
+    ? (environmentIdByBoxId.get(remoteHandler.computer.boxId) ?? null)
+    : environmentId;
+  const remoteTitle = useThreadTitle(
+    remoteHandler ? senderEnvironmentId : null,
+    remoteHandler ? sentByThreadId : null,
+  );
+  const senderTitle = localTitle ?? remoteTitle ?? remoteHandler?.title ?? null;
   const navigate = useNavigate();
-  const label = describeAgentSentMessage(senderTitle);
+  const label = describeAgentSentMessage(senderTitle, remoteHandler?.computer?.name);
   return (
     <div className="mb-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
       <BotIcon aria-hidden="true" className="size-3 shrink-0 text-info" />
-      {senderTitle ? (
+      {senderTitle && senderEnvironmentId !== null ? (
         <button
           type="button"
           title="Open the chat this message came from"
           onClick={() =>
             void navigate({
               to: "/$environmentId/$threadId",
-              params: { environmentId, threadId: sentByThreadId },
+              params: { environmentId: senderEnvironmentId, threadId: sentByThreadId },
             })
           }
           className="cursor-pointer truncate rounded-sm underline-offset-2 outline-hidden hover:text-foreground hover:underline focus-visible:ring-1 focus-visible:ring-ring"
@@ -138,13 +156,23 @@ export const AgentTalkFoldRow = memo(function AgentTalkFoldRow(props: {
 }) {
   const { environmentId, senderThreadIds } = props;
   const shells = useStore((state) => selectEnvironmentState(state, environmentId).threadShellById);
-  const names = useMemo(
-    () =>
-      senderThreadIds.map(
-        (threadId) => shells[threadId as ThreadId]?.title?.trim() || "another chat",
-      ),
-    [senderThreadIds, shells],
+  const summaries = useStore(
+    (state) => selectEnvironmentState(state, environmentId).sidebarThreadSummaryById,
   );
+  const names = useMemo(() => {
+    // Handlers on another computer (T63-C) are no chats here: their saved name.
+    const remote = new Map<string, string>();
+    for (const thread of Object.values(summaries)) {
+      const handler = thread?.handler;
+      if (handler?.computer) {
+        remote.set(handler.threadId, `${handler.title} on ${handler.computer.name}`);
+      }
+    }
+    return senderThreadIds.map(
+      (threadId) =>
+        shells[threadId as ThreadId]?.title?.trim() || remote.get(threadId) || "another chat",
+    );
+  }, [senderThreadIds, shells, summaries]);
   const count = props.agentMessageCount;
   const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   return (

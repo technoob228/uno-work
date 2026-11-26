@@ -37,3 +37,24 @@ export function useEnvironmentSupportsHandTo(
   }
   return saved;
 }
+
+/**
+ * Whether the daemon behind `environmentId` hands chats to and takes them
+ * from its person's other computers (T63-C): both the chat's and
+ * the handler's computer need it.
+ */
+export function descriptorSupportsHandToRemote(
+  descriptor: ExecutionEnvironmentDescriptor | null | undefined,
+): boolean {
+  return descriptor?.capabilities.chatHandToRemote === true;
+}
+
+export function readEnvironmentSupportsHandToRemote(environmentId: EnvironmentId): boolean {
+  const primary = readPrimaryEnvironmentDescriptor();
+  if (primary?.environmentId === environmentId) {
+    return descriptorSupportsHandToRemote(primary);
+  }
+  return descriptorSupportsHandToRemote(
+    useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.descriptor,
+  );
+}
