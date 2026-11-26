@@ -25,6 +25,14 @@ export function cloudCopyMaker(input: {
 
 type ShareLocalFile = NonNullable<DesktopBridge["unoDrive"]>["shareLocalFile"];
 
+/** A password link, but the desktop app is too old to pass the password on (pure, for tests). */
+export function desktopWouldDropPassword(
+  password: string | undefined,
+  bridge: { readonly sharePassword?: boolean },
+): boolean {
+  return Boolean(password) && bridge.sharePassword !== true;
+}
+
 /** The desktop app's uploader for a file on this computer, or null (the daemon does it). */
 export function desktopShareLocalFile(environmentId: EnvironmentId | null): ShareLocalFile | null {
   const drive = typeof window === "undefined" ? undefined : window.desktopBridge?.unoDrive;
@@ -33,5 +41,10 @@ export function desktopShareLocalFile(environmentId: EnvironmentId | null): Shar
     onThisComputer: environmentId !== null && isPrimaryEnvironmentId(environmentId),
     bridgeHasDrive: typeof drive?.shareLocalFile === "function",
   });
-  return maker === "desktop" && drive ? (input) => drive.shareLocalFile(input) : null;
+  if (maker !== "desktop" || !drive) return null;
+  return async (input) =>
+    // An app before 0.0.195 would drop the password and make an open link.
+    desktopWouldDropPassword(input.password, drive)
+      ? { ok: false, error: "Update Uno Work to share Cloud storage links with a password." }
+      : drive.shareLocalFile(input);
 }

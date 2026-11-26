@@ -34,6 +34,8 @@ const MAX_EXPIRES_IN_HOURS = 24 * 365;
 export interface DriveShareFileInput {
   readonly path: string;
   readonly expiresInHours?: number | undefined;
+  /** The visitor enters it before the file opens; "" / absent = none. */
+  readonly password?: string | undefined;
 }
 
 export type DriveShareFileResult =
@@ -142,6 +144,7 @@ function consoleProblem(status: number, body: unknown, what: string): string {
     return "Uno Drive isn't available on this Uno console yet.";
   }
   if (status === 429 || code === "RATE_LIMITED") return "Too many tries. Wait a bit and try again.";
+  if (code === "INVALID_PASSWORD") return "The password must be 4 to 72 characters.";
   if (status === 413 || code === "TOO_LARGE")
     return "This file is too big to share (2 GB at most).";
   return `${what} didn't work (the console answered ${status}). Try again.`;
@@ -175,6 +178,10 @@ export async function shareLocalFileViaDrive(
   if (file.size <= 0) return { ok: false, error: "This file is empty." };
   if (file.size > MAX_SHARE_UPLOAD_BYTES) {
     return { ok: false, error: "This file is too big to share (2 GB at most)." };
+  }
+  const password = typeof input.password === "string" ? input.password : "";
+  if (password !== "" && (password.length < 4 || Buffer.byteLength(password, "utf8") > 72)) {
+    return { ok: false, error: "The password must be 4 to 72 characters." };
   }
   const hours = Math.min(
     Math.max(Math.trunc(input.expiresInHours ?? DEFAULT_EXPIRES_IN_HOURS), 1),
@@ -220,13 +227,21 @@ export async function shareLocalFileViaDrive(
   const shared = await deps.accountRequest({
     method: "POST",
     path: "/api/v1/drive/shares",
-    body: { key, expires_in_hours: hours },
+    body: { key, expires_in_hours: hours, ...(password !== "" ? { password } : {}) },
   });
   if (shared.status !== 200 && shared.status !== 201) {
     return { ok: false, error: consoleProblem(shared.status, shared.body, "Making the link") };
   }
   const share = parseDriveShare(shared.body);
   if (!share.url) return { ok: false, error: "The console didn't return a link." };
+  // An older console ignores the password: never hand out an open link (its
+  // address isn't shown anywhere else, so nobody can use it).
+  if (password !== "" && !share.hasPassword) {
+    return {
+      ok: false,
+      error: "Uno can't protect Cloud storage links with a password yet. Try again later.",
+    };
+  }
   return { ok: true, key, url: share.url, expiresAt: share.expiresAt };
 }
 

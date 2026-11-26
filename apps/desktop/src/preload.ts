@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   pageTools: { version: PAGE_TOOLS_PRELOAD_VERSION },
   unoDrive: {
     shareLocalFile: (input) => ipcRenderer.invoke(UNO_DRIVE_SHARE_FILE_CHANNEL, input),
+    sharePassword: true,
   },
   // Computers lifecycle: this computer becomes one of the person's computers.
   connectHelper: {

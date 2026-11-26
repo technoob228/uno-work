@@ -127,6 +127,38 @@ describe("Uno Drive client", () => {
     expect(await driveShareRevoke(deps, 9)).toEqual({ ok: true });
   });
 
+  it("makes password links and refuses an open one from an older console", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const consoleAnswer = (hasPassword: boolean) =>
+      fakeConsole({
+        "POST /api/v1/drive/shares": (init) => {
+          bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return {
+            id: 9,
+            key: "a.pdf",
+            url: "https://console.uno4.dev/api/v1/drive/d/tok",
+            has_password: hasPassword,
+          };
+        },
+      }).deps;
+    const share = await driveShareCreate(consoleAnswer(true), {
+      key: "a.pdf",
+      password: "brave-otter-42",
+    });
+    expect(share.hasPassword).toBe(true);
+    expect(bodies[0]).toMatchObject({ key: "a.pdf", password: "brave-otter-42" });
+    await expect(
+      driveShareCreate(consoleAnswer(false), { key: "a.pdf", password: "brave-otter-42" }),
+    ).rejects.toThrow("can't protect");
+    await expect(
+      driveShareCreate(consoleAnswer(true), { key: "a.pdf", password: "abc" }),
+    ).rejects.toThrow("4 to 72");
+    expect(bodies).toHaveLength(2);
+    const open = await driveShareCreate(consoleAnswer(false), { key: "a.pdf" });
+    expect(open.hasPassword).toBe(false);
+    expect(bodies[2]).not.toHaveProperty("password");
+  });
+
   it("explains console refusals in words", async () => {
     const { deps } = fakeConsole({
       "PUT /api/v1/drive/telegram/bot": () => {

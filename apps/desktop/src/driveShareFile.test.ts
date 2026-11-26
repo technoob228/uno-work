@@ -112,6 +112,53 @@ describe("shareLocalFileViaDrive", () => {
     ]);
   });
 
+  it("passes a password on and refuses a link the console didn't protect", async () => {
+    const shares: Array<Record<string, unknown>> = [];
+    const answer = (hasPassword: boolean) =>
+      deps({
+        accountRequest: async (input) => {
+          if (input.path === "/api/v1/drive/upload-link") {
+            return { status: 200, body: { url: UPLOAD } };
+          }
+          shares.push(input.body as Record<string, unknown>);
+          return {
+            status: 201,
+            body: {
+              id: 7,
+              key: "Shared/report.pdf",
+              url: "https://console.uno4.dev/d/tok",
+              has_password: hasPassword,
+            },
+          };
+        },
+      }).value;
+    const path = Path.join(HOME, "Documents", "report.pdf");
+    const ok = await shareLocalFileViaDrive(answer(true), { path, password: "brave-otter-42" });
+    expect(ok).toMatchObject({ ok: true, url: "https://console.uno4.dev/d/tok" });
+    expect(shares[0]).toMatchObject({ key: "Shared/report.pdf", password: "brave-otter-42" });
+
+    // An older console drops the password: no open link handed out.
+    const old = await shareLocalFileViaDrive(answer(false), { path, password: "brave-otter-42" });
+    expect(old).toEqual({ ok: false, error: expect.stringContaining("can't protect") });
+
+    // No password = the body has none.
+    await shareLocalFileViaDrive(answer(false), { path });
+    expect(shares[2]).not.toHaveProperty("password");
+  });
+
+  it("refuses a password that doesn't fit before uploading", async () => {
+    const { value, calls, uploads } = deps();
+    const path = Path.join(HOME, "Documents", "report.pdf");
+    for (const password of ["abc", "x".repeat(73)]) {
+      expect(await shareLocalFileViaDrive(value, { path, password })).toEqual({
+        ok: false,
+        error: "The password must be 4 to 72 characters.",
+      });
+    }
+    expect(calls).toEqual([]);
+    expect(uploads).toEqual([]);
+  });
+
   it("refuses before uploading anything", async () => {
     const hidden = deps();
     expect(

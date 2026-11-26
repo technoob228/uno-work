@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cloudCopyMaker } from "./desktopFileShare";
+import { cloudCopyMaker, desktopWouldDropPassword } from "./desktopFileShare";
 
 describe("cloudCopyMaker", () => {
   it("lets the desktop app upload a file of this Mac", () => {
@@ -19,5 +19,14 @@ describe("cloudCopyMaker", () => {
     expect(cloudCopyMaker({ isElectron: true, onThisComputer: true, bridgeHasDrive: false })).toBe(
       "daemon",
     );
+  });
+});
+
+describe("desktopWouldDropPassword", () => {
+  it("stops a password link through a desktop app that can't pass the password on", () => {
+    expect(desktopWouldDropPassword("brave-otter-42", {})).toBe(true);
+    expect(desktopWouldDropPassword("brave-otter-42", { sharePassword: true })).toBe(false);
+    expect(desktopWouldDropPassword(undefined, {})).toBe(false);
+    expect(desktopWouldDropPassword("", {})).toBe(false);
   });
 });

@@ -131,13 +131,21 @@ export function FileSharePopover({
         // Desktop, a file of this Mac: the app uploads it with its own sign-in.
         const viaDesktop = desktopShareLocalFile(environmentId);
         if (viaDesktop) {
-          const result = await viaDesktop({ path, expiresInHours: hours });
+          const result = await viaDesktop({
+            path,
+            expiresInHours: hours,
+            ...(linkPassword ? { password: linkPassword } : {}),
+          });
           if (!result.ok) throw new Error(result.error);
           return result.url;
         }
         const key = await uploadSharedCopy(environmentId, path);
         setPhase("linking");
-        const share = await api.driveShareCreate({ key, expiresInHours: hours });
+        const share = await api.driveShareCreate({
+          key,
+          expiresInHours: hours,
+          ...(linkPassword ? { password: linkPassword } : {}),
+        });
         if (!share.url) throw new Error("Couldn't make a link.");
         return share.url;
       }
@@ -173,8 +181,11 @@ export function FileSharePopover({
   };
   // The desktop's copy can't be replaced in place: updating it makes a new copy and link.
   const copyMadeByDesktop = route === "cloud-copy" && desktopShareLocalFile(environmentId) !== null;
-  const passwordTooShort = withPassword && password.length < 4;
-  const passwordAvailable = route === "computer-link";
+  // Cloud storage links take 4 to 72 bytes (the console's bcrypt limit).
+  const passwordInvalid =
+    withPassword &&
+    (password.length < 4 ||
+      (route === "cloud-copy" && new TextEncoder().encode(password).length > 72));
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -225,7 +236,9 @@ export function FileSharePopover({
                     size="xs"
                     variant="outline"
                     disabled={update.isPending}
-                    onClick={() => (copyMadeByDesktop ? create.mutate(null) : update.mutate())}
+                    onClick={() =>
+                      copyMadeByDesktop ? create.mutate(linkPassword) : update.mutate()
+                    }
                   >
                     {update.isPending ? (
                       <Loader2Icon className="animate-spin" />
@@ -287,23 +300,14 @@ export function FileSharePopover({
                 <div className="flex items-center gap-2">
                   <Checkbox
                     id="file-share-password"
-                    checked={passwordAvailable && withPassword}
-                    disabled={!passwordAvailable}
+                    checked={withPassword}
                     onCheckedChange={(checked) => setWithPassword(checked === true)}
                   />
-                  <Label
-                    htmlFor="file-share-password"
-                    className={cn("text-xs", !passwordAvailable && "text-muted-foreground")}
-                  >
+                  <Label htmlFor="file-share-password" className="text-xs">
                     Require a password
                   </Label>
-                  {passwordAvailable ? null : (
-                    <span className="text-[11px] text-muted-foreground">
-                      · not for Cloud storage links yet
-                    </span>
-                  )}
                 </div>
-                {passwordAvailable && withPassword ? (
+                {withPassword ? (
                   <PasswordGenerateControls
                     password={password}
                     onPasswordChange={setPassword}
@@ -332,8 +336,8 @@ export function FileSharePopover({
               ) : null}
               <Button
                 size="sm"
-                disabled={create.isPending || passwordTooShort}
-                onClick={() => create.mutate(passwordAvailable && withPassword ? password : null)}
+                disabled={create.isPending || passwordInvalid}
+                onClick={() => create.mutate(withPassword ? password : null)}
                 data-testid="file-share-create"
               >
                 {create.isPending ? (

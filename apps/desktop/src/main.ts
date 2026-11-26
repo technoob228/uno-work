@@ -2174,7 +2174,7 @@ function registerIpcHandlers(): void {
   // with the desktop's own sign-in, then a link to it (driveShareFile.ts).
   ipcMain.removeHandler(UNO_DRIVE_SHARE_FILE_CHANNEL);
   handleTrustedIpc(UNO_DRIVE_SHARE_FILE_CHANNEL, async (_event, raw: unknown) => {
-    const input = raw as { path?: unknown; expiresInHours?: unknown } | null;
+    const input = raw as { path?: unknown; expiresInHours?: unknown; password?: unknown } | null;
     if (typeof input?.path !== "string") return { ok: false, error: "No file to share." };
     try {
       return await shareLocalFileViaDrive(
@@ -2189,6 +2189,9 @@ function registerIpcHandlers(): void {
           path: input.path,
           ...(typeof input.expiresInHours === "number"
             ? { expiresInHours: input.expiresInHours }
+            : {}),
+          ...(typeof input.password === "string" && input.password !== ""
+            ? { password: input.password }
             : {}),
         },
       );

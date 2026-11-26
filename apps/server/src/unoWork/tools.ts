@@ -437,6 +437,7 @@ export interface UnoWorkToolDeps extends WorkspaceToolDeps {
       readonly key: string;
       readonly expiresInHours?: number;
       readonly via?: "app" | "agent";
+      readonly password?: string;
     }) => Effect.Effect<FilesDriveShare, { readonly message: string }>;
     readonly cloudCopyToCloud?: (input: {
       readonly paths: ReadonlyArray<string>;
@@ -2826,12 +2827,13 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "drive_share_link",
     group: "files",
     description:
-      "Make a link to one Uno Drive file (key from drive_find) that anyone can download, even while this computer sleeps. Expires after expiresInHours (default 7 days, max 90 days); the person can turn it off in Uno Drive → Shared links. In Ask mode the person approves it first. To send someone a file; a report for the person themselves goes out with report_publish.",
+      "Make a link to one Uno Drive file (key from drive_find) that anyone can download, even while this computer sleeps. Expires after expiresInHours (default 7 days, max 90 days); the person can turn it off in Uno Drive → Shared links. With password (4-72 characters) the visitor must enter it before the file opens; give the password separately from the link. In Ask mode the person approves it first. To send someone a file; a report for the person themselves goes out with report_publish.",
     inputSchema: {
       type: "object",
       properties: {
         key: { type: "string", minLength: 1, maxLength: 1024 },
         expiresInHours: { type: "integer", minimum: 1, maximum: 24 * 90 },
+        password: { type: "string", minLength: 4, maxLength: 72 },
       },
       required: ["key"],
       additionalProperties: false,
@@ -2839,7 +2841,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     level: "change",
     approvalTitle: (args) => `Create a download link to ${str(args, "key")} (Uno Drive)`,
     approvalDetail: (args) =>
-      `Anyone with the link can download it for ${num(args, "expiresInHours") ?? 168} h.`,
+      `Anyone with the link${str(args, "password") ? " and its password" : ""} can download it for ${num(args, "expiresInHours") ?? 168} h.`,
     run: (deps, args) =>
       Effect.gen(function* () {
         if (!deps.files.driveShareCreate) {
@@ -2852,6 +2854,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
             ...(num(args, "expiresInHours")
               ? { expiresInHours: num(args, "expiresInHours")! }
               : {}),
+            ...(str(args, "password") ? { password: str(args, "password")! } : {}),
           }),
         );
         return {
@@ -2859,6 +2862,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
           url: share.url,
           key: share.key,
           expiresAt: share.expiresAt,
+          hasPassword: share.hasPassword,
         };
       }),
   },

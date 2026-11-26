@@ -389,6 +389,7 @@ export function answerFileRpc(machine: DemoMachine, body: NormalizedWsRpcRequest
         downloads: 0,
         createdVia: "app",
         createdAt: iso(0),
+        hasPassword: typeof body.password === "string" && body.password !== "",
       }));
     default:
       return undefined;
