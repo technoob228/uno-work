@@ -157,6 +157,30 @@ describe("suggestRoles: a set by the plans connected here", () => {
     expect(withClaude.sources).toEqual(["claude", "uno"]);
   });
 
+  it("Antigravity signed in: Gemini through Antigravity, ahead of Gemini CLI (T66)", () => {
+    const antigravity = provider(
+      "antigravity",
+      [
+        { slug: "antigravity-default", name: "Antigravity default", isDefault: true },
+        { slug: "gemini-3.5-pro", name: "Gemini 3.5 Pro" },
+        { slug: "gemini-3.5-flash", name: "Gemini 3.5 Flash" },
+      ],
+      { auth: { status: "authenticated", type: "google-file" } },
+    );
+    const gemini = provider("gemini", [{ slug: "auto", name: "Auto", isDefault: true }], {
+      auth: { status: "authenticated", type: "oauth-personal" },
+    });
+    const roles = suggestRoles({
+      providers: [gemini, antigravity, uno],
+      isReady: ready,
+      unoReplies: true,
+    });
+    expect(roles.complex).toEqual(sel("antigravity", "antigravity-default"));
+    expect(roles.simple).toEqual(sel("antigravity", "gemini-3.5-flash"));
+    expect(roles.sources).toEqual(["gemini", "uno"]);
+    expect(roles.why).toMatch(/^Antigravity signed in here/);
+  });
+
   it("only Grok: its recommended model for complex work, Uno Fast for simple tasks (T59)", () => {
     const grok = provider(
       "grok",

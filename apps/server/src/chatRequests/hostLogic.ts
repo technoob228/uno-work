@@ -149,7 +149,7 @@ const ms = (value: string) => {
 };
 
 export const REASONS = {
-  off: "Chat requests are off on that computer: they are off until the person turns them on in Uno Work there (Settings → Computer → Chats from the cloud). Don't ask again; if it matters, tell the person in one line where to turn it on.",
+  off: "Chat requests are off on that computer: they are off until the person turns them on in Uno Work there (Settings → Computer → Cloud agents). Don't ask again; if it matters, tell the person in one line where to turn it on.",
   busy: `${CHAT_REQUESTS_AT_ONCE} requests are already waiting or working on that computer. Try again when one of them is done.`,
   harness:
     "Only Claude Code and Codex chats can be started there (they are held to the rules there). Leave provider out, or use claudeAgent or codex.",

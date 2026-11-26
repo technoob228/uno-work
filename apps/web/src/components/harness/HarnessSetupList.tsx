@@ -15,6 +15,7 @@ import { cn } from "~/lib/utils";
 import { plainExplanation } from "../../plainLanguage";
 import { getDriverOption } from "../settings/providerDriverMeta";
 import { HarnessSignInDialog } from "./HarnessSignInDialog";
+import { InstallFailureCard } from "./InstallFailureCard";
 import { SetupLogDetails } from "./SetupLogDetails";
 import {
   HARNESS_ROW_DRIVERS,
@@ -216,7 +217,15 @@ export function HarnessSetupList({
                     {hint}
                   </div>
                 ) : null}
-                {installFailed ? (
+                {installFailed && installJob?.help ? (
+                  <div className="pl-11">
+                    <InstallFailureCard
+                      job={installJob}
+                      onRetry={() => void setup.startInstall(driver)}
+                      onCheckAgain={() => setup.recheckInstall(driver)}
+                    />
+                  </div>
+                ) : installFailed ? (
                   <div className="flex flex-col gap-1.5 pl-11">
                     <span className="text-[11px] text-amber-700 dark:text-amber-300">
                       {installJob?.error ?? "The install failed."}

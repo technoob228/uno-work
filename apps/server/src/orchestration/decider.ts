@@ -823,6 +823,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    // Background work left running (T71): the daemon's own bookkeeping, like
+    // the computer wait. A deleted chat has nothing to show it on.
+    case "thread.background-work.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      yield* requireSystemOrigin({ command, origin, subject: `chat '${command.threadId}'` });
+      yield* requireNotDeleted({
+        command,
+        deletedAt: thread.deletedAt,
+        subject: `Thread '${command.threadId}'`,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.background-work-set",
+        payload: {
+          threadId: command.threadId,
+          backgroundWork: command.backgroundWork,
+          updatedAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.snooze": {
       const thread = yield* requireThreadNotArchived({
         readModel,

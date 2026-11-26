@@ -36,7 +36,8 @@ import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryI
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
+import { backgroundWorkOf, ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
+import { recordRuntimeEvent, resetSessionActivity } from "../../provider/sessionActivity.ts";
 import { makeTurnAutoRetryLayer } from "./TurnAutoRetry.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
@@ -358,6 +359,76 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  describe("T71: a turn that ends with work left running in the background", () => {
+    afterEach(() => resetSessionActivity());
+
+    it("leaves the chat free (ready) but marked as working in the background until the work ends", async () => {
+      const harness = await createHarness();
+      // ProviderService notes every event before ingestion sees it.
+      const emit = (event: Parameters<typeof harness.emit>[0]) => {
+        recordRuntimeEvent(event);
+        harness.emit(event);
+      };
+      const now = () => new Date().toISOString();
+      const base = {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        threadId: asThreadId("thread-1"),
+      };
+      emit({
+        ...base,
+        type: "turn.started",
+        eventId: asEventId("evt-bg-turn"),
+        createdAt: now(),
+        turnId: asTurnId("turn-bg"),
+      });
+      emit({
+        ...base,
+        type: "task.started",
+        eventId: asEventId("evt-bg-task"),
+        createdAt: now(),
+        turnId: asTurnId("turn-bg"),
+        payload: {
+          taskId: "upload-1" as never,
+          description: "Upload to Uno Drive",
+          isBackgrounded: true,
+        },
+      } as never);
+      emit({
+        ...base,
+        type: "turn.completed",
+        eventId: asEventId("evt-bg-turn-done"),
+        createdAt: now(),
+        turnId: asTurnId("turn-bg"),
+        payload: { state: "completed" },
+      });
+
+      const waiting = await waitForThread(
+        harness.readModel,
+        (thread) => thread.session?.status === "ready" && (thread.backgroundWork?.count ?? 0) === 1,
+      );
+      // Free for the next message: no turn, not running.
+      expect(waiting.session?.activeTurnId).toBeNull();
+      expect(Date.parse(waiting.backgroundWork?.since ?? "")).not.toBeNaN();
+
+      emit({
+        ...base,
+        type: "task.completed",
+        eventId: asEventId("evt-bg-task-done"),
+        createdAt: now(),
+        payload: { taskId: "upload-1" as never, status: "completed" },
+      } as never);
+      await waitForThread(harness.readModel, (thread) => thread.backgroundWork == null);
+    });
+
+    it("counts only live background tasks", () => {
+      expect(backgroundWorkOf({ backgroundTaskCount: 0 })).toBeNull();
+      expect(backgroundWorkOf({ backgroundTaskCount: 2, oldestBackgroundTaskMs: 0 })).toEqual({
+        count: 2,
+        since: "1970-01-01T00:00:00.000Z",
+      });
+    });
   });
 
   describe("automatic continuation of a turn Uno AI didn't answer", () => {

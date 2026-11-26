@@ -11,6 +11,7 @@ import {
   type HarnessSetupRunnerDeps,
 } from "./HarnessSetupService.ts";
 import type { HarnessProcessSpawnInput } from "./harnessProcess.ts";
+import { ManagedNodeError } from "./npmRuntime.ts";
 
 interface FakeProcess {
   readonly input: HarnessProcessSpawnInput;
@@ -48,7 +49,12 @@ function makeHarness(overrides: Partial<HarnessSetupRunnerDeps> = {}): Harness {
     platform: "linux",
     homeDir: "/home/unowork",
     baseEnv: { PATH: "/usr/bin" },
-    probeNpmGlobalWritable: async () => false,
+    locateNpm: async () => ({
+      npm: "npm",
+      binDir: undefined,
+      globalWritable: false,
+      managed: false,
+    }),
     probeUvAvailable: async () => true,
     resolveCliEnvironment: async (driver) => ({
       binaryPath: driver === "codex" ? "codex" : "claude",
@@ -134,7 +140,91 @@ describe("install jobs", () => {
     const error = Object.assign(new Error("spawn npm ENOENT"), { code: "ENOENT" });
     harness.latest().input.onExit({ code: null, signal: null, error });
     await harness.runner.drain();
-    expect(harness.runner.installStatus({ jobId: id }).error).toContain("was not found");
+    expect(harness.runner.installStatus({ jobId: id }).error).toBe(
+      'Uno Work could not find "npm" on this computer.',
+    );
+  });
+
+  it("runs the npm it found, with its folder first on PATH", async () => {
+    const harness = makeHarness({
+      locateNpm: async () => ({
+        npm: "/opt/homebrew/bin/npm",
+        binDir: "/opt/homebrew/bin",
+        globalWritable: true,
+        managed: false,
+      }),
+    });
+    harness.runner.installStart({ driver: ProviderDriverKind.make("gemini") });
+    await tick();
+    const process = harness.latest();
+    expect(process.input.command).toBe("/opt/homebrew/bin/npm");
+    expect(process.input.args).toEqual(["install", "-g", "@google/gemini-cli@latest"]);
+    expect(process.input.env.PATH?.split(":")[0]).toBe("/opt/homebrew/bin");
+    expect(process.input.env.npm_config_prefix).toBeUndefined();
+  });
+
+  it("brings Node.js when the machine has none, then installs with it (T64)", async () => {
+    let nodeReady = false;
+    const harness = makeHarness({
+      locateNpm: async () =>
+        nodeReady
+          ? {
+              npm: "/home/unowork/.uno/node/bin/npm",
+              binDir: "/home/unowork/.uno/node/bin",
+              globalWritable: true,
+              managed: true,
+            }
+          : null,
+      installManagedNode: async (log) => {
+        log("Node.js v24.22.3 is ready\n");
+        nodeReady = true;
+      },
+    });
+    const { jobId: id } = harness.runner.installStart({ driver: ProviderDriverKind.make("grok") });
+    await tick(12);
+    const process = harness.latest();
+    expect(process.input.command).toBe("/home/unowork/.uno/node/bin/npm");
+    expect(process.input.env.npm_config_allow_scripts).toBe("@xai-official/grok");
+    process.input.onExit({ code: 0, signal: null });
+    await harness.runner.drain();
+    const status = harness.runner.installStatus({ jobId: id });
+    expect(status.state).toBe("succeeded");
+    expect(status.log).toContain("Node.js v24.22.3 is ready");
+    expect(status.help).toBeUndefined();
+  });
+
+  it("ends with a card to fix it by hand when Node.js cannot be brought (T64)", async () => {
+    const harness = makeHarness({
+      platform: "darwin",
+      locateNpm: async () => null,
+      installManagedNode: async () => {
+        throw new ManagedNodeError("Could not reach nodejs.org (fetch failed).", "download");
+      },
+      brewAvailable: async () => true,
+    });
+    const { jobId: id } = harness.runner.installStart({
+      driver: ProviderDriverKind.make("gemini"),
+    });
+    await harness.runner.drain();
+    expect(harness.processes).toHaveLength(0);
+    const status = harness.runner.installStatus({ jobId: id });
+    expect(status.state).toBe("failed");
+    expect(status.error).toBe("Gemini CLI needs Node.js, and this Mac doesn't have it yet.");
+    expect(status.error).not.toContain("PATH");
+    expect(status.help?.command).toBe("brew install gemini-cli");
+    expect(status.help?.detail).toContain("could not reach nodejs.org");
+    expect(status.help?.docsUrl).toContain("geminicli.com");
+    expect(status.log).toContain("Could not reach nodejs.org");
+  });
+
+  it("without a way to bring Node.js, says what to install", async () => {
+    const harness = makeHarness({ platform: "win32", locateNpm: async () => null });
+    const { jobId: id } = harness.runner.installStart({ driver: ProviderDriverKind.make("codex") });
+    await harness.runner.drain();
+    const status = harness.runner.installStatus({ jobId: id });
+    expect(status.state).toBe("failed");
+    expect(status.help?.command).toBe("npm install -g @openai/codex");
+    expect(status.help?.nodeUrl).toBe("https://nodejs.org/en/download");
   });
 
   it("rejects a second install for the same driver while one runs", async () => {

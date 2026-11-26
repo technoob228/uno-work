@@ -43,6 +43,7 @@ export type YourTurnInput = ThreadOwnerInput &
       | "source"
       | "childWork"
       | "unreadAnswerAt"
+      | "backgroundWork"
     >
   >;
 
@@ -73,6 +74,10 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   }
   // An approval or a question has its own, louder status.
   if (threadNeedsUser(thread)) return false;
+  // Work it left running in the background (T71): the answer that says "I'll
+  // tell you when it's done" isn't the end of it. Ready once the work ended
+  // and the agent's follow-up turn did; a call into the chat still counts.
+  if (thread.backgroundWork != null && thread.backgroundWork.count > 0 && !calledIn) return false;
   if (answerWaiting) return !isThreadSnoozed(thread, now);
   const session = thread.session;
   if (

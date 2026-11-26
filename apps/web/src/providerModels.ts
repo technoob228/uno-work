@@ -151,6 +151,7 @@ const DEFAULT_THREAD_DRIVER_PREFERENCE: ReadonlyArray<string> = [
   "uno",
   "codex",
   "claudeAgent",
+  "antigravity",
   "gemini",
   "grok",
   "opencode",

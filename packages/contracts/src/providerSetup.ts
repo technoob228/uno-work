@@ -31,10 +31,17 @@ export const INSTALLABLE_PROVIDER_DRIVERS = [
   "cursor",
   "gemini",
   "grok",
+  "antigravity",
 ] as const;
 
 /** Drivers that support the in-app sign-in flow. */
-export const ProviderAuthDriver = Schema.Literals(["codex", "claudeAgent", "gemini", "grok"]);
+export const ProviderAuthDriver = Schema.Literals([
+  "codex",
+  "claudeAgent",
+  "gemini",
+  "grok",
+  "antigravity",
+]);
 export type ProviderAuthDriver = typeof ProviderAuthDriver.Type;
 
 export const ProviderAuthMethod = Schema.Literals(["apiKey", "oauth"]);
@@ -75,6 +82,27 @@ export const ProviderInstallStatusInput = Schema.Struct({
 });
 export type ProviderInstallStatusInput = typeof ProviderInstallStatusInput.Type;
 
+/**
+ * What the person can do themselves when Install could not finish here (no
+ * Node.js and none could be fetched): a plain cause, a command for this
+ * machine to copy, and the vendor's install page.
+ */
+export const ProviderInstallHelp = Schema.Struct({
+  /** One plain sentence: what is missing. */
+  title: Schema.String,
+  /** Why the automatic way did not work, when it was tried. */
+  detail: Schema.optional(Schema.String),
+  /** Command to paste into Terminal. */
+  command: Schema.optional(Schema.String),
+  /** What to do with that command. */
+  commandNote: Schema.optional(Schema.String),
+  /** Node.js download page, when Node has to come first. */
+  nodeUrl: Schema.optional(Schema.String),
+  docsUrl: Schema.optional(Schema.String),
+  docsLabel: Schema.optional(Schema.String),
+});
+export type ProviderInstallHelp = typeof ProviderInstallHelp.Type;
+
 export const ProviderInstallJobStatus = Schema.Struct({
   jobId: ProviderSetupJobId,
   driver: ProviderDriverKind,
@@ -85,6 +113,8 @@ export const ProviderInstallJobStatus = Schema.Struct({
   command: Schema.String,
   /** Short human-readable reason when `state === "failed"`. */
   error: Schema.optional(Schema.String),
+  /** Set on a failure the person can fix by hand (see ProviderInstallHelp). */
+  help: Schema.optional(ProviderInstallHelp),
 });
 export type ProviderInstallJobStatus = typeof ProviderInstallJobStatus.Type;
 

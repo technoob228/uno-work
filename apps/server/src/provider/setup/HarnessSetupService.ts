@@ -36,10 +36,12 @@
  * @module provider/setup/HarnessSetupService
  */
 import * as NodeOS from "node:os";
-import { access, constants as fsConstants } from "node:fs/promises";
+import { access, constants as fsConstants, rm } from "node:fs/promises";
 import { spawn as nodeSpawn } from "node:child_process";
+import * as nodePath from "node:path";
 
 import {
+  AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   defaultInstanceIdForDriver,
@@ -61,6 +63,7 @@ import {
   type ProviderAuthStatusInput,
   type ProviderAuthSubmitCodeInput,
   ProviderDriverKind,
+  type ProviderInstallHelp,
   type ProviderInstallJobStatus,
   type ProviderInstallStartInput,
   type ProviderInstallStartResult,
@@ -88,7 +91,21 @@ import {
 } from "../providerAccounts.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import { isInstallableDriver, resolveInstallPlan } from "./harnessInstallCommands.ts";
+import {
+  isInstallableDriver,
+  isNpmInstalledDriver,
+  resolveInstallPlan,
+} from "./harnessInstallCommands.ts";
+import {
+  installManagedNode,
+  locateNpm,
+  ManagedNodeError,
+  managedNodeDownload,
+  npmMissingHelp,
+  withDirFirstOnPath,
+  withManagedNodeOnPath,
+  type NpmRuntime,
+} from "./npmRuntime.ts";
 import { SetupJobStore, type SetupJobRecord } from "./harnessJobs.ts";
 import {
   type HarnessProcessHandle,
@@ -109,6 +126,21 @@ import {
   writeGeminiSelectedAuthType,
 } from "../acp/GeminiAcpSupport.ts";
 import { GROK_API_KEY_ENV, GROK_PROCESS_ENV, probeGrokAuth } from "../acp/GrokAcpSupport.ts";
+import {
+  ANTIGRAVITY_API_KEY_ENV,
+  ANTIGRAVITY_LOGIN_ARGS,
+  type AntigravityAuthState,
+  antigravityLoginResponse,
+  antigravityProcessEnvironment,
+  antigravityTokenFile,
+  findAntigravityAuthorizationUrl,
+  probeAntigravityAuth,
+} from "../acp/AntigravityAcpSupport.ts";
+import {
+  defaultAntigravityInstallDeps,
+  installAntigravityCli,
+  resolveAntigravityExecutable,
+} from "../AntigravityInstallation.ts";
 
 export const AUTH_JOB_TIMEOUT_MS = 10 * 60_000;
 /** How often a waiting browser sign-in checks whether the harness got signed in another way. */
@@ -174,7 +206,15 @@ export interface HarnessSetupRunnerDeps {
   readonly platform: NodeJS.Platform;
   readonly homeDir: string;
   readonly baseEnv: NodeJS.ProcessEnv;
-  readonly probeNpmGlobalWritable: () => Promise<boolean>;
+  /** A working npm on this machine (PATH, then the usual Node folders, then ~/.uno/node). */
+  readonly locateNpm: () => Promise<NpmRuntime | null>;
+  /**
+   * Brings Node.js into ~/.uno/node when the machine has none. Absent where
+   * Uno Work brings no Node (Windows): the card tells what to install.
+   */
+  readonly installManagedNode?: (log: (line: string) => void) => Promise<void>;
+  /** Homebrew is there (the card then offers a brew command). */
+  readonly brewAvailable?: () => Promise<boolean>;
   readonly probeUvAvailable: () => Promise<boolean>;
   /** Binary + environment the daemon itself uses to run that driver's CLI (or that instance's). */
   readonly resolveCliEnvironment: (
@@ -186,6 +226,8 @@ export interface HarnessSetupRunnerDeps {
   readonly gemini?: GeminiSignInStore;
   /** Grok CLI's sign-in and stored key; absent: Grok sign-in is refused. */
   readonly grok?: GrokSignInStore;
+  /** Antigravity's managed install and sign-in; absent: both are refused. */
+  readonly antigravity?: AntigravitySetupStore;
   /** Drops ANTHROPIC_API_KEY from the default Claude instance; true if one was there. */
   readonly removeClaudeApiKey: () => Promise<boolean>;
   readonly refreshProvider: (
@@ -240,11 +282,30 @@ export interface GrokSignInStore {
   readonly removeApiKey: () => Promise<boolean>;
 }
 
+/**
+ * Google Antigravity (`agy`): Uno Work installs Google's CLI itself (no npm),
+ * signs in with `agy acp --login` (a Google link; the page it lands on shows
+ * a code to paste back) into the sign-in file, or a Gemini API key.
+ */
+export interface AntigravitySetupStore {
+  /** Downloads, verifies and activates Google's current CLI; logs progress. */
+  readonly install: (log: (line: string) => void) => Promise<{ readonly version: string }>;
+  /** The sign-in a chat would use (API key, file or this computer's keyring). */
+  readonly auth: () => Promise<AntigravityAuthState>;
+  /** ANTIGRAVITY_GEMINI_API_KEY into the Antigravity instance's environment. */
+  readonly storeApiKey: (apiKey: string) => Promise<void>;
+  /** Drops it; true if one was there. */
+  readonly removeApiKey: () => Promise<boolean>;
+  /** Deletes the sign-in file Uno Work's sign-in wrote; true if there was one. */
+  readonly clearFileSignIn: () => Promise<boolean>;
+}
+
 /** Device sign-in of Grok CLI 1.0.92 (prints the link and the code, polls xAI). */
 export const GROK_LOGIN_ARGS: ReadonlyArray<string> = ["login", "--device-auth"];
 
 interface InstallExtra {
   readonly command: string;
+  readonly help?: ProviderInstallHelp;
 }
 
 interface AuthExtra {
@@ -381,21 +442,49 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
 
   const runInstall = async (job: SetupJobRecord<InstallExtra>) => {
     const driver = job.driver as ProviderDriverKind;
-    const needsNpm =
-      driver === "codex" ||
-      driver === "claudeAgent" ||
-      driver === "gemini" ||
-      driver === "grok" ||
-      driver === "opencode";
-    const [npmGlobalWritable, uvAvailable] = await Promise.all([
-      needsNpm ? deps.probeNpmGlobalWritable().catch(() => false) : Promise.resolve(true),
+    const needsNpm = isNpmInstalledDriver(driver);
+    const [located, uvAvailable] = await Promise.all([
+      needsNpm ? deps.locateNpm().catch(() => null) : Promise.resolve(null),
       driver === "hermes" ? deps.probeUvAvailable().catch(() => false) : Promise.resolve(true),
     ]);
+    let npm = located;
+    if (needsNpm && !npm) {
+      // No Node.js here (T64): bring Uno Work's own, or say what to do by hand.
+      installs.markRunning(job.jobId);
+      let managedError: ManagedNodeError | undefined;
+      if (deps.installManagedNode) {
+        installs.updateExtra(job.jobId, { command: "Get Node.js for Uno Work" });
+        try {
+          await deps.installManagedNode((line) => installs.appendLog(job.jobId, line));
+          npm = await deps.locateNpm().catch(() => null);
+        } catch (error) {
+          managedError =
+            error instanceof ManagedNodeError
+              ? error
+              : new ManagedNodeError(describeError(error), "unpack");
+          installs.appendLog(job.jobId, `${managedError.message}\n`);
+        }
+      }
+      if (!npm) {
+        const help = npmMissingHelp({
+          driver,
+          platform: deps.platform,
+          brewAvailable: await (deps.brewAvailable?.() ?? Promise.resolve(false)).catch(
+            () => false,
+          ),
+          ...(managedError ? { managedNodeError: managedError } : {}),
+        });
+        installs.updateExtra(job.jobId, { help });
+        installs.finish(job.jobId, { state: "failed", error: help.title });
+        return;
+      }
+    }
     const plan = resolveInstallPlan(driver, {
       platform: deps.platform,
       homeDir: deps.homeDir,
-      npmGlobalWritable,
+      npmGlobalWritable: npm?.globalWritable ?? true,
       uvAvailable,
+      ...(npm ? { npmBin: npm.npm } : {}),
     });
     if (plan.kind === "unsupported") {
       installs.finish(job.jobId, { state: "failed", error: plan.reason });
@@ -410,7 +499,12 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       jobId: job.jobId,
       command: plan.command,
       args: plan.args,
-      env: { ...withUserLocalBinOnPath(deps.baseEnv, deps.homeDir), ...plan.env },
+      env: {
+        ...(npm?.binDir
+          ? withDirFirstOnPath(withUserLocalBinOnPath(deps.baseEnv, deps.homeDir), npm.binDir)
+          : withUserLocalBinOnPath(deps.baseEnv, deps.homeDir)),
+        ...plan.env,
+      },
       timeoutMs: installTimeoutMs,
     });
 
@@ -425,6 +519,26 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       error:
         result.reason ?? `Installer exited with code ${result.code}.${summarizeTail(current?.log)}`,
     });
+  };
+
+  /** Google's CLI straight from Google's release manifest: no npm, no sudo, no shell. */
+  const runAntigravityInstall = async (job: SetupJobRecord<InstallExtra>) => {
+    const store = deps.antigravity;
+    if (!store) {
+      installs.finish(job.jobId, {
+        state: "failed",
+        error: "Antigravity can't be installed on this computer.",
+      });
+      return;
+    }
+    installs.updateExtra(job.jobId, { command: "Antigravity CLI from Google" });
+    installs.markRunning(job.jobId);
+    const { version } = await store.install((line) => {
+      installs.appendLog(job.jobId, `${line}\n`);
+    });
+    installs.finish(job.jobId, { state: "succeeded" });
+    log("antigravity installed", { version });
+    await refreshAfterSuccess(ProviderDriverKind.make("antigravity"));
   };
 
   const installStart = (input: ProviderInstallStartInput): ProviderInstallStartResult => {
@@ -444,8 +558,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     if (!started.ok) {
       throw fail("conflict", `An install for ${input.driver} is already running.`);
     }
+    const run = input.driver === "antigravity" ? runAntigravityInstall : runInstall;
     track(
-      runInstall(started.job).catch((error: unknown) => {
+      run(started.job).catch((error: unknown) => {
         installs.finish(started.job.jobId, { state: "failed", error: describeError(error) });
       }),
     );
@@ -462,6 +577,7 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       log: job.log,
       command: job.extra.command,
       ...(job.error ? { error: job.error } : {}),
+      ...(job.state === "failed" && job.extra.help ? { help: job.extra.help } : {}),
     };
   };
 
@@ -553,6 +669,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     const cli = await (instanceId
       ? deps.resolveCliEnvironment(driver, instanceId)
       : deps.resolveCliEnvironment(driver));
+    // Cancelled (or signed out) while it was still queued: start nothing, or
+    // the login would wait on its stdin until the timeout with no one to answer.
+    if (auths.get(job.jobId)?.state !== "queued") return;
     auths.markRunning(job.jobId);
     auths.appendLog(job.jobId, `$ ${cli.binaryPath} ${input.args.join(" ")}\n`);
     const stopWatching = input.parsePrompt ? await watchForSignInElsewhere(job) : () => {};
@@ -692,8 +811,44 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     await runCliLogin(job, { args: GROK_LOGIN_ARGS, parsePrompt: true });
   };
 
+  const runAntigravityAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
+    const store = deps.antigravity;
+    if (!store) throw new Error("Antigravity sign-in is not available on this computer.");
+    const driver = ProviderDriverKind.make("antigravity");
+    if (job.extra.method === "apiKey") {
+      auths.markRunning(job.jobId);
+      await store.storeApiKey(apiKey ?? "");
+      auths.appendLog(
+        job.jobId,
+        `Stored ${ANTIGRAVITY_API_KEY_ENV} in the Antigravity provider environment on this machine; Antigravity now signs in with it.\n`,
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(driver);
+      return;
+    }
+    const auth = await store.auth();
+    if (auth.status === "authenticated" && auth.type !== "gemini-api-key") {
+      auths.markRunning(job.jobId);
+      auths.appendLog(
+        job.jobId,
+        "Antigravity is already signed in to a Google account on this computer. To use another account, sign out first.\n",
+      );
+      auths.finish(job.jobId, { state: "succeeded" });
+      await refreshAfterSuccess(driver);
+      return;
+    }
+    // `agy acp --login` prints the Google link, reads the code (or the
+    // page's URL) from stdin and exits 0 once the sign-in file is written.
+    await runCliLogin(job, { args: ANTIGRAVITY_LOGIN_ARGS, parsePrompt: true });
+  };
+
   const runAuth = async (job: SetupJobRecord<AuthExtra>, apiKey: string | undefined) => {
     const { driver, method } = job.extra;
+
+    if (driver === "antigravity") {
+      await runAntigravityAuth(job, apiKey);
+      return;
+    }
 
     if (driver === "gemini") {
       await runGeminiAuth(job, apiKey);
@@ -745,6 +900,9 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     }
     if (input.driver === "grok" && input.instanceId) {
       throw fail("invalid", "Grok has one account per computer.");
+    }
+    if (input.driver === "antigravity" && input.instanceId) {
+      throw fail("invalid", "Antigravity has one account per computer.");
     }
     const jobKey = authJobKey(input);
     const waiting = auths.findActive("auth", jobKey);
@@ -799,6 +957,17 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
     }
     const handle = handles.get(job.jobId);
     if (!handle) throw fail("invalid", "This sign-in is not waiting for a code.");
+    if (job.extra.driver === "antigravity") {
+      // Only the code or the page's URL for this very sign-in: anything else
+      // (a second line, another link) would answer a prompt it wasn't meant for.
+      const pending = findAntigravityAuthorizationUrl(job.log);
+      if (!pending || antigravityLoginResponse(pending, code) === undefined) {
+        throw fail(
+          "invalid",
+          "That is not the code from the Antigravity page. Copy the code it shows (or the page's address) and paste it here.",
+        );
+      }
+    }
     handle.write(`${code}\n`);
     auths.appendLog(job.jobId, `${CODE_SUBMITTED_MARK}\n`);
     return toAuthStatus(
@@ -879,6 +1048,32 @@ export function makeHarnessSetupRunner(deps: HarnessSetupRunnerDeps): HarnessSet
       }
       await refreshAfterSuccess(ProviderDriverKind.make(driver));
       return { driver, signedOut: true };
+    }
+    if (driver === "antigravity") {
+      const store = deps.antigravity;
+      if (!store) {
+        return { driver, signedOut: false, error: "Antigravity sign-in is not available." };
+      }
+      try {
+        const removedKey = await store.removeApiKey();
+        const removedFile = await store.clearFileSignIn();
+        await refreshAfterSuccess(ProviderDriverKind.make(driver));
+        const after = await store.auth();
+        if (after.status === "authenticated" && after.type === "google-keyring") {
+          // The keyring sign-in is the Antigravity app's and the terminal's
+          // too: signing it out from here would sign the whole computer out.
+          return {
+            driver,
+            signedOut: removedKey || removedFile,
+            error:
+              "Antigravity stays signed in through the Antigravity app on this computer. Sign out there (or run `agy logout`) to stop it.",
+          };
+        }
+        return { driver, signedOut: true };
+      } catch (error) {
+        log("provider sign-out failed", { driver, error: describeError(error) });
+        return { driver, signedOut: false, error: describeError(error) };
+      }
     }
     if (driver === "grok") {
       const store = deps.grok;
@@ -982,7 +1177,9 @@ function describeError(error: unknown): string {
 
 function describeSpawnError(command: string, error: Error): string {
   const code = (error as NodeJS.ErrnoException).code;
-  if (code === "ENOENT") return `"${command}" was not found on this machine's PATH.`;
+  if (code === "ENOENT") {
+    return `Uno Work could not find "${nodePath.basename(command)}" on this computer.`;
+  }
   return `Could not start "${command}": ${error.message}`;
 }
 
@@ -1033,40 +1230,7 @@ const decodeCodexSettings = Schema.decodeUnknownSync(CodexSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 const decodeGeminiSettings = Schema.decodeUnknownSync(GeminiSettings);
 const decodeGrokSettings = Schema.decodeUnknownSync(GrokSettings);
-
-const isWritableDir = (dir: string): Promise<boolean> =>
-  access(dir, fsConstants.W_OK).then(
-    () => true,
-    () => false,
-  );
-
-/** `npm prefix -g` then a write check on its `lib/node_modules`. */
-const probeNpmGlobalWritable = (env: NodeJS.ProcessEnv): Promise<boolean> =>
-  new Promise((resolve) => {
-    const child = nodeSpawn("npm", ["prefix", "-g"], {
-      env,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-      shell: process.platform === "win32",
-    });
-    let output = "";
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      output += chunk;
-    });
-    child.on("error", () => resolve(false));
-    child.on("close", (code) => {
-      const prefix = output.trim();
-      if (code !== 0 || prefix.length === 0) {
-        resolve(false);
-        return;
-      }
-      const modulesDir = process.platform === "win32" ? prefix : `${prefix}/lib/node_modules`;
-      void isWritableDir(modulesDir).then((writable) =>
-        writable ? resolve(true) : isWritableDir(prefix).then(resolve),
-      );
-    });
-  });
+const decodeAntigravitySettings = Schema.decodeUnknownSync(AntigravitySettings);
 
 const probeCommandAvailable = (command: string, env: NodeJS.ProcessEnv): Promise<boolean> =>
   new Promise((resolve) => {
@@ -1090,7 +1254,10 @@ export const HarnessSetupLive = Layer.effect(
     const runPromise = Effect.runPromiseWith(runtimeContext);
     const runFork = Effect.runForkWith(runtimeContext);
     const homeDir = NodeOS.homedir();
-    const baseEnv = withUserLocalBinOnPath(process.env, homeDir);
+    const baseEnv = withManagedNodeOnPath(withUserLocalBinOnPath(process.env, homeDir), homeDir);
+    // Two agents installed at once share one Node.js download.
+    let managedNodeInstall: Promise<void> | null = null;
+    const managedNodeAvailable = managedNodeDownload(process.platform, process.arch) !== null;
 
     const resolveCliEnvironment = (driver: ProviderAuthDriver, instanceId?: ProviderInstanceId) =>
       Effect.gen(function* () {
@@ -1122,6 +1289,24 @@ export const HarnessSetupLive = Layer.effect(
             env: { ...instanceEnv, ...GEMINI_PROCESS_ENV },
           } satisfies CliEnvironment;
         }
+        if (driver === "antigravity") {
+          const config = decodeAntigravitySettings(instance?.config ?? {});
+          const executable = yield* Effect.promise(() =>
+            resolveAntigravityExecutable({ binaryPath: config.binaryPath, env: instanceEnv }),
+          );
+          if (!executable.ok) {
+            return yield* fail(
+              "invalid",
+              "Install Antigravity first (Settings → AI → Antigravity).",
+            );
+          }
+          // The sign-in goes to the file (no keyring prompt, no browser on
+          // this computer): the link is opened in the person's own browser.
+          const env = antigravityProcessEnvironment(instanceEnv, { store: "file" });
+          delete env.DISPLAY;
+          delete env.WAYLAND_DISPLAY;
+          return { binaryPath: executable.path, env } satisfies CliEnvironment;
+        }
         if (driver === "grok") {
           const config = decodeGrokSettings(instance?.config ?? {});
           return {
@@ -1135,7 +1320,11 @@ export const HarnessSetupLive = Layer.effect(
       }).pipe(Effect.provideService(Path.Path, path));
 
     /** A key into the default instance's environment, stored as sensitive. */
-    const storeApiKey = (driver: "claudeAgent" | "gemini" | "grok", name: string, apiKey: string) =>
+    const storeApiKey = (
+      driver: "claudeAgent" | "gemini" | "grok" | "antigravity",
+      name: string,
+      apiKey: string,
+    ) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
@@ -1160,7 +1349,10 @@ export const HarnessSetupLive = Layer.effect(
         });
       });
 
-    const removeApiKey = (driver: "claudeAgent" | "gemini" | "grok", name: string) =>
+    const removeApiKey = (
+      driver: "claudeAgent" | "gemini" | "grok" | "antigravity",
+      name: string,
+    ) =>
       Effect.gen(function* () {
         const settings = yield* serverSettings.getSettings;
         const instanceId = defaultInstanceIdForDriver(ProviderDriverKind.make(driver));
@@ -1210,12 +1402,69 @@ export const HarnessSetupLive = Layer.effect(
       removeApiKey: () => runPromise(removeApiKey("grok", GROK_API_KEY_ENV)),
     };
 
+    // Antigravity's sign-in is the daemon's own Antigravity's (AntigravityAcpSupport).
+    const antigravityEnv = () =>
+      runPromise(
+        serverSettings.getSettings.pipe(
+          Effect.map((settings) => {
+            const instance =
+              deriveProviderInstanceConfigMap(settings)[
+                defaultInstanceIdForDriver(ProviderDriverKind.make("antigravity"))
+              ];
+            return mergeProviderInstanceEnvironment(instance?.environment, baseEnv);
+          }),
+        ),
+      );
+    const antigravity: AntigravitySetupStore = {
+      install: async (logLine) =>
+        installAntigravityCli(await defaultAntigravityInstallDeps(logLine, baseEnv)),
+      auth: () => antigravityEnv().then((env) => probeAntigravityAuth(env)),
+      storeApiKey: (apiKey) =>
+        runPromise(storeApiKey("antigravity", ANTIGRAVITY_API_KEY_ENV, apiKey)),
+      removeApiKey: () => runPromise(removeApiKey("antigravity", ANTIGRAVITY_API_KEY_ENV)),
+      clearFileSignIn: () =>
+        antigravityEnv().then(async (env) => {
+          const file = antigravityTokenFile(env);
+          const existed = await access(file).then(
+            () => true,
+            () => false,
+          );
+          if (existed) await rm(file, { force: true });
+          return existed;
+        }),
+    };
+
     const runner = makeHarnessSetupRunner({
       spawn: spawnHarnessProcess,
       platform: process.platform,
       homeDir,
       baseEnv,
-      probeNpmGlobalWritable: () => probeNpmGlobalWritable(baseEnv),
+      locateNpm: () => locateNpm({ env: baseEnv, homeDir, platform: process.platform }),
+      ...(managedNodeAvailable
+        ? {
+            installManagedNode: (log: (line: string) => void) => {
+              managedNodeInstall ??= installManagedNode(
+                { homeDir, platform: process.platform, arch: process.arch },
+                log,
+              ).finally(() => {
+                managedNodeInstall = null;
+              });
+              return managedNodeInstall;
+            },
+          }
+        : {}),
+      brewAvailable: async () => {
+        for (const brew of ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]) {
+          if (
+            await access(brew, fsConstants.X_OK).then(
+              () => true,
+              () => false,
+            )
+          )
+            return true;
+        }
+        return false;
+      },
       probeUvAvailable: () => probeCommandAvailable("uv", baseEnv),
       resolveCliEnvironment: (driver, instanceId) =>
         runPromise(resolveCliEnvironment(driver, instanceId)),
@@ -1224,6 +1473,7 @@ export const HarnessSetupLive = Layer.effect(
       removeClaudeApiKey: () => runPromise(removeApiKey("claudeAgent", ANTHROPIC_API_KEY_ENV)),
       gemini,
       grok,
+      antigravity,
       refreshProvider: (driver, instanceId) =>
         runPromise(
           instanceId
@@ -1266,6 +1516,9 @@ export const HarnessSetupLive = Layer.effect(
         }
         if (input.driver === "grok") {
           return yield* fail("invalid", "Grok has one account per computer.");
+        }
+        if (input.driver === "antigravity") {
+          return yield* fail("invalid", "Antigravity has one account per computer.");
         }
         const instanceId = newAccountInstanceId(input.driver);
         const folder = accountFolder(homeDir, instanceId);

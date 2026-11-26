@@ -70,7 +70,13 @@ import {
   openExternal,
   useAccountWho,
 } from "./SidebarDAccountButton";
-import { accountMenuLines, isHomePath, needsYouPlace, placeNamesThatFit } from "./sidebarD.logic";
+import {
+  accountMenuLines,
+  inboxLabel,
+  isHomePath,
+  needsYouPlace,
+  placeNamesThatFit,
+} from "./sidebarD.logic";
 import { sidebarDPanel } from "./sidebarDState";
 import { useOpenFilesInPanel } from "../files/filesPanelTab";
 import { useSidebarEnvironmentLabelResolver } from "./useSidebarMachineIdentities";
@@ -570,19 +576,20 @@ function NeedsYouPopover(props: {
 }
 
 /**
- * Home, Files, Apps & sites, Automations (with the assistants, 28.10) — and
- * Needs you only when something waits for the person — as icons in one row,
- * the name on hover; Dev mode's switch at the end.
+ * Home, Files, Apps & sites, Automations (with the assistants, 28.10) and the
+ * Inbox as icons in one row, the name on hover; Dev mode's switch at the end.
+ * The Inbox is always there (T65, Misha 24.11 — on 28.10 it showed only when
+ * something waited, and people didn't know where it was); the badge counts
+ * what waits for the person, none when nothing does.
  */
 const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const open = useOpenPlace();
   const goHome = useGoHome();
-  const { shown } = useNeedsYouBadge();
   const automations = useAutomationsShown();
   const devMode = useDevMode();
   const row = useRef<HTMLElement>(null);
-  const nameFits = usePlaceNamesFit(row, `${automations} ${shown} ${devMode}`);
+  const nameFits = usePlaceNamesFit(row, `${automations} ${devMode}`);
   return (
     <nav
       ref={row}
@@ -643,32 +650,30 @@ const SidebarDPlaceIcons = memo(function SidebarDPlaceIcons() {
           nameFits={nameFits("sidebar-nav-pull-requests")}
         />
       ) : null}
-      {shown ? (
-        <NeedsYouPopover
-          side="bottom"
-          trigger={(badge) => (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <PopoverTrigger
-                    aria-label="Needs you"
-                    className={cn(PLACE_ICON_CLASS, PLACE_ICON_IDLE)}
-                    data-testid="sidebar-needs-you"
-                  />
-                }
-              >
-                <InboxIcon />
-                <InboxCountBadge
-                  unread={badge.needsYou}
-                  needsYou={badge.needsYou}
-                  className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+      <NeedsYouPopover
+        side="bottom"
+        trigger={(badge) => (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PopoverTrigger
+                  aria-label={inboxLabel(badge.needsYou)}
+                  className={cn(PLACE_ICON_CLASS, PLACE_ICON_IDLE)}
+                  data-testid="sidebar-needs-you"
                 />
-              </TooltipTrigger>
-              <TooltipPopup side="bottom">Needs you</TooltipPopup>
-            </Tooltip>
-          )}
-        />
-      ) : null}
+              }
+            >
+              <InboxIcon />
+              <InboxCountBadge
+                unread={badge.needsYou}
+                needsYou={badge.needsYou}
+                className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+              />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">{inboxLabel(badge.needsYou)}</TooltipPopup>
+          </Tooltip>
+        )}
+      />
       <DevModePlace nameFits={nameFits("sidebar-nav-dev-mode")} />
     </nav>
   );
@@ -800,7 +805,6 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
   const openPalette = useCommandPaletteStore((store) => store.setOpen);
   const open = useOpenPlace();
   const { setOpen } = useSidebar();
-  const { shown } = useNeedsYouBadge();
   const devMode = useDevMode();
   const automations = useAutomationsShown();
   const hover = {
@@ -877,25 +881,24 @@ export const SidebarDRail = memo(function SidebarDRail(props: { isElectron: bool
             <GitPullRequestIcon />
           </RailButton>
         ) : null}
-        {shown ? (
-          <NeedsYouPopover
-            side="right"
-            trigger={(badge) => (
-              <PopoverTrigger
-                aria-label="Needs you"
-                data-testid="sidebar-rail-needs-you"
-                className="relative grid size-9 cursor-pointer place-items-center rounded-lg text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-[18px]"
-              >
-                <InboxIcon />
-                <InboxCountBadge
-                  unread={badge.needsYou}
-                  needsYou={badge.needsYou}
-                  className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
-                />
-              </PopoverTrigger>
-            )}
-          />
-        ) : null}
+        {/* The Inbox is always on the rail too (T65), like the row it folds from. */}
+        <NeedsYouPopover
+          side="right"
+          trigger={(badge) => (
+            <PopoverTrigger
+              aria-label={inboxLabel(badge.needsYou)}
+              data-testid="sidebar-rail-needs-you"
+              className="relative grid size-9 cursor-pointer place-items-center rounded-lg text-muted-foreground outline-hidden transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:bg-sidebar-row-hover [&_svg]:size-[18px]"
+            >
+              <InboxIcon />
+              <InboxCountBadge
+                unread={badge.needsYou}
+                needsYou={badge.needsYou}
+                className="absolute -top-0.5 -right-0.5 min-w-4 px-0.5 text-[9px] leading-4"
+              />
+            </PopoverTrigger>
+          )}
+        />
         <span aria-hidden className="my-1 h-px w-6 bg-border" />
         <RailButton label="Uno and its chats" testId="sidebar-rail-uno" {...hover}>
           <UnoFace className="size-6" online />

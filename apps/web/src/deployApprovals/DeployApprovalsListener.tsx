@@ -2,26 +2,23 @@
  * Keeps the deploy-window requests fresh (deployApprovalsStore.ts) and pops
  * a system notification when a new one starts waiting. Mounted once, next to
  * the Inbox listener; separate from it — these come from the console, not
- * from a computer's daemon.
+ * from a computer's daemon. A notification click opens that request's card
+ * at once, over whatever is on screen (DeployRequestDialog, T68).
  */
 import { useEffect } from "react";
 
+import { DeployRequestDialog } from "../components/inbox/DeployRequestDialog";
 import { useFeatureFlag } from "../hooks/useFeatureFlags";
 
-import { useNavStore } from "../navigation/navStore";
 import { newlyWaiting } from "./deployApprovals.logic";
 import {
+  focusDeployRequest,
   nextPollDelay,
   refreshDeployApprovals,
   setDeployApprovalsEnabled,
   useDeployApprovalsStore,
 } from "./deployApprovalsStore";
 import { showSystemNotification } from "../inbox/systemNotifications";
-
-/** A notification click: the sidebar's Inbox, where the card is. */
-function openInbox(): void {
-  useNavStore.getState().setSidebarMode("inbox");
-}
 
 export function DeployApprovalsListener() {
   // Labs → "Deploy windows in the Inbox": off by default (Misha 13.11).
@@ -46,10 +43,10 @@ export function DeployApprovalsListener() {
           showSystemNotification({
             tag: `ops-gate:${request.id}`,
             kind: "agent.approval",
-            title: `${request.machine || "Машина"} просит окно в прод`,
+            title: `${request.kind === "critical" ? "Критичное: " : ""}${request.machine || "Машина"} просит окно в прод`,
             body: `${request.summary} · ${request.minutes} мин`,
             viewingItsChat: false,
-            onClick: openInbox,
+            onClick: () => focusDeployRequest(request),
           });
         }
       }
@@ -95,5 +92,5 @@ export function DeployApprovalsListener() {
     };
   }, [enabled]);
 
-  return null;
+  return enabled ? <DeployRequestDialog /> : null;
 }

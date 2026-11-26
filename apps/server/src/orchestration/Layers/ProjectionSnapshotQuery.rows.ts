@@ -14,6 +14,7 @@ import {
   ProjectComputer,
   ProjectId,
   ProjectScript,
+  ThreadBackgroundWork,
   ThreadComputerWait,
   ThreadHandler,
   ThreadId,
@@ -65,6 +66,7 @@ export const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     ),
     source: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadSource))),
     computerWait: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadComputerWait))),
+    backgroundWork: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadBackgroundWork))),
     handler: Schema.optional(Schema.NullOr(Schema.fromJsonString(ThreadHandler))),
   }),
 );

@@ -136,7 +136,14 @@ import {
   isGuestPermissionAllowedByDefault,
   isTrustedAppUrl,
   resolveTrustedOrigins,
+  toHttpUrl,
 } from "./navigationGuard.ts";
+import {
+  createUserActivationTracker,
+  decideGuestWindowOpen,
+  popupWindowOptions,
+  withoutFedCm,
+} from "./browserPopups.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 
 syncShellEnvironment();
@@ -2900,6 +2907,7 @@ function createWindow(): BrowserWindow {
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
+    webPreferences.disableBlinkFeatures = withoutFedCm(webPreferences.disableBlinkFeatures);
     if (params.src && !isAllowedWebviewUrl(params.src)) {
       console.warn("[desktop] refused to attach webview", { src: params.src });
       event.preventDefault();
@@ -2913,13 +2921,6 @@ function createWindow(): BrowserWindow {
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
     guardGuestSessionPermissions(guestContents.session);
     getPageToolsMain().didAttachWebview(guestContents);
-    guestContents.setWindowOpenHandler(({ url }) => {
-      const safeUrl = getSafeExternalUrl(url);
-      if (safeUrl && !window.isDestroyed()) {
-        window.webContents.send(BROWSER_OPEN_URL_CHANNEL, safeUrl);
-      }
-      return { action: "deny" };
-    });
     // Guests may only load web pages: no file:, chrome:, devtools:,
     // javascript:, data: or custom schemes, in any frame, even via redirect.
     // Exception: the built-in PDF viewer sub-frame (Electron 41+), never as
@@ -2940,6 +2941,63 @@ function createWindow(): BrowserWindow {
       if (!isAllowedWebviewUrl(url)) {
         event.preventDefault();
       }
+    });
+    // Sign-in popups ("Continue with Google") open as a child window in the
+    // same session so window.opener survives; other new windows become panel
+    // tabs. Nothing opens without a click or key press (browserPopups.ts).
+    // Clicks inside cross-site frames (the Google button is one) reach only
+    // before-mouse-event; keys reach before-input-event; input-event also
+    // sees the agent's sendInputEvent clicks.
+    const activation = createUserActivationTracker();
+    guestContents.on("input-event", (_event, input) => activation.onInput(input.type));
+    guestContents.on("before-mouse-event", (_event, mouse) => activation.onInput(mouse.type));
+    guestContents.on("before-input-event", (_event, input) => activation.onInput(input.type));
+    guestContents.setWindowOpenHandler((details) => {
+      const decision = decideGuestWindowOpen(
+        {
+          url: details.url,
+          disposition: details.disposition,
+          hasPostBody: details.postBody !== undefined,
+        },
+        activation.isActive(),
+      );
+      if (decision.kind === "popup") {
+        return {
+          action: "allow",
+          overrideBrowserWindowOptions: popupWindowOptions(window),
+        };
+      }
+      if (decision.kind === "tab" && !window.isDestroyed()) {
+        window.webContents.send(BROWSER_OPEN_URL_CHANNEL, decision.url);
+      } else if (decision.kind === "deny") {
+        console.warn("[desktop] blocked webview popup", {
+          url: details.url,
+          disposition: details.disposition,
+        });
+      }
+      return { action: "deny" };
+    });
+    const popups = new Set<BrowserWindow>();
+    guestContents.on("did-create-window", (popup) => {
+      popups.add(popup);
+      popup.once("closed", () => popups.delete(popup));
+      const popupContents = popup.webContents;
+      // No popups from the popup itself; its links open as panel tabs.
+      popupContents.setWindowOpenHandler(({ url }) => {
+        const safeUrl = toHttpUrl(url);
+        if (safeUrl && !window.isDestroyed()) {
+          window.webContents.send(BROWSER_OPEN_URL_CHANNEL, safeUrl);
+        }
+        return { action: "deny" };
+      });
+      popupContents.on("will-frame-navigate", (details) =>
+        guardGuestNavigation(details, "navigate"),
+      );
+      popupContents.on("will-redirect", (details) => guardGuestNavigation(details, "redirect"));
+    });
+    // A popup lives as long as the panel page that opened it.
+    guestContents.once("destroyed", () => {
+      for (const popup of popups) if (!popup.isDestroyed()) popup.close();
     });
   });
 

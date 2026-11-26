@@ -105,7 +105,11 @@ describe("sidebar D places", () => {
       (id) => screen.getByTestId(id).element().getBoundingClientRect().top,
     );
     expect(new Set(tops).size).toBe(1);
-    expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
+    // The Inbox is always in the row (T65, Misha 24.11), with no badge when nothing waits.
+    await expect.element(screen.getByTestId("sidebar-needs-you")).toBeVisible();
+    await expect
+      .element(screen.getByTestId("sidebar-needs-you"))
+      .toHaveAttribute("aria-label", "Inbox");
     // No Assistants and no Sites row of their own any more.
     expect(screen.getByText("Assistants").query()).toBeNull();
   });
@@ -119,12 +123,12 @@ describe("sidebar D places", () => {
     expect(goHome).toHaveBeenCalled();
   });
 
-  it('no Needs you for unread news alone (no "Needs you 0")', async () => {
+  it('no badge on the Inbox for unread news alone (no "Needs you 0")', async () => {
     unread = 3;
     needsYou = 0;
     const screen = await mount(<SidebarDPlaces />);
-    await expect.element(screen.getByTestId("sidebar-nav-files")).toBeVisible();
-    expect(screen.getByTestId("sidebar-needs-you").query()).toBeNull();
+    await expect.element(screen.getByTestId("sidebar-needs-you")).toBeVisible();
+    await expect.element(screen.getByTestId("sidebar-needs-you")).toHaveTextContent("");
   });
 
   it("names a place on hover: the name grows out of the icon, the icons to its right move over", async () => {
@@ -195,7 +199,7 @@ describe("sidebar D places", () => {
     const again = await mount(<SidebarDPlaces />);
     await expect
       .element(again.getByTestId("sidebar-needs-you"))
-      .toHaveAttribute("aria-label", "Needs you");
+      .toHaveAttribute("aria-label", "Inbox · 2 waiting for you");
     await expect.element(again.getByTestId("sidebar-needs-you")).toHaveTextContent("2");
   });
 

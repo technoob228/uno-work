@@ -20,6 +20,7 @@ import type {
   ThreadAssistantRole,
   ThreadStartedBy,
   ThreadSource,
+  ThreadBackgroundWork,
   ThreadComputerWait,
   ThreadPendingForYou,
   ProjectComputer,
@@ -173,6 +174,8 @@ export interface Thread {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** Its turn is over but the agent left work running in the background (T71). */
+  backgroundWork?: ThreadBackgroundWork | null | undefined;
   /** "Waiting for you" (T52): what in it still waits for the person. */
   pendingForYou?: ThreadPendingForYou | null | undefined;
 }
@@ -208,6 +211,8 @@ export interface ThreadShell {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** Its turn is over but the agent left work running in the background (T71). */
+  backgroundWork?: ThreadBackgroundWork | null | undefined;
   /** "Waiting for you" (T52): what in it still waits for the person. */
   pendingForYou?: ThreadPendingForYou | null | undefined;
 }
@@ -273,6 +278,8 @@ export interface SidebarThreadSummary {
   source?: ThreadSource | null | undefined;
   /** Its turn waits for the person's own computer (asleep, offline). */
   computerWait?: ThreadComputerWait | null | undefined;
+  /** Its turn is over but the agent left work running in the background (T71). */
+  backgroundWork?: ThreadBackgroundWork | null | undefined;
   /** "Waiting for you" (T52): how many things in it wait for the person. */
   pendingForYouCount?: number | undefined;
   /**

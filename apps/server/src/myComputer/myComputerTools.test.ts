@@ -27,7 +27,7 @@ import {
 } from "./fakeConsole.testkit.ts";
 import { createMyComputerCore, MAX_FILE_BYTES } from "./myComputerCore.ts";
 import { myComputerShape } from "./MyComputerService.ts";
-import { MY_COMPUTER_TOOL_NAMES } from "./myComputerTools.ts";
+import { hiddenMyComputerTools, MY_COMPUTER_TOOL_NAMES } from "./myComputerTools.ts";
 
 let fake: FakeConsole;
 let home: string;
@@ -466,8 +466,30 @@ describe("what the agent reads back", () => {
     expect(await ok("my_computers_list", deps)).toMatchObject({
       enabled: false,
       computers: [],
-      note: expect.stringContaining("No computer is connected"),
+      note: expect.stringContaining("No computer of the person is connected"),
     });
+  });
+
+  it("my_computers_list: with no computer the note says where the person connects one and turns cloud agents on", async () => {
+    const { deps } = makeDeps();
+    fake.listing = { status: 200, body: { enabled: true, computers: [] } };
+    const answer = await ok("my_computers_list", deps);
+    expect(answer).toMatchObject({ enabled: true, computers: [] });
+    expect(answer.note).toContain("Add computer → Your own computer");
+    expect(answer.note).toContain("Settings → Computer → Cloud agents");
+    // T70: a helper linked to another account is the other common reason.
+    expect(answer.note).toContain("another Uno account");
+    expect(answer.note).toContain("Reconnect to my account");
+  });
+
+  it("tools/list: everything with a computer, the list alone without one, nothing with the feature off", () => {
+    expect(hiddenMyComputerTools("all")).toEqual([]);
+    const withoutComputer = hiddenMyComputerTools("list");
+    expect(withoutComputer).not.toContain("my_computers_list");
+    expect(withoutComputer).toEqual(
+      expect.arrayContaining(["my_computer_run", "my_computer_start_chat"]),
+    );
+    expect(new Set(hiddenMyComputerTools("none"))).toEqual(MY_COMPUTER_TOOL_NAMES);
   });
 
   it("without a console the tools say so instead of crashing the turn", async () => {

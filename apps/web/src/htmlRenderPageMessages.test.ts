@@ -46,9 +46,10 @@ beforeEach(() => {
 });
 
 describe("a card's message (show_card)", () => {
-  it("goes the way the person's Enter goes: into Up next, visible, headed by the card", () => {
+  it("goes at once (T71): handed to the chat's sender marked to go now, headed by the card", () => {
     expect(send("  Plus  ", 1_000)).toEqual({ ok: true });
     expect(queued()).toEqual(["[from the card «Which plan?»]\nPlus"]);
+    expect(useQueuedMessageStore.getState().queuesByThreadKey[THREAD]?.[0]?.steer).toBe(true);
     expect(composer).toEqual([]);
     // The card is told what it sent as it sent it: it marks the pick after a reload.
     expect(pageMessagesSent("page-1")).toEqual(["Plus"]);

@@ -1581,11 +1581,9 @@ async function waitForNewThreadShortcutLabel(): Promise<void> {
   showFullSidebar();
   const newThreadButton = page.getByTestId("sidebar-d-new-chat");
   await expect.element(newThreadButton).toBeInTheDocument();
-  await newThreadButton.hover();
-  const shortcutLabel = isMacPlatform(navigator.platform)
-    ? "New chat ⇧⌘O"
-    : "New chat Ctrl+Shift+O";
-  await expect.element(page.getByText(shortcutLabel)).toBeInTheDocument();
+  // T65: the button names the shortcut itself ("New chat ⇧⌘O").
+  const shortcutLabel = isMacPlatform(navigator.platform) ? "⇧⌘O" : "Ctrl+Shift+O";
+  await expect.element(newThreadButton).toHaveTextContent(shortcutLabel);
 }
 
 async function waitForCommandPaletteTrigger(): Promise<void> {
@@ -1882,6 +1880,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("keeps a project without chats in the sidebar", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
+      // The By project view (the default is By status since T65).
+      clientSettings: { sidebarGroupLevels: ["project"] },
       snapshot: createDraftOnlySnapshot(),
     });
 
@@ -4164,6 +4164,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("renames a project from the ⋯ menu on its sidebar row", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
+      // Project rows show in the By project view (the default is By status since T65).
+      clientSettings: { sidebarGroupLevels: ["project"] },
       snapshot: createSnapshotForTargetUser({
         targetMessageId: "msg-user-project-rename-target" as MessageId,
         targetText: "project rename target",

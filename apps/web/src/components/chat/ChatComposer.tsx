@@ -227,13 +227,14 @@ function inferVideoMimeType(file: File): VideoMimeType | null {
 
 type ImageAttachmentSupport = "supported" | "unsupported" | "unknown";
 
-// Claude, Codex, Gemini CLI and Grok always take images; their model lists simply
+// Claude, Codex, Gemini CLI, Grok and Antigravity always take images; their model lists simply
 // carry no vision metadata, so "unknown" would nag on every screenshot.
 const PROVIDERS_WITH_IMAGE_INPUT: ReadonlySet<string> = new Set([
   "claudeAgent",
   "codex",
   "gemini",
   "grok",
+  "antigravity",
 ]);
 
 function deriveImageAttachmentSupport(

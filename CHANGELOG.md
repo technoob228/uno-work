@@ -8,6 +8,20 @@
 
 ---
 
+## v0.0.194 — 2026-11-25
+
+- Above the message box there is one thing at a time: a card that waits for you (Allow, a question, a secret) or one quiet line of chips: "Waiting for you · N", "Tasks · N working / needs you / done", where the chat came from, and whether other agents may write here ("Keep other agents out"). Details open upward on a click. The separate Tasks, Waiting for you and "Agents are talking here…" strips are gone. When agents of other chats talk in your chat, each round folds into one line "Agents talked · N messages · Show"; your messages, the answer to you and what waits for you stay in view.
+- The chat stays calm while the agent writes: scroll up a little and it stops following, so you can read; the bottom, the round "Scroll to end" button or sending a message brings following back. The turn you were reading no longer collapses or disappears when it ends.
+- A message in "Up next" goes out as soon as the agent's turn ends, even if a background task or subagent is still running; "Send now" is rarely needed. A chat with work still running in the background stays in Working with a quiet "In background · 40m" instead of turning Ready, and an answer from a card or form goes out at once.
+- Antigravity, Google's agent for Gemini, is the recommended way to use Gemini: Uno Work finds it if it's already on the computer and signed in, otherwise Install takes one click (Google's official build, checked) and you sign in with Google (a link and a code) or a Gemini API key. Gemini CLI stays as "Gemini CLI (older)".
+- Install for Gemini CLI, Grok, Codex, Claude Code and OpenCode works on a Mac without Node.js: Uno Work finds npm wherever it is (Homebrew, nvm, fnm, Volta, asdf, mise…) or downloads the official Node.js into ~/.uno/node by itself, no admin password. If even that fails, a card shows the one command to run and Check again.
+- The model picker works like T3 Code's: reasoning levels always in a column to the right of the models, a check on the chosen one and "Default" on the default, Context window as a row with its own menu, Standard / Fast at the bottom, model names in full on one line. The picker stays open after a choice; arrows and the first letter move around.
+- Sidebar: pinned chats sit at the top of the chat list under a full-width "New chat ⌘N" button; Pinned keeps links, folders and files, with "+ Link" always visible next to it. Inbox is always in the icon row and on the collapsed sidebar, with a badge only when something waits. Chats are grouped By status unless you chose otherwise.
+- Sign in with Google, Apple or Facebook works in the Uno Work browser: the sign-in window opens as a real popup tied to the site and closes itself when done.
+- A request for a production window opens its card right away from the notification, with Allow and Deny.
+- If this Mac's helper is linked to another Uno account, Settings → Computer and Cloud agents say so, with "Reconnect to my account". A cloud agent with no computer connected can still check and tells you how to connect one.
+- Team: if a session started for a colleague fails on the owner's computer, the colleague's agent hears that it did not finish and why, not "it is done".
+
 ## v0.0.193 — 2026-11-24
 
 - Update in the "A new version of Uno Work is ready" notice updates this computer, and the app if it has an update, instead of opening a list of every machine. Update everything (Settings, or "Update other computers…") lists only the computers in use: this one, the ones online and the ones you used in the last 14 days; the rest fold under "Other computers". Only computers that are online are ticked, every step has a time limit, so a computer that doesn't answer no longer stops the others, the window can be closed while it runs, and each row shows the version the computer itself reports.

@@ -254,3 +254,19 @@ describe("Up next of a chat that isn't on screen (T48)", () => {
     expect(queue()).toEqual([message]);
   });
 });
+
+describe("a card's answer in a chat that isn't on screen (T71)", () => {
+  it("goes at once while the agent works, ahead of what was typed; the typed one still waits", async () => {
+    enqueue("and add a footer");
+    const answer = useQueuedMessageStore
+      .getState()
+      .enqueue(KEY, "[from the card «Ship on Thursday?»]\nYes", { steer: true });
+    await pass();
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({
+      commandId: `queued-turn:${answer.id}`,
+      message: { text: "[from the card «Ship on Thursday?»]\nYes" },
+    });
+    expect(queue().map((message) => message.text)).toEqual(["and add a footer"]);
+  });
+});

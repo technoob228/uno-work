@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatAgeLabel, chatAgeTitle } from "./chatAgeLabel";
+import { backgroundWorkLabel, chatAgeLabel, chatAgeTitle } from "./chatAgeLabel";
 
 // Thursday 29 Oct 2026, 15:00 local time.
 const NOW = new Date(2026, 9, 29, 15, 0).getTime();
@@ -64,5 +64,14 @@ describe("chatAgeTitle", () => {
   it("gives the exact moment for the tooltip, nothing for unknown", () => {
     expect(chatAgeTitle(NOW)).toMatch(/^Last activity /);
     expect(chatAgeTitle(Number.NaN)).toBeUndefined();
+  });
+});
+
+describe("backgroundWorkLabel (T71)", () => {
+  it("says how long the background work has been running", () => {
+    expect(backgroundWorkLabel(NOW - 10_000, NOW)).toBe("In background");
+    expect(backgroundWorkLabel(NOW - 40 * MIN, NOW)).toBe("In background · 40m");
+    expect(backgroundWorkLabel(NOW - 2 * HOUR, NOW)).toBe("In background · 2h");
+    expect(backgroundWorkLabel(Number.NaN, NOW)).toBe("In background");
   });
 });

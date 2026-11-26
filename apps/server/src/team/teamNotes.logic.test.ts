@@ -80,6 +80,22 @@ describe("how this chat's request went", () => {
     expect(note).toContain("<outside_input_q1>\nIt's in api.ts\n</outside_input_q1>");
   });
 
+  it("a session whose chat failed is not reported as done (24.11 live check)", () => {
+    const note = outgoingNote(
+      request({ status: "done", reason: "The chat stopped with an error." }),
+      "n",
+    )!;
+    expect(note).toContain("it did not finish");
+    expect(note).toContain("Why: The chat stopped with an error.");
+    expect(note).not.toContain("it is done.");
+  });
+
+  it("done with an answer stays done", () => {
+    expect(outgoingNote(request({ status: "done", answer: "Added." }), "n")).toContain(
+      "it is done.",
+    );
+  });
+
   it("declined with why", () => {
     expect(outgoingNote(request({ status: "declined", reason: "busy" }), "n")).toContain(
       "they declined it. Why: busy",

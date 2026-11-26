@@ -161,7 +161,7 @@ export function AccountPlanSettings() {
 
 /**
  * The agents a person can use, as rows of Settings → AI. Claude, ChatGPT and
- * Gemini and Grok sign in here (their own account); OpenCode and Cursor are installed
+ * Antigravity, Gemini and Grok sign in here (their own account); OpenCode and Cursor are installed
  * here and take a key or a terminal login. Anything else is a custom harness.
  */
 const AGENTS = [
@@ -178,11 +178,18 @@ const AGENTS = [
     description: "Codex on your ChatGPT Plus or Pro subscription",
   },
   {
-    driver: "gemini",
-    label: "Gemini",
+    driver: "antigravity",
+    label: "Antigravity",
     plans: "a Google account or a Gemini API key",
     description:
-      "Google's Gemini CLI on your Google account (free tier, Google AI Pro or Ultra) or a Gemini API key",
+      "Gemini, the recommended way: Google's Antigravity agent. Uses the Antigravity already signed in on this computer, or your Google account (free tier, Google AI Pro or Ultra), or a Gemini API key",
+  },
+  {
+    driver: "gemini",
+    label: "Gemini CLI",
+    plans: "a Google account or a Gemini API key",
+    description:
+      "Google's older open-source Gemini CLI. Only if you need it in particular: for Gemini, Antigravity above is the main choice",
   },
   {
     driver: "grok",
@@ -330,10 +337,11 @@ export function AiSettings() {
 
       <SettingsSection title="Agents">
         {agents.map(({ agent, entry, row }) => {
-          // Claude, ChatGPT, Gemini and Grok sign in (and out) with the person's own account here.
+          // Claude, ChatGPT, Antigravity, Gemini and Grok sign in (and out) with the person's own account here.
           const authDriver =
             agent.driver === "claudeAgent" ||
             agent.driver === "codex" ||
+            agent.driver === "antigravity" ||
             agent.driver === "gemini" ||
             agent.driver === "grok"
               ? agent.driver

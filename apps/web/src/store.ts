@@ -298,6 +298,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    backgroundWork: thread.backgroundWork ?? null,
     pendingForYou: thread.pendingForYou ?? null,
   };
 }
@@ -335,6 +336,7 @@ function mapThreadShell(
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    backgroundWork: thread.backgroundWork ?? null,
     pendingForYou: thread.pendingForYou ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
@@ -386,6 +388,7 @@ function mapThreadShell(
     autoSettleDisabledAt: thread.autoSettleDisabledAt ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    backgroundWork: thread.backgroundWork ?? null,
     pendingForYouCount: thread.pendingForYou?.items.length ?? 0,
   };
   return {
@@ -421,6 +424,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
+    backgroundWork: thread.backgroundWork ?? null,
     pendingForYou: thread.pendingForYou ?? null,
   };
 }
@@ -531,6 +535,7 @@ function sidebarThreadSummariesEqual(
     JSON.stringify(left.pullRequests ?? []) === JSON.stringify(right.pullRequests ?? []) &&
     threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
     (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null) &&
+    backgroundWorkStamp(left.backgroundWork) === backgroundWorkStamp(right.backgroundWork) &&
     (left.pendingForYouCount ?? 0) === (right.pendingForYouCount ?? 0)
   );
 }
@@ -579,6 +584,7 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
     threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
     (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null) &&
+    backgroundWorkStamp(left.backgroundWork) === backgroundWorkStamp(right.backgroundWork) &&
     pendingForYouStamp(left.pendingForYou) === pendingForYouStamp(right.pendingForYou)
   );
 }
@@ -1334,6 +1340,11 @@ export function syncServerThreadDetail(
   );
 }
 
+/** Background work left running (T71), for equality: null when there is none. */
+function backgroundWorkStamp(work: Thread["backgroundWork"]): string | null {
+  return work ? `${work.count}|${work.since}` : null;
+}
+
 /**
  * Computers lifecycle events (CONTRACT.md §7.6): a project that stands for a
  * folder on the person's own computer, and a turn waiting for that computer.
@@ -1354,6 +1365,18 @@ function applyComputersLifecycleEvent(
       (thread.computerWait?.since ?? null) === (payload.computerWait?.since ?? null)
         ? thread
         : { ...thread, computerWait: payload.computerWait ?? null },
+    );
+  }
+  if (event.type === "thread.background-work-set") {
+    const payload = event.payload as {
+      threadId: ThreadId;
+      backgroundWork: Thread["backgroundWork"];
+    };
+    // Not `updatedAt` either: work left running doesn't move the chat (T71).
+    return updateThreadState(state, payload.threadId, (thread) =>
+      backgroundWorkStamp(thread.backgroundWork) === backgroundWorkStamp(payload.backgroundWork)
+        ? thread
+        : { ...thread, backgroundWork: payload.backgroundWork ?? null },
     );
   }
   if (event.type === "project.computer-set") {

@@ -16,7 +16,13 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { onProvidersUpdated } from "../../rpc/serverState";
 
 const KEY = "uno:harness-ever-signed-in";
-const SIGN_IN_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "gemini", "grok"]);
+const SIGN_IN_DRIVERS: ReadonlySet<string> = new Set([
+  "claudeAgent",
+  "codex",
+  "gemini",
+  "grok",
+  "antigravity",
+]);
 
 let known: Set<string> | null = null;
 

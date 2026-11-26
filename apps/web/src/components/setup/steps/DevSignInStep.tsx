@@ -16,7 +16,7 @@ import { useServerProviders } from "../../../rpc/serverState";
 import { HarnessSignInPanel } from "../../harness/HarnessSignInDialog";
 import { isJobActive, progressLine } from "../../harness/harnessSetupState";
 import { useHarnessSetup } from "../../harness/useHarnessSetup";
-import { ClaudeAI, Gemini, GrokIcon, OpenAI, type Icon } from "../../Icons";
+import { AntigravityIcon, ClaudeAI, Gemini, GrokIcon, OpenAI, type Icon } from "../../Icons";
 import { Button } from "../../ui/button";
 import { withAnswer } from "../goals";
 import {
@@ -39,6 +39,10 @@ const AGENT_ROW: Readonly<Record<ProviderAuthDriver, { icon: Icon; plan: string 
   // Not a row of this step (DEV_AGENTS); here for the exhaustive table.
   gemini: { icon: Gemini, plan: "Your Google account, or a Gemini API key." },
   grok: { icon: GrokIcon, plan: "Your xAI account, or an xAI API key." },
+  antigravity: {
+    icon: AntigravityIcon,
+    plan: "Your Google account, or a Gemini API key.",
+  },
 };
 
 type RowStatus = "checking" | "notInstalled" | "needsSignIn" | "signedIn";

@@ -28,6 +28,7 @@ export const DEV_AGENT_LABEL: Readonly<Record<DevAgentId, string>> = {
   codex: "Codex",
   gemini: "Gemini CLI",
   grok: "Grok",
+  antigravity: "Antigravity",
   uno: "Uno AI",
 };
 

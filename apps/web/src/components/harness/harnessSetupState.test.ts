@@ -103,6 +103,12 @@ describe("resolveHarnessAction", () => {
     expect(resolveHarnessAction({ driver: driver("grok"), status: "notInstalled" })).toBe(
       "install",
     );
+    expect(resolveHarnessAction({ driver: driver("antigravity"), status: "needsSignIn" })).toBe(
+      "signIn",
+    );
+    expect(resolveHarnessAction({ driver: driver("antigravity"), status: "notInstalled" })).toBe(
+      "install",
+    );
     expect(resolveHarnessAction({ driver: driver("cursor"), status: "needsSignIn" })).toBe("none");
   });
 
@@ -149,6 +155,7 @@ describe("row list", () => {
       "uno",
       "claudeAgent",
       "codex",
+      "antigravity",
       "gemini",
       "grok",
       "opencode",

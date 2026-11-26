@@ -45,6 +45,7 @@ import {
 } from "../../chatRequests/chatRequestsStore";
 import { useMinuteClock } from "../../hooks/useMinuteClock";
 import { buildThreadRouteParams } from "../../threadRoutes";
+import { MacLinkMismatch } from "../localComputer/MacLinkMismatch";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
@@ -86,6 +87,7 @@ export function ChatRequestsSettingsSection(props: {
 
   return (
     <SettingsSection title="Cloud agents">
+      <MacLinkMismatch />
       <SettingsRow
         title="Let cloud agents work on this computer"
         description="Chats on your cloud computers can run commands here through Connect my computer, and ask to start a chat here. Every command shows below before it runs; a push, an install or anything risky waits for your Allow in that chat or in your Telegram. ssh to other machines is never allowed. Off by default."

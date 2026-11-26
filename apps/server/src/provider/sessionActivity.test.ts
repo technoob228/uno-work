@@ -26,10 +26,18 @@ describe("sessionActivity", () => {
       { threadId: "t", type: "task.started", payload: { taskId: "b", isBackgrounded: true } },
       3_000,
     );
-    expect(getSessionActivity("t", 4_000)).toEqual({ lastEventMs: 3_000, backgroundTaskCount: 2 });
+    expect(getSessionActivity("t", 4_000)).toEqual({
+      lastEventMs: 3_000,
+      backgroundTaskCount: 2,
+      oldestBackgroundTaskMs: 2_000,
+    });
 
     recordRuntimeEvent({ threadId: "t", type: "task.completed", payload: { taskId: "a" } }, 5_000);
-    expect(getSessionActivity("t", 6_000)).toEqual({ lastEventMs: 5_000, backgroundTaskCount: 1 });
+    expect(getSessionActivity("t", 6_000)).toEqual({
+      lastEventMs: 5_000,
+      backgroundTaskCount: 1,
+      oldestBackgroundTaskMs: 3_000,
+    });
   });
 
   it("ignores tasks that are not backgrounded", () => {

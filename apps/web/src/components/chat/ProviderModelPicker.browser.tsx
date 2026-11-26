@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { EnvironmentId } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
+import { GEMINI_ANTIGRAVITY_DETECTED_MESSAGE } from "@t3tools/shared/agentVersions";
 import { page, userEvent } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
@@ -336,9 +337,18 @@ function getModelPickerListText() {
   return getModelPickerListElement().textContent ?? "";
 }
 
+/** The row's visible name, without the provider named for screen readers. */
+function modelNameText(element: Element) {
+  const copy = element.cloneNode(true) as Element;
+  for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+  return copy.textContent?.trim() ?? "";
+}
+
 function getVisibleModelNames() {
-  return Array.from(getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"))
-    .map((element) => element.textContent?.replace(/New$/u, "").trim() ?? "")
+  return Array.from(
+    getModelPickerListElement().querySelectorAll<HTMLDivElement>("[data-model-picker-model-name]"),
+  )
+    .map((element) => modelNameText(element))
     .filter((text) => text.length > 0);
 }
 
@@ -356,6 +366,31 @@ const CLAUDE_NOT_INSTALLED = withClaudeState({
   auth: { status: "unknown" },
   models: [],
 });
+
+/** TEST_PROVIDERS plus a Gemini CLI that is not installed (T64). */
+function withGeminiNotInstalled(message?: string): ServerProvider[] {
+  return [
+    ...TEST_PROVIDERS,
+    {
+      driver: ProviderDriverKind.make("gemini"),
+      instanceId: ProviderInstanceId.make("gemini"),
+      displayName: "Gemini CLI",
+      enabled: true,
+      installed: false,
+      version: null,
+      status: "error",
+      auth: { status: "unknown" },
+      checkedAt: new Date().toISOString(),
+      slashCommands: [],
+      skills: [],
+      models: [],
+      ...(message ? { message } : {}),
+    } as ServerProvider,
+  ];
+}
+
+/** VITE_T64_SHOTS=<dir> writes the before/after screenshots for the T64 report. */
+const t64ShotDir = import.meta.env.VITE_T64_SHOTS as string | undefined;
 
 const CLAUDE_NEEDS_SIGN_IN = withClaudeState({
   status: "error",
@@ -1121,7 +1156,8 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const listText = getModelPickerListText();
-        expect(listText).toContain("OpenCode · GitHub Copilot");
+        // Upstream's one-line row: the name, then the sub-provider as muted trailing text.
+        expect(listText).toContain("GitHub Copilot");
         expect(listText).toContain("Claude");
         expect(listText).not.toContain("OpenCodeClaude Opus 4.6");
       });
@@ -1199,8 +1235,10 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(async () => {
         const favoritedModelRows = Array.from(
-          getModelPickerListElement().querySelectorAll<HTMLDivElement>("div.font-medium"),
-        ).filter((element) => element.textContent?.trim() === "Claude Opus 4.6");
+          getModelPickerListElement().querySelectorAll<HTMLDivElement>(
+            "[data-model-picker-model-name]",
+          ),
+        ).filter((element) => modelNameText(element) === "Claude Opus 4.6");
         expect(favoritedModelRows.length).toBe(1);
       });
     } finally {
@@ -1550,6 +1588,103 @@ describe("ProviderModelPicker", () => {
       await vi.waitFor(() => {
         expect(providerSetupRpc.installStart).toHaveBeenCalledTimes(2);
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("without Node.js, the failed install says what to do: copy command, guide, Check again (T64)", async () => {
+    providerSetupRpc.installStart.mockResolvedValue({ jobId: "job-3" });
+    providerSetupRpc.installStatus.mockResolvedValue({
+      jobId: "job-3",
+      driver: "gemini",
+      state: "failed",
+      log: "Node.js was not found here: getting Node.js 24.22.3 for Uno Work from nodejs.org…\nCould not reach nodejs.org (fetch failed).\n",
+      command: "Get Node.js for Uno Work",
+      error: "Gemini CLI needs Node.js, and this Mac doesn't have it yet.",
+      help: {
+        title: "Gemini CLI needs Node.js, and this Mac doesn't have it yet.",
+        detail: "Uno Work tried to download Node.js but could not reach nodejs.org.",
+        command: "brew install gemini-cli",
+        commandNote: "Paste it into Terminal, then press Check again.",
+        docsUrl: "https://geminicli.com/docs/get-started/installation/",
+        docsLabel: "Gemini CLI install guide",
+      },
+    });
+
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: withGeminiNotInstalled(),
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await userEvent.click(getSidebarButton("gemini"));
+      const pane = () =>
+        document.querySelector<HTMLElement>('[data-model-picker-pane="install"]')?.textContent ??
+        "";
+      await vi.waitFor(() => {
+        expect(pane()).toContain("Google's official open-source command-line agent");
+      });
+      if (t64ShotDir) await page.screenshot({ path: `${t64ShotDir}/after-0-gemini-install.png` });
+      await page.getByRole("button", { name: "Install", exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(pane()).toContain("Gemini CLI needs Node.js, and this Mac doesn't have it yet.");
+        },
+        { timeout: 5_000 },
+      );
+      expect(pane()).not.toContain("PATH");
+      expect(pane()).toContain("brew install gemini-cli");
+      await expect
+        .element(page.getByRole("link", { name: /Gemini CLI install guide/ }))
+        .toBeVisible();
+      if (t64ShotDir) await page.screenshot({ path: `${t64ShotDir}/after-1-no-node-card.png` });
+
+      const writeText = vi.fn(async (_text: string) => {});
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await page.getByRole("button", { name: "Copy command" }).click();
+      await vi.waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith("brew install gemini-cli");
+      });
+
+      await page.getByRole("button", { name: "Try install again" }).click();
+      await vi.waitFor(() => {
+        expect(providerSetupRpc.installStart).toHaveBeenCalledTimes(2);
+      });
+      await vi.waitFor(
+        () => {
+          expect(pane()).toContain("Check again");
+        },
+        { timeout: 5_000 },
+      );
+      await page.getByRole("button", { name: "Check again" }).click();
+      await vi.waitFor(() => {
+        expect(pane()).not.toContain("needs Node.js");
+        expect(pane()).toContain("Install");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("points to Antigravity when it is already on the Mac (T64)", async () => {
+    const mounted = await mountPicker({
+      model: "gpt-5-codex",
+      lockedProvider: null,
+      providers: withGeminiNotInstalled(GEMINI_ANTIGRAVITY_DETECTED_MESSAGE),
+    });
+    try {
+      await page.getByRole("button").click();
+      await userEvent.click(getSidebarButton("gemini"));
+      await vi.waitFor(() => {
+        expect(document.querySelector("[data-gemini-antigravity]")?.textContent).toBe(
+          GEMINI_ANTIGRAVITY_DETECTED_MESSAGE,
+        );
+      });
+      if (t64ShotDir) await page.screenshot({ path: `${t64ShotDir}/after-2-antigravity.png` });
     } finally {
       await mounted.cleanup();
     }

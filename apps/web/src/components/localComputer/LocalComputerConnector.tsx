@@ -14,6 +14,7 @@ import { useImportStatus } from "../../localComputer/useChatImport";
 import { STATUS_POLL_SCREEN_MS, useMyComputers } from "../../localComputer/useMyComputers";
 import { STATUS_DOT_CLASS } from "../computerSwitcher/useComputerSwitcher";
 import { Button } from "../ui/button";
+import { MacLinkMismatch } from "./MacLinkMismatch";
 import { importedLine } from "./chatImport.logic";
 import { computerStatusLine } from "./connectComputer.logic";
 
@@ -89,6 +90,7 @@ export function LocalComputerConnector({ className }: { className?: string }) {
   if (!enabled) return null;
   return (
     <div className={cn("divide-y divide-border", className)} data-testid="connector-my-computer">
+      <MacLinkMismatch />
       {computers.length === 0 ? (
         <Row
           name="My computer"

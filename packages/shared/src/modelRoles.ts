@@ -15,6 +15,9 @@
  *   Grok recommends (grok-4.6), simple tasks on Uno Fast when Uno AI is here
  *   (Grok has no small model), replies on Uno Fast. Gemini goes first when
  *   both are signed in.
+ * - Antigravity (24.11, T66) is Gemini's recommended path: signed in, it is
+ *   the Gemini plan here (ahead of Gemini CLI) — complex work on the model
+ *   Antigravity picks by default, simple tasks on a Flash model it lists.
  *
  * Which model is strongest comes from the harness (modelStrength.ts, the
  * CLI's recommendation); which one is quick, from the gateway's catalog
@@ -42,7 +45,7 @@ export interface PlanSources {
   readonly claude: ServerProvider | null;
   /** Codex signed in (ChatGPT plan or an API key). */
   readonly codex: ServerProvider | null;
-  /** Gemini CLI signed in (a Google account, a Gemini key, Vertex AI). */
+  /** Antigravity, else Gemini CLI, signed in (a Google account, a Gemini key, Vertex AI). */
   readonly gemini: ServerProvider | null;
   /** Grok signed in (an xAI account or an xAI API key). */
   readonly grok: ServerProvider | null;
@@ -65,7 +68,9 @@ export function detectPlanSources(
         provider.driver === "claudeAgent" && signedIn(provider) && provider.auth.type !== "unoAi",
     ),
     codex: find((provider) => provider.driver === "codex" && signedIn(provider)),
-    gemini: find((provider) => provider.driver === "gemini" && signedIn(provider)),
+    gemini:
+      find((provider) => provider.driver === "antigravity" && signedIn(provider)) ??
+      find((provider) => provider.driver === "gemini" && signedIn(provider)),
     grok: find((provider) => provider.driver === "grok" && signedIn(provider)),
     uno: find((provider) => provider.driver === "uno"),
   };
@@ -148,7 +153,9 @@ export function suggestRoles(input: {
   const strongest = strongestReadySelection(plans, () => true)?.selection ?? null;
   const unoSmart = found.uno ? pick(found.uno, unoIncluded(found.uno, "smart")) : null;
   const unoFast = found.uno ? pick(found.uno, quickModel(found.uno)) : null;
-  const geminiPick = gemini ? pick(gemini, strongestListedModel("gemini", gemini.models)) : null;
+  const geminiPick = gemini
+    ? pick(gemini, strongestListedModel(gemini.driver, gemini.models))
+    : null;
   const grokPick = grok ? pick(grok, strongestListedModel("grok", grok.models)) : null;
   const complex = strongest ?? geminiPick ?? grokPick ?? unoSmart;
   // Simple tasks: Codex's quick model when there is Codex (with Claude too it
@@ -174,7 +181,10 @@ export function suggestRoles(input: {
     const cli = found.claude ? "Claude Code" : "Codex";
     why = `Your ${plan} plan here: complex work on ${complexName} (${cli}'s pick), simple tasks on its quick ${simpleName}${repliesPart}.`;
   } else if (gemini) {
-    why = `Gemini CLI signed in here: complex work on ${complexName} (Gemini CLI picks the model per task), simple tasks on ${simpleName}${repliesPart}.`;
+    why =
+      gemini.driver === "antigravity"
+        ? `Antigravity signed in here: complex work on ${complexName} (Antigravity's pick), simple tasks on ${simpleName}${repliesPart}.`
+        : `Gemini CLI signed in here: complex work on ${complexName} (Gemini CLI picks the model per task), simple tasks on ${simpleName}${repliesPart}.`;
   } else if (grok) {
     why = `Grok signed in here: complex work on ${complexName} (Grok's pick), simple tasks on ${simpleName}${repliesPart}.`;
   } else if (found.uno) {

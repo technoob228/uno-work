@@ -10,6 +10,7 @@ import {
   disconnectNote,
   LOCAL_OS,
   LOCAL_OS_ORDER,
+  macLinkedElsewhere,
   pairProgress,
   stepLabel,
   type LocalOs,
@@ -411,5 +412,33 @@ describe("the journal", () => {
       "Oct 28",
     );
     expect(activityTimeLabel("nonsense", now, clock)).toBe("");
+  });
+});
+
+describe("macLinkedElsewhere", () => {
+  const base = {
+    desktop: true,
+    helper: { installed: true, computerId: "7" },
+    settled: true,
+    enabled: true,
+    computers: [] as Array<{ id: string }>,
+  };
+  it("helper not in the account's list: linked elsewhere", () => {
+    expect(macLinkedElsewhere(base)).toBe(true);
+    expect(macLinkedElsewhere({ ...base, computers: [{ id: "9" }] })).toBe(true);
+  });
+  it("helper in the list: fine", () => {
+    expect(macLinkedElsewhere({ ...base, computers: [{ id: "7" }] })).toBe(false);
+  });
+  it("no verdict before the list answered, off the desktop, or without a helper", () => {
+    expect(macLinkedElsewhere({ ...base, settled: false })).toBe(false);
+    expect(macLinkedElsewhere({ ...base, enabled: false })).toBe(false);
+    expect(macLinkedElsewhere({ ...base, desktop: false })).toBe(false);
+    expect(macLinkedElsewhere({ ...base, helper: { installed: false, computerId: null } })).toBe(
+      false,
+    );
+    expect(macLinkedElsewhere({ ...base, helper: { installed: true, computerId: null } })).toBe(
+      false,
+    );
   });
 });

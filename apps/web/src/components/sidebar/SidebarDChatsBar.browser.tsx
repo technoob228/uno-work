@@ -55,8 +55,6 @@ function Bar(props: {
           onlyMine={false}
           onOnlyMineChange={() => {}}
           onClearFilters={() => setPicked(null)}
-          onNewChat={() => {}}
-          newChatShortcutLabel={null}
           onAddProject={() => {}}
         />
       </ul>
@@ -108,8 +106,6 @@ function BarWithComputers() {
           onlyMine={false}
           onOnlyMineChange={() => {}}
           onClearFilters={() => setComputers(null)}
-          onNewChat={() => {}}
-          newChatShortcutLabel={null}
           onAddProject={() => {}}
         />
       </ul>
@@ -268,11 +264,7 @@ describe("the funnel", () => {
     await render(
       <TooltipProvider>
         <ul>
-          <LegacySidebarDChatsBar
-            onNewChat={() => {}}
-            newChatShortcutLabel={null}
-            onAddProject={() => {}}
-          />
+          <LegacySidebarDChatsBar onAddProject={() => {}} />
         </ul>
       </TooltipProvider>,
     );

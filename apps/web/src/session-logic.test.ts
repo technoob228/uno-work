@@ -62,6 +62,28 @@ describe("deriveWorkLogEntries with a turn that never started", () => {
   });
 });
 
+describe("deriveWorkLogEntries by turn", () => {
+  const step = (id: string, turnId?: string) =>
+    makeActivity({
+      id,
+      kind: "tool.completed",
+      summary: "Read",
+      payload: { itemType: "dynamic_tool_call", detail: `${id}.ts` },
+      ...(turnId ? { turnId } : {}),
+    });
+  const activities = [step("a", "turn-1"), step("b", "turn-2"), step("loose")];
+  const ids = (scope: Parameters<typeof deriveWorkLogEntries>[1]) =>
+    deriveWorkLogEntries(activities, scope).map((entry) => entry.id);
+
+  it("keeps the steps of every turn, so each finished turn can fold its own (T67)", () => {
+    expect(ids("every-turn")).toEqual(["a", "b"]);
+  });
+  it("keeps one turn's steps, or everything", () => {
+    expect(ids(TurnId.make("turn-2"))).toEqual(["b"]);
+    expect(ids(undefined)).toEqual(["a", "b", "loose"]);
+  });
+});
+
 describe("deriveApprovalExpiredEntries", () => {
   const resolved = (id: string, decision: string) =>
     makeActivity({

@@ -256,7 +256,7 @@ export const ClientSettingsSchema = Schema.Struct({
   computerSpaces: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // How the sidebar groups chats since 0.0.138 (Misha 16.10): project,
   // status, computer in the order picked; [] — one list, newest first. Null —
-  // not chosen yet: `sidebarInboxMode` above decides (status or project).
+  // not chosen yet: by status (T65, Misha 24.11; the web's resolveGroupLevels).
   sidebarGroupLevels: Schema.NullOr(Schema.Array(SidebarGroupLevel)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -536,6 +536,38 @@ export const GrokSettings = makeProviderSettingsSchema(
   },
 );
 export type GrokSettings = typeof GrokSettings.Type;
+
+/**
+ * Google Antigravity by its official ACP agent (`agy acp`, the Antigravity
+ * CLI) — Gemini's recommended path in Uno Work (upstream T3 Code #9348). On
+ * by default: it shows up once `agy` is installed (on this computer or by
+ * Settings → AI → Antigravity → Install) and signed in.
+ */
+export const AntigravitySettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: Schema.String.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Binary path",
+        description:
+          "Path to the Antigravity CLI (`agy`). Empty: the one Uno Work installed, else `agy` on this computer.",
+        providerSettingsForm: { placeholder: "agy", clearWhenEmpty: "omit" },
+      }),
+    ),
+    customModels: Schema.Array(Schema.String).pipe(
+      Schema.withDecodingDefault(Effect.succeed([])),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+  },
+  {
+    order: ["binaryPath"],
+  },
+);
+export type AntigravitySettings = typeof AntigravitySettings.Type;
 
 export const HermesSettings = makeProviderSettingsSchema(
   {
@@ -1107,6 +1139,7 @@ export const ServerSettings = Schema.Struct({
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     gemini: GeminiSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    antigravity: AntigravitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     hermes: HermesSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     uno: UnoProviderSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
@@ -1213,6 +1246,12 @@ const GrokSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+const AntigravitySettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(Schema.String),
+  customModels: Schema.optionalKey(Schema.Array(Schema.String)),
+});
+
 const HermesSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
@@ -1307,6 +1346,7 @@ export const ServerSettingsPatch = Schema.Struct({
       cursor: Schema.optionalKey(CursorSettingsPatch),
       gemini: Schema.optionalKey(GeminiSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
+      antigravity: Schema.optionalKey(AntigravitySettingsPatch),
       hermes: Schema.optionalKey(HermesSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       uno: Schema.optionalKey(OpenCodeSettingsPatch),

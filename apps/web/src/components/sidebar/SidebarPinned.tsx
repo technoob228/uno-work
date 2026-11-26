@@ -55,41 +55,53 @@ export function useAppPinsInRow(): boolean {
   return useNavLayout() !== "rail" && teamShown;
 }
 
+/** The pins Pinned lists: apps and widgets may live in the icon row instead. */
+export function usePinnedListed(): ReadonlyArray<UnoPin> {
+  const { pins } = usePins();
+  const appPinsInRow = useAppPinsInRow();
+  return appPinsInRow ? pins.filter((item) => item.kind !== "app") : pins;
+}
+
 export const SidebarPinned = memo(function SidebarPinned({
   pinnedChats,
   hasPinnedChats,
+  emptyHint = true,
 }: {
-  /** Pinned chat rows, rendered by the chat list (they carry its behaviour). */
+  /**
+   * Pinned chat rows, rendered by the chat list (they carry its behaviour).
+   * Sidebar D puts them on top of the chats instead (T65): null here.
+   */
   pinnedChats: ReactNode;
   hasPinnedChats: boolean;
+  /** "Pin chats, apps…" under an empty Pinned; off — the bare header. */
+  emptyHint?: boolean;
 }) {
-  const { pins, unpin, rename, pin } = usePins();
+  const { unpin, rename, pin } = usePins();
   const [linkOpen, setLinkOpen] = useState(false);
   const [renaming, setRenaming] = useState<UnoPin | null>(null);
-  const appPinsInRow = useAppPinsInRow();
-  const listed = appPinsInRow ? pins.filter((item) => item.kind !== "app") : pins;
+  const listed = usePinnedListed();
   const empty = listed.length === 0 && !hasPinnedChats;
 
   return (
-    <section aria-label="Pinned" className="group/pinned flex flex-col gap-px">
-      <div className="flex h-6 items-center justify-between pr-1 pl-2.5">
+    <section aria-label="Pinned" className="flex flex-col gap-px">
+      {/* T53 (Misha 20.11): a bare "+" right above New chat read as "new chat";
+          it became "+ Link" on hover at the right edge. T65 (24.11): right
+          after the word Pinned and always there, far from New chat. */}
+      <div className="flex h-6 items-center gap-1.5 pr-1 pl-2.5">
         <span className="text-xs font-medium text-sidebar-muted-foreground/70">Pinned</span>
-        {/* T53 (Misha 20.11): a bare "+" right above New chat read as "new chat".
-            Now it says what it adds and shows only while the pointer is on
-            Pinned (always on touch screens, and when focused from the keyboard). */}
         <button
           type="button"
           aria-label="Pin a link"
           title="Pin a link"
           onClick={() => setLinkOpen(true)}
           data-testid="sidebar-pin-link"
-          className="inline-flex h-5 cursor-pointer items-center gap-0.5 rounded px-1 text-[11px] text-muted-foreground/80 opacity-0 transition-opacity group-hover/pinned:opacity-100 group-focus-within/pinned:opacity-100 hover:bg-sidebar-row-hover hover:text-foreground focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+          className="inline-flex h-5 cursor-pointer items-center gap-0.5 rounded px-1 text-[11px] text-sidebar-muted-foreground/55 transition-colors hover:bg-sidebar-row-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden"
         >
           <PlusIcon className="size-3" />
           Link
         </button>
       </div>
-      {empty ? (
+      {empty && emptyHint ? (
         <p className="px-2 pb-1 text-[11px] leading-snug text-muted-foreground/60">
           Pin chats, apps, files and links to keep them one click away.
         </p>
