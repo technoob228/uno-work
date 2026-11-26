@@ -156,13 +156,23 @@ export const AgentTalkFoldRow = memo(function AgentTalkFoldRow(props: {
 }) {
   const { environmentId, senderThreadIds } = props;
   const shells = useStore((state) => selectEnvironmentState(state, environmentId).threadShellById);
-  const names = useMemo(
-    () =>
-      senderThreadIds.map(
-        (threadId) => shells[threadId as ThreadId]?.title?.trim() || "another chat",
-      ),
-    [senderThreadIds, shells],
+  const summaries = useStore(
+    (state) => selectEnvironmentState(state, environmentId).sidebarThreadSummaryById,
   );
+  const names = useMemo(() => {
+    // Handlers on another computer (T63-C) are no chats here: their saved name.
+    const remote = new Map<string, string>();
+    for (const thread of Object.values(summaries)) {
+      const handler = thread?.handler;
+      if (handler?.computer) {
+        remote.set(handler.threadId, `${handler.title} on ${handler.computer.name}`);
+      }
+    }
+    return senderThreadIds.map(
+      (threadId) =>
+        shells[threadId as ThreadId]?.title?.trim() || remote.get(threadId) || "another chat",
+    );
+  }, [senderThreadIds, shells, summaries]);
   const count = props.agentMessageCount;
   const ToggleIcon = props.expanded ? ChevronDownIcon : ChevronRightIcon;
   return (

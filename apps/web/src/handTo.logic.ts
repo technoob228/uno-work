@@ -227,20 +227,25 @@ export function handToComputers(input: {
   }>;
   readonly environmentId: EnvironmentId;
   readonly supportsRemote: (environmentId: EnvironmentId) => boolean;
+  /**
+   * The box a connected computer's daemon says it is — known where the
+   * account's computer list isn't (a computer paired by link).
+   */
+  readonly ownBoxIdOf?: ((environmentId: EnvironmentId) => number | null) | undefined;
 }): ReadonlyArray<HandToComputer> {
   if (!input.supportsRemote(input.environmentId)) return [];
   const out: HandToComputer[] = [];
   const seen = new Set<string>();
   for (const row of input.rows) {
     const environmentId = row.environmentId;
-    if (environmentId === null || row.box === null || environmentId === input.environmentId) {
-      continue;
-    }
+    if (environmentId === null || environmentId === input.environmentId) continue;
+    const boxId = row.box?.id ?? input.ownBoxIdOf?.(environmentId) ?? null;
+    if (boxId === null) continue;
     if (seen.has(environmentId) || !input.supportsRemote(environmentId)) continue;
     seen.add(environmentId);
     out.push({
       environmentId,
-      boxId: row.box.id,
+      boxId,
       name: row.label,
       awake: row.status === "online",
     });

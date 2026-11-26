@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   formatHandedBrief,
   formatHandedNote,
+  formatHandedReply,
   HANDED_BRIEF_PREFIX,
   HANDED_DEFAULT_EXPECTED,
   parseHandedBrief,
   parseHandedNote,
+  parseHandedReply,
 } from "./handedChat.ts";
 
 describe("handedChat", () => {
@@ -87,5 +89,27 @@ describe("a brief for a handler on another computer (T63-C)", () => {
         formatHandedBrief({ threadId: "t", title: "x", about: "", now: "", expected: null }),
       )?.computer,
     ).toBeNull();
+  });
+});
+
+describe("a handed chat's agent writes to its handler on another computer (T63-C)", () => {
+  it("names the chat and its computer, and is no note", () => {
+    const text = formatHandedReply({
+      threadId: "c-1",
+      title: "Pricing page",
+      computer: "Mac",
+      text: "Shorter: «Fresh bread, fair prices.»",
+    });
+    expect(text).toBe(
+      "From the agent in «Pricing page» (threadId c-1) on “Mac”, the chat you handle:\n\nShorter: «Fresh bread, fair prices.»",
+    );
+    expect(parseHandedNote(text)).toBeNull();
+    expect(parseHandedReply(text)).toEqual({
+      title: "Pricing page",
+      threadId: "c-1",
+      computer: "Mac",
+      text: "Shorter: «Fresh bread, fair prices.»",
+    });
+    expect(parseHandedReply("hello")).toBeNull();
   });
 });

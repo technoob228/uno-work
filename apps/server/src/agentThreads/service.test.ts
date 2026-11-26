@@ -28,6 +28,7 @@ import { strongestReadyModelSelection } from "../manager/personRouting.ts";
 import { ROUTING_TEMPLATE } from "../manager/routingTemplate.ts";
 import { AGENTS_CLOSED_MESSAGE, HUMAN_ACTIVE_MESSAGE, TARGET_BUSY_MESSAGE } from "./logic.ts";
 import {
+  type AgentThreadsDeps,
   type AgentThreadsRemoteDeps,
   type AgentThreadsScope,
   makeAgentThreadsHandlers,
@@ -140,6 +141,7 @@ function makeFixture(options?: {
   readonly providers?: ReadonlyArray<ServerProvider>;
   readonly personalDefault?: Effect.Effect<ModelSelection | null>;
   readonly defaultModelSelection?: ModelSelection | null;
+  readonly handed?: Pick<AgentThreadsDeps, "handedElsewhere" | "toRemoteHandler">;
 }): Fixture {
   const dispatched: Fixture["dispatched"] = [];
   const threads = new Map<string, OrchestrationThreadShell>(
@@ -226,6 +228,7 @@ function makeFixture(options?: {
       ? { getDefaultModelSelection: Effect.succeed(options.defaultModelSelection) }
       : {}),
     ...(options?.remote ? { remote: options.remote } : {}),
+    ...options?.handed,
     pollIntervalMs: 1_000,
     nowMs: () => clock,
     sleep: (ms) =>
@@ -1746,5 +1749,64 @@ describe("agent threads bridge: assistant presets (21.10)", () => {
         const inside = yield* handlers.createThread(scoped(SPAWNED), { text: "Look here" });
         assert.strictEqual(inside.status, 200);
       }),
+  );
+});
+
+describe("agent threads bridge: Hand to… across computers (T63-C)", () => {
+  const HANDLER = "handler-on-cloud" as ThreadId;
+  const handedChat = threadShell(CALLER, {
+    controller: "agent",
+    handler: {
+      threadId: HANDLER,
+      kind: "chat",
+      title: "Coordinator",
+      handedAt: T0,
+      computer: { boxId: 2531, name: "uno-work" },
+    },
+  } as Partial<OrchestrationThreadShell>);
+
+  it.effect("the handed chat's agent answers its handler on another computer with a letter", () =>
+    Effect.gen(function* () {
+      const sent: Array<unknown> = [];
+      const { handlers, dispatched } = makeFixture({
+        threads: [handedChat],
+        handed: {
+          toRemoteHandler: (input) =>
+            Effect.sync(() => {
+              sent.push(input);
+              return { computer: "uno-work" };
+            }),
+        },
+      });
+      const reply = yield* handlers.sendMessage(scoped(), {
+        threadId: HANDLER,
+        body: { text: "Shorter: «Fresh bread, fair prices.»" },
+      });
+      assert.strictEqual(reply.status, 200);
+      assert.strictEqual(body(reply).relation, "handler");
+      assert.strictEqual(body(reply).computer, "uno-work");
+      assert.deepStrictEqual(sent, [
+        {
+          chatThreadId: CALLER,
+          handlerThreadId: HANDLER,
+          text: "Shorter: «Fresh bread, fair prices.»",
+        },
+      ]);
+      assert.strictEqual(dispatched.length, 0);
+    }),
+  );
+
+  it.effect("anyone else on another computer is still not a chat here", () =>
+    Effect.gen(function* () {
+      const { handlers } = makeFixture({
+        threads: [handedChat],
+        handed: { toRemoteHandler: () => Effect.succeed({ computer: "uno-work" }) },
+      });
+      const reply = yield* handlers.sendMessage(scoped(), {
+        threadId: "someone-else",
+        body: { text: "hi" },
+      });
+      assert.notStrictEqual(reply.status, 200);
+    }),
   );
 });

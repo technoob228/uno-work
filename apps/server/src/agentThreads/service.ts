@@ -206,6 +206,16 @@ export interface AgentThreadsDeps {
       readonly chatThreadId: string;
     }) => Effect.Effect<AgentThreadsReply | null>;
   };
+  /**
+   * The caller's own handler lives on another computer (T63-C): its
+   * `chat_message` to that handler goes there as a letter. Null: not
+   * handed that way. Absent: never.
+   */
+  readonly toRemoteHandler?: (input: {
+    readonly chatThreadId: string;
+    readonly handlerThreadId: string;
+    readonly text: string;
+  }) => Effect.Effect<{ readonly computer: string } | null>;
   /** Long-poll step; injectable so tests do not wait for real seconds. */
   readonly pollIntervalMs?: number;
   readonly sleep?: (ms: number) => Effect.Effect<void>;
@@ -1052,6 +1062,35 @@ export function makeAgentThreadsHandlers(deps: AgentThreadsDeps) {
     input: { readonly threadId: string | undefined; readonly body: unknown },
   ) =>
     Effect.gen(function* () {
+      // The caller's own handler, on another computer: a letter goes there.
+      const target = input.threadId?.trim() ?? "";
+      const handler = caller.handler ?? null;
+      if (
+        deps.toRemoteHandler !== undefined &&
+        handler?.computer &&
+        target.length > 0 &&
+        handler.threadId === target
+      ) {
+        const text = checkMessageText(asBody(input.body)?.text);
+        if (!text.ok) return yield* fail(400, "invalid_payload", text.message);
+        const sent = yield* deps.toRemoteHandler({
+          chatThreadId: caller.id,
+          handlerThreadId: target,
+          text: text.value,
+        });
+        if (sent !== null) {
+          return {
+            status: 200,
+            body: {
+              ok: true,
+              threadId: target,
+              relation: "handler",
+              computer: sent.computer,
+              note: `Sent to the chat that handles this one, on ${sent.computer}: it gets it within a minute.`,
+            },
+          } satisfies AgentThreadsReply;
+        }
+      }
       const chatThreadId = yield* notHere(input.threadId);
       if (chatThreadId === null || deps.handedElsewhere === undefined) return null;
       const text = checkMessageText(asBody(input.body)?.text);

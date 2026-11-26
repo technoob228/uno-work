@@ -106,6 +106,18 @@ describe("Hand to… another computer (T63-C)", () => {
     expect(
       handToComputers({ rows, environmentId: env("cloud"), supportsRemote }).map((c) => c.name),
     ).toEqual(["night"]);
+    // Paired by link (not in the account's list): its daemon says which box it is.
+    expect(
+      handToComputers({
+        rows: [
+          { environmentId: env("mac"), label: "Mac", status: "online", box: null },
+          { environmentId: env("linked"), label: "work-canary", status: "online", box: null },
+        ],
+        environmentId: env("mac"),
+        supportsRemote,
+        ownBoxIdOf: (id) => (id === env("linked") ? 2534 : null),
+      }).map((c) => c.boxId),
+    ).toEqual([2534]);
     // The chat's own daemon doesn't speak it: nothing on other computers.
     expect(handToComputers({ rows, environmentId: env("old"), supportsRemote })).toEqual([]);
   });

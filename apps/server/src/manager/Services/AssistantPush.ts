@@ -80,6 +80,16 @@ export interface AssistantPushServiceShape {
     readonly text: string;
     readonly at: string;
   }) => Effect.Effect<void>;
+  /**
+   * A handed chat's agent writes to its handler on another computer (T63-C):
+   * the text goes there as a letter. False: the chat isn't handed to a chat
+   * on another computer (or the bridge is off). Absent in test wirings.
+   */
+  readonly tellRemoteHandler?: (input: {
+    readonly chatThreadId: string;
+    readonly handlerThreadId: string;
+    readonly text: string;
+  }) => Effect.Effect<{ readonly computer: string } | null>;
   /** Chats `assistantProjectId` is waiting on, and whether news about them is pending. */
   readonly watchedBy: (
     assistantProjectId: ProjectId,

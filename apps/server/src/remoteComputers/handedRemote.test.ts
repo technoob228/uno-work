@@ -32,7 +32,7 @@ import {
   type HandedLetterInput,
   type HandedPullInput,
 } from "./handedRemote.ts";
-import { remoteError } from "./remoteDaemonClient.ts";
+import { remoteError, type RemoteComputerError } from "./remoteDaemonClient.ts";
 
 const T0 = "2026-11-26T10:00:00.000Z";
 const UNO_WORK = { boxId: 2531, name: "uno-work" };
@@ -96,7 +96,11 @@ function unoWork(options: { readonly coordinator?: Partial<OrchestrationThreadSh
     newId: () => `msg-${++ids}`,
   });
   /** The console's pairing: a request from the Mac lands on this computer's routes. */
-  const request = (input: { method: string; path: string; body?: unknown }) =>
+  const request = (input: {
+    method: string;
+    path: string;
+    body?: unknown;
+  }): Effect.Effect<{ readonly status: number; readonly body: unknown }, RemoteComputerError> =>
     Effect.gen(function* () {
       if (input.path === `${HANDED_CHATS_PATH}/letters`) {
         return yield* host.letter(input.body as HandedLetterInput);
@@ -163,7 +167,7 @@ function mac(remoteRequest: ReturnType<typeof unoWork>["request"], free = true) 
   };
 }
 
-const run = <A>(effect: Effect.Effect<A>) => Effect.runPromise(effect);
+const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 const NOW = Date.parse(T0);
 
 const brief = (key = "brief-1") => ({

@@ -59,6 +59,7 @@ const makeRequestContext = Effect.gen(function* () {
       send: handedHost.sendFromHandler,
       status: handedHost.statusForHandler,
     },
+    ...(push?.tellRemoteHandler ? { toRemoteHandler: push.tellRemoteHandler } : {}),
     // Unreadable settings fall back to the narrow default.
     getAgentThreadsScope: serverSettings.getSettings.pipe(
       Effect.map((settings) => settings.agentThreadsScope),

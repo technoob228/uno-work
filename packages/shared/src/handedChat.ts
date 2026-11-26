@@ -133,6 +133,45 @@ export function formatHandedNote(input: {
   }
 }
 
+/**
+ * What the agent of a handed chat wrote to its handler on another computer
+ * (T63-C): there the chat is no chat of that computer, so `chat_message`
+ * can't start a turn from it — it arrives as a letter. Not a note.
+ */
+export function formatHandedReply(input: {
+  readonly threadId: string;
+  readonly title: string;
+  readonly computer: string;
+  readonly text: string;
+}): string {
+  const chat = `«${oneLine(input.title, 160) || "a chat"}» (threadId ${input.threadId})`;
+  return [
+    `From the agent in ${chat} on “${oneLine(input.computer, 80)}”, the chat you handle:`,
+    "",
+    input.text,
+  ].join("\n");
+}
+
+const HANDED_REPLY_HEAD =
+  /^From the agent in «([^»]*)» \(threadId ([^)\s]+)\) on “([^”]*)”, the chat you handle:\n\n/;
+
+/** A letter from `formatHandedReply`, for the app; null: not one. */
+export function parseHandedReply(text: string): {
+  readonly title: string;
+  readonly threadId: string;
+  readonly computer: string;
+  readonly text: string;
+} | null {
+  const head = HANDED_REPLY_HEAD.exec(text);
+  if (head === null) return null;
+  return {
+    title: head[1] ?? "a chat",
+    threadId: head[2] ?? "",
+    computer: head[3] ?? "",
+    text: text.slice(head[0].length),
+  };
+}
+
 /** What the app shows for a note, in the person's words; null: not a note. */
 export function parseHandedNote(
   text: string,

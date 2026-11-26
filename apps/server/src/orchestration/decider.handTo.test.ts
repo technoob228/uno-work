@@ -380,7 +380,13 @@ describe("decider: Hand to… a chat on another computer (T63-C)", () => {
     const readModel = (await decideAndApply(await seedFour(), handRemote(OTHER_ID))).readModel;
     const { readModel: back } = await decideAndApply(
       readModel,
-      { ...handTo(OTHER_ID, null, "cmd-gone"), reason: "handler-gone" },
+      {
+        ...(handTo(OTHER_ID, null, "cmd-gone") as Extract<
+          OrchestrationCommand,
+          { type: "thread.handler.set" }
+        >),
+        reason: "handler-gone",
+      },
       { kind: "system", component: "hand-to-remote" },
     );
     expect(threadOf(back, OTHER_ID)).toMatchObject({ controller: "human", handler: null });

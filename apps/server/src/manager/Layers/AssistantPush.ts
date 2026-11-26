@@ -32,6 +32,7 @@ import {
 import {
   formatHandedBrief,
   formatHandedNote,
+  formatHandedReply,
   type HandedNoteKind,
 } from "@t3tools/shared/handedChat";
 import { Clock, Duration, Effect, Layer, Option, Ref, Semaphore, Stream } from "effect";
@@ -1283,6 +1284,39 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         }),
       );
 
+    const tellRemoteHandler: NonNullable<AssistantPushServiceShape["tellRemoteHandler"]> = (
+      input,
+    ) =>
+      exclusive(
+        Effect.gen(function* () {
+          if (handedRemote === null) return null;
+          const state = yield* Ref.get(stateRef);
+          const watch = handedWatchOf(state, input.chatThreadId);
+          if (
+            watch?.handlerComputer === undefined ||
+            watch.conversationThreadId !== input.handlerThreadId
+          ) {
+            return null;
+          }
+          const shell = yield* shellOf(input.chatThreadId);
+          const nowMs = yield* Clock.currentTimeMillis;
+          const next = letterFor(state, {
+            key: `handed:reply:${input.chatThreadId}:${crypto.randomUUID()}`,
+            handlerThreadId: watch.conversationThreadId,
+            text: formatHandedReply({
+              threadId: input.chatThreadId,
+              title: shell?.title ?? "a chat",
+              computer: yield* selfName,
+              text: input.text,
+            }),
+            at: new Date(nowMs).toISOString(),
+            remote: remoteOf(watch.handlerComputer, input.chatThreadId, "update"),
+          });
+          yield* commit(next);
+          return { computer: watch.handlerComputer.name };
+        }),
+      );
+
     const tellViaChat: AssistantPushServiceShape["tellViaChat"] = (input) =>
       Effect.gen(function* () {
         const conversation = yield* shellOf(input.threadId);
@@ -1347,6 +1381,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       watchRemote,
       chatOf,
       queueHandedLetter,
+      tellRemoteHandler,
       tellViaChat,
       reportsOutcomeOf,
       watchedBy,
