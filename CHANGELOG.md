@@ -11,6 +11,7 @@
 ## v0.0.195 — 2026-11-26
 
 - Hand to…: hand a chat to another chat (a coordinator) or an assistant from the chat's menu, the "⋯" menu in its header or the line above the message box, with an optional note on what you expect. The chat moves under them in the sidebar ("↳ … · handled"), they get a short brief and then its results and questions instead of you, and you see only what needs your own click — approvals, secrets, payments and sign-ins — plus their result, a decision they can't make, or that it's stuck. Take back returns it in one click; writing in the chat yourself adds a line and leaves it with them. If they're deleted or archived, the chat comes back to you with a note in Needs you; if they haven't picked up a result in 2 hours, you see it too. Same computer for now.
+- Cloud storage links can have a password: set it in the Share dialog of Cloud storage or when sharing a file from the file panel; Shared links show «· password», and agents can make protected links with drive_share_link.
 - The model picker's rows no longer overlap (Private GPU models).
 - The sidebar doesn't repeat the computer's name when every chat in the list is on the same computer, and a long computer name gives way to the chat title.
 
