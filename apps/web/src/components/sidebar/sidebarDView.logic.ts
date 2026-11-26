@@ -307,7 +307,9 @@ export function projectRowComputers(input: {
  * - right under a project row (`projectComputers`): only when the project
  *   spans several computers and the chat is not on this one (a project on one
  *   other computer already says so on its row);
- * - otherwise (`projectComputers` null): when not on this computer.
+ * - otherwise (`projectComputers` null): when not on this computer and the
+ *   list's chats are on more than one computer (Misha 25.11: "uno-work" on
+ *   every row hid the chat titles and told nothing).
  */
 export function chatRowShowsComputer(input: {
   readonly chatComputer: string;
@@ -315,10 +317,12 @@ export function chatRowShowsComputer(input: {
   readonly multiComputer: boolean;
   readonly underComputerHeader: boolean;
   readonly projectComputers: ReadonlyArray<string> | null;
+  /** How many computers the chats in the list are on (unknown: as if several). */
+  readonly listComputerCount?: number;
 }): boolean {
   if (!input.multiComputer || input.underComputerHeader) return false;
   if (input.chatComputer === input.thisComputer) return false;
-  if (input.projectComputers === null) return true;
+  if (input.projectComputers === null) return (input.listComputerCount ?? 2) > 1;
   return new Set(input.projectComputers).size > 1;
 }
 
