@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import * as Schema from "effect/Schema";
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -160,6 +161,7 @@ import { useUiStateStore } from "../uiStateStore";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 import { CONTINUE_ON_MACHINE_COPY } from "../continueOnMachineCopy";
 import { ContinueOnMachineDialog } from "./ContinueOnMachineDialog";
+import { HandToDialog } from "./HandToDialog";
 import { MoveProjectToBoxDialog } from "./MoveProjectToBoxDialog";
 import { pickProjectMoveChat } from "../continueOnMachine";
 import { MOVE_PROJECT_COPY } from "../continueOnMachineCopy";
@@ -205,9 +207,12 @@ import {
   archiveWithTasksPrompt,
   groupAgentChats,
   handoffAction,
+  nestHandedChats,
   sidebarAgentPlacement,
 } from "../agentTasks.logic";
-import { setThreadHandler } from "../agentsAccess";
+import { setThreadHandedTo, setThreadHandler } from "../agentsAccess";
+import { HAND_TO_COPY, useHandToStore } from "../handTo.logic";
+import { readEnvironmentSupportsHandTo } from "../environments/handToSupport";
 
 import { isYourTurn, yourTurnKind } from "./Sidebar.yourTurn";
 import { getThreadSortTimestamp, toSortableTimestamp } from "../lib/threadSort";
@@ -225,6 +230,7 @@ import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { SidebarPendingCount } from "./chat/SidebarPendingCount";
 import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { SettingsSidebarNav } from "./settings/SettingsSidebarNav";
+import { HandedChatLines } from "./sidebar/HandedChatLines";
 import { SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarSetupRow } from "./sidebar/SidebarSetupRow";
 import { SidebarEmptyProjects, useSetupProjectPreview } from "./sidebar/SidebarEmptyProjects";
@@ -2296,9 +2302,11 @@ export default function Sidebar() {
     () => new Map(threads.map((thread) => [threadKeyOf(thread), thread] as const)),
     [threads],
   );
-  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, agentChats } =
+  const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, agentChats, handedUnder } =
     useMemo(() => {
       const agentHandled: SidebarThreadSummary[] = [];
+      // The assistants' chats drawn in the Assistants section (Hand to…, T63).
+      const assistantHosts = new Set<string>();
       const visible = threads.filter((thread) => {
         if (thread.archivedAt !== null) return false;
         if (
@@ -2334,7 +2342,10 @@ export default function Sidebar() {
         const byAssistant =
           dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
         // The Uno chat is pinned on top of the sidebar, never in the list.
-        if (assistantChatId !== null && thread.id === assistantChatId) return false;
+        if (assistantChatId !== null && thread.id === assistantChatId) {
+          if (showAssistantRow) assistantHosts.add(threadKeyOf(thread));
+          return false;
+        }
         const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
         if (isHelperScope) return isOlderUnoChat;
         // The assistant's other chats (older ones, Telegram / Slack chats) live
@@ -2342,7 +2353,10 @@ export default function Sidebar() {
         if (!isRegularListChat(thread, assistantChatId)) {
           // A conversation with Uno shows under the Uno row (unfolded while
           // it is open), never twice.
-          if (showAssistantRow && isTeamConversation(thread)) return false;
+          if (showAssistantRow && isTeamConversation(thread)) {
+            assistantHosts.add(threadKeyOf(thread));
+            return false;
+          }
           // A chat an assistant started in its own folder: in the list, "started by".
           if (byAssistant) return true;
           return threadKeyOf(thread) === routeThreadKey;
@@ -2354,13 +2368,24 @@ export default function Sidebar() {
           threadKeyOf(thread) === routeThreadKey
         );
       });
-      const sections = partitionSidebarThreads(visible, { now, sortOrder: sidebarThreadSortOrder });
+      // Chats handed to a listed chat sit under it (Hand to…, T63).
+      const handed = nestHandedChats({
+        listed: visible,
+        shelf: agentHandled,
+        keyOf: threadKeyOf,
+        hosts: assistantHosts,
+      });
+      const sections = partitionSidebarThreads([...handed.listed], {
+        now,
+        sortOrder: sidebarThreadSortOrder,
+      });
       return {
         pinnedThreads: sections.pinned,
         activeThreads: sections.active,
         snoozedThreads: sections.snoozed,
         settledThreads: sections.settled,
-        agentChats: groupAgentChats(agentHandled),
+        agentChats: groupAgentChats(handed.shelf),
+        handedUnder: handed.nested,
       };
     }, [
       assistantChatId,
@@ -3675,6 +3700,10 @@ export default function Sidebar() {
               ownChats: readEnvironmentSupportsChatHandoff(thread.environmentId),
             })
           : null;
+        // "Hand to…" (T63): replaces Hand to agent / Join on daemons that have it.
+        const handTo = readEnvironmentSupportsHandTo(thread.environmentId);
+        const handed = thread.handler != null;
+        const takeBack = handTo && (handed || handoff?.nextController === "human");
         const status = resolveSidebarThreadStatus(thread);
         const snoozePresets = resolveSnoozePresets(nowDate);
         const projectOffer = chatProjectOffer({
@@ -3744,6 +3773,10 @@ export default function Sidebar() {
                   ]
                 : []),
               { id: "pin", label: isPinned ? "Unpin chat" : "Pin chat" },
+              ...(handTo && thread.assistantRole !== "chat"
+                ? [{ id: "hand-to", label: HAND_TO_COPY.action }]
+                : []),
+              ...(takeBack ? [{ id: "take-back", label: HAND_TO_COPY.takeBack }] : []),
               ...lifecycleItems,
               // Read: seen, nothing to add — the chat stops asking for "Ready".
               ...(isYourTurn(thread, nowDate.toISOString())
@@ -3756,7 +3789,7 @@ export default function Sidebar() {
               ...(isElectron
                 ? [{ id: "continue-on-machine", label: CONTINUE_ON_MACHINE_COPY.action }]
                 : []),
-              ...(handoff
+              ...(handoff && !handTo
                 ? [
                     {
                       id: "handoff",
@@ -3827,6 +3860,28 @@ export default function Sidebar() {
                 environmentId: thread.environmentId,
                 threadId: thread.id,
                 controller: handoff.nextController,
+              });
+            }
+            return;
+          case "hand-to":
+            useHandToStore.getState().open({
+              environmentId: thread.environmentId,
+              threadId: thread.id,
+              title: thread.title,
+            });
+            return;
+          case "take-back":
+            if (handed) {
+              void setThreadHandedTo({
+                environmentId: thread.environmentId,
+                threadId: thread.id,
+                handler: null,
+              });
+            } else {
+              void setThreadHandler({
+                environmentId: thread.environmentId,
+                threadId: thread.id,
+                controller: "human",
               });
             }
             return;
@@ -4171,7 +4226,8 @@ export default function Sidebar() {
     // Sidebar D: every live chat is one line, a pinned one too.
     const variant = options?.d ? "d" : section === "active" ? "card" : "slim";
     const projectKey = projectKeyOf(thread);
-    return (
+    const handed = handedUnder.get(threadKey);
+    const row = (
       <SidebarThreadRow
         key={`${threadKey}:${variant}`}
         thread={thread}
@@ -4231,6 +4287,19 @@ export default function Sidebar() {
         onOpenPrLink={openPrLink}
         simple={simple}
       />
+    );
+    if (handed === undefined) return row;
+    return (
+      <Fragment key={`${threadKey}:${variant}`}>
+        {row}
+        <HandedChatLines
+          chats={handed}
+          nestedOf={(chat) => handedUnder.get(threadKeyOf(chat)) ?? []}
+          isActive={(chat) => threadKeyOf(chat) === routeThreadKey}
+          onOpen={navigateToThread}
+          onContextMenu={handleThreadContextMenu}
+        />
+      </Fragment>
     );
   };
   // Pinned chats render in the Pinned group, not in the list below.
@@ -4382,6 +4451,7 @@ export default function Sidebar() {
           );
         }}
       />
+      <HandToDialog />
       <ContinueOnMachineDialog
         threadRef={continueThreadTarget}
         open={continueThreadTarget !== null}

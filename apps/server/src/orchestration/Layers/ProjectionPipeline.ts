@@ -883,6 +883,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.handler-changed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            handler: event.payload.handler,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
         case "thread.pending-for-you-updated": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,

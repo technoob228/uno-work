@@ -3062,7 +3062,7 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
     name: "chat_message",
     group: "chats",
     description:
-      "Send a message to another chat (one you started, your parent, or a peer in this project) by its threadId — also one the person wrote in. Refused when the person closed that chat to agents (agents_closed: don't retry or work around it, tell the person here) or is being asked something there (human_active); busy targets: pass waitMs to deliver when free. After messaging another agent, end your turn — its answer arrives as a new message.",
+      "Send a message to another chat (one you started, your parent, or a peer in this project) by its threadId — also one the person wrote in. Refused when the person closed that chat to agents (agents_closed: don't retry or work around it, tell the person here) — except a chat the person handed you (a `[Uno Work: handed to you]` brief) or is being asked something there (human_active); busy targets: pass waitMs to deliver when free. After messaging another agent, end your turn — its answer arrives as a new message.",
     inputSchema: {
       type: "object",
       properties: {

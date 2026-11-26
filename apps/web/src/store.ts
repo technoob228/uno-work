@@ -294,6 +294,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
+    handler: thread.handler ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
@@ -331,6 +332,7 @@ function mapThreadShell(
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
+    handler: thread.handler ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
@@ -374,6 +376,7 @@ function mapThreadShell(
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
+    handler: thread.handler ?? null,
     assistantRole: thread.assistantRole ?? null,
     // Kept undefined from a server before 28.10: Sidebar.owner falls back.
     startedBy: thread.startedBy,
@@ -417,6 +420,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     controller: thread.controller ?? "human",
     controlChangedAt: thread.controlChangedAt ?? null,
     agentsClosedAt: thread.agentsClosedAt ?? null,
+    handler: thread.handler ?? null,
     assistantRole: thread.assistantRole ?? null,
     source: thread.source ?? null,
     computerWait: thread.computerWait ?? null,
@@ -479,6 +483,10 @@ function threadSessionsEqual(
 }
 
 /** Enough to tell two sources apart: the rest follows a session's last activity. */
+/** A handler's identity for "did it change" (T63). */
+const handlerStamp = (handler: Thread["handler"]) =>
+  handler ? `${handler.threadId}|${handler.handedAt}|${handler.note ?? ""}` : null;
+
 const threadSourceStamp = (source: Thread["source"]) =>
   source == null ? null : `${source.tool}:${source.sessionId}:${source.lastActiveAt}`;
 
@@ -516,6 +524,7 @@ function sidebarThreadSummariesEqual(
     (left.controller ?? "human") === (right.controller ?? "human") &&
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&
+    handlerStamp(left.handler) === handlerStamp(right.handler) &&
     (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
     (left.startedBy ?? null) === (right.startedBy ?? null) &&
     (left.latestPersonMessageAt ?? null) === (right.latestPersonMessageAt ?? null) &&
@@ -571,6 +580,7 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     (left.controller ?? "human") === (right.controller ?? "human") &&
     (left.controlChangedAt ?? null) === (right.controlChangedAt ?? null) &&
     (left.agentsClosedAt ?? null) === (right.agentsClosedAt ?? null) &&
+    handlerStamp(left.handler) === handlerStamp(right.handler) &&
     (left.assistantRole ?? null) === (right.assistantRole ?? null) &&
     threadSourceStamp(left.source) === threadSourceStamp(right.source) &&
     (left.computerWait?.since ?? null) === (right.computerWait?.since ?? null) &&
@@ -1582,6 +1592,13 @@ function applyEnvironmentOrchestrationEvent(
         ...thread,
         ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
         source: event.payload.source,
+        updatedAt: event.payload.updatedAt,
+      }));
+
+    case "thread.handler-changed":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        handler: event.payload.handler,
         updatedAt: event.payload.updatedAt,
       }));
 

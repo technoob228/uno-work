@@ -15,6 +15,7 @@ import {
   RuntimeMode,
   ThreadAssistantRole,
   ThreadController,
+  ThreadHandler,
   ThreadSpawnKind,
   ThreadId,
   ThreadPullRequest,
@@ -90,6 +91,8 @@ export const ProjectionThread = Schema.Struct({
   // (`@t3tools/shared/pendingForYou`); NULL: not tracked yet (a chat from
   // before it starts empty on its next event).
   pendingForYou: Schema.optional(Schema.NullOr(Schema.String)),
+  // "Hand to…" (migration 064, see ThreadHandler); NULL: the person handles it.
+  handler: Schema.optional(Schema.NullOr(ThreadHandler)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   pendingApprovalCount: NonNegativeInt,
   pendingUserInputCount: NonNegativeInt,

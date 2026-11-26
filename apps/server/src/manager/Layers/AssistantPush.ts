@@ -29,6 +29,11 @@ import {
   type OrchestrationEvent,
   type OrchestrationThreadShell,
 } from "@t3tools/contracts";
+import {
+  formatHandedBrief,
+  formatHandedNote,
+  type HandedNoteKind,
+} from "@t3tools/shared/handedChat";
 import { Clock, Duration, Effect, Layer, Option, Ref, Semaphore, Stream } from "effect";
 import * as crypto from "node:crypto";
 import * as fsp from "node:fs/promises";
@@ -39,6 +44,10 @@ import { readReports, reportOfThread } from "../../sites/reports.ts";
 
 import { ServerConfig } from "../../config.ts";
 import { systemCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import {
+  HANDED_READY_UNCLAIMED_MS,
+  handedReadyUnclaimedReason,
+} from "../../orchestration/threadHandler.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
@@ -50,21 +59,28 @@ import { remoteComputersOption } from "../../remoteComputers/RemoteComputers.ts"
 import {
   assistantPushEnabled,
   decideTurnStart,
+  dropLetter,
   dropWatch,
   dueBatches,
   EMPTY_PUSH_STATE,
   formatPushFallback,
   formatPushNotice,
   guessConversation,
+  handedWatchOf,
   isAssistantConversationThread,
   markBatchSent,
+  markUnclaimedShown,
   noticeFromProbe,
   noticeFromRemoteStatus,
   pruneWatches,
+  queueLetter,
   remotePollEveryMs,
   PUSH_CALLER_ROUTE_TTL_MS,
   rememberSent,
+  renewHanded,
+  unclaimedHandedNotices,
   upsertWatch,
+  watchHanded,
   type PushBatch,
   type PushState,
   type PushThreadShell,
@@ -120,6 +136,7 @@ async function readState(file: string): Promise<PushState> {
         typeof parsed.turns === "object" && parsed.turns !== null && !Array.isArray(parsed.turns)
           ? parsed.turns
           : {},
+      letters: Array.isArray(parsed.letters) ? parsed.letters : [],
     };
   } catch {
     return EMPTY_PUSH_STATE;
@@ -245,6 +262,17 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       Effect.gen(function* () {
         const threadId = event.payload.threadId;
         const target = yield* shellOf(threadId);
+        // A chat handed to someone (T63): every turn there is theirs to hear.
+        if (target !== null && (target.handler ?? null) !== null) {
+          const state = yield* Ref.get(stateRef);
+          const handler = target.handler!;
+          const next =
+            handedWatchOf(state, threadId)?.conversationThreadId === handler.threadId
+              ? renewHanded(state, threadId, event.payload.createdAt)
+              : yield* handedWatchFor(state, threadId, handler.threadId, event.payload.createdAt);
+          if (next !== state) yield* commit(next);
+          return;
+        }
         const origin = event.metadata.origin;
         const tokenAssistant =
           origin?.kind === "manager" ? yield* assistantOfToken(origin.tokenId) : null;
@@ -306,6 +334,202 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           }),
         );
       });
+
+    // ── handed chats (T63 "Hand to…") ──
+
+    /** Watch `threadId` for `handlerThreadId` (its project names the watcher). */
+    const handedWatchFor = (
+      state: PushState,
+      threadId: string,
+      handlerThreadId: string,
+      at: string,
+    ) =>
+      Effect.gen(function* () {
+        const handler = yield* shellOf(handlerThreadId);
+        return watchHanded(state, {
+          threadId,
+          handlerThreadId,
+          handlerProjectId: handler?.projectId ?? "",
+          at,
+        });
+      });
+
+    const letterFor = (
+      state: PushState,
+      input: {
+        readonly key: string;
+        readonly handlerThreadId: string;
+        readonly text: string;
+        readonly at: string;
+      },
+    ) =>
+      queueLetter(state, {
+        key: input.key,
+        conversationThreadId: input.handlerThreadId,
+        text: input.text,
+        at: input.at,
+      });
+
+    const noteFor = (
+      kind: HandedNoteKind,
+      threadId: string,
+      title: string,
+      text?: string,
+    ): string => formatHandedNote({ kind, threadId, title, text });
+
+    /** The brief: the chat's first request, its latest answer, the person's note. */
+    const briefOf = (threadId: string, title: string, note: string | null) =>
+      Effect.gen(function* () {
+        const detail = Option.getOrNull(
+          yield* projections
+            .getThreadDetailById(ThreadId.make(threadId))
+            .pipe(Effect.orElseSucceed(() => Option.none())),
+        );
+        const messages = detail?.messages ?? [];
+        const first = messages.find(
+          (message) => message.role === "user" && message.text.trim().length > 0,
+        );
+        const last = messages.findLast(
+          (message) => message.role === "assistant" && message.text.trim().length > 0,
+        );
+        return formatHandedBrief({
+          threadId,
+          title,
+          about: first?.text ?? "",
+          now: last?.text ?? "",
+          expected: note,
+        });
+      });
+
+    const onHandlerChanged = (
+      event: Extract<OrchestrationEvent, { type: "thread.handler-changed" }>,
+    ) =>
+      Effect.gen(function* () {
+        const { threadId, handler, previousHandler, reason } = event.payload;
+        const shell = yield* shellOf(threadId);
+        const title = shell?.title ?? "a chat";
+        let state = yield* Ref.get(stateRef);
+        const at = event.payload.updatedAt;
+        if (previousHandler !== null && previousHandler.threadId !== handler?.threadId) {
+          // The old handler is off it (unless it is gone itself).
+          if (reason !== "handler-gone") {
+            state = letterFor(state, {
+              key: `handed:${event.eventId}:off`,
+              handlerThreadId: previousHandler.threadId,
+              text: noteFor(handler === null ? "taken-back" : "handed-elsewhere", threadId, title),
+              at,
+            });
+          }
+          state = dropWatch(state, threadId);
+        }
+        if (handler !== null) {
+          state = yield* handedWatchFor(state, threadId, handler.threadId, at);
+          if (previousHandler?.threadId !== handler.threadId) {
+            state = letterFor(state, {
+              key: `handed:${event.eventId}:brief`,
+              handlerThreadId: handler.threadId,
+              text: yield* briefOf(threadId, title, handler.note ?? null),
+              at,
+            });
+          }
+        }
+        yield* commit(state);
+        yield* Effect.logInfo("hand to: handler changed").pipe(
+          Effect.annotateLogs({
+            threadId,
+            handler: handler?.threadId ?? null,
+            previous: previousHandler?.threadId ?? null,
+            reason,
+          }),
+        );
+      });
+
+    /** The person wrote in a handed chat: it stays with the handler, who hears it. */
+    const onMessageSent = (event: Extract<OrchestrationEvent, { type: "thread.message-sent" }>) =>
+      Effect.gen(function* () {
+        const payload = event.payload;
+        if (payload.role !== "user" || (payload.sentByThreadId ?? null) !== null) return;
+        const origin = event.metadata.origin;
+        if (origin !== undefined && origin.kind !== "connector") return;
+        const watch = handedWatchOf(yield* Ref.get(stateRef), payload.threadId);
+        if (watch === null) return;
+        const shell = yield* shellOf(payload.threadId);
+        if (shell === null || (shell.handler ?? null) === null) return;
+        yield* commit(
+          letterFor(yield* Ref.get(stateRef), {
+            key: `handed:${payload.messageId}:wrote`,
+            handlerThreadId: watch.conversationThreadId,
+            text: noteFor("person-wrote", payload.threadId, shell.title, payload.text),
+            at: payload.createdAt,
+          }),
+        );
+      });
+
+    /** A handler deleted or archived: the chats it handled go back to the person. */
+    const releaseHandledBy = (handlerThreadId: string) =>
+      Effect.gen(function* () {
+        const snapshot = yield* projections.getShellSnapshot().pipe(
+          Effect.orElseSucceed(() => ({
+            threads: [] as ReadonlyArray<OrchestrationThreadShell>,
+          })),
+        );
+        for (const chat of snapshot.threads) {
+          if (chat.handler?.threadId !== handlerThreadId) continue;
+          yield* engine
+            .dispatch(
+              {
+                type: "thread.handler.set",
+                commandId: CommandId.make(`hand-to:gone:${crypto.randomUUID()}`),
+                threadId: chat.id,
+                handler: null,
+                reason: "handler-gone",
+                createdAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+              },
+              { origin: systemCommandOrigin("hand-to", "handler deleted or archived") },
+            )
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("hand to: could not give a chat back").pipe(
+                  Effect.annotateLogs({ threadId: chat.id, cause }),
+                ),
+              ),
+            );
+        }
+      });
+
+    /**
+     * After a restart: every handed chat has its watch, and no watch outlives
+     * its handing (events missed while the daemon was down).
+     */
+    const reconcileHanded = Effect.gen(function* () {
+      const snapshot = yield* projections
+        .getShellSnapshot()
+        .pipe(
+          Effect.orElseSucceed(() => ({ threads: [] as ReadonlyArray<OrchestrationThreadShell> })),
+        );
+      let state = yield* Ref.get(stateRef);
+      const handed = new Map(
+        snapshot.threads
+          .filter((chat) => (chat.handler ?? null) !== null && chat.archivedAt === null)
+          .map((chat) => [chat.id as string, chat.handler!.threadId as string] as const),
+      );
+      for (const watch of state.watches) {
+        if (watch.handed === true && handed.get(watch.threadId) !== watch.conversationThreadId) {
+          state = dropWatch(state, watch.threadId);
+        }
+      }
+      const at = new Date(yield* Clock.currentTimeMillis).toISOString();
+      for (const [threadId, handlerThreadId] of handed) {
+        if (handedWatchOf(state, threadId)?.conversationThreadId === handlerThreadId) continue;
+        state = yield* handedWatchFor(state, threadId, handlerThreadId, at);
+      }
+      if (state !== (yield* Ref.get(stateRef))) yield* commit(state);
+    }).pipe(
+      exclusive,
+      Effect.catchCause((cause) =>
+        Effect.logWarning("hand to: reconcile failed").pipe(Effect.annotateLogs({ cause })),
+      ),
+    );
 
     // ── the Uno chat's launch check (the app) ──
 
@@ -500,6 +724,14 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           yield* noteUnoTurn(event);
           return;
         }
+        if (event.type === "thread.handler-changed") {
+          yield* exclusive(onHandlerChanged(event));
+          return;
+        }
+        if (event.type === "thread.message-sent") {
+          yield* exclusive(onMessageSent(event));
+          // ...and on: a watched chat's message marks it for a look.
+        }
         if (event.type === "thread.archived" || event.type === "thread.deleted") {
           // The person put it away: nothing to report.
           yield* exclusive(
@@ -509,6 +741,8 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
               if (next !== state) yield* commit(next);
             }),
           );
+          // A handler gone: its chats go back to the person (T63).
+          yield* releaseHandledBy(event.payload.threadId);
           return;
         }
         const watched = new Set((yield* Ref.get(stateRef)).watches.map((watch) => watch.threadId));
@@ -745,8 +979,53 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         return true;
       });
 
+    /** Letters to handlers (T63): one turn each, oldest first, when the handler is free. */
+    const deliverLetters = Effect.gen(function* () {
+      const letters = (yield* Ref.get(stateRef)).letters ?? [];
+      const busy = new Set<string>();
+      for (const letter of letters) {
+        if (busy.has(letter.conversationThreadId)) continue;
+        const conversation = yield* shellOf(letter.conversationThreadId);
+        if (conversation === null || conversation.archivedAt !== null) {
+          yield* commit(dropLetter(yield* Ref.get(stateRef), letter.key));
+          continue;
+        }
+        if (!(yield* conversationFree(conversation.id))) {
+          busy.add(letter.conversationThreadId);
+          continue;
+        }
+        yield* engine.dispatch(
+          {
+            type: "thread.turn.start",
+            commandId: CommandId.make(`hand-to:${crypto.randomUUID()}`),
+            threadId: conversation.id,
+            message: {
+              messageId: MessageId.make(crypto.randomUUID()),
+              role: "user",
+              text: letter.text,
+              attachments: [],
+            },
+            runtimeMode: conversation.runtimeMode,
+            interactionMode: conversation.interactionMode,
+            createdAt: new Date(yield* Clock.currentTimeMillis).toISOString(),
+          },
+          { origin: systemCommandOrigin(SYSTEM_TURN_ORIGIN_COMPONENT, "hand to") },
+        );
+        // One turn per conversation per tick: the next waits for it to end.
+        busy.add(letter.conversationThreadId);
+        yield* commit(dropLetter(yield* Ref.get(stateRef), letter.key));
+      }
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("hand to: a letter was not delivered; retrying").pipe(
+          Effect.annotateLogs({ cause }),
+        ),
+      ),
+    );
+
     const flushOutbox = (nowMs: number) =>
       Effect.gen(function* () {
+        yield* deliverLetters;
         let state = yield* Ref.get(stateRef);
         const batches = dueBatches(state, nowMs);
         if (batches.length === 0) return;
@@ -768,10 +1047,55 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         if (changed) yield* commit(state);
       });
 
+    /**
+     * A handed chat's Ready its handler hasn't picked up in 2 h (T63): the
+     * person sees it in Needs you. The handler still gets it when free.
+     */
+    const showUnclaimed = (nowMs: number) =>
+      Effect.gen(function* () {
+        const unclaimed = unclaimedHandedNotices(
+          yield* Ref.get(stateRef),
+          nowMs,
+          HANDED_READY_UNCLAIMED_MS,
+        );
+        for (const notice of unclaimed) {
+          const shell = yield* shellOf(notice.threadId);
+          const handler = shell?.handler ?? null;
+          if (
+            shell !== null &&
+            shell.archivedAt === null &&
+            handler !== null &&
+            handler.threadId === notice.conversationThreadId
+          ) {
+            const handlerShell = yield* shellOf(handler.threadId);
+            yield* engine
+              .dispatch(
+                {
+                  type: "thread.person.call",
+                  commandId: CommandId.make(`hand-to:unclaimed:${crypto.randomUUID()}`),
+                  threadId: shell.id,
+                  reason: handedReadyUnclaimedReason(handlerShell?.title ?? handler.title ?? null),
+                  createdAt: new Date(nowMs).toISOString(),
+                },
+                { origin: systemCommandOrigin("hand-to", "ready not picked up") },
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("hand to: could not show an unclaimed Ready").pipe(
+                    Effect.annotateLogs({ threadId: notice.threadId, cause }),
+                  ),
+                ),
+              );
+          }
+          yield* commit(markUnclaimedShown(yield* Ref.get(stateRef), notice.threadId));
+        }
+      });
+
     const tick = Effect.gen(function* () {
       const nowMs = yield* Clock.currentTimeMillis;
       yield* lookAtWatches(nowMs);
       yield* flushOutbox(nowMs);
+      yield* showUnclaimed(nowMs);
       yield* lookAtLaunches(nowMs);
     }).pipe(
       exclusive,
@@ -781,6 +1105,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
     );
 
     if (enabled) {
+      yield* Effect.forkScoped(reconcileHanded);
       yield* Effect.forkScoped(engine.streamDomainEvents.pipe(Stream.runForEach(handleEvent)));
       yield* Effect.forkScoped(
         Effect.forever(tick.pipe(Effect.andThen(Effect.sleep(options?.tick ?? TICK)))),

@@ -10,7 +10,7 @@ import type { ContextMenuItem } from "@t3tools/contracts";
  * pin, Read / Snooze / Done (the same three as on the row's hover, Misha
  * 13.10), archive, delete — plus the rare "Don't let agents write here"
  * (0.0.115): it has to be findable by the person who needs it, and it is
- * absent on older daemons.
+ * absent on older daemons — and "Hand to…" / "Take back" (T63, under Pin).
  */
 export const SIMPLE_THREAD_MENU_IDS = [
   "rename",
@@ -18,6 +18,8 @@ export const SIMPLE_THREAD_MENU_IDS = [
   "filter-by-project",
   "turn-into-project",
   "pin",
+  "hand-to",
+  "take-back",
   "settle",
   "unsettle",
   "snooze",

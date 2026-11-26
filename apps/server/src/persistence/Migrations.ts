@@ -76,6 +76,7 @@ import Migration0060 from "./Migrations/060_ProjectionComputers.ts";
 import Migration0061 from "./Migrations/061_ThreadSpawnKind.ts";
 import Migration0062 from "./Migrations/062_ThreadPendingForYou.ts";
 import Migration0063 from "./Migrations/063_ThreadBackgroundWork.ts";
+import Migration0064 from "./Migrations/064_ThreadHandler.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -153,6 +154,7 @@ export const migrationEntries = [
   [61, "ThreadSpawnKind", Migration0061],
   [62, "ThreadPendingForYou", Migration0062],
   [63, "ThreadBackgroundWork", Migration0063],
+  [64, "ThreadHandler", Migration0064],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

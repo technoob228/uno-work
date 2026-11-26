@@ -25,6 +25,7 @@ import type {
   ThreadPendingForYou,
   ProjectComputer,
   ThreadController,
+  ThreadHandler,
   ThreadSpawnKind,
   ThreadPullRequest,
 } from "@t3tools/contracts";
@@ -163,8 +164,10 @@ export interface Thread {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
-  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  /** Set while the person keeps agents out ("Keep other agents out"). */
   agentsClosedAt?: string | null | undefined;
+  /** Who handles a chat the person handed off ("Hand to…", T63); null: the person. */
+  handler?: ThreadHandler | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
   /** Where the chat came from, when it did not start in Uno Work. */
@@ -198,8 +201,10 @@ export interface ThreadShell {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
-  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  /** Set while the person keeps agents out ("Keep other agents out"). */
   agentsClosedAt?: string | null | undefined;
+  /** Who handles a chat the person handed off ("Hand to…", T63); null: the person. */
+  handler?: ThreadHandler | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
   /** Where the chat came from, when it did not start in Uno Work. */
@@ -255,8 +260,10 @@ export interface SidebarThreadSummary {
   /** Who drives the thread; absent means "human". */
   controller?: ThreadController | undefined;
   controlChangedAt?: string | null | undefined;
-  /** Set while the person keeps agents out ("Don't let agents write here"). */
+  /** Set while the person keeps agents out ("Keep other agents out"). */
   agentsClosedAt?: string | null | undefined;
+  /** Who handles a chat the person handed off ("Hand to…", T63); null: the person. */
+  handler?: ThreadHandler | null | undefined;
   /** "chat": THE assistant chat (Uno); "spawned": a chat Uno started. */
   assistantRole?: ThreadAssistantRole | null | undefined;
   /** Who created the chat when it was not the person (see threadOwner.ts); absent on older servers. */

@@ -236,6 +236,10 @@
       "types": "./src/secretRequestCopy.ts",
       "import": "./src/secretRequestCopy.ts"
     },
+    "./handedChat": {
+      "types": "./src/handedChat.ts",
+      "import": "./src/handedChat.ts"
+    },
     "./approvalActivity": {
       "types": "./src/approvalActivity.ts",
       "import": "./src/approvalActivity.ts"

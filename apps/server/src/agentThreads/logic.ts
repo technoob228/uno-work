@@ -150,7 +150,8 @@ export type AgentDeliveryBlock = {
 
 /**
  * Why an agent may not write into `target` right now; null when it may.
- * - the person closed the chat to agents — nobody, not even the parent;
+ * - the person closed the chat to agents — nobody, not even the parent,
+ *   except its handler ("Hand to…");
  * - the parent still drives a child no human wrote in (controller "agent")
  *   and may write into it even mid-turn (plan 21);
  * - everyone else — a peer, a child writing to its parent, a parent whose
@@ -167,6 +168,7 @@ export function agentDeliveryBlock(
     | "spawnedByThreadId"
     | "controller"
     | "agentsClosedAt"
+    | "handler"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
     | "session"
@@ -175,7 +177,8 @@ export function agentDeliveryBlock(
     | "assistantRole"
   >,
 ): AgentDeliveryBlock | null {
-  if (isClosedToAgents(target)) {
+  // "Keep other agents out" lets the chat's handler in ("Hand to…", T63).
+  if (isClosedToAgents(target) && (target.handler?.threadId ?? null) !== caller.id) {
     return { status: 409, error: "agents_closed", message: AGENTS_CLOSED_MESSAGE };
   }
   if (threadRelation(caller, target) === "child" && threadController(target) === "agent") {
