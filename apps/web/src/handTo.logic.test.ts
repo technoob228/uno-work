@@ -1,7 +1,16 @@
-import type { ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { canHandle, handToOptions, type HandToThreadView } from "./handTo.logic";
+import {
+  HAND_TO_COPY,
+  canHandle,
+  handToComputers,
+  handToOptionKey,
+  handToOptions,
+  remoteHandToOptions,
+  type HandToComputer,
+  type HandToThreadView,
+} from "./handTo.logic";
 
 const id = (value: string) => value as ThreadId;
 const chat = (
@@ -68,5 +77,93 @@ describe("Hand to… picker (T63)", () => {
     expect(options.others.map((option) => option.title)).toEqual(["Pricing", "Hero"]);
     const found = handToOptions({ threads, threadId: id("me"), query: "old" });
     expect(found.others.map((option) => option.title)).toEqual(["Old one"]);
+  });
+});
+
+describe("Hand to… another computer (T63-C)", () => {
+  const env = (value: string) => value as EnvironmentId;
+  const cloud: HandToComputer = {
+    environmentId: env("cloud"),
+    boxId: 2531,
+    name: "uno-work",
+    awake: true,
+  };
+
+  it("lists the connected boxes both daemons speak it on, never the chat's own computer", () => {
+    const rows = [
+      { environmentId: env("mac"), label: "Misha's Mac", status: "online", box: null },
+      { environmentId: env("cloud"), label: "uno-work", status: "online", box: { id: 2531 } },
+      { environmentId: env("old"), label: "old box", status: "online", box: { id: 7 } },
+      { environmentId: env("night"), label: "night", status: "sleeping", box: { id: 9 } },
+      { environmentId: null, label: "not connected", status: "online", box: { id: 11 } },
+    ];
+    const supportsRemote = (id: EnvironmentId) => id !== env("old");
+    expect(handToComputers({ rows, environmentId: env("mac"), supportsRemote })).toEqual([
+      cloud,
+      { environmentId: env("night"), boxId: 9, name: "night", awake: false },
+    ]);
+    // A Mac is no box: from the cloud it isn't offered.
+    expect(
+      handToComputers({ rows, environmentId: env("cloud"), supportsRemote }).map((c) => c.name),
+    ).toEqual(["night"]);
+    // The chat's own daemon doesn't speak it: nothing on other computers.
+    expect(handToComputers({ rows, environmentId: env("old"), supportsRemote })).toEqual([]);
+  });
+
+  it("offers the other computer's coordinators and assistants, keyed apart from local chats", () => {
+    const there = [
+      chat("Coordinator", { updatedAt: "2026-11-26T09:00:00.000Z" }),
+      chat("w1", { spawnedByThreadId: id("Coordinator") }),
+      chat("Uno", { assistantRole: "chat" }),
+      // Handed to yet another computer: it handles nothing here.
+      chat("Away", {
+        assistantRole: "chat",
+        handler: { threadId: id("x"), computer: { boxId: 9, name: "night" } },
+      }),
+    ];
+    const groups = remoteHandToOptions({
+      computers: [
+        { computer: cloud, threads: there },
+        {
+          computer: { ...cloud, environmentId: env("night"), boxId: 9, awake: false },
+          threads: there,
+        },
+      ],
+      threads: [chat("me")],
+      threadId: id("me"),
+      query: "",
+    });
+    expect(groups[0]!.options.map((option) => option.title)).toEqual(["Coordinator", "Uno"]);
+    expect(groups[0]!.options[0]!.computer).toEqual(cloud);
+    expect(handToOptionKey(groups[0]!.options[0]!)).toBe("cloud/Coordinator");
+    expect(groups[1]!.options[1]!.detail).toBe(`Assistant · ${HAND_TO_COPY.asleep}`);
+  });
+
+  it("offers no other computer to a chat that handles chats", () => {
+    const here = [chat("me"), chat("sub", { handler: { threadId: id("me") } })];
+    expect(
+      remoteHandToOptions({
+        computers: [{ computer: cloud, threads: [chat("Uno", { assistantRole: "chat" })] }],
+        threads: here,
+        threadId: id("me"),
+        query: "",
+      }),
+    ).toEqual([]);
+  });
+
+  it("never offers a chat handed to another computer as a handler here", () => {
+    const threads = [
+      chat("me"),
+      chat("away", { handler: { threadId: id("x"), computer: { boxId: 2531, name: "uno-work" } } }),
+    ];
+    expect(canHandle(threads, id("me"), threads[1]!)).toBe(false);
+  });
+
+  it("names the computer in the chip and the toast", () => {
+    expect(HAND_TO_COPY.handledBy("Coordinator", "uno-work")).toBe(
+      "Handled by “Coordinator” on uno-work",
+    );
+    expect(HAND_TO_COPY.handledBy("Coordinator", null)).toBe("Handled by “Coordinator”");
+    expect(HAND_TO_COPY.handedToast("Uno", "uno-work")).toBe("Handed to “Uno” on uno-work");
   });
 });

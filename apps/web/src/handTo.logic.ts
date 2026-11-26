@@ -6,10 +6,16 @@
  * so the picker never offers a chat the daemon would refuse: not the chat
  * itself, not a chat it started, not a chat it handles (A → B → A), not an
  * archived one, and the chain stays at most THREAD_HANDLER_MAX_DEPTH deep.
+ *
+ * Across computers (T63-C, Misha 26.11): a chat on one of the person's
+ * computers can be handed to a chat or an assistant on another one of them.
+ * Such a handing is a leaf of the chain — the handed chat handles no chats
+ * itself, and a chat handed to another computer handles none here.
  */
 import {
   THREAD_HANDLER_MAX_DEPTH,
   type EnvironmentId,
+  type ThreadHandlerComputer,
   type ThreadHandlerKind,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -23,7 +29,13 @@ export interface HandToThreadView {
   readonly archivedAt: string | null;
   readonly pinnedAt?: string | null | undefined;
   readonly spawnedByThreadId?: ThreadId | null | undefined;
-  readonly handler?: { readonly threadId: ThreadId } | null | undefined;
+  readonly handler?:
+    | {
+        readonly threadId: ThreadId;
+        readonly computer?: ThreadHandlerComputer | null | undefined;
+      }
+    | null
+    | undefined;
   readonly assistantRole?: string | null | undefined;
 }
 
@@ -32,6 +44,17 @@ export interface HandToOption {
   readonly kind: ThreadHandlerKind;
   readonly title: string;
   readonly detail: string;
+  /** The handler lives on another of the person's computers (T63-C). */
+  readonly computer?: HandToComputer | undefined;
+}
+
+/** Another of the person's computers whose chats can take a handed chat. */
+export interface HandToComputer {
+  readonly environmentId: EnvironmentId;
+  readonly boxId: number;
+  readonly name: string;
+  /** Asleep: the brief wakes it up (the console does), its answers come then. */
+  readonly awake: boolean;
 }
 
 export interface HandToOptions {
@@ -94,6 +117,8 @@ export function canHandle(
   candidate: HandToThreadView,
 ): boolean {
   if (candidate.id === threadId || candidate.archivedAt !== null) return false;
+  // Handed to another computer itself: it handles no chats here (T63-C).
+  if (candidate.handler?.computer) return false;
   const byId = new Map(threads.map((thread) => [thread.id as string, thread] as const));
   // Started by this chat (any depth down): it would report to its own worker.
   if (walksTo(byId, candidate.spawnedByThreadId, (t) => t.spawnedByThreadId, threadId)) {
@@ -174,6 +199,94 @@ export function handToOptions(input: {
   return { coordinators, assistants, others };
 }
 
+/** Whether this chat handles chats (then it is not handed to another computer). */
+export function handlesChats(
+  threads: ReadonlyArray<HandToThreadView>,
+  threadId: ThreadId,
+): boolean {
+  return threads.some(
+    (thread) =>
+      thread.archivedAt === null &&
+      thread.handler?.threadId === threadId &&
+      !thread.handler.computer &&
+      thread.id !== threadId,
+  );
+}
+
+/**
+ * The other computers of the person that can take a handed chat (T63-C):
+ * boxes this app is connected to whose daemon and the chat's daemon both
+ * speak it. A laptop (no box) can't be reached from another computer.
+ */
+export function handToComputers(input: {
+  readonly rows: ReadonlyArray<{
+    readonly environmentId: EnvironmentId | null;
+    readonly label: string;
+    readonly status: string;
+    readonly box: { readonly id: number } | null;
+  }>;
+  readonly environmentId: EnvironmentId;
+  readonly supportsRemote: (environmentId: EnvironmentId) => boolean;
+}): ReadonlyArray<HandToComputer> {
+  if (!input.supportsRemote(input.environmentId)) return [];
+  const out: HandToComputer[] = [];
+  const seen = new Set<string>();
+  for (const row of input.rows) {
+    const environmentId = row.environmentId;
+    if (environmentId === null || row.box === null || environmentId === input.environmentId) {
+      continue;
+    }
+    if (seen.has(environmentId) || !input.supportsRemote(environmentId)) continue;
+    seen.add(environmentId);
+    out.push({
+      environmentId,
+      boxId: row.box.id,
+      name: row.label,
+      awake: row.status === "online",
+    });
+  }
+  return out;
+}
+
+/** One computer's group in the picker: its coordinators, assistants, latest chats. */
+export interface HandToComputerOptions {
+  readonly computer: HandToComputer;
+  readonly options: ReadonlyArray<HandToOption>;
+}
+
+/**
+ * The picker's "on other computers" groups (T63-C). None when the chat
+ * handles chats itself: a handing to another computer stays a leaf.
+ */
+export function remoteHandToOptions(input: {
+  readonly computers: ReadonlyArray<{
+    readonly computer: HandToComputer;
+    readonly threads: ReadonlyArray<HandToThreadView>;
+  }>;
+  readonly threads: ReadonlyArray<HandToThreadView>;
+  readonly threadId: ThreadId;
+  readonly query: string;
+}): ReadonlyArray<HandToComputerOptions> {
+  if (handlesChats(input.threads, input.threadId)) return [];
+  const out: HandToComputerOptions[] = [];
+  for (const { computer, threads } of input.computers) {
+    const options = handToOptions({ threads, threadId: input.threadId, query: input.query });
+    const list = [...options.coordinators, ...options.assistants, ...options.others].map(
+      (option) => ({
+        ...option,
+        detail: computer.awake ? option.detail : `${option.detail} · ${HAND_TO_COPY.asleep}`,
+        computer,
+      }),
+    );
+    if (list.length > 0) out.push({ computer, options: list });
+  }
+  return out;
+}
+
+/** Picker key of an option: a chat id, or computer + chat id on another computer. */
+export const handToOptionKey = (option: HandToOption): string =>
+  option.computer ? `${option.computer.environmentId}/${option.threadId}` : option.threadId;
+
 /** The open "Hand to…" picker (one at a time, from the chat menu or the chip). */
 export interface HandToTarget {
   readonly environmentId: EnvironmentId;
@@ -196,8 +309,14 @@ export const HAND_TO_COPY = {
   takeBack: "Take back",
   ownAgent: "Its own agent",
   ownAgentDetail: "Carries on by itself · you see only Needs you and the result",
-  handedToast: (title: string) => `Handed to “${title}”`,
+  handedToast: (title: string, computer?: string | null) =>
+    computer ? `Handed to “${title}” on ${computer}` : `Handed to “${title}”`,
   handedDescription: "It moved under them in the sidebar · Take back any time",
   takenBackToast: "It's your chat again",
   failed: "Could not hand this chat over",
+  onComputer: (name: string) => `On “${name}”`,
+  asleep: "asleep, wakes up to take it",
+  handledBy: (title: string, computer: string | null | undefined) =>
+    computer ? `Handled by “${title}” on ${computer}` : `Handled by “${title}”`,
+  handlesChatsNote: "It handles chats itself, so it stays on this computer",
 } as const;

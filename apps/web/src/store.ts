@@ -485,7 +485,9 @@ function threadSessionsEqual(
 /** Enough to tell two sources apart: the rest follows a session's last activity. */
 /** A handler's identity for "did it change" (T63). */
 const handlerStamp = (handler: Thread["handler"]) =>
-  handler ? `${handler.threadId}|${handler.handedAt}|${handler.note ?? ""}` : null;
+  handler
+    ? `${handler.threadId}|${handler.handedAt}|${handler.note ?? ""}|${handler.computer?.boxId ?? ""}`
+    : null;
 
 const threadSourceStamp = (source: Thread["source"]) =>
   source == null ? null : `${source.tool}:${source.sessionId}:${source.lastActiveAt}`;

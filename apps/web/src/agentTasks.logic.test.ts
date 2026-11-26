@@ -411,4 +411,26 @@ describe("Hand to… in the sidebar (T63)", () => {
     expect(result.listed.map((thread) => thread.id)).toEqual(["launch"]);
     expect(result.nested.get("env:cooper-main")?.map((thread) => thread.id)).toEqual(["pricing"]);
   });
+
+  it("puts a chat handled on another computer under its handler there (T63-C)", () => {
+    const coordinator = summary("coord", { environmentId: EnvironmentId.make("cloud") });
+    const remote = (handlerId: string, boxId: number) => {
+      const handed = handedTo(handlerId);
+      return {
+        ...handed,
+        handler: { ...handed.handler, computer: { boxId, name: "uno-work" } },
+      };
+    };
+    const pricing = summary("pricing", remote("coord", 2531));
+    // Its box isn't connected to this app: it stays in the list.
+    const lost = summary("lost", remote("coord", 9));
+    const result = nestHandedChats({
+      listed: [coordinator, pricing, lost],
+      shelf: [],
+      keyOf,
+      environmentOfBox: (boxId) => (boxId === 2531 ? EnvironmentId.make("cloud") : null),
+    });
+    expect(result.listed.map((thread) => thread.id)).toEqual(["coord", "lost"]);
+    expect(result.nested.get("cloud:coord")?.map((thread) => thread.id)).toEqual(["pricing"]);
+  });
 });

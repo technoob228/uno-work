@@ -399,6 +399,11 @@ export function nestHandedChats<T extends TaskSummary>(input: {
    * the Assistants section: a chat handed to one sits under it there.
    */
   readonly hosts?: ReadonlySet<string> | undefined;
+  /**
+   * A handler on another of the person's computers (T63-C): which connected
+   * computer its box is. Not connected: the chat stays in the list.
+   */
+  readonly environmentOfBox?: ((boxId: number) => T["environmentId"] | null) | undefined;
 }): {
   readonly listed: ReadonlyArray<T>;
   readonly shelf: ReadonlyArray<T>;
@@ -413,7 +418,11 @@ export function nestHandedChats<T extends TaskSummary>(input: {
   const nestedKeyOf = (thread: T): string | null => {
     const handler = thread.handler ?? null;
     if (handler === null || thread.pinnedAt !== null || agentTaskNeedsPerson(thread)) return null;
-    const key = input.keyOf({ environmentId: thread.environmentId, id: handler.threadId } as T);
+    const environmentId = handler.computer
+      ? (input.environmentOfBox?.(handler.computer.boxId) ?? null)
+      : thread.environmentId;
+    if (environmentId === null) return null;
+    const key = input.keyOf({ environmentId, id: handler.threadId } as T);
     return listedKeys.has(key) && key !== input.keyOf(thread) ? key : null;
   };
   const keep = (thread: T) => {

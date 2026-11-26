@@ -29,9 +29,14 @@ export function describeSpawnedThreadOrigin(parentTitle: string | null | undefin
 }
 
 /** Small label above a user-role message another thread's agent sent. */
-export function describeAgentSentMessage(senderTitle: string | null | undefined): string {
+export function describeAgentSentMessage(
+  senderTitle: string | null | undefined,
+  /** The sender's computer when it is another of the person's (T63-C). */
+  computer?: string | null,
+): string {
   const title = cleanTitle(senderTitle);
-  return title ? `From the agent in ${quoteTitle(title)}` : "From an agent";
+  const on = computer ? ` on ${computer}` : "";
+  return title ? `From the agent in ${quoteTitle(title)}${on}` : `From an agent${on}`;
 }
 
 /** Wording of the "Keep other agents out" switch (T63), one place for the menu and the chip. */
