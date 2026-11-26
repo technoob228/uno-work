@@ -91,6 +91,10 @@ export function isYourTurn(thread: YourTurnInput, now: string): boolean {
   // An imported chat has no turns here: it stopped on the computer, and that
   // counts as its last turn however long ago it was.
   const importedAt = thread.source?.lastActiveAt ?? null;
+  // Called into a chat that never ran a turn (a handed chat given back, T63).
+  if (calledIn && importedAt === null && thread.latestTurn == null) {
+    return !isThreadSnoozed(thread, now);
+  }
   if (importedAt === null && !isLatestTurnSettled(thread.latestTurn, session)) return false;
   const completedAt = importedAt ?? thread.latestTurn?.completedAt;
   const completedAtMs = Date.parse(completedAt ?? "");
