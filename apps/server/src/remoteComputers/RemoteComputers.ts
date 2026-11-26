@@ -52,6 +52,9 @@ export const REMOTE_CHAT_LEDGER_MESSAGE_CHARS = 1_200;
 
 export const REMOTE_CHATS_PATH = "/api/manager/remote-chats";
 
+/** Box statuses of a computer that is up (the web's `isBoxRunning`). */
+const AWAKE_STATUSES: ReadonlySet<string> = new Set(["running", "active", "on"]);
+
 export type RemoteTarget =
   | { readonly kind: "this" }
   | { readonly kind: "box"; readonly boxId: number; readonly name: string };
@@ -111,6 +114,12 @@ export interface RemoteComputersServiceShape {
   }) => Effect.Effect<RemoteDaemonReply, RemoteComputerError>;
   /** This computer as the account names it, and its box id (null on a laptop). */
   readonly self: Effect.Effect<{ readonly name: string; readonly boxId: number | null }>;
+  /**
+   * Whether the account's list says the computer is up (from the console's
+   * cached list — no wake, no pairing): a handed chat's messages are fetched
+   * from a sleeping computer only when there is something to bring there.
+   */
+  readonly computerAwake: (boxId: number) => Effect.Effect<boolean>;
 }
 
 export class RemoteComputersService extends Context.Service<
@@ -378,6 +387,15 @@ export const makeRemoteComputersService = (options?: {
       return { name: yield* ownName, boxId: ownBoxId };
     }).pipe(Effect.orElseSucceed(() => ({ name: "this computer", boxId: null })));
 
+    const computerAwake: RemoteComputersServiceShape["computerAwake"] = (boxId) =>
+      cloud.getState().pipe(
+        Effect.map((state) => {
+          const status = state.boxes.find((box) => box.id === boxId)?.status ?? "";
+          return AWAKE_STATUSES.has(status.trim().toLowerCase());
+        }),
+        Effect.orElseSucceed(() => false),
+      );
+
     return {
       resolveTarget,
       startChat,
@@ -386,6 +404,7 @@ export const makeRemoteComputersService = (options?: {
       noteStatus,
       request,
       self,
+      computerAwake,
     } satisfies RemoteComputersServiceShape;
   });
 

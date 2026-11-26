@@ -32,6 +32,7 @@ import { ownBoxIdFromSettings } from "../assistants/targetComputer.ts";
 import { readTeam } from "../assistants/teamStore.ts";
 import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
 import { remoteComputersOption } from "../remoteComputers/RemoteComputers.ts";
+import { makeHandedHostLive } from "../remoteComputers/http.ts";
 import { assistantDisplayName } from "../remoteComputers/remoteChatHost.ts";
 import { selectAutoBootstrapModelSelection } from "../provider/autoBootstrapModelSelection.ts";
 import { ManagerAccountDefaultAi } from "../manager/Layers/AccountDefaultAi.ts";
@@ -50,9 +51,14 @@ const makeRequestContext = Effect.gen(function* () {
   const remoteComputers = yield* remoteComputersOption;
   const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
   const accountDefaultAi = Option.getOrNull(yield* Effect.serviceOption(ManagerAccountDefaultAi));
+  const handedHost = yield* makeHandedHostLive;
   const handlers = makeAgentThreadsHandlers({
     engine,
     projections,
+    handedElsewhere: {
+      send: handedHost.sendFromHandler,
+      status: handedHost.statusForHandler,
+    },
     // Unreadable settings fall back to the narrow default.
     getAgentThreadsScope: serverSettings.getSettings.pipe(
       Effect.map((settings) => settings.agentThreadsScope),

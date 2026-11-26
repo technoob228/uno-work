@@ -68,6 +68,18 @@ export interface AssistantPushServiceShape {
    * "finished" / "failed" notices (Telegram forwarder, Inbox) stay quiet.
    */
   readonly reportsOutcomeOf: (threadId: ThreadId) => Effect.Effect<boolean>;
+  /**
+   * A letter for a handler here about a chat of ANOTHER computer handed to it
+   * ("Hand to…" across computers, `remoteComputers/handedRemote.ts`): one
+   * turn in the handler's chat, in order, when it is free (dedupe by key).
+   * Absent in test wirings.
+   */
+  readonly queueHandedLetter?: (letter: {
+    readonly key: string;
+    readonly handlerThreadId: string;
+    readonly text: string;
+    readonly at: string;
+  }) => Effect.Effect<void>;
   /** Chats `assistantProjectId` is waiting on, and whether news about them is pending. */
   readonly watchedBy: (
     assistantProjectId: ProjectId,

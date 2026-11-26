@@ -56,6 +56,8 @@ import { ManagerCapabilityTokenRepository } from "../../persistence/Services/Man
 import { ManagerConnectorPendingReplyRepository } from "../../persistence/Services/ManagerConnectorPendingReplies.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { remoteComputersOption } from "../../remoteComputers/RemoteComputers.ts";
+import { readHandedIn } from "../../remoteComputers/handedRemote.ts";
+import { makeHandedRemotePush, type HandedRemotePush } from "../handedRemotePush.ts";
 import {
   assistantPushEnabled,
   decideTurnStart,
@@ -81,7 +83,9 @@ import {
   unclaimedHandedNotices,
   upsertWatch,
   watchHanded,
+  type HandlerComputer,
   type PushBatch,
+  type PushLetter,
   type PushState,
   type PushThreadShell,
   type PushVia,
@@ -269,7 +273,13 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           const next =
             handedWatchOf(state, threadId)?.conversationThreadId === handler.threadId
               ? renewHanded(state, threadId, event.payload.createdAt)
-              : yield* handedWatchFor(state, threadId, handler.threadId, event.payload.createdAt);
+              : yield* handedWatchFor(
+                  state,
+                  threadId,
+                  handler.threadId,
+                  event.payload.createdAt,
+                  handler.computer,
+                );
           if (next !== state) yield* commit(next);
           return;
         }
@@ -337,20 +347,29 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
 
     // ── handed chats (T63 "Hand to…") ──
 
+    /** How the account names this computer (the brief to a handler on another one says it). */
+    const selfName =
+      remoteComputers === null
+        ? Effect.succeed("another computer")
+        : remoteComputers.self.pipe(Effect.map((self) => self.name));
+
     /** Watch `threadId` for `handlerThreadId` (its project names the watcher). */
     const handedWatchFor = (
       state: PushState,
       threadId: string,
       handlerThreadId: string,
       at: string,
+      computer?: HandlerComputer | null,
     ) =>
       Effect.gen(function* () {
-        const handler = yield* shellOf(handlerThreadId);
+        // On another computer (T63-C): nothing of it is here.
+        const handler = computer ? null : yield* shellOf(handlerThreadId);
         return watchHanded(state, {
           threadId,
           handlerThreadId,
           handlerProjectId: handler?.projectId ?? "",
           at,
+          computer: computer ?? null,
         });
       });
 
@@ -361,6 +380,8 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         readonly handlerThreadId: string;
         readonly text: string;
         readonly at: string;
+        /** A handler on another computer (T63-C): the letter goes there. */
+        readonly remote?: PushLetter["remote"];
       },
     ) =>
       queueLetter(state, {
@@ -368,7 +389,17 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         conversationThreadId: input.handlerThreadId,
         text: input.text,
         at: input.at,
+        ...(input.remote ? { remote: input.remote } : {}),
       });
+
+    const remoteOf = (
+      computer: HandlerComputer | null | undefined,
+      chatThreadId: string,
+      kind: "brief" | "update" | "off",
+    ): PushLetter["remote"] =>
+      computer
+        ? { computer: { boxId: computer.boxId, name: computer.name }, chatThreadId, kind }
+        : undefined;
 
     const noteFor = (
       kind: HandedNoteKind,
@@ -378,7 +409,12 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
     ): string => formatHandedNote({ kind, threadId, title, text });
 
     /** The brief: the chat's first request, its latest answer, the person's note. */
-    const briefOf = (threadId: string, title: string, note: string | null) =>
+    const briefOf = (
+      threadId: string,
+      title: string,
+      note: string | null,
+      computer?: string | null,
+    ) =>
       Effect.gen(function* () {
         const detail = Option.getOrNull(
           yield* projections
@@ -398,6 +434,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           about: first?.text ?? "",
           now: last?.text ?? "",
           expected: note,
+          computer: computer ?? null,
         });
       });
 
@@ -410,26 +447,50 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         const title = shell?.title ?? "a chat";
         let state = yield* Ref.get(stateRef);
         const at = event.payload.updatedAt;
+        // Chats of other computers handled here (T63-C): rules only this
+        // computer's ledger knows. Refused: back to the person, no letters.
+        if (handler !== null && handedRemote !== null) {
+          const snapshot = yield* projections.getShellSnapshot().pipe(
+            Effect.orElseSucceed(() => ({
+              threads: [] as ReadonlyArray<OrchestrationThreadShell>,
+            })),
+          );
+          const why = yield* handedRemote.refusalFor({
+            threads: snapshot.threads,
+            threadId,
+            handler,
+          });
+          if (why !== null) {
+            yield* handedRemote.refuseHere(threadId, handler.threadId, why);
+            return;
+          }
+        }
+        // A handing that was refused (here or there) owes no "taken back".
+        const refusedNow =
+          handler === null && handedRemote !== null && handedRemote.takeRefused(threadId);
         if (previousHandler !== null && previousHandler.threadId !== handler?.threadId) {
           // The old handler is off it (unless it is gone itself).
-          if (reason !== "handler-gone") {
+          if (reason !== "handler-gone" && !refusedNow) {
             state = letterFor(state, {
               key: `handed:${event.eventId}:off`,
               handlerThreadId: previousHandler.threadId,
               text: noteFor(handler === null ? "taken-back" : "handed-elsewhere", threadId, title),
               at,
+              remote: remoteOf(previousHandler.computer, threadId, "off"),
             });
           }
           state = dropWatch(state, threadId);
         }
         if (handler !== null) {
-          state = yield* handedWatchFor(state, threadId, handler.threadId, at);
+          state = yield* handedWatchFor(state, threadId, handler.threadId, at, handler.computer);
           if (previousHandler?.threadId !== handler.threadId) {
+            const here = handler.computer ? yield* selfName : null;
             state = letterFor(state, {
               key: `handed:${event.eventId}:brief`,
               handlerThreadId: handler.threadId,
-              text: yield* briefOf(threadId, title, handler.note ?? null),
+              text: yield* briefOf(threadId, title, handler.note ?? null, here),
               at,
+              remote: remoteOf(handler.computer, threadId, "brief"),
             });
           }
         }
@@ -461,6 +522,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
             handlerThreadId: watch.conversationThreadId,
             text: noteFor("person-wrote", payload.threadId, shell.title, payload.text),
             at: payload.createdAt,
+            remote: remoteOf(watch.handlerComputer, payload.threadId, "update"),
           }),
         );
       });
@@ -511,17 +573,20 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       const handed = new Map(
         snapshot.threads
           .filter((chat) => (chat.handler ?? null) !== null && chat.archivedAt === null)
-          .map((chat) => [chat.id as string, chat.handler!.threadId as string] as const),
+          .map((chat) => [chat.id as string, chat.handler!] as const),
       );
       for (const watch of state.watches) {
-        if (watch.handed === true && handed.get(watch.threadId) !== watch.conversationThreadId) {
+        if (
+          watch.handed === true &&
+          handed.get(watch.threadId)?.threadId !== watch.conversationThreadId
+        ) {
           state = dropWatch(state, watch.threadId);
         }
       }
       const at = new Date(yield* Clock.currentTimeMillis).toISOString();
-      for (const [threadId, handlerThreadId] of handed) {
-        if (handedWatchOf(state, threadId)?.conversationThreadId === handlerThreadId) continue;
-        state = yield* handedWatchFor(state, threadId, handlerThreadId, at);
+      for (const [threadId, handler] of handed) {
+        if (handedWatchOf(state, threadId)?.conversationThreadId === handler.threadId) continue;
+        state = yield* handedWatchFor(state, threadId, handler.threadId, at, handler.computer);
       }
       if (state !== (yield* Ref.get(stateRef))) yield* commit(state);
     }).pipe(
@@ -737,7 +802,19 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
           yield* exclusive(
             Effect.gen(function* () {
               const state = yield* Ref.get(stateRef);
-              const next = dropWatch(state, event.payload.threadId);
+              let next = dropWatch(state, event.payload.threadId);
+              // Handled on another computer (T63-C): it forgets the chat there.
+              const watch = handedWatchOf(state, event.payload.threadId);
+              if (watch?.handlerComputer !== undefined) {
+                const shell = yield* shellOf(event.payload.threadId);
+                next = letterFor(next, {
+                  key: `handed:${event.eventId}:put-away`,
+                  handlerThreadId: watch.conversationThreadId,
+                  text: noteFor("taken-back", event.payload.threadId, shell?.title ?? "a chat"),
+                  at: event.occurredAt,
+                  remote: remoteOf(watch.handlerComputer, event.payload.threadId, "off"),
+                });
+              }
               if (next !== state) yield* commit(next);
             }),
           );
@@ -906,9 +983,34 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         return !busy.busy;
       });
 
+    // "Hand to…" across computers (T63-C): needs the bridge to other computers.
+    const handedRemote: HandedRemotePush | null =
+      remoteComputers === null
+        ? null
+        : makeHandedRemotePush({
+            remote: remoteComputers,
+            engine,
+            projections,
+            getState: Ref.get(stateRef),
+            commit,
+            chatFree: conversationFree,
+            handledHere:
+              serverConfig === null
+                ? Effect.succeed({})
+                : Effect.promise(() => readHandedIn(serverConfig.stateDir)).pipe(
+                    Effect.orElseSucceed(() => ({})),
+                  ),
+          });
+
     /** Hand one batch over. `true`: out of the outbox (sent, queued, or not deliverable). */
     const deliverBatch = (batch: PushBatch) =>
       Effect.gen(function* () {
+        // The handler is on another computer (T63-C): the update goes there.
+        if (batch.notices[0]?.handlerComputer !== undefined) {
+          return handedRemote === null
+            ? true
+            : yield* handedRemote.deliverBatch(batch, yield* Clock.currentTimeMillis);
+        }
         const conversation = yield* shellOf(batch.conversationThreadId);
         if (conversation === null || conversation.archivedAt !== null) {
           yield* Effect.logWarning("assistant push: conversation gone; notice dropped").pipe(
@@ -985,6 +1087,15 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       const busy = new Set<string>();
       for (const letter of letters) {
         if (busy.has(letter.conversationThreadId)) continue;
+        // To another computer (T63-C), in order: one that doesn't answer holds the rest.
+        if (letter.remote !== undefined) {
+          const done =
+            handedRemote === null ||
+            (yield* handedRemote.deliverLetter(letter, yield* Clock.currentTimeMillis));
+          if (done) yield* commit(dropLetter(yield* Ref.get(stateRef), letter.key));
+          else busy.add(letter.conversationThreadId);
+          continue;
+        }
         const conversation = yield* shellOf(letter.conversationThreadId);
         if (conversation === null || conversation.archivedAt !== null) {
           yield* commit(dropLetter(yield* Ref.get(stateRef), letter.key));
@@ -1095,6 +1206,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       const nowMs = yield* Clock.currentTimeMillis;
       yield* lookAtWatches(nowMs);
       yield* flushOutbox(nowMs);
+      if (handedRemote !== null) yield* handedRemote.pull(nowMs);
       yield* showUnclaimed(nowMs);
       yield* lookAtLaunches(nowMs);
     }).pipe(
@@ -1154,6 +1266,22 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         : Effect.void;
 
     const chatOf: AssistantPushServiceShape["chatOf"] = (threadId) => viaOf(threadId);
+
+    const queueHandedLetter: NonNullable<AssistantPushServiceShape["queueHandedLetter"]> = (
+      letter,
+    ) =>
+      exclusive(
+        Effect.gen(function* () {
+          const state = yield* Ref.get(stateRef);
+          const next = queueLetter(state, {
+            key: letter.key,
+            conversationThreadId: letter.handlerThreadId,
+            text: letter.text,
+            at: letter.at,
+          });
+          if (next !== state) yield* commit(next);
+        }),
+      );
 
     const tellViaChat: AssistantPushServiceShape["tellViaChat"] = (input) =>
       Effect.gen(function* () {
@@ -1218,6 +1346,7 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
       noteCaller,
       watchRemote,
       chatOf,
+      queueHandedLetter,
       tellViaChat,
       reportsOutcomeOf,
       watchedBy,

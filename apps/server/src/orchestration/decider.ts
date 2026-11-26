@@ -29,6 +29,7 @@ import {
   clipHandlerTitle,
   handlerGoneCall,
   handlerRefusal,
+  remoteHandlerRefusal,
 } from "./threadHandler.ts";
 
 const nowIso = () => new Date().toISOString();
@@ -1383,11 +1384,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `handler_person_only: Only the person can hand thread '${command.threadId}' to someone.`,
         });
       }
-      const refusal = handlerRefusal({
-        threads: readModel.threads,
-        threadId: command.threadId,
-        handlerThreadId: command.handler.threadId,
-      });
+      // A handler on another computer (T63-C): that computer checks its
+      // side when the brief arrives; here only what this computer knows.
+      const computer = command.handler.computer ?? null;
+      const refusal =
+        computer !== null
+          ? remoteHandlerRefusal({ threads: readModel.threads, threadId: command.threadId })
+          : handlerRefusal({
+              threads: readModel.threads,
+              threadId: command.threadId,
+              handlerThreadId: command.handler.threadId,
+            });
       if (refusal !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -1399,6 +1406,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (
         current !== null &&
         current.threadId === command.handler.threadId &&
+        (current.computer?.boxId ?? null) === (computer?.boxId ?? null) &&
         (current.note ?? null) === note
       ) {
         return [];
@@ -1411,6 +1419,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           handler: {
             threadId: command.handler.threadId,
             kind: command.handler.kind,
+            ...(computer !== null
+              ? { computer: { boxId: computer.boxId, name: computer.name.trim().slice(0, 80) } }
+              : {}),
             ...(title !== null ? { title } : {}),
             ...(note !== null ? { note } : {}),
             handedAt: occurredAt,

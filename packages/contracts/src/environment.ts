@@ -44,6 +44,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       this chat's Ready and questions, and lets the handler write into a chat
       kept closed to other agents. Absent: clients keep Hand to agent / Join. */
   chatHandTo: Schema.optionalKey(Schema.Boolean),
+  /** "Hand to…" across computers (T63-C, 0.0.196): a handler on another
+      computer of the account (`handler.computer`) — letters go there through
+      the console's pairing, its messages are fetched from there; and this
+      daemon takes chats of other computers (`/api/manager/handed-chats`).
+      Absent: only chats of the same computer. */
+  chatHandToRemote: Schema.optionalKey(Schema.Boolean),
   /** Server projects who a chat answers to (28.10): `startedBy`,
       `latestPersonMessageAt` and the agents' person calls
       (`thread.person.call` / `.release`, bridge `/call-person`,

@@ -29,6 +29,16 @@ import {
   type RemoteChatHostReply,
 } from "./remoteChatHost.ts";
 import { readIncomingRemoteChats, recordIncomingRemoteChat } from "./remoteChatStore.ts";
+import { AssistantPushService } from "../manager/Services/AssistantPush.ts";
+import {
+  HANDED_CHATS_PATH,
+  HandedLetterInput,
+  HandedPullInput,
+  makeHandedHost,
+  readHandedIn,
+  updateHandedIn,
+  type HandedHostReply,
+} from "./handedRemote.ts";
 
 export const STARTED_BY_PATH = "/api/manager/started-by";
 
@@ -62,7 +72,27 @@ export const makeHost = Effect.gen(function* () {
   });
 });
 
-const respond = (reply: RemoteChatHostReply) =>
+/**
+ * The handler's side of "Hand to…" across computers (`handedRemote.ts`),
+ * wired to this daemon: the ledger under the state dir, letters queued by
+ * AssistantPush (absent there — the push is off: letters can't be queued).
+ */
+export const makeHandedHostLive = Effect.gen(function* () {
+  const projections = yield* ProjectionSnapshotQuery;
+  const { stateDir } = yield* ServerConfig;
+  const push = Option.getOrNull(yield* Effect.serviceOption(AssistantPushService));
+  return makeHandedHost({
+    projections,
+    read: Effect.promise(() => readHandedIn(stateDir)).pipe(Effect.orElseSucceed(() => ({}))),
+    update: (change) => Effect.promise(() => updateHandedIn(stateDir, change)),
+    queueLetter: (letter) =>
+      push?.queueHandedLetter === undefined
+        ? Effect.logWarning("hand to: assistant push is off; a letter is not queued")
+        : push.queueHandedLetter(letter),
+  });
+});
+
+const respond = (reply: RemoteChatHostReply | HandedHostReply) =>
   HttpServerResponse.jsonUnsafe(reply.body, {
     status: reply.status,
     headers: { "cache-control": "no-store" },
@@ -113,8 +143,44 @@ export const startedByRouteLayer = HttpRouter.add(
   }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
 );
 
+const invalid = (message: string) =>
+  respond({ status: 400, body: { ok: false, error: "invalid_payload", message } });
+
+export const handedLetterRouteLayer = HttpRouter.add(
+  "POST",
+  `${HANDED_CHATS_PATH}/letters`,
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
+    const input = Schema.decodeUnknownOption(HandedLetterInput)(body);
+    if (Option.isNone(input)) {
+      return invalid("Expected {handlerThreadId, chat: {threadId, title}, from, kind, key, text}.");
+    }
+    const host = yield* makeHandedHostLive;
+    return respond(yield* host.letter(input.value));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+export const handedPullRouteLayer = HttpRouter.add(
+  "POST",
+  `${HANDED_CHATS_PATH}/:threadId/pull`,
+  Effect.gen(function* () {
+    yield* authenticateOwnerSession;
+    const params = yield* HttpRouter.params;
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const body = yield* request.json.pipe(Effect.orElseSucceed(() => null));
+    const input = Schema.decodeUnknownOption(HandedPullInput)(body);
+    if (Option.isNone(input)) return invalid("Expected {handlerThreadId, ack: [...], status?}.");
+    const host = yield* makeHandedHostLive;
+    return respond(yield* host.pull(params["threadId"] ?? "", input.value));
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
 export const remoteComputersRouteLayers = [
   remoteChatCreateRouteLayer,
   remoteChatStatusRouteLayer,
   startedByRouteLayer,
+  handedLetterRouteLayer,
+  handedPullRouteLayer,
 ] as const;

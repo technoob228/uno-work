@@ -450,9 +450,23 @@ export type ThreadController = typeof ThreadController.Type;
 export const ThreadHandlerKind = Schema.Literals(["chat", "assistant"]);
 export type ThreadHandlerKind = typeof ThreadHandlerKind.Type;
 
+/**
+ * The handler lives on ANOTHER computer of the person's account ("Hand to…"
+ * across computers, T63-C 26.11): a cloud computer (its Uno box), reached
+ * through the console's pairing like every cross-computer call. Absent /
+ * null: the handler is a chat on this computer.
+ */
+export const ThreadHandlerComputer = Schema.Struct({
+  boxId: Schema.Number,
+  name: Schema.String,
+});
+export type ThreadHandlerComputer = typeof ThreadHandlerComputer.Type;
+
 export const ThreadHandler = Schema.Struct({
   threadId: ThreadId,
   kind: ThreadHandlerKind,
+  // See ThreadHandlerComputer. Absent / null: on this computer.
+  computer: Schema.optional(Schema.NullOr(ThreadHandlerComputer)),
   // The handler's title when handed (the sidebar shows the live one).
   title: Schema.optional(Schema.NullOr(Schema.String)),
   // What the person told the handler ("take it to launch, ask me only about money").
@@ -1214,6 +1228,8 @@ const ThreadHandlerSetCommand = Schema.Struct({
     Schema.Struct({
       threadId: ThreadId,
       kind: ThreadHandlerKind,
+      // A chat or an assistant on another computer of the account (T63-C).
+      computer: Schema.optional(Schema.NullOr(ThreadHandlerComputer)),
       title: Schema.optional(Schema.NullOr(Schema.String)),
       note: Schema.optional(Schema.NullOr(Schema.String)),
     }),
