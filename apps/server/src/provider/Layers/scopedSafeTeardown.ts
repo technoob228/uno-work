@@ -28,6 +28,10 @@
  * 4. Replay the captured Exit so typed body failures still surface and
  *    successes still return their value.
  *
+ * Steps 1, 3 and 4 run uninterruptibly; only the body can be interrupted.
+ * An interrupted body (a probe timeout) therefore still closes its scope,
+ * and the interrupt is replayed afterwards.
+ *
  * The helper deliberately logs teardown causes at `Warning` level —
  * silently swallowing them is dangerous because they usually indicate a
  * real bug in a downstream Layer's finalizer.
@@ -49,13 +53,22 @@ import { Effect, Exit, Scope } from "effect";
 export const scopedSafeTeardown =
   (label: string) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, Exclude<R, Scope.Scope>> =>
-    Effect.gen(function* () {
-      const scope = yield* Scope.make();
-      const bodyExit = yield* effect.pipe(Effect.provideService(Scope.Scope, scope), Effect.exit);
-      yield* Scope.close(scope, Exit.void).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning(`${label} teardown errored; preserving body result`, cause),
-        ),
-      );
-      return yield* bodyExit;
-    }) as Effect.Effect<A, E, Exclude<R, Scope.Scope>>;
+    // Only the body is interruptible. A timeout (or any interrupt) that lands
+    // on the body must still reach `Scope.close`: without the mask the
+    // interrupt ended this generator right after the body, the scope was never
+    // closed and the spawned `codex app-server` stayed alive (26.11: 78 of
+    // them in 20 hours on a 4 GB machine, two per missed probe).
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const scope = yield* Scope.make();
+        const bodyExit = yield* restore(
+          effect.pipe(Effect.provideService(Scope.Scope, scope)),
+        ).pipe(Effect.exit);
+        yield* Scope.close(scope, Exit.void).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning(`${label} teardown errored; preserving body result`, cause),
+          ),
+        );
+        return yield* bodyExit;
+      }),
+    ) as Effect.Effect<A, E, Exclude<R, Scope.Scope>>;

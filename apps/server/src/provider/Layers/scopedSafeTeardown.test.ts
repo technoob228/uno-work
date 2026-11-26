@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Cause, Effect, Exit } from "effect";
+import { Cause, Deferred, Duration, Effect, Exit, Fiber, Option } from "effect";
 import { describe, expect } from "vitest";
 
 import { scopedSafeTeardown } from "./scopedSafeTeardown.ts";
@@ -89,6 +89,49 @@ describe("scopedSafeTeardown", () => {
         const squashed = Cause.squash(exit.cause);
         expect(squashed).toBeInstanceOf(BodyError);
       }
+    }),
+  );
+
+  it.live("runs the finalizers when the body is cut off by a timeout", () =>
+    // The leak on a slow machine (26.11): the Codex probe missed its 8 s window,
+    // the timeout interrupted the wrapper before it closed the scope, and the
+    // `codex app-server` child was never killed. Two were left every 5 minutes.
+    Effect.gen(function* () {
+      const finalizers: string[] = [];
+      const wrapped = Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            finalizers.push("killed-child");
+          }),
+        );
+        return yield* Effect.never;
+      }).pipe(scopedSafeTeardown("test"));
+
+      const result = yield* wrapped.pipe(Effect.timeoutOption(Duration.millis(20)));
+      expect(Option.isNone(result)).toBe(true);
+      expect(finalizers).toEqual(["killed-child"]);
+    }),
+  );
+
+  it.effect("runs the finalizers and stays interrupted when the fiber is interrupted", () =>
+    Effect.gen(function* () {
+      const finalizers: string[] = [];
+      const started = yield* Deferred.make<void>();
+      const fiber = yield* Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            finalizers.push("killed-child");
+          }),
+        );
+        yield* Deferred.succeed(started, undefined);
+        return yield* Effect.never;
+      }).pipe(scopedSafeTeardown("test"), Effect.forkChild);
+
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(fiber);
+      const exit = yield* Fiber.await(fiber);
+      expect(finalizers).toEqual(["killed-child"]);
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
     }),
   );
 });
