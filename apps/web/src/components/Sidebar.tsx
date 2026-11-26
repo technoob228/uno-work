@@ -4994,6 +4994,18 @@ export default function Sidebar() {
                 renderChat={(thread) =>
                   renderRow(thread, "active", { d: true, nested: true, underUno: true })
                 }
+                renderHandedFor={(hosts) => {
+                  const chats = hosts.flatMap((host) => handedUnder.get(threadKeyOf(host)) ?? []);
+                  return chats.length === 0 ? null : (
+                    <HandedChatLines
+                      chats={chats}
+                      nestedOf={(chat) => handedUnder.get(threadKeyOf(chat)) ?? []}
+                      isActive={(chat) => threadKeyOf(chat) === routeThreadKey}
+                      onOpen={navigateToThread}
+                      onContextMenu={handleThreadContextMenu}
+                    />
+                  );
+                }}
               />
             ) : (
               <>

@@ -199,6 +199,10 @@ const AssistantRow = memo(function AssistantRow(props: {
   readonly routeThreadKey: string | null;
   readonly extraChats: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+  /** Chats handed to these (Hand to…, T63), for the ones not drawn as rows. */
+  readonly renderHandedFor?:
+    | ((hosts: ReadonlyArray<SidebarThreadSummary>) => ReactNode)
+    | undefined;
 }) {
   const { member } = props;
   const navigate = useNavigate();
@@ -222,6 +226,11 @@ const AssistantRow = memo(function AssistantRow(props: {
   });
   const preview = previewChats(chats, { showAll, isOpen });
   const latest = latestConversation(member.chats);
+  // Folded (or past "Show more"), a chat handed to one of its chats still shows.
+  const handedHere =
+    props.renderHandedFor?.(
+      unfolded ? chats.filter((thread) => !preview.visible.includes(thread)) : chats,
+    ) ?? null;
   // Folded with its open chat inside: the row itself says "you are here".
   const rowActive = !unfolded && holdsOpenChat;
 
@@ -380,6 +389,11 @@ const AssistantRow = memo(function AssistantRow(props: {
           </span>
         ) : null}
       </div>
+      {handedHere ? (
+        <ul role="list" className="m-0 flex flex-col gap-px p-0">
+          {handedHere}
+        </ul>
+      ) : null}
       {unfolded ? (
         <ul
           role="list"
@@ -482,6 +496,9 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
   /** Uno's work chats that are still running (the sidebar keeps them under Uno). */
   readonly unoRunning: ReadonlyArray<SidebarThreadSummary>;
   readonly renderChat: (thread: SidebarThreadSummary) => ReactNode;
+  readonly renderHandedFor?:
+    | ((hosts: ReadonlyArray<SidebarThreadSummary>) => ReactNode)
+    | undefined;
 }) {
   const team = useAssistantTeam();
   const teamShown = useTeamShown();
@@ -604,6 +621,7 @@ export const SidebarAssistants = memo(function SidebarAssistants(props: {
             routeThreadKey={props.routeThreadKey}
             extraChats={member.isUno ? props.unoRunning : []}
             renderChat={props.renderChat}
+            renderHandedFor={props.renderHandedFor}
           />
         ))}
         {live.length === 0 ? <UnoFallbackRow /> : null}

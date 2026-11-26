@@ -283,6 +283,18 @@ describe("the person's own chat where agents talk (Misha 13.11)", () => {
     expect(countChatsWaitingOnYou([called], NOW)).toBe(1);
   });
 
+  it("is Needs you when called into a chat that never ran a turn (handed back, T63)", () => {
+    const back = makeThread({
+      latestTurn: null,
+      session: null,
+      latestUserMessageAt: null,
+      personCalledAt: ago(MINUTE_MS),
+    });
+    expect(isYourTurn(back, NOW)).toBe(true);
+    expect(yourTurnKind(back, NOW)).toBe("called");
+    expect(isYourTurn({ ...back, personCalledAt: null }, NOW)).toBe(false);
+  });
+
   it("still shows an approval or a question", () => {
     expect(
       countChatsWaitingOnYou([mine({ ...agentSpokeLast, hasPendingApprovals: true })], NOW),
