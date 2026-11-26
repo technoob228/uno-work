@@ -175,9 +175,11 @@ describe("NetworkService", () => {
   it("refuses to turn on without a proxy, and restores the person's own variables", async () => {
     await withService({ env: { HTTPS_PROXY: "http://corp:3128" } }, (service, env) =>
       Effect.gen(function* () {
-        const refused = yield* service.change({ enabled: true }, COMPUTER).pipe(
-          Effect.match({ onFailure: (error) => error.message, onSuccess: () => "turned on" }),
-        );
+        const refused = yield* service
+          .change({ enabled: true }, COMPUTER)
+          .pipe(
+            Effect.match({ onFailure: (error) => error.message, onSuccess: () => "turned on" }),
+          );
         expect(refused).toBe("Add a proxy first.");
         yield* service.change({ proxy: proxyInput, enabled: true }, COMPUTER);
         expect(env.HTTPS_PROXY).toContain("127.0.0.1");

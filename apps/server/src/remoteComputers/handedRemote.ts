@@ -326,13 +326,11 @@ export function makeHandedHost(deps: HandedHostDeps) {
         return fail(410, "handler_gone", GONE_MESSAGE);
       }
       if (input.kind === "brief") {
-        const snapshot = yield* deps.projections
-          .getShellSnapshot()
-          .pipe(
-            Effect.orElseSucceed(() => ({
-              threads: [] as ReadonlyArray<OrchestrationThreadShell>,
-            })),
-          );
+        const snapshot = yield* deps.projections.getShellSnapshot().pipe(
+          Effect.orElseSucceed(() => ({
+            threads: [] as ReadonlyArray<OrchestrationThreadShell>,
+          })),
+        );
         const refusal = handlerHereRefusal({ handler, threads: snapshot.threads });
         if (refusal !== null) return fail(409, refusal.error, refusal.message);
       }
