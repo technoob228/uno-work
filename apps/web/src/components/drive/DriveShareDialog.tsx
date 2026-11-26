@@ -9,7 +9,9 @@ import { CheckIcon, CopyIcon, LinkIcon, Loader2Icon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "../../lib/utils";
+import { PasswordGenerateControls } from "../files/PasswordGenerateControls";
 import { Button } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 import {
   Dialog,
   DialogDescription,
@@ -19,6 +21,7 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import { QRCodeSvg } from "../ui/qr-code";
 import { filesApi } from "../files/filesApi";
 import { DRIVE_SHARE_DURATIONS, driveQueryKeys } from "./driveApi";
@@ -36,9 +39,15 @@ export function DriveShareDialog({
   const queryClient = useQueryClient();
   const [hours, setHours] = useState(24 * 7);
   const [copied, setCopied] = useState(false);
+  const [withPassword, setWithPassword] = useState(false);
+  const [password, setPassword] = useState("");
   const create = useMutation({
-    mutationFn: (input: { key: string; hours: number }) =>
-      filesApi(environmentId).driveShareCreate({ key: input.key, expiresInHours: input.hours }),
+    mutationFn: (input: { key: string; hours: number; password: string | null }) =>
+      filesApi(environmentId).driveShareCreate({
+        key: input.key,
+        expiresInHours: input.hours,
+        ...(input.password ? { password: input.password } : {}),
+      }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: driveQueryKeys.shares(environmentId) }),
   });
@@ -49,10 +58,16 @@ export function DriveShareDialog({
     create.reset();
     setCopied(false);
     setHours(24 * 7);
+    setWithPassword(false);
+    setPassword("");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset on a new target only
   }, [targetKey]);
 
   const url = create.data?.url ?? null;
+  const linkPassword = create.variables?.password ?? null;
+  // 4 to 72 bytes: the console's bcrypt limit.
+  const passwordInvalid =
+    withPassword && (password.length < 4 || new TextEncoder().encode(password).length > 72);
   const copy = async () => {
     if (!url) return;
     await navigator.clipboard.writeText(url).catch(() => undefined);
@@ -88,6 +103,11 @@ export function DriveShareDialog({
                   {copied ? "Copied" : "Copy"}
                 </Button>
               </div>
+              {linkPassword ? (
+                <div className="w-full">
+                  <PasswordGenerateControls password={linkPassword} link={url} size="sm" />
+                </div>
+              ) : null}
               <QRCodeSvg value={url} size={132} className="rounded-lg bg-white p-2" />
               <p className="text-center text-xs text-muted-foreground">
                 Works until{" "}
@@ -125,14 +145,41 @@ export function DriveShareDialog({
                   ))}
                 </div>
               </div>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="drive-share-password"
+                    checked={withPassword}
+                    onCheckedChange={(checked) => setWithPassword(checked === true)}
+                  />
+                  <Label htmlFor="drive-share-password" className="text-sm">
+                    Require a password
+                  </Label>
+                </div>
+                {withPassword ? (
+                  <PasswordGenerateControls
+                    password={password}
+                    onPasswordChange={setPassword}
+                    link={null}
+                    size="sm"
+                  />
+                ) : null}
+              </div>
               {create.error ? (
                 <p className="text-sm text-destructive">
                   {create.error instanceof Error ? create.error.message : "Couldn't make a link."}
                 </p>
               ) : null}
               <Button
-                disabled={create.isPending || !target}
-                onClick={() => target && create.mutate({ key: target.key, hours })}
+                disabled={create.isPending || !target || passwordInvalid}
+                onClick={() =>
+                  target &&
+                  create.mutate({
+                    key: target.key,
+                    hours,
+                    password: withPassword ? password : null,
+                  })
+                }
               >
                 {create.isPending ? <Loader2Icon className="animate-spin" /> : <LinkIcon />}
                 Create link

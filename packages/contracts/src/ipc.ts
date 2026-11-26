@@ -662,6 +662,8 @@ export interface DesktopUnoDriveShareFileInput {
   /** Absolute path of a file in the home folder. */
   path: string;
   expiresInHours?: number;
+  /** The visitor enters it before the file opens; absent = no password. */
+  password?: string;
 }
 
 export type DesktopUnoDriveShareFileResult =
@@ -671,6 +673,8 @@ export type DesktopUnoDriveShareFileResult =
 export interface DesktopUnoDriveBridge {
   /** Uploads a copy to Uno Drive → Shared/ with the app's Uno sign-in and links to it. */
   shareLocalFile: (input: DesktopUnoDriveShareFileInput) => Promise<DesktopUnoDriveShareFileResult>;
+  /** This app passes `password` on (0.0.195+); older ones would drop it. */
+  readonly sharePassword?: boolean;
 }
 
 /** What the desktop app knows about Uno's helper on this computer (`~/.uno-connect`). */

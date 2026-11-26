@@ -380,6 +380,7 @@ export function DriveView() {
                   ? `Until ${new Date(share.expiresAt).toLocaleDateString()}`
                   : "No end date"}{" "}
                 · {share.downloads} {share.downloads === 1 ? "open" : "opens"}
+                {share.hasPassword ? " · password" : ""}
                 {share.createdVia === "telegram"
                   ? " · from Telegram"
                   : share.createdVia === "agent"

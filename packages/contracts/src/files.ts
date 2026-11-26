@@ -611,6 +611,8 @@ export const FilesDriveShare = Schema.Struct({
   downloads: NonNegativeInt,
   createdVia: Schema.String,
   createdAt: Schema.NullOr(Schema.String),
+  /** The link asks for a password (the console keeps only its hash). */
+  hasPassword: Schema.Boolean,
 });
 export type FilesDriveShare = typeof FilesDriveShare.Type;
 
@@ -618,6 +620,8 @@ export const FilesDriveShareCreateInput = Schema.Struct({
   key: CloudKey,
   /** 0/absent = 7 days; at most 90 days. */
   expiresInHours: Schema.optional(NonNegativeInt),
+  /** The visitor enters it before the file opens (4–72 bytes); absent = none. */
+  password: Schema.optional(Schema.String),
 });
 export type FilesDriveShareCreateInput = typeof FilesDriveShareCreateInput.Type;
 

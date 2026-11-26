@@ -87,14 +87,25 @@ export async function driveRecent(
   };
 }
 
+/** What the console takes as a link password: 4 to 72 bytes (bcrypt's limit). */
+export function validDriveSharePassword(password: string): boolean {
+  const bytes = new TextEncoder().encode(password).length;
+  return password.length >= 4 && bytes <= 72;
+}
+
 export async function driveShareCreate(
   deps: CloudDeps,
   input: {
     readonly key: string;
     readonly expiresInHours?: number | undefined;
     readonly via?: "app" | "agent";
+    readonly password?: string | undefined;
   },
 ): Promise<FilesDriveShare> {
+  const password = input.password ?? "";
+  if (password !== "" && !validDriveSharePassword(password)) {
+    throw new CloudError("The password must be 4 to 72 characters.");
+  }
   const share = parseDriveShare(
     await call(deps, "/api/v1/drive/shares", {
       method: "POST",
@@ -102,10 +113,18 @@ export async function driveShareCreate(
         key: input.key,
         expires_in_hours: input.expiresInHours ?? 0,
         via: input.via ?? "app",
+        ...(password !== "" ? { password } : {}),
       }),
     }),
   );
   if (!share.url) throw new CloudError("The console didn't return a link.");
+  // An older console ignores the password: don't hand out an open link (its
+  // address is never shown again, so nobody can use it).
+  if (password !== "" && !share.hasPassword) {
+    throw new CloudError(
+      "Uno can't protect Cloud storage links with a password yet. Try again later.",
+    );
+  }
   return share;
 }
 

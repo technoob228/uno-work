@@ -132,6 +132,7 @@ export function parseDriveShare(raw: unknown): FilesDriveShare {
     downloads: num(record["downloads"]),
     createdVia: str(record["created_via"]) || "app",
     createdAt: dateOrNull(record["created_at"]),
+    hasPassword: record["has_password"] === true,
   };
 }
 
@@ -160,6 +161,7 @@ export function describeDriveError(cause: unknown): string {
     return "Cloud storage is full. Free up space or upgrade your plan.";
   if (code === "NOT_FOUND") return "That file or link doesn't exist anymore.";
   if (code === "INVALID_KEY") return "That file name isn't valid.";
+  if (code === "INVALID_PASSWORD") return "The password must be 4 to 72 characters.";
   if (status === 401)
     return "The Uno console didn't accept this computer's key. Reconnect it in Settings.";
   if (status === 403) return "This computer's key isn't allowed to use Cloud storage.";
