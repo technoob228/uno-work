@@ -443,6 +443,35 @@ export const dropLetter = (state: PushState, key: string): PushState => ({
   letters: (state.letters ?? []).filter((entry) => entry.key !== key),
 });
 
+/**
+ * Handed chats' outcomes their handler hasn't picked up for `maxMs` (busy
+ * with a long turn, or at its hourly cap): the person sees those (T63, "Ready
+ * not picked up in 2 h"). One per chat, each only once (`unclaimed:` keys).
+ */
+export const unclaimedHandedNotices = (
+  state: PushState,
+  nowMs: number,
+  maxMs: number,
+): ReadonlyArray<PushNotice> => {
+  const sent = new Set(state.sentKeys);
+  const byThread = new Map<string, PushNotice>();
+  for (const notice of state.outbox) {
+    if (notice.handed !== true || notice.outcome === "needs_you") continue;
+    if (nowMs - toMs(notice.at) < maxMs) continue;
+    if (sent.has(unclaimedKey(notice))) continue;
+    if (!byThread.has(notice.threadId)) byThread.set(notice.threadId, notice);
+  }
+  return [...byThread.values()];
+};
+
+export const unclaimedKey = (notice: Pick<PushNotice, "key">): string => `unclaimed:${notice.key}`;
+
+/** Mark every waiting outcome of the chat as shown to the person. */
+export const markUnclaimedShown = (state: PushState, threadId: string): PushState =>
+  state.outbox
+    .filter((notice) => notice.threadId === threadId && notice.handed === true)
+    .reduce((next, notice) => rememberSent(next, unclaimedKey(notice)), state);
+
 function hashText(text: string): number {
   let hash = 0;
   for (let index = 0; index < text.length; index += 1) {

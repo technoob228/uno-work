@@ -387,19 +387,28 @@ export function latestReportIdBySender(
  * list (and the Agents' chats shelf) and sits as a line under the chat that
  * handles it — when that chat is in the list. One that needs the person
  * (an approval, a question, a call) or is pinned stays where it is, as do
- * chats whose handler isn't listed (the Uno chat on top, another scope).
+ * chats whose handler isn't shown (another scope). An assistant's chat is
+ * shown in the Assistants section (`hosts`).
  */
 export function nestHandedChats<T extends TaskSummary>(input: {
   readonly listed: ReadonlyArray<T>;
   readonly shelf: ReadonlyArray<T>;
   readonly keyOf: (thread: Pick<T, "environmentId" | "id">) => string;
+  /**
+   * Chats whose rows the sidebar draws elsewhere — the assistants' chats in
+   * the Assistants section: a chat handed to one sits under it there.
+   */
+  readonly hosts?: ReadonlySet<string> | undefined;
 }): {
   readonly listed: ReadonlyArray<T>;
   readonly shelf: ReadonlyArray<T>;
   /** Handler's key → the chats it handles, newest first. */
   readonly nested: ReadonlyMap<string, ReadonlyArray<T>>;
 } {
-  const listedKeys = new Set(input.listed.map((thread) => input.keyOf(thread)));
+  const listedKeys = new Set([
+    ...input.listed.map((thread) => input.keyOf(thread)),
+    ...(input.hosts ?? []),
+  ]);
   const nested = new Map<string, T[]>();
   const nestedKeyOf = (thread: T): string | null => {
     const handler = thread.handler ?? null;

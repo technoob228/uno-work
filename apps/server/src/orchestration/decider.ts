@@ -24,7 +24,12 @@ import {
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
-import { clipHandlerNote, clipHandlerTitle, handlerRefusal } from "./threadHandler.ts";
+import {
+  clipHandlerNote,
+  clipHandlerTitle,
+  handlerGoneCall,
+  handlerRefusal,
+} from "./threadHandler.ts";
 
 const nowIso = () => new Date().toISOString();
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
@@ -1351,18 +1356,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         };
         // Back with the person, as Join: it returns to their sidebar.
-        return (thread.controller ?? "human") === "agent"
-          ? [
-              released,
-              controlChangedEvent({
-                threadId: command.threadId,
-                controller: "human",
-                reason: "handoff",
-                commandId: command.commandId,
-                occurredAt,
-              }),
-            ]
-          : released;
+        const back: PlannedOrchestrationEvent[] = [released];
+        if ((thread.controller ?? "human") === "agent") {
+          back.push(
+            controlChangedEvent({
+              threadId: command.threadId,
+              controller: "human",
+              reason: "handoff",
+              commandId: command.commandId,
+              occurredAt,
+            }),
+          );
+        }
+        // A handler deleted or archived: the person hears it in Needs you (T63).
+        if (command.reason === "handler-gone") {
+          const eventId = crypto.randomUUID() as OrchestrationEvent["eventId"];
+          const payload = handlerGoneCall(command.threadId, current.title, occurredAt);
+          back.push({ ...base, eventId, type: "thread.person-called", payload });
+        }
+        return back;
       }
       // Only the person hands a chat; a handler can't pass it on.
       if (!isHumanOrigin(origin)) {

@@ -5,10 +5,12 @@ import {
   EMPTY_PUSH_STATE,
   formatPushNotice,
   handedWatchOf,
+  markUnclaimedShown,
   noticeFromProbe,
   pruneWatches,
   queueLetter,
   renewHanded,
+  unclaimedHandedNotices,
   watchHanded,
   PUSH_NOTICE_MARKER,
   type PushNotice,
@@ -148,5 +150,44 @@ describe("handed chats (T63 Hand to…)", () => {
     const mixed = formatPushNotice([{ ...notice, handed: undefined, threadId: "x" }, notice]);
     expect(mixed).toContain("A chat you handed work to has settled.");
     expect(mixed).toContain("A chat the person handed you has settled.");
+  });
+
+  it("shows the person a Ready the handler hasn't picked up in 2 h, once", () => {
+    const TWO_H = 2 * 60 * 60_000;
+    const base: PushNotice = {
+      key: "pricing|turn-1|completed",
+      threadId: "pricing",
+      title: "Pricing page",
+      project: null,
+      outcome: "completed",
+      assistantProjectId: "launch",
+      conversationThreadId: "coordinator",
+      via: null,
+      elapsedMs: null,
+      changedFiles: null,
+      excerpt: null,
+      request: null,
+      error: null,
+      handed: true,
+      at: HANDED_AT,
+    };
+    const state = {
+      ...EMPTY_PUSH_STATE,
+      outbox: [
+        base,
+        { ...base, key: "pricing|turn-2|completed" },
+        { ...base, key: "hero|turn-1|completed", threadId: "hero", handed: undefined },
+        { ...base, key: "fresh|turn-1|completed", threadId: "fresh", at: "2026-11-24T11:30:00Z" },
+      ],
+    };
+    const at = Date.parse(HANDED_AT) + TWO_H;
+    expect(unclaimedHandedNotices(state, at - 1, TWO_H)).toEqual([]);
+    expect(unclaimedHandedNotices(state, at, TWO_H).map((notice) => notice.threadId)).toEqual([
+      "pricing",
+    ]);
+    const shown = markUnclaimedShown(state, "pricing");
+    expect(unclaimedHandedNotices(shown, at, TWO_H)).toEqual([]);
+    // Still the handler's to hear when it is free.
+    expect(shown.outbox).toHaveLength(4);
   });
 });

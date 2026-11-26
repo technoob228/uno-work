@@ -44,6 +44,10 @@ import { readReports, reportOfThread } from "../../sites/reports.ts";
 
 import { ServerConfig } from "../../config.ts";
 import { systemCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import {
+  HANDED_READY_UNCLAIMED_MS,
+  handedReadyUnclaimedReason,
+} from "../../orchestration/threadHandler.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerConnectorPendingReplyRepositoryLive } from "../../persistence/Layers/ManagerConnectorPendingReplies.ts";
@@ -65,6 +69,7 @@ import {
   handedWatchOf,
   isAssistantConversationThread,
   markBatchSent,
+  markUnclaimedShown,
   noticeFromProbe,
   noticeFromRemoteStatus,
   pruneWatches,
@@ -73,6 +78,7 @@ import {
   PUSH_CALLER_ROUTE_TTL_MS,
   rememberSent,
   renewHanded,
+  unclaimedHandedNotices,
   upsertWatch,
   watchHanded,
   type PushBatch,
@@ -1041,10 +1047,55 @@ export const makeAssistantPush = (options?: AssistantPushOptions) =>
         if (changed) yield* commit(state);
       });
 
+    /**
+     * A handed chat's Ready its handler hasn't picked up in 2 h (T63): the
+     * person sees it in Needs you. The handler still gets it when free.
+     */
+    const showUnclaimed = (nowMs: number) =>
+      Effect.gen(function* () {
+        const unclaimed = unclaimedHandedNotices(
+          yield* Ref.get(stateRef),
+          nowMs,
+          HANDED_READY_UNCLAIMED_MS,
+        );
+        for (const notice of unclaimed) {
+          const shell = yield* shellOf(notice.threadId);
+          const handler = shell?.handler ?? null;
+          if (
+            shell !== null &&
+            shell.archivedAt === null &&
+            handler !== null &&
+            handler.threadId === notice.conversationThreadId
+          ) {
+            const handlerShell = yield* shellOf(handler.threadId);
+            yield* engine
+              .dispatch(
+                {
+                  type: "thread.person.call",
+                  commandId: CommandId.make(`hand-to:unclaimed:${crypto.randomUUID()}`),
+                  threadId: shell.id,
+                  reason: handedReadyUnclaimedReason(handlerShell?.title ?? handler.title ?? null),
+                  createdAt: new Date(nowMs).toISOString(),
+                },
+                { origin: systemCommandOrigin("hand-to", "ready not picked up") },
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("hand to: could not show an unclaimed Ready").pipe(
+                    Effect.annotateLogs({ threadId: notice.threadId, cause }),
+                  ),
+                ),
+              );
+          }
+          yield* commit(markUnclaimedShown(yield* Ref.get(stateRef), notice.threadId));
+        }
+      });
+
     const tick = Effect.gen(function* () {
       const nowMs = yield* Clock.currentTimeMillis;
       yield* lookAtWatches(nowMs);
       yield* flushOutbox(nowMs);
+      yield* showUnclaimed(nowMs);
       yield* lookAtLaunches(nowMs);
     }).pipe(
       exclusive,

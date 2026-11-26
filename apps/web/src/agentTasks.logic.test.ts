@@ -399,4 +399,16 @@ describe("Hand to… in the sidebar (T63)", () => {
     expect(result.shelf.map((thread) => thread.id)).toEqual(["elsewhere"]);
     expect(result.nested.size).toBe(0);
   });
+
+  it("puts a chat handed to an assistant under it in the Assistants section", () => {
+    const pricing = summary("pricing", handedTo("cooper-main"));
+    const result = nestHandedChats({
+      listed: [summary("launch"), pricing],
+      shelf: [],
+      keyOf,
+      hosts: new Set(["env:cooper-main"]),
+    });
+    expect(result.listed.map((thread) => thread.id)).toEqual(["launch"]);
+    expect(result.nested.get("env:cooper-main")?.map((thread) => thread.id)).toEqual(["pricing"]);
+  });
 });

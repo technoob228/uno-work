@@ -20,7 +20,7 @@
  *
  * @module orchestration/threadHandler
  */
-import { THREAD_HANDLER_MAX_DEPTH, type ThreadHandler } from "@t3tools/contracts";
+import { THREAD_HANDLER_MAX_DEPTH, type ThreadHandler, type ThreadId } from "@t3tools/contracts";
 
 export interface HandlerThreadView {
   readonly id: string;
@@ -187,4 +187,40 @@ export function chatsHandledBy(
         thread.handler?.threadId === handlerThreadId && (thread.deletedAt ?? null) === null,
     )
     .map((thread) => thread.id);
+}
+
+/**
+ * The Needs-you line when a handler is deleted or archived and the chat
+ * comes back to the person (T63): "“Launch week” was removed — the chat is
+ * yours again". Within PERSON_CALL_REASON_MAX_CHARS.
+ */
+export function handlerGoneReason(handlerTitle: string | null | undefined): string {
+  const tail = " was removed — the chat is yours again";
+  const title = clip(handlerTitle, 120);
+  return title === null ? `The chat handling it${tail}` : `“${title}”${tail}`;
+}
+
+/** The `thread.person-called` payload for a chat whose handler is gone (T63). */
+export function handlerGoneCall(
+  threadId: ThreadId,
+  handlerTitle: string | null | undefined,
+  at: string,
+) {
+  return {
+    threadId,
+    calledAt: at,
+    calledByThreadId: null,
+    reason: handlerGoneReason(handlerTitle),
+    updatedAt: at,
+  };
+}
+
+/** How long a handed chat's Ready may wait for its handler before the person sees it (T63). */
+export const HANDED_READY_UNCLAIMED_MS = 2 * 60 * 60_000;
+
+/** The Needs-you line when the handler hasn't picked a Ready up in time (T63). */
+export function handedReadyUnclaimedReason(handlerTitle: string | null | undefined): string {
+  const tail = " hasn't picked this up for 2 h — have a look";
+  const title = clip(handlerTitle, 120);
+  return title === null ? `Its handler${tail}` : `“${title}”${tail}`;
 }

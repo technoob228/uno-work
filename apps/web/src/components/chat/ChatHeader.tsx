@@ -11,6 +11,8 @@ import GitActionsControl from "../GitActionsControl";
 import { ThreadDetailsButton } from "./ThreadDetailsButton";
 import { type DraftId } from "~/composerDraftStore";
 import {
+  ArrowRightLeftIcon,
+  CornerUpLeftIcon,
   DiffIcon,
   EllipsisIcon,
   LaptopIcon,
@@ -50,6 +52,9 @@ import { useDevMode } from "../../devMode";
 import { CONTINUE_ON_MACHINE_COPY } from "../../continueOnMachineCopy";
 import { isElectron } from "../../env";
 import { ContinueOnMachineDialog } from "../ContinueOnMachineDialog";
+import { HAND_TO_COPY, useHandToStore } from "../../handTo.logic";
+import { useEnvironmentSupportsHandTo } from "../../environments/handToSupport";
+import { setThreadHandedTo } from "../../agentsAccess";
 import { DraftFolderChip } from "./DraftFolderChip";
 import { cn } from "../../lib/utils";
 import { AssistantChatHeaderActions, AssistantChatHeadline } from "./AssistantChatHeaderActions";
@@ -254,6 +259,20 @@ export const ChatHeader = memo(function ChatHeader({
   const { rootRef, folded, menuNeeded } = useHeaderOverflow(HEADER_FOLD_ORDER, HEADER_FOLD_SILENT);
   const addActionRef = useRef<(() => void) | null>(null);
   const isFolded = (id: HeaderFoldId) => folded.has(id);
+  // "Hand to…" (T63): in the "⋯" menu too, not only in the chat's row menu.
+  const supportsHandTo = useEnvironmentSupportsHandTo(activeThreadEnvironmentId);
+  const handToSummary = useStore((state) => {
+    if (draftId) return null;
+    const summary = selectEnvironmentState(state, activeThreadEnvironmentId)
+      .sidebarThreadSummaryById[activeThreadId];
+    return summary ?? null;
+  });
+  const canHandTo =
+    supportsHandTo &&
+    handToSummary !== null &&
+    handToSummary.assistantRole !== "chat" &&
+    handToSummary.archivedAt === null;
+  const handedNow = canHandTo && (handToSummary?.handler ?? null) !== null;
 
   return (
     <div ref={rootRef} className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -535,7 +554,7 @@ export const ChatHeader = memo(function ChatHeader({
             onOpenChange={setContinueDialogOpen}
           />
         )}
-        {menuNeeded ? (
+        {menuNeeded || canHandTo ? (
           <Menu>
             <MenuTrigger
               render={
@@ -599,6 +618,39 @@ export const ChatHeader = memo(function ChatHeader({
                 <>
                   <MenuSeparator />
                   <OpenInMenuItems availableEditors={availableEditors} openInCwd={openInCwd} />
+                </>
+              ) : null}
+              {canHandTo && handToSummary ? (
+                <>
+                  {menuNeeded ? <MenuSeparator /> : null}
+                  <MenuItem
+                    data-testid="chat-header-hand-to"
+                    onClick={() =>
+                      useHandToStore.getState().open({
+                        environmentId: activeThreadEnvironmentId,
+                        threadId: activeThreadId,
+                        title: handToSummary.title,
+                      })
+                    }
+                  >
+                    <ArrowRightLeftIcon className="size-4" />
+                    {handedNow ? "Hand to someone else…" : HAND_TO_COPY.action}
+                  </MenuItem>
+                  {handedNow ? (
+                    <MenuItem
+                      data-testid="chat-header-take-back"
+                      onClick={() =>
+                        void setThreadHandedTo({
+                          environmentId: activeThreadEnvironmentId,
+                          threadId: activeThreadId,
+                          handler: null,
+                        })
+                      }
+                    >
+                      <CornerUpLeftIcon className="size-4" />
+                      {HAND_TO_COPY.takeBack}
+                    </MenuItem>
+                  ) : null}
                 </>
               ) : null}
               {isFolded("continue") && canContinueOnMachine && !isMobile ? (

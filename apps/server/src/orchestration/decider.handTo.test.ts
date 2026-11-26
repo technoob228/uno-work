@@ -292,6 +292,15 @@ describe("decider: thread.handler.set (Hand to…, T63)", () => {
       { kind: "system", component: "hand-to" },
     );
     expect(gone[0]?.payload).toMatchObject({ handler: null, reason: "handler-gone" });
+    // The person hears it in Needs you; taking it back doesn't call them.
+    const called = gone.find((event) => event.type === "thread.person-called");
+    expect(called?.payload).toMatchObject({
+      threadId: OTHER_ID,
+      calledByThreadId: null,
+      reason: expect.stringMatching(/was removed — the chat is yours again$/),
+    });
+    expect(new Set(gone.map((event) => event.eventId)).size).toBe(gone.length);
+    expect(back.map((event) => event.type)).not.toContain("thread.person-called");
   });
 
   it("lets the handler into a chat kept closed to other agents", async () => {

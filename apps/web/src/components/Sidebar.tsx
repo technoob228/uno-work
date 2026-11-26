@@ -2303,6 +2303,8 @@ export default function Sidebar() {
   const { pinnedThreads, activeThreads, snoozedThreads, settledThreads, agentChats, handedUnder } =
     useMemo(() => {
       const agentHandled: SidebarThreadSummary[] = [];
+      // The assistants' chats drawn in the Assistants section (Hand to…, T63).
+      const assistantHosts = new Set<string>();
       const visible = threads.filter((thread) => {
         if (thread.archivedAt !== null) return false;
         if (
@@ -2338,7 +2340,10 @@ export default function Sidebar() {
         const byAssistant =
           dStartedByInList && startedBy.byKey.has(startedByKey(thread.environmentId, thread.id));
         // The Uno chat is pinned on top of the sidebar, never in the list.
-        if (assistantChatId !== null && thread.id === assistantChatId) return false;
+        if (assistantChatId !== null && thread.id === assistantChatId) {
+          if (showAssistantRow) assistantHosts.add(threadKeyOf(thread));
+          return false;
+        }
         const isOlderUnoChat = isOlderAssistantChat(thread, assistantChatId);
         if (isHelperScope) return isOlderUnoChat;
         // The assistant's other chats (older ones, Telegram / Slack chats) live
@@ -2346,7 +2351,10 @@ export default function Sidebar() {
         if (!isRegularListChat(thread, assistantChatId)) {
           // A conversation with Uno shows under the Uno row (unfolded while
           // it is open), never twice.
-          if (showAssistantRow && isTeamConversation(thread)) return false;
+          if (showAssistantRow && isTeamConversation(thread)) {
+            assistantHosts.add(threadKeyOf(thread));
+            return false;
+          }
           // A chat an assistant started in its own folder: in the list, "started by".
           if (byAssistant) return true;
           return threadKeyOf(thread) === routeThreadKey;
@@ -2359,7 +2367,12 @@ export default function Sidebar() {
         );
       });
       // Chats handed to a listed chat sit under it (Hand to…, T63).
-      const handed = nestHandedChats({ listed: visible, shelf: agentHandled, keyOf: threadKeyOf });
+      const handed = nestHandedChats({
+        listed: visible,
+        shelf: agentHandled,
+        keyOf: threadKeyOf,
+        hosts: assistantHosts,
+      });
       const sections = partitionSidebarThreads([...handed.listed], {
         now,
         sortOrder: sidebarThreadSortOrder,
