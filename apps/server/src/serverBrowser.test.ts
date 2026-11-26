@@ -12,10 +12,10 @@ import { BROWSER_LIVE_SETUP_PAGE_ID } from "@t3tools/contracts";
 import { BROWSER_SETUP_REQUEST_ENV, BROWSER_SETUP_STATUS_ENV } from "./browserSetup.ts";
 import type { ServerConfigShape } from "./config.ts";
 import { ServerConfig } from "./config.ts";
+import { parseTrace } from "./network/exitTrace.ts";
 import {
   liveCaptureClip,
   MAX_PERSON_TAB_PAGES,
-  parseTrace,
   personTabPageKey,
   proxyConfigProblem,
   SERVER_BROWSER_EXECUTABLE_ENV,

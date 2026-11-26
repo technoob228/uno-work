@@ -8,6 +8,10 @@
  * Exit and protocol open their own lists inside the same panel.
  * Everything comes from this computer's daemon (`lib/networkApi.ts`);
  * a daemon without the route hides the button.
+ *
+ * Proxy (26.11): the person's own proxy is an exit too
+ * (`SidebarDNetworkProxy.tsx`). A daemon without the tunnel yet
+ * (`tunnel: false`) shows no protocol: the proxy is the exit.
  */
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,6 +28,7 @@ import {
   ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldIcon,
+  WaypointsIcon,
 } from "lucide-react";
 import { memo, type ReactNode, useState } from "react";
 
@@ -31,6 +36,7 @@ import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { cn } from "../../lib/utils";
 import {
   ADDRESS_TYPE_LABEL,
+  NETWORK_PROXY_EXIT_ID,
   type NetworkAddressType,
   type NetworkChange,
   type NetworkComputer,
@@ -39,10 +45,12 @@ import {
   type NetworkState,
   PROTOCOL_HINT,
   PROTOCOL_LABEL,
+  checkNetworkProxy,
   currentExit,
   exitCarries,
   flagOf,
   getNetwork,
+  networkErrorMessage,
   protocolSummary,
   setNetwork,
 } from "../../lib/networkApi";
@@ -50,6 +58,7 @@ import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ProxyCheckLine, ProxyForm, countryName } from "./SidebarDNetworkProxy";
 
 export const NETWORK_KEY = ["uno-network"] as const;
 
@@ -76,7 +85,8 @@ function useSetNetwork(environmentId: EnvironmentId | null) {
     onMutate: async (change) => {
       await queryClient.cancelQueries({ queryKey: key });
       const before = queryClient.getQueryData<NetworkState>(key);
-      if (before) {
+      // A proxy is saved and checked first: the form waits for the daemon.
+      if (before && change.proxy === undefined) {
         const enabled = change.enabled ?? (change.exitId !== undefined ? true : before.enabled);
         const status = enabled ? "connecting" : "off";
         queryClient.setQueryData<NetworkState>(key, {
@@ -103,6 +113,7 @@ function useSetNetwork(environmentId: EnvironmentId | null) {
 /** What the trigger and the popover say about the state, in one place. */
 export function networkHeadline(state: NetworkState): string {
   const exit = currentExit(state);
+  if (exit?.kind === "proxy") return proxyHeadline(state, exit);
   const where = exit ? exitPlace(exit) : "the chosen exit";
   if (state.enabled && state.permission === "needed") return "Waiting for your OK in macOS";
   switch (state.status) {
@@ -112,6 +123,21 @@ export function networkHeadline(state: NetworkState): string {
       return `Connecting to ${where}…`;
     case "down":
       return `${exit?.label ?? "The exit"} doesn't answer`;
+    default:
+      return "Off";
+  }
+}
+
+function proxyHeadline(state: NetworkState, exit: NetworkExit): string {
+  switch (state.status) {
+    case "on": {
+      const country = countryName(exit.country);
+      return country ? `On · via proxy · ${country}` : "On · via proxy";
+    }
+    case "connecting":
+      return "Checking the proxy…";
+    case "down":
+      return "The proxy doesn't answer";
     default:
       return "Off";
   }
@@ -167,7 +193,9 @@ function NetworkTrigger(props: { state: NetworkState; compact: boolean }) {
           {flagOf(exit.country)} {code}
         </span>
       ) : (
-        <span className="max-w-[4.5rem] truncate">{exit.label}</span>
+        <span className="max-w-[4.5rem] truncate">
+          {exit.kind === "proxy" ? "Proxy" : exit.label}
+        </span>
       )}
     </span>
   );
@@ -182,6 +210,7 @@ function ExitIcon(props: { exit: NetworkExit }) {
     computer: <CloudIcon />,
     server: <ServerIcon />,
     config: <KeyRoundIcon />,
+    proxy: <WaypointsIcon />,
   };
   return icon[exit.kind];
 }
@@ -229,22 +258,30 @@ function ExitRow(props: {
   onPick: () => void;
 }) {
   const { exit, selected } = props;
+  const proxy = exit.kind === "proxy";
   // A config brings its own protocol; with another one chosen it can't be picked.
   const carries = exit.kind !== "config" || exitCarries(exit, props.protocol);
   const own = exit.kind === "config" ? (exit.protocols[0] ?? null) : null;
-  const sub = !exit.online
-    ? "Offline"
-    : !carries && own
-      ? `${PROTOCOL_LABEL[own]} only`
-      : exit.kind === "uno"
-        ? (exit.city ?? "")
-        : [flagOf(exit.country), exit.address, own ? `· ${PROTOCOL_LABEL[own]}` : null]
-            .filter(Boolean)
-            .join(" ");
+  const sub = proxy
+    ? !exit.online
+      ? "Doesn't answer"
+      : exit.address
+        ? `${flagOf(exit.country)} ${exit.address}`.trim()
+        : "Not checked yet"
+    : !exit.online
+      ? "Offline"
+      : !carries && own
+        ? `${PROTOCOL_LABEL[own]} only`
+        : exit.kind === "uno"
+          ? (exit.city ?? "")
+          : [flagOf(exit.country), exit.address, own ? `· ${PROTOCOL_LABEL[own]}` : null]
+              .filter(Boolean)
+              .join(" ");
   return (
     <button
       type="button"
-      disabled={!exit.online || !carries}
+      // A proxy that doesn't answer can still be picked: Check tells why.
+      disabled={proxy ? false : !exit.online || !carries}
       onClick={props.onPick}
       aria-pressed={selected}
       data-testid={`network-exit-${exit.id}`}
@@ -256,7 +293,7 @@ function ExitRow(props: {
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="truncate text-sm font-medium text-foreground">{exit.label}</span>
-          <AddressBadge type={exit.addressType} />
+          {proxy ? null : <AddressBadge type={exit.addressType} />}
         </span>
         <span
           className={cn(
@@ -406,16 +443,19 @@ function SubHeader(props: { title: string; onBack: () => void }) {
   );
 }
 
-type PanelView = "main" | "exits" | "protocol";
+type PanelView = "main" | "exits" | "protocol" | "proxy";
 
 function ExitsView(props: {
   state: NetworkState;
   onBack: () => void;
   onPick: (exitId: string) => void;
+  onProxy: () => void;
 }) {
   const { state } = props;
   const uno = state.exits.filter((item) => item.kind === "uno");
-  const own = state.exits.filter((item) => item.kind !== "uno");
+  const own = state.exits.filter((item) => item.kind !== "uno" && item.kind !== "proxy");
+  const proxy = state.exits.find((item) => item.kind === "proxy") ?? null;
+  const tunnelExits = uno.length + own.length > 0;
   const row = (item: NetworkExit) => (
     <ExitRow
       key={item.id}
@@ -428,12 +468,16 @@ function ExitsView(props: {
   return (
     <div className="flex flex-col" data-testid="network-exits">
       <SubHeader title="Exit" onBack={props.onBack} />
-      <p className="border-t border-border px-3 pt-2.5 pb-1 text-[11px] leading-snug text-muted-foreground">
-        <span className="font-medium text-foreground">Clean</span> addresses belong to home internet
-        providers, so sites trust them.{" "}
-        <span className="font-medium text-foreground">Datacenter</span> ones belong to hosting
-        companies: more captchas, and some sites block them.
-      </p>
+      {tunnelExits ? (
+        <p className="border-t border-border px-3 pt-2.5 pb-1 text-[11px] leading-snug text-muted-foreground">
+          <span className="font-medium text-foreground">Clean</span> addresses belong to home
+          internet providers, so sites trust them.{" "}
+          <span className="font-medium text-foreground">Datacenter</span> ones belong to hosting
+          companies: more captchas, and some sites block them.
+        </p>
+      ) : (
+        <div className="border-t border-border" />
+      )}
       <div className="px-1.5">
         {uno.length > 0 ? (
           <>
@@ -447,6 +491,23 @@ function ExitsView(props: {
             {own.map(row)}
           </>
         ) : null}
+        <SectionTitle first={!tunnelExits}>Your proxy</SectionTitle>
+        {proxy ? row(proxy) : null}
+        <button
+          type="button"
+          onClick={props.onProxy}
+          data-testid="network-proxy-edit"
+          className={cn(ROW, "hover:bg-accent")}
+        >
+          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+            <WaypointsIcon />
+          </span>
+          <span className="min-w-0 flex-1 text-sm text-foreground">
+            {proxy ? "Edit proxy" : "Add a proxy"}
+            <span className="block text-[11px] text-muted-foreground">HTTP, HTTPS or SOCKS5</span>
+          </span>
+          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+        </button>
       </div>
     </div>
   );
@@ -485,9 +546,14 @@ function MainView(props: {
   onToggle: (enabled: boolean) => void;
   onOpen: (view: PanelView) => void;
   onAllow: () => void;
+  onCheck: () => void;
+  checking: boolean;
 }) {
   const { state } = props;
   const exit = currentExit(state);
+  const viaProxy = exit?.kind === "proxy";
+  // Nothing to go through yet: the switch and the exit row open the proxy form.
+  const noExit = state.exits.length === 0;
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3 px-3 pb-2.5">
@@ -511,7 +577,9 @@ function MainView(props: {
         </div>
         <Switch
           checked={state.enabled}
-          onCheckedChange={(checked) => props.onToggle(checked)}
+          onCheckedChange={(checked) =>
+            checked && noExit ? props.onOpen("proxy") : props.onToggle(checked)
+          }
           aria-label="Network"
           data-testid="network-switch"
           className="mt-1"
@@ -533,9 +601,19 @@ function MainView(props: {
         </div>
       ) : null}
       {state.status === "down" ? (
-        <div className="mx-3 mb-2.5 rounded-md bg-destructive/8 px-2.5 py-2 text-xs text-destructive-foreground">
-          Uno Work is offline until it answers, so your own address doesn't leak. Pick another exit
-          or turn Network off.
+        <div
+          className="mx-3 mb-2.5 rounded-md bg-destructive/8 px-2.5 py-2 text-xs text-destructive-foreground"
+          data-testid="network-down"
+        >
+          {viaProxy ? (
+            <>
+              {state.proxy?.check?.status === "failed" ? `${state.proxy.check.reason} ` : null}
+              Agents and apps here can't go online until it answers, so your own address doesn't
+              leak. Fix the proxy or turn Network off.
+            </>
+          ) : (
+            "Uno Work is offline until it answers, so your own address doesn't leak. Pick another exit or turn Network off."
+          )}
         </div>
       ) : null}
 
@@ -543,25 +621,57 @@ function MainView(props: {
         <PickRow
           label="Exit"
           testId="network-row-exit"
-          onOpen={() => props.onOpen("exits")}
+          onOpen={() => props.onOpen(noExit ? "proxy" : "exits")}
           value={
             exit ? (
               <>
                 {exit.kind === "uno" ? `${flagOf(exit.country)} ` : null}
+                {viaProxy ? "Proxy · " : null}
                 {exitPlace(exit)}
               </>
+            ) : noExit ? (
+              "Add a proxy"
             ) : (
               "Choose"
             )
           }
         />
-        <PickRow
-          label="Protocol"
-          testId="network-row-protocol"
-          onOpen={() => props.onOpen("protocol")}
-          value={protocolSummary(state)}
-        />
-        {state.status === "on" && exit?.address ? (
+        {state.tunnel && !viaProxy ? (
+          <PickRow
+            label="Protocol"
+            testId="network-row-protocol"
+            onOpen={() => props.onOpen("protocol")}
+            value={protocolSummary(state)}
+          />
+        ) : null}
+        {viaProxy && state.enabled ? (
+          <div className="flex items-center gap-2 px-2 py-1.5">
+            <div className="min-w-0 flex-1">
+              {props.checking || state.proxy?.check?.status === "ok" ? (
+                <ProxyCheckLine
+                  check={state.proxy?.check ?? null}
+                  checking={props.checking || state.status === "connecting"}
+                />
+              ) : (
+                <span className="text-[11px] text-muted-foreground">
+                  {state.proxy?.check?.status === "failed"
+                    ? "Last check: no answer"
+                    : "Not checked yet"}
+                </span>
+              )}
+            </div>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={props.onCheck}
+              disabled={props.checking}
+              data-testid="network-check"
+            >
+              Check
+            </Button>
+          </div>
+        ) : null}
+        {!viaProxy && state.status === "on" && exit?.address ? (
           <div className="flex items-center gap-2.5 px-2 py-1.5">
             <span className="w-16 shrink-0 text-xs text-muted-foreground">Sites see</span>
             <span className="min-w-0 flex-1 truncate text-right font-mono text-sm font-medium text-foreground">
@@ -572,7 +682,7 @@ function MainView(props: {
         ) : null}
       </div>
 
-      {state.computers.length > 0 ? (
+      {state.computers.length > 0 && state.tunnel ? (
         <div className="border-t border-border px-1.5 pt-1.5" data-testid="network-computers">
           <SectionTitle first>Your computers</SectionTitle>
           {state.computers.map((computer) => (
@@ -596,25 +706,69 @@ function MainView(props: {
       ) : null}
 
       <div className="mt-1.5 border-t border-border px-3 pt-2.5 text-[11px] leading-snug text-muted-foreground">
-        Everything Uno Work does goes through the tunnel: agents, terminals, git, ssh, downloads,
-        and Docker on this computer. Nothing goes around it. Other apps keep their own connection.
+        {viaProxy || !state.tunnel ? (
+          <>
+            Agents, terminals, git, downloads and the apps Uno Work starts on this computer go
+            through the proxy. Running ones switch after a restart. Uno itself stays direct, so it
+            can help if the proxy breaks.
+          </>
+        ) : (
+          "Everything Uno Work does goes through the tunnel: agents, terminals, git, ssh, downloads, and Docker on this computer. Nothing goes around it. Other apps keep their own connection."
+        )}
       </div>
     </div>
   );
 }
 
-function NetworkPanel(props: { state: NetworkState; onChange: (change: NetworkChange) => void }) {
-  const { state } = props;
+function NetworkPanel(props: {
+  state: NetworkState;
+  environmentId: EnvironmentId;
+  change: ReturnType<typeof useSetNetwork>;
+}) {
+  const { state, change, environmentId } = props;
+  const queryClient = useQueryClient();
   const [view, setView] = useState<PanelView>("main");
+  const [proxyError, setProxyError] = useState<string | null>(null);
   const back = () => setView("main");
+  const onChange = (next: NetworkChange) => change.mutate(next);
+  const recheck = useMutation({
+    mutationFn: () => checkNetworkProxy({ environmentId }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: [...NETWORK_KEY, environmentId] }),
+  });
+  const saveProxy = (next: NetworkChange) => {
+    setProxyError(null);
+    change.mutate(next, {
+      onSuccess: back,
+      onError: (error) => setProxyError(networkErrorMessage(error)),
+    });
+  };
   return (
     <div className="flex flex-col" data-testid="network-panel" data-view={view}>
-      {view === "exits" ? (
+      {view === "proxy" ? (
+        <div className="flex flex-col pb-2.5">
+          <SubHeader
+            title="Proxy"
+            onBack={state.exits.length > 0 ? () => setView("exits") : back}
+          />
+          <div className="border-t border-border">
+            <ProxyForm
+              environmentId={environmentId}
+              saved={state.proxy}
+              active={state.enabled && state.exitId === NETWORK_PROXY_EXIT_ID}
+              busy={change.isPending}
+              error={proxyError}
+              onUse={(proxy) => saveProxy({ proxy, enabled: true })}
+              onRemove={() => saveProxy({ proxy: null })}
+            />
+          </div>
+        </div>
+      ) : view === "exits" ? (
         <ExitsView
           state={state}
           onBack={back}
+          onProxy={() => setView("proxy")}
           onPick={(exitId) => {
-            props.onChange({ exitId });
+            onChange({ exitId });
             back();
           }}
         />
@@ -623,16 +777,18 @@ function NetworkPanel(props: { state: NetworkState; onChange: (change: NetworkCh
           state={state}
           onBack={back}
           onPick={(protocol) => {
-            if (protocol !== state.protocol) props.onChange({ protocol });
+            if (protocol !== state.protocol) onChange({ protocol });
             back();
           }}
         />
       ) : (
         <MainView
           state={state}
-          onToggle={(enabled) => props.onChange({ enabled })}
+          onToggle={(enabled) => onChange({ enabled })}
           onOpen={setView}
-          onAllow={() => props.onChange({ askPermission: true })}
+          onAllow={() => onChange({ askPermission: true })}
+          onCheck={() => recheck.mutate()}
+          checking={recheck.isPending}
         />
       )}
     </div>
@@ -678,7 +834,9 @@ export const SidebarDNetworkButton = memo(function SidebarDNetworkButton(props: 
         className="w-[min(21rem,calc(100vw-1.5rem))] p-0 [--viewport-inline-padding:0px]"
       >
         {/* Mounted per opening: the panel always opens on its main view. */}
-        {open ? <NetworkPanel state={state} onChange={(next) => change.mutate(next)} /> : null}
+        {open && environmentId ? (
+          <NetworkPanel state={state} environmentId={environmentId} change={change} />
+        ) : null}
       </PopoverPopup>
     </Popover>
   );

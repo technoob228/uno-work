@@ -58,6 +58,7 @@ import {
   telegramBotLink,
   type AppManifest,
 } from "./appManifest.ts";
+import { copyProxyEnvironment } from "../network/proxyEnv.ts";
 import { extractHtmlTitle, parseCgroupOwner } from "./discoveryParsers.ts";
 import { openHiddenApps } from "./hiddenApps.ts";
 import { displayManifestDir, resolveManifestDir } from "./manifestDir.ts";
@@ -302,7 +303,7 @@ export function appSdkEnvironment(manifest: Pick<AppManifest, "id" | "ai">, home
   return env;
 }
 
-/** The environment a user's app starts with: theirs, not the daemon's secrets. */
+/** The environment a user's app starts with: theirs, not the daemon's secrets (Network's proxy, if on). */
 export function appEnvironment(home: string, port: number | null): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     HOME: home,
@@ -315,6 +316,8 @@ export function appEnvironment(home: string, port: number | null): NodeJS.Proces
     if (value) env[key] = value;
   }
   if (port !== null) env["PORT"] = String(port);
+  // Network's proxy (the sidebar's shield): an app Uno Work starts goes out through it too.
+  Object.assign(env, copyProxyEnvironment());
   return env;
 }
 

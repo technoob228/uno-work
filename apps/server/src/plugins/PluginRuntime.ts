@@ -22,6 +22,7 @@ import * as OS from "node:os";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { collectStreamAsString } from "../provider/providerSnapshot.ts";
 import { cronMatches, cronMinuteKey, parseCronExpression, parseEveryDuration } from "./cron.ts";
+import { copyProxyEnvironment } from "../network/proxyEnv.ts";
 import { isPluginActive, PluginRegistry } from "./PluginRegistry.ts";
 
 const CRON_SWEEP_INTERVAL_MS = 30 * 1000;
@@ -53,6 +54,8 @@ export const PLUGIN_ENV_PREFIX = "UNO_PLUGIN_";
  * - on Windows additionally `SystemRoot`/`ComSpec`, without which `cmd.exe`
  *   cannot start at all.
  *
+ * - Network's proxy variables while it is on (`network/proxyEnv.ts`).
+ *
  * `extraEnv` keys without the prefix are dropped: the runtime only ever passes
  * prefixed ones, and the filter keeps that an invariant rather than a habit.
  */
@@ -77,6 +80,8 @@ export function buildPluginCommandEnv(input: {
       if (value !== undefined && key.startsWith(PLUGIN_ENV_PREFIX)) env[key] = value;
     }
   }
+  // Network's proxy, if on: the bridge's address, never the person's proxy login.
+  Object.assign(env, copyProxyEnvironment(input.baseEnv));
   return env;
 }
 

@@ -8,8 +8,11 @@
  * Address params: `net=off|on|down` — where it starts (off by default);
  * `vpn=cisco` — this Mac is already on a corporate VPN;
  * `perm=ask` — macOS hasn't allowed Uno Work's network extension yet
- *   (allowing takes ~1.2 s in the demo, as if the person clicked Allow).
- * All addresses are made up.
+ *   (allowing takes ~1.2 s in the demo, as if the person clicked Allow);
+ * `tunnel=0` — a daemon without the tunnel yet (what ships first, 26.11):
+ *   the person's proxy is the only exit;
+ * `proxy=saved|on|down` — a proxy is already saved (and on / not answering).
+ * A proxy whose host has "bad" in it fails its check. All addresses are made up.
  */
 import { HttpResponse, http, type HttpHandler } from "msw";
 
@@ -17,6 +20,9 @@ import type {
   NetworkComputer,
   NetworkExit,
   NetworkProtocol,
+  NetworkProxyCheck,
+  NetworkProxyInfo,
+  NetworkProxyInput,
   NetworkState,
   NetworkStatus,
   NetworkTransport,
@@ -124,6 +130,50 @@ interface Switch {
   otherVpn: { name: string } | null;
   /** null — allowed; else when the person asked macOS (0 — not yet). */
   permissionAskedAt: number | null;
+  tunnel: boolean;
+  proxy: Omit<NetworkProxyInfo, "check" | "alwaysDirect"> | null;
+  proxyCheck: NetworkProxyCheck | null;
+}
+
+const ALWAYS_DIRECT = ["localhost", "127.0.0.1", "::1", ".local", "192.168.0.0/16", "uno.place"];
+const PROXY_CHECK_MS = 900;
+const SAMPLE_PROXY = {
+  scheme: "http" as const,
+  host: "de.proxy-seller.example",
+  port: 8080,
+  username: "misha",
+  hasPassword: true,
+  skip: [],
+};
+
+function demoCheck(proxy: { host: string }): NetworkProxyCheck {
+  const at = new Date().toISOString();
+  if (/bad/i.test(proxy.host)) {
+    return { status: "failed", reason: "The proxy doesn't answer at this address and port.", at };
+  }
+  return { status: "ok", ip: "185.199.110.42", country: "DE", latencyMs: 142, at };
+}
+
+function proxyExit(current: Switch): NetworkExit | null {
+  if (!current.proxy) return null;
+  const check = current.proxyCheck;
+  return {
+    id: "proxy",
+    kind: "proxy",
+    label: `${current.proxy.host}:${current.proxy.port}`,
+    country: check?.status === "ok" ? check.country : null,
+    city: null,
+    address: check?.status === "ok" ? check.ip : null,
+    latencyMs: check?.status === "ok" ? check.latencyMs : null,
+    online: check?.status !== "failed",
+    addressType: "unknown",
+    protocols: [],
+  };
+}
+
+function exitsOf(current: Switch): ReadonlyArray<NetworkExit> {
+  const proxy = proxyExit(current);
+  return [...(current.tunnel ? EXITS : []), ...(proxy ? [proxy] : [])];
 }
 
 const ALLOW_MS = 1_200;
@@ -140,9 +190,15 @@ const byHost = new Map<string, Switch>();
 function startOf(): Switch {
   const params = typeof location === "undefined" ? null : new URLSearchParams(location.search);
   const asked = params?.get("net") ?? null;
+  const tunnel = params?.get("tunnel") !== "0";
+  const proxy = params?.get("proxy") ?? null;
+  const proxyDown = proxy === "down";
   return {
-    enabled: asked === "on" || asked === "down",
-    exitId: "uno-de",
+    tunnel,
+    proxy: proxy ? { ...SAMPLE_PROXY, ...(proxyDown ? { host: "bad.proxy.example" } : {}) } : null,
+    proxyCheck: proxy ? demoCheck(proxyDown ? { host: "bad" } : SAMPLE_PROXY) : null,
+    enabled: asked === "on" || asked === "down" || proxy === "on" || proxyDown,
+    exitId: proxy === "on" || proxyDown || !tunnel ? "proxy" : "uno-de",
     protocol: "auto",
     // Started "on": connected a week ago.
     at: Date.now() - 7 * 86_400_000,
@@ -190,7 +246,8 @@ function computersOf(status: NetworkStatus, waiting: boolean): ReadonlyArray<Net
 }
 
 function stateOf(current: Switch): NetworkState {
-  const exit = EXITS.find((item) => item.id === current.exitId) ?? null;
+  const exits = exitsOf(current);
+  const exit = exits.find((item) => item.id === current.exitId) ?? null;
   const needed = permissionNeeded(current);
   if (!needed && current.permissionAskedAt !== null) {
     // Allowed just now: the tunnel comes up from here.
@@ -199,25 +256,34 @@ function stateOf(current: Switch): NetworkState {
   }
   const waiting = current.enabled && needed;
   let status: NetworkStatus = "off";
-  if (current.enabled) {
-    if (current.forcedDown || !exit?.online) status = "down";
-    else if (waiting) status = "connecting";
-    else status = Date.now() - current.at < CONNECT_MS ? "connecting" : "on";
+  const viaProxy = exit?.kind === "proxy";
+  if (current.enabled && exit) {
+    if (current.forcedDown || !exit.online) status = "down";
+    else if (waiting && !viaProxy) status = "connecting";
+    else
+      status =
+        Date.now() - current.at < (viaProxy ? PROXY_CHECK_MS : CONNECT_MS) ? "connecting" : "on";
   }
   return {
     available: true,
-    enabled: current.enabled,
+    tunnel: current.tunnel,
+    enabled: current.enabled && exit !== null,
     status,
-    exitId: current.exitId,
-    exits: EXITS,
+    exitId: exit ? current.exitId : null,
+    exits,
     protocol: current.protocol,
-    activeProtocol: status === "on" ? transportOf(current, exit) : null,
-    computers: computersOf(status, waiting),
-    permission: needed ? "needed" : "granted",
+    activeProtocol: status === "on" && !viaProxy ? transportOf(current, exit) : null,
+    computers: computersOf(status, waiting && !viaProxy).slice(0, current.tunnel ? 3 : 1),
+    permission: needed && !viaProxy ? "needed" : "granted",
     otherVpn: current.otherVpn,
     since: current.enabled ? new Date(current.at).toISOString() : null,
+    proxy: current.proxy
+      ? { ...current.proxy, alwaysDirect: ALWAYS_DIRECT, check: current.proxyCheck }
+      : null,
   };
 }
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const PROTOCOLS: ReadonlyArray<NetworkProtocol> = ["auto", ...ALL];
 
@@ -226,6 +292,16 @@ export function networkHandlers(): HttpHandler[] {
     http.get("*/api/manager/network", ({ request }) =>
       HttpResponse.json(stateOf(switchOf(new URL(request.url).host))),
     ),
+    http.post("*/api/manager/network/check", async ({ request }) => {
+      const current = switchOf(new URL(request.url).host);
+      const body = (await request.json().catch(() => ({}))) as { proxy?: NetworkProxyInput };
+      const typed = body.proxy ?? current.proxy;
+      if (!typed) return HttpResponse.json({ error: "Add a proxy first." }, { status: 400 });
+      await wait(PROXY_CHECK_MS);
+      const check = demoCheck(typed);
+      if (!body.proxy) current.proxyCheck = check;
+      return HttpResponse.json(check);
+    }),
     http.post("*/api/manager/network", async ({ request }) => {
       const current = switchOf(new URL(request.url).host);
       const body = (await request.json().catch(() => ({}))) as {
@@ -233,12 +309,42 @@ export function networkHandlers(): HttpHandler[] {
         exitId?: unknown;
         protocol?: unknown;
         askPermission?: unknown;
+        proxy?: NetworkProxyInput | null;
       };
+      if (body.proxy === null) {
+        current.proxy = null;
+        current.proxyCheck = null;
+        if (current.exitId === "proxy") current.enabled = false;
+        if (!current.tunnel) current.enabled = false;
+      } else if (body.proxy) {
+        const typed = body.proxy;
+        if (!/^[a-z0-9.-]+$/i.test(typed.host.trim())) {
+          return HttpResponse.json(
+            { error: "Enter the proxy's host name or IP." },
+            { status: 400 },
+          );
+        }
+        await wait(PROXY_CHECK_MS);
+        current.proxy = {
+          scheme: typed.scheme,
+          host: typed.host.trim(),
+          port: typed.port,
+          username: typed.username ?? null,
+          hasPassword: typed.password
+            ? true
+            : (typed.password === undefined && current.proxy?.hasPassword) || false,
+          skip: typed.skip?.flatMap((item) => item.split(/[\s,]+/)).filter(Boolean) ?? [],
+        };
+        current.proxyCheck = demoCheck(current.proxy);
+        current.exitId = "proxy";
+        current.forcedDown = false;
+        current.at = Date.now() - PROXY_CHECK_MS;
+      }
       if (body.askPermission === true && current.permissionAskedAt === 0) {
         current.permissionAskedAt = Date.now();
       }
       if (typeof body.exitId === "string") {
-        const exit = EXITS.find((item) => item.id === body.exitId);
+        const exit = exitsOf(current).find((item) => item.id === body.exitId);
         if (!exit) return HttpResponse.json({ error: "unknown exit" }, { status: 400 });
         current.exitId = exit.id;
         // A config carries only its own protocol: picking it moves the protocol along.

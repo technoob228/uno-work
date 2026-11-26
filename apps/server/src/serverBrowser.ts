@@ -53,6 +53,8 @@ import {
   type BrowserSetupController,
 } from "./browserSetup.ts";
 import { ServerConfig } from "./config.ts";
+import { TRACE_URL, parseTrace } from "./network/exitTrace.ts";
+import { browserProxyFromEnvironment } from "./network/proxyEnv.ts";
 import {
   capturePage as capturePageIn,
   type PageCapture,
@@ -470,17 +472,6 @@ async function startVirtualDisplay(): Promise<{ display: string; process: ChildP
   });
 }
 
-// По имени, не по IP: запрос браузера через прокси к голому IP падает на
-// проверке сертификата в playwright (SNI уходит как localhost).
-const TRACE_URL = "https://one.one.one.one/cdn-cgi/trace";
-
-/** Адрес и страна выхода из ответа Cloudflare trace (`ip=…`, `loc=…`). */
-export function parseTrace(body: string): { ip: string | null; country: string | null } {
-  const ip = /^ip=(.+)$/m.exec(body)?.[1]?.trim() || null;
-  const loc = /^loc=([A-Z]{2})$/m.exec(body)?.[1] ?? null;
-  return { ip, country: loc && loc !== "XX" ? loc : null };
-}
-
 /**
  * Адрес, который видят сайты. Спрашиваем Cloudflare trace: без ключа, без
  * третьих сервисов. С прокси — через сам браузер (его сеть идёт через прокси),
@@ -604,6 +595,8 @@ export const makeServerBrowser = Effect.gen(function* () {
     }
   };
   let proxy: BrowserProxyConfig | null = yield* Effect.promise(readProxy);
+  /** The running browser went out through Network's proxy (no proxy of its own). */
+  let networkProxyAtLaunch = false;
   const stateListeners = new Set<(state: BrowserLiveState) => void>();
 
   // Браузер не в образе: машина ставит его при первом использовании
@@ -675,14 +668,15 @@ export const makeServerBrowser = Effect.gen(function* () {
     const running = Effect.runSync(Ref.get(contextRef));
     // С прокси адрес машины — не тот, что видят сайты: пока браузер не
     // запущен, честнее не показывать ничего.
-    if (proxy && !running) {
+    const viaProxy = proxy !== null || networkProxyAtLaunch;
+    if (viaProxy && !running) {
       exit = null;
       emitState();
       return;
     }
     // Метка ставится до ответа — параллельные подписки не спрашивают дважды.
     exit = { ip: exit?.ip ?? null, country: exit?.country ?? null, at: Date.now() };
-    void lookupExit(proxy ? running : null).then((value) => {
+    void lookupExit(viaProxy ? running : null).then((value) => {
       exit = { ...value, at: Date.now() };
       emitState();
     });
@@ -856,6 +850,9 @@ export const makeServerBrowser = Effect.gen(function* () {
     }
     const headless = displayVar === undefined;
     proxy = yield* Effect.promise(readProxy);
+    // No proxy of its own: Network's (the sidebar's shield), if it is on.
+    const launchProxy = proxy ?? browserProxyFromEnvironment();
+    networkProxyAtLaunch = proxy ? false : launchProxy !== null;
     const launchWith = (channel: "chromium" | undefined) =>
       playwright.chromium.launchPersistentContext(profileDir, {
         headless,
@@ -863,12 +860,12 @@ export const makeServerBrowser = Effect.gen(function* () {
         ...(executablePath ? { executablePath } : {}),
         ...(channel ? { channel } : {}),
         ...(headless ? {} : { env: { ...process.env, DISPLAY: displayVar } }),
-        ...(proxy
+        ...(launchProxy
           ? {
               proxy: {
-                server: proxy.server,
-                ...(proxy.username ? { username: proxy.username } : {}),
-                ...(proxy.password ? { password: proxy.password } : {}),
+                server: launchProxy.server,
+                ...(launchProxy.username ? { username: launchProxy.username } : {}),
+                ...(launchProxy.password ? { password: launchProxy.password } : {}),
               },
             }
           : {}),
