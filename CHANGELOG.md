@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.195 — 2026-11-26
+
+- Hand to…: hand a chat to another chat (a coordinator) or an assistant from the chat's menu, the "⋯" menu in its header or the line above the message box, with an optional note on what you expect. The chat moves under them in the sidebar ("↳ … · handled"), they get a short brief and then its results and questions instead of you, and you see only what needs your own click — approvals, secrets, payments and sign-ins — plus their result, a decision they can't make, or that it's stuck. Take back returns it in one click; writing in the chat yourself adds a line and leaves it with them. If they're deleted or archived, the chat comes back to you with a note in Needs you; if they haven't picked up a result in 2 hours, you see it too. Same computer for now.
+- The model picker's rows no longer overlap (Private GPU models).
+- The sidebar doesn't repeat the computer's name when every chat in the list is on the same computer, and a long computer name gives way to the chat title.
+
 ## v0.0.194 — 2026-11-25
 
 - Above the message box there is one thing at a time: a card that waits for you (Allow, a question, a secret) or one quiet line of chips: "Waiting for you · N", "Tasks · N working / needs you / done", where the chat came from, and whether other agents may write here ("Keep other agents out"). Details open upward on a click. The separate Tasks, Waiting for you and "Agents are talking here…" strips are gone. When agents of other chats talk in your chat, each round folds into one line "Agents talked · N messages · Show"; your messages, the answer to you and what waits for you stay in view.
