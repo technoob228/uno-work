@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.196 — 2026-11-26
+
+- Network: your own proxy for Uno Work. Open the shield on top of the sidebar → Add a proxy → pick HTTP, HTTPS or SOCKS5, enter host, port and an optional login and password, and press Check to see which address and country sites see. Once it's on, agents, terminals, git, downloads and the apps Uno Work starts on this computer go through the proxy; if it stops answering they stay offline instead of using your own address. Uno itself, localhost and private networks stay direct (add your own in "Skip for"). The password stays on the computer and never reaches logs. Apps that already run switch after a restart. The browser panel of the Mac app doesn't use the proxy yet.
+- Hand to… works across your computers: hand a chat to a chat or an assistant on another computer of yours. They get the brief, write in the chat and get its results the same way; the chat stays in your list with "Handled by … on <computer>". The handler has to be a cloud computer.
+
 ## v0.0.195 — 2026-11-26
 
 - Hand to…: hand a chat to another chat (a coordinator) or an assistant from the chat's menu, the "⋯" menu in its header or the line above the message box, with an optional note on what you expect. The chat moves under them in the sidebar ("↳ … · handled"), they get a short brief and then its results and questions instead of you, and you see only what needs your own click — approvals, secrets, payments and sign-ins — plus their result, a decision they can't make, or that it's stuck. Take back returns it in one click; writing in the chat yourself adds a line and leaves it with them. If they're deleted or archived, the chat comes back to you with a note in Needs you; if they haven't picked up a result in 2 hours, you see it too. Same computer for now.
