@@ -112,7 +112,8 @@ import {
 } from "./updateMachine.ts";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch.ts";
 import { resolveDesktopAppBranding } from "./appBranding.ts";
-import { createPageToolsMain } from "./pageTools/pageToolsMain.ts";
+import { createPageToolsMain, isPageToolsPartition } from "./pageTools/pageToolsMain.ts";
+import { createBrowserProxy, type BrowserProxy } from "./browserProxy.ts";
 import {
   DESKTOP_FLAVOR_ENV,
   isAutoUpdateAllowedForFlavor,
@@ -2769,6 +2770,16 @@ function guardGuestSessionPermissions(guestSession: Electron.Session): void {
   guestSession.setDisplayMediaRequestHandler((_request, callback) => callback({}));
 }
 
+let browserProxy: BrowserProxy | null = null;
+/** Network's proxy for the panel browser's sessions (browserProxy.ts; the backend writes the file). */
+function getBrowserProxy(): BrowserProxy {
+  browserProxy ??= createBrowserProxy({
+    filePath: Path.join(STATE_DIR, "browser-proxy.json"),
+    log: (message, details) => console.info(message, details ?? {}),
+  });
+  return browserProxy;
+}
+
 let pageToolsMain: ReturnType<typeof createPageToolsMain> | null = null;
 /** Comment and Debug for the panel browser's pages (pageTools/pageToolsMain.ts). */
 function getPageToolsMain(): ReturnType<typeof createPageToolsMain> {
@@ -2920,6 +2931,11 @@ function createWindow(): BrowserWindow {
     // and Debug (pageTools/): never a preload the page or the app asked for.
     // Its first address (checked just above) loads once Debug listens.
     getPageToolsMain().willAttachWebview(webPreferences, params);
+    // The panel browser goes through Network's proxy when it is on.
+    const partition = params.partition ?? (webPreferences as { partition?: string }).partition;
+    if (isPageToolsPartition(partition)) {
+      void getBrowserProxy().track(session.fromPartition(partition));
+    }
   });
   window.webContents.on("did-attach-webview", (_event, guestContents) => {
     guardGuestSessionPermissions(guestContents.session);
@@ -3262,7 +3278,17 @@ async function bootstrap(): Promise<void> {
   ensureInitialBackendWindowOpen();
 }
 
+// Network's proxy asks the panel browser for its bridge's login (407): answer
+// it for the bridge only (browserProxy.ts); every other prompt stays as it was.
+app.on("login", (event, _webContents, _details, authInfo, callback) => {
+  const login = browserProxy?.loginFor(authInfo) ?? null;
+  if (login === null) return;
+  event.preventDefault();
+  callback(login.username, login.password);
+});
+
 app.on("before-quit", () => {
+  browserProxy?.dispose();
   isQuitting = true;
   updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");

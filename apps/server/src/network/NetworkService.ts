@@ -19,6 +19,8 @@
  * "down" — its users can't go online, nothing goes around it.
  */
 import { randomBytes } from "node:crypto";
+import { rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 import {
   NETWORK_PROXY_EXIT_ID,
@@ -35,6 +37,7 @@ import { Context, Effect, Layer } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
+import { ServerConfig } from "../config.ts";
 import { registerKnownSecret } from "../secretRedaction.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
 import { checkProxy } from "./exitTrace.ts";
@@ -43,12 +46,21 @@ import type { UpstreamProxy } from "./proxyDial.ts";
 import {
   alwaysDirectHosts,
   applyProxyEnvironment,
+  type BrowserProxyFile,
   inheritedProxyEnvironment,
+  browserProxyOf,
   normalizeSkipList,
   proxyEnvironment,
 } from "./proxyEnv.ts";
 
 export const NETWORK_SECRET_NAME = "network-proxy";
+/**
+ * In the state dir, for the desktop app's own browser panel (0.0.197): the
+ * Electron sessions of the panel can't take the proxy from the environment,
+ * so the desktop reads the bridge from here (`apps/desktop/src/browserProxy.ts`).
+ * Present (0600) while the proxy is on; removed when off.
+ */
+export const BROWSER_PROXY_FILE = "browser-proxy.json";
 /** While on, how often the proxy is checked. */
 export const NETWORK_RECHECK_MS = 3 * 60_000;
 
@@ -221,6 +233,8 @@ export const makeNetworkService = (options?: {
   readonly env?: Record<string, string | undefined>;
   readonly checkProxy?: typeof checkProxy;
   readonly recheckMs?: number;
+  /** Where the desktop's browser panel reads the proxy ({@link BROWSER_PROXY_FILE}); none on a server. */
+  readonly browserProxyPath?: string | null;
 }) =>
   Effect.gen(function* () {
     const secrets = yield* ServerSecretStore;
@@ -230,6 +244,23 @@ export const makeNetworkService = (options?: {
     const inherited = inheritedProxyEnvironment(env);
     applyProxyEnvironment(env, null, inherited);
     const direct = alwaysDirectHosts(controlPlaneBaseUrl());
+    const browserProxyPath = options?.browserProxyPath ?? null;
+    /** The desktop's browser panel follows this file; a failed write is logged, never fatal. */
+    const writeBrowserProxy = (value: BrowserProxyFile | null) =>
+      browserProxyPath === null
+        ? Effect.void
+        : Effect.tryPromise(async () => {
+            if (value === null) return rm(browserProxyPath, { force: true });
+            const tmp = `${browserProxyPath}.${process.pid}.tmp`;
+            await writeFile(tmp, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+            await rename(tmp, browserProxyPath);
+          }).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("network: proxy for the browser panel not written").pipe(
+                Effect.annotateLogs({ cause: String(cause) }),
+              ),
+            ),
+          );
     const lock = yield* Semaphore.make(1);
 
     const fresh = (): StoredNetwork => ({
@@ -289,16 +320,13 @@ export const makeNetworkService = (options?: {
       }
       const on = stored.enabled && stored.proxy !== null && bridge !== null;
       bridge?.setUpstream(on && stored.proxy ? upstreamOf(stored.proxy) : null);
+      const bypass = [...direct, ...(stored.proxy?.skip ?? [])];
       applyProxyEnvironment(
         env,
-        on && bridge
-          ? proxyEnvironment({
-              bridgeUrl: bridge.url,
-              direct: [...direct, ...(stored.proxy?.skip ?? [])],
-            })
-          : null,
+        on && bridge ? proxyEnvironment({ bridgeUrl: bridge.url, direct: bypass }) : null,
         inherited,
       );
+      yield* writeBrowserProxy(on && bridge ? browserProxyOf(bridge.url, bypass) : null);
     });
 
     const recheck = Effect.gen(function* () {
@@ -416,4 +444,14 @@ export const makeNetworkService = (options?: {
     } satisfies NetworkServiceShape;
   });
 
-export const NetworkServiceLive = Layer.effect(NetworkService, makeNetworkService());
+export const NetworkServiceLive = Layer.effect(
+  NetworkService,
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    return yield* makeNetworkService({
+      // Only the desktop app has a browser panel of its own (Electron).
+      browserProxyPath:
+        config.mode === "desktop" ? join(config.stateDir, BROWSER_PROXY_FILE) : null,
+    });
+  }),
+);

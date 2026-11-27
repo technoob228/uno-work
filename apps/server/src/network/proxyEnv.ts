@@ -211,3 +211,26 @@ export function browserProxyFromEnvironment(
     return null;
   }
 }
+
+/**
+ * What the desktop's browser panel reads (NetworkService `BROWSER_PROXY_FILE`):
+ * the bridge, its login, and what goes direct — the same list as children's
+ * NO_PROXY.
+ */
+export interface BrowserProxyFile {
+  readonly server: string;
+  readonly username: string;
+  readonly password: string;
+  readonly bypass: ReadonlyArray<string>;
+}
+
+export function browserProxyOf(
+  bridgeUrl: string,
+  bypass: ReadonlyArray<string>,
+): BrowserProxyFile | null {
+  const proxy = browserProxyFromEnvironment({
+    [NETWORK_PROXY_MARKER_ENV]: "1",
+    HTTPS_PROXY: bridgeUrl,
+  });
+  return proxy === null ? null : { ...proxy, bypass: [...new Set(bypass)] };
+}

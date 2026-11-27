@@ -1,5 +1,8 @@
 import type { NetworkProxyCheck } from "@t3tools/contracts";
 import { Effect, Exit, Scope } from "effect";
+import { mkdtempSync, readFileSync, statSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
@@ -41,6 +44,7 @@ async function withService<A>(
     store?: ReturnType<typeof makeStore>;
     env?: Record<string, string | undefined>;
     check?: (proxy: UpstreamProxy) => Promise<NetworkProxyCheck>;
+    browserProxyPath?: string;
   },
   body: (
     service: Effect.Success<ReturnType<typeof makeNetworkService>>,
@@ -56,6 +60,7 @@ async function withService<A>(
         env,
         recheckMs: 0,
         checkProxy: options.check ?? (async () => OK),
+        ...(options.browserProxyPath ? { browserProxyPath: options.browserProxyPath } : {}),
       }).pipe(
         Effect.flatMap((service) => body(service, env)),
         Effect.provideService(ServerSecretStore, store.service),
@@ -127,6 +132,34 @@ describe("NetworkService", () => {
     );
     const record = JSON.parse(new TextDecoder().decode(store.memory.get(NETWORK_SECRET_NAME)));
     expect(record.proxy.password).toBe(PASSWORD);
+  });
+
+  it("on the desktop, the browser panel's file holds the bridge and the direct list while on", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "net-browser-")), "browser-proxy.json");
+    await withService({ browserProxyPath: path }, (service, env) =>
+      Effect.gen(function* () {
+        yield* service.change({ proxy: { ...proxyInput, skip: ["*.corp.example"] } }, COMPUTER);
+        expect(existsSync(path)).toBe(false);
+
+        yield* service.change({ enabled: true }, COMPUTER);
+        const file = JSON.parse(readFileSync(path, "utf8"));
+        const bridge = new URL(env.HTTPS_PROXY!);
+        expect(file).toMatchObject({
+          server: `http://127.0.0.1:${bridge.port}`,
+          username: "uno",
+          password: bridge.password,
+        });
+        expect(file.bypass).toEqual(
+          expect.arrayContaining(["localhost", ".uno.place", ".corp.example"]),
+        );
+        // The bridge's login only, never the person's proxy password.
+        expect(readFileSync(path, "utf8")).not.toContain(PASSWORD);
+        if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+
+        yield* service.change({ enabled: false }, COMPUTER);
+        expect(existsSync(path)).toBe(false);
+      }),
+    );
   });
 
   it("comes back on after a restart with the same bridge port", async () => {
