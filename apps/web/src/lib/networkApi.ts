@@ -51,7 +51,11 @@ export type {
   NetworkStatus,
   NetworkTransport,
 } from "@t3tools/contracts";
-export { NETWORK_PROXY_EXIT_ID } from "@t3tools/contracts";
+export {
+  NETWORK_CONFIG_MAX_CHARS,
+  NETWORK_LABEL_MAX_CHARS,
+  NETWORK_PROXY_EXIT_ID,
+} from "@t3tools/contracts";
 
 export const NETWORK_UNAVAILABLE: NetworkState = {
   available: false,
