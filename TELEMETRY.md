@@ -16,7 +16,7 @@ Every request carries:
 | Field         | Example                         | What it is                                         |
 | ------------- | ------------------------------- | -------------------------------------------------- |
 | `install_id`  | `3f9c…-…`                       | A random id made once for this installation        |
-| `version`     | `0.0.194`                       | Uno Work version                                   |
+| `version`     | `0.0.197`                       | Uno Work version                                   |
 | `platform`    | `darwin`, `linux`, `win32`      | Operating system                                   |
 | `arch`        | `arm64`, `x64`                  | Processor type                                     |
 | `client_type` | `desktop-app`, `cli-web-client` | The desktop app, or the server on a cloud computer |

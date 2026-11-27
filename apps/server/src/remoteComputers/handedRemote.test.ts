@@ -10,7 +10,7 @@ import {
   type OrchestrationThreadShell,
   type ThreadId,
 } from "@t3tools/contracts";
-import { Effect, Option } from "effect";
+import { Effect, Logger, Option, References } from "effect";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -320,6 +320,34 @@ describe("Hand to… across computers: the two sides together", () => {
     expect(await run(here.push.deliverLetter(brief(), NOW))).toBe(false);
     // Within the minute it isn't even tried.
     expect(await run(here.push.deliverLetter(brief(), NOW + 1_000))).toBe(false);
+  });
+
+  it("a letter that doesn't get through is logged with how long it waits, and when it lands", async () => {
+    const there = unoWork();
+    let reachable = false;
+    const here = mac((input) =>
+      reachable ? there.request(input) : Effect.fail(remoteError("unreachable", "asleep")),
+    );
+    const logs: Array<{ message: string; notes: Record<string, unknown> }> = [];
+    const logger = Logger.make<unknown, void>((options) => {
+      logs.push({
+        message: String(Array.isArray(options.message) ? options.message[0] : options.message),
+        notes: { ...options.fiber.getRef(References.CurrentLogAnnotations) },
+      });
+    });
+    const logged = <A, E>(effect: Effect.Effect<A, E>) =>
+      run(effect.pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false }))));
+
+    expect(await logged(here.push.deliverLetter(brief(), NOW))).toBe(false);
+    expect(await logged(here.push.deliverLetter(brief(), NOW + 61_000))).toBe(false);
+    reachable = true;
+    expect(await logged(here.push.deliverLetter(brief(), NOW + 180_000))).toBe(true);
+
+    const retries = logs.filter((log) => log.message.includes("didn't take a letter"));
+    expect(retries.map((log) => log.notes.undeliveredMinutes)).toEqual([0, 1]);
+    expect(retries[0]!.notes).toMatchObject({ boxId: UNO_WORK.boxId, kind: "brief", retryInSeconds: 60 });
+    const landed = logs.find((log) => log.message.includes("got through after retries"));
+    expect(landed?.notes).toMatchObject({ boxId: UNO_WORK.boxId, undeliveredMinutes: 3 });
   });
 
   it("taken back → 'off' forgets the chat there", async () => {
