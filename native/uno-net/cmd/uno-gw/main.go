@@ -76,7 +76,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: uno-gw run|ruleset|keygen|version --config file")
+	fmt.Fprintln(os.Stderr, "usage: uno-gw init|install-service|run|ruleset|keygen|version [--dir dir | --config file]")
 	os.Exit(2)
 }
 
