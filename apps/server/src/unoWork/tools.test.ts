@@ -1293,6 +1293,49 @@ describe("telling and showing", () => {
     );
   });
 
+  it("opens the person's own protected site in the panel by a key link, never the password form", async () => {
+    const sites = {
+      deploys: [
+        { slug: "team-site", has_password: true },
+        { slug: "open-site", has_password: false },
+      ],
+    };
+    const { deps, recorded } = makeDeps({
+      console: (request) =>
+        request.path.endsWith("/open-link")
+          ? {
+              status: 200,
+              body: { url: "https://team-site.uno4.me/__open?t=k1", expires_at: 2_000 },
+            }
+          : { status: 200, body: sites },
+    });
+    const own = await run("open_in_panel", deps, { url: "https://team-site.uno4.me/" });
+    expect(recorded.bridge.at(-1)).toMatchObject({
+      path: "/api/browser/open",
+      body: { url: "https://team-site.uno4.me/__open?t=k1" },
+    });
+    expect(recorded.console.at(-1)).toMatchObject({
+      method: "POST",
+      path: "/api/v1/deploys/team-site/open-link",
+      body: { ttl_seconds: 600 },
+    });
+    // The key stays out of the agent's answer.
+    expect(own._tag === "Success" && JSON.stringify(own.success)).not.toContain("t=k1");
+
+    const deep = await run("open_in_panel", deps, { url: "https://team-site.uno4.me/docs/" });
+    expect(deep._tag === "Success" && JSON.stringify(deep.success)).toContain("front page");
+
+    // Not protected, not the person's, not a site: the address as it is.
+    for (const url of [
+      "https://open-site.uno4.me/",
+      "https://someone-else.uno4.me/",
+      "https://example.com/",
+    ]) {
+      await run("open_in_panel", deps, { url });
+      expect(recorded.bridge.at(-1)).toMatchObject({ body: { url } });
+    }
+  });
+
   it("opens an app of this computer by its id", async () => {
     const { deps, recorded } = makeDeps();
     const result = await run("open_in_panel", deps, { appId: "notes", path: "/widget" });

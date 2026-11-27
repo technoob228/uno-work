@@ -8,8 +8,21 @@ import {
   isSecretSiteFileName,
   liveSiteUrl,
   publishToUnoHosting,
+  siteSlugOfUrl,
   suggestSiteSlug,
 } from "./sitePublish.ts";
+
+describe("siteSlugOfUrl", () => {
+  it("reads the slug of an Uno Sites address only", () => {
+    expect(siteSlugOfUrl("https://team-site.uno4.me/docs/?a=1")).toBe("team-site");
+    expect(siteSlugOfUrl("https://Team-Site.UNO4.me/")).toBe("team-site");
+    expect(siteSlugOfUrl("http://team-site.uno4.me/")).toBeNull();
+    expect(siteSlugOfUrl("https://a.b.uno4.me/")).toBeNull();
+    expect(siteSlugOfUrl("https://uno4.me/")).toBeNull();
+    expect(siteSlugOfUrl("https://team-site.uno4.me.evil.example/")).toBeNull();
+    expect(siteSlugOfUrl("not a url")).toBeNull();
+  });
+});
 
 let dir: string;
 beforeEach(() => {

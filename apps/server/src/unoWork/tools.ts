@@ -66,6 +66,7 @@ import { uploadsMonthDir } from "../files/chatUploads.ts";
 import { agentDiskSpaceMessage } from "../files/diskSpace.ts";
 import {
   liveSiteUrl,
+  siteSlugOfUrl,
   parseSiteOpenLink,
   SITE_OPEN_LINK_TTL_SECONDS,
   siteOpenLinkPath,
@@ -1559,6 +1560,35 @@ const openSiteLink = (
     if (link === null) return yield* toolError("Uno Hosting didn't give a link. Try again.");
     return link;
   });
+
+/** Long enough to load the page once; the site's own cookie keeps it open after. */
+const OWN_SITE_PANEL_LINK_TTL_SECONDS = 10 * 60;
+
+/**
+ * The panel has its own cookies, without the person's Uno sign-in, so their
+ * own protected site would ask for its password there. Such a site (or a
+ * report) opens by a fresh key link instead. Null: not the person's protected
+ * site, or no link (an older console, no console) — the address as it is.
+ */
+const ownSitePanelLink = (
+  deps: UnoWorkToolDeps,
+  url: string,
+): Effect.Effect<{ readonly url: string; readonly frontPageOnly: boolean } | null> =>
+  Effect.gen(function* () {
+    const slug = siteSlugOfUrl(url);
+    if (slug === null || !deps.console) return null;
+    const body = yield* callConsole(
+      deps,
+      { method: "GET", path: WORK_SITES_PATH },
+      "list the sites",
+    );
+    const site = parseWorkSites(body, { withReports: true }).sites.find((s) => s.slug === slug);
+    if (!site?.hasPassword) return null;
+    const link = yield* openSiteLink(deps, slug, OWN_SITE_PANEL_LINK_TTL_SECONDS);
+    const asked = new URL(url);
+    // The key link lands on the front page.
+    return { url: link.url, frontPageOnly: asked.pathname !== "/" || asked.search !== "" };
+  }).pipe(Effect.orElseSucceed(() => null));
 
 const linkExpiry = (expiresAtMs: number | null): string | null =>
   expiresAtMs === null ? null : new Date(expiresAtMs).toISOString();
@@ -3529,12 +3559,16 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         if (url !== undefined && appId === undefined) {
           localOnly = deps.hostedMachine && isLocalAddress(url);
         }
+        const ownSite =
+          url !== undefined && appId === undefined ? yield* ownSitePanelLink(deps, url) : null;
         const opened = yield* deps
           .bridge({
             method: "POST",
             path: "/api/browser/open",
             body: {
-              ...(url !== undefined ? { url } : { file: resolveUserPath(file!, deps) }),
+              ...(url !== undefined
+                ? { url: ownSite?.url ?? url }
+                : { file: resolveUserPath(file!, deps) }),
               ...(str(args, "scope") ? { scope: str(args, "scope") } : {}),
             },
             ...(url !== undefined ? { timeoutMs: 30_000 + BROWSER_FIRST_USE_MS + 10_000 } : {}),
@@ -3583,6 +3617,15 @@ export const UNO_WORK_TOOLS: ReadonlyArray<UnoWorkTool> = [
         }
         if (url !== undefined && shownApp?.notRunning) {
           return { ok: true, opened: url, note: shownApp.notRunning };
+        }
+        if (url !== undefined && ownSite) {
+          return {
+            ok: true,
+            opened: url,
+            note: ownSite.frontPageOnly
+              ? "This is the person's own protected site: it opened by a key link, without the password, on its front page. The panel stays signed in to it now; open_in_panel the same address again to show that page."
+              : "This is the person's own protected site: it opened by a key link, without the password.",
+          };
         }
         return url !== undefined ? { ok: true, opened: url } : opened;
       }),

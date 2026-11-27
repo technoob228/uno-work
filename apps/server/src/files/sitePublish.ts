@@ -445,6 +445,22 @@ async function postDeploy(input: {
  */
 export const SITES_BASE_DOMAIN = "uno4.me";
 
+/** The slug of an `https://<slug>.uno4.me/…` address; null for any other address. */
+export function siteSlugOfUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:") return null;
+  const host = parsed.hostname.toLowerCase();
+  const suffix = `.${SITES_BASE_DOMAIN}`;
+  if (!host.endsWith(suffix)) return null;
+  const slug = host.slice(0, -suffix.length);
+  return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug) ? slug : null;
+}
+
 /** Hosting's own `url` when it is an https address, else `<slug>.uno4.me`. */
 export function liveSiteUrl(fromHosting: string | undefined, slug: string): string {
   if (typeof fromHosting === "string" && /^https:\/\/[a-z0-9.-]+\//i.test(`${fromHosting}/`)) {
