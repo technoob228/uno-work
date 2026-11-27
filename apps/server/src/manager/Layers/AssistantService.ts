@@ -65,6 +65,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
+import { OrchestrationCommandInvariantError } from "../../orchestration/Errors.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
@@ -578,6 +579,22 @@ function slugifyAssistantName(name: string): string {
 }
 
 /**
+ * True for the invariant `project.create` raises on a project id that is
+ * already in the orchestration read model — including one soft-deleted, so
+ * invisible to `getProjectShellById`. Adoption treats this as "nothing to
+ * do", not a failure: a folder is adopted once; a project that already
+ * exists under this id (deleted on purpose, or a snapshot that hadn't
+ * caught up yet) is not re-created on every scan.
+ */
+function isProjectAlreadyExistsInvariant(cause: unknown, projectId: string): boolean {
+  return (
+    Schema.is(OrchestrationCommandInvariantError)(cause) &&
+    cause.commandType === "project.create" &&
+    cause.detail.includes(`'${projectId}' already exists`)
+  );
+}
+
+/**
  * Contents of a folder's `.uno-assistant.json` marker.
  *
  * Parsed by hand rather than through a schema because the only question ever
@@ -660,6 +677,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
   // ~/UnoWork/Assistants, or UNO_WORK_ASSISTANTS_DIR (Uno Work Stage's own daemon).
   const assistantsBaseDir = resolveAssistantsDir(os.homedir());
   const scanSemaphore = yield* Semaphore.make(1);
+  /**
+   * A folder whose adoption keeps failing the same way is retried on every
+   * scan (scans piggyback on every `listAssistants` call, several a
+   * minute) — without this, each retry logged the full cause and stack
+   * again: thousands of identical entries a day from one stuck folder.
+   */
+  const adoptionFailureLog = new Map<string, { count: number; lastLoggedAt: number }>();
+  const ADOPTION_FAILURE_LOG_INTERVAL_MS = 30 * 60_000;
 
   /**
    * Assistants are plain folders in a place the user can see and open:
@@ -910,11 +935,21 @@ const makeManagerAssistantService = Effect.gen(function* () {
         }
       }
     }).pipe(
-      Effect.catch((cause) =>
-        Schema.is(ManagerAssistantError)(cause)
+      Effect.catch((cause) => {
+        if (isProjectAlreadyExistsInvariant(cause, projectId)) {
+          // Idempotent: the files/token above are already written, and a
+          // project under this id already exists one way or another — there
+          // is nothing left to do. Re-dispatching `project.create` on every
+          // scan (and failing the same way every time) is the loop this
+          // guards against.
+          return Effect.logInfo("assistant project already exists; adoption is a no-op").pipe(
+            Effect.annotateLogs({ projectId }),
+          );
+        }
+        return Schema.is(ManagerAssistantError)(cause)
           ? Effect.fail(cause)
-          : Effect.fail(toAssistantError(`Failed to ensure assistant ${projectId}.`)(cause)),
-      ),
+          : Effect.fail(toAssistantError(`Failed to ensure assistant ${projectId}.`)(cause));
+      }),
     );
 
   const createAssistant: ManagerAssistantServiceShape["createAssistant"] = ({
@@ -1010,7 +1045,15 @@ const makeManagerAssistantService = Effect.gen(function* () {
         .exists(path.join(dir, "AGENTS.md"))
         .pipe(Effect.orElseSucceed(() => false));
       if (!hasInstructions) return null;
-      const base = slugifyAssistantName(folderName);
+      // A folder named by an older convention already carries the project
+      // id prefix (e.g. `assistant-a4e99f`, from before `defaultWorkspaceRootFor`
+      // started stripping it). Slugifying and re-prefixing such a name
+      // doubled it into `assistant-assistant-a4e99f` — a new, wrong id every
+      // scan found "missing" and tried to create again.
+      const slugified = slugifyAssistantName(folderName);
+      const base = slugified.startsWith(ASSISTANT_PROJECT_ID_PREFIX)
+        ? slugified.slice(ASSISTANT_PROJECT_ID_PREFIX.length)
+        : slugified;
       let candidate = ProjectId.make(`${ASSISTANT_PROJECT_ID_PREFIX}${base}`);
       const existing = yield* projectionSnapshotQuery
         .getProjectShellById(candidate)
@@ -1036,12 +1079,23 @@ const makeManagerAssistantService = Effect.gen(function* () {
           const info = yield* fs.stat(dir).pipe(Effect.orElseSucceed(() => null));
           if (info === null || info.type !== "Directory") continue;
           const projectId = yield* adoptFolder(dir, entry).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("assistant folder adoption failed").pipe(
-                Effect.annotateLogs({ dir, cause }),
+            Effect.catch((cause) => {
+              const now = Date.now();
+              const seen = adoptionFailureLog.get(dir);
+              const failuresSinceLastLog = (seen?.count ?? 0) + 1;
+              if (seen && now - seen.lastLoggedAt < ADOPTION_FAILURE_LOG_INTERVAL_MS) {
+                adoptionFailureLog.set(dir, {
+                  count: failuresSinceLastLog,
+                  lastLoggedAt: seen.lastLoggedAt,
+                });
+                return Effect.succeed(null);
+              }
+              adoptionFailureLog.set(dir, { count: 0, lastLoggedAt: now });
+              return Effect.logWarning("assistant folder adoption failed").pipe(
+                Effect.annotateLogs({ dir, cause, failuresSinceLastLog }),
                 Effect.as(null),
-              ),
-            ),
+              );
+            }),
           );
           if (projectId !== null) {
             adopted.push(projectId);
