@@ -8,6 +8,12 @@
 
 ---
 
+## v0.0.199 — 2026-11-27
+
+- Mac app: no more background loops that kept the Mac busy and the logs growing. A saved computer that was archived or removed is no longer asked for its assistants every 15 seconds, and an assistant folder of an assistant you deleted is no longer re-created several times a minute.
+- Network: when your exit computer sleeps (it may after 3 days with no device using it), Uno Work says it is waking up, wakes it and connects by itself as soon as it is up. Errors now name the protocol as WireGuard or AmneziaWG.
+- Your own password-protected sites and reports open in the Uno Work panel without asking for the password.
+
 ## v0.0.198 — 2026-11-27
 
 - Network: a tunnel for Uno Work. In the shield on top of the sidebar, Add a WireGuard config (from your own server or a VPN provider) and turn it on: agents, terminals, git, downloads, the apps Uno Work starts and the browser panel of the Mac app go through it, over WireGuard or, when that's blocked, AmneziaWG. If the exit stops answering they stay offline instead of using your own address. Apps that ignore proxy settings go direct; a strict mode (everything or offline, Docker included) comes with the macOS extension. Your own Uno cloud computer as the exit is turning on account by account.
