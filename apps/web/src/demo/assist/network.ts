@@ -15,6 +15,11 @@
  * `tunnel=app` — what ships first with the tunnel (27.11): Uno Work's own
  *   apps go through it (not strict), the exits are the account's cloud
  *   computer and pasted WireGuard configs; Uno addresses are "Coming soon".
+ * `exit=asleep` (with `tunnel=app`) — the cloud computer sleeps (the console
+ *   lets an exit sleep after 3 days without devices): picking it, or starting
+ *   with `net=on`, wakes it in ~6 s ("stage-work is waking up.");
+ * `engine=handshake` (with `net=down`) — the engine's own reason, protocol by
+ *   its name ("No handshake with … over WireGuard.").
  * A proxy whose host has "bad" in it fails its check. All addresses are made up.
  */
 import { HttpResponse, http, type HttpHandler } from "msw";
@@ -151,6 +156,8 @@ const APP_EXITS: ReadonlyArray<NetworkExit> = [
 ];
 
 const CONNECT_MS = 1_500;
+/** `exit=asleep`: how long the cloud computer takes to wake. */
+const WAKE_MS = 6_000;
 
 interface Switch {
   enabled: boolean;
@@ -166,6 +173,10 @@ interface Switch {
   tunnel: boolean;
   /** `tunnel=app`: app-level (not strict), configs can be pasted. */
   app: boolean;
+  /** `exit=asleep`: the cloud computer sleeps until it's picked. */
+  asleep: boolean;
+  /** `engine=handshake`: the down reason is the engine's. */
+  engineReason: boolean;
   configs: NetworkExit[];
   proxy: Omit<NetworkProxyInfo, "check" | "alwaysDirect"> | null;
   proxyCheck: NetworkProxyCheck | null;
@@ -207,9 +218,25 @@ function proxyExit(current: Switch): NetworkExit | null {
   };
 }
 
+/** The cloud computer wakes once picked; until then it reads asleep. */
+function waking(current: Switch): boolean {
+  return current.asleep && current.enabled && current.exitId === "box-2531";
+}
+
+function appExits(current: Switch): ReadonlyArray<NetworkExit> {
+  if (!current.asleep) return APP_EXITS;
+  if (waking(current) && Date.now() - current.at >= WAKE_MS) current.asleep = false;
+  const note = waking(current) ? "Waking up…" : "Asleep · wakes when picked";
+  return APP_EXITS.map((exit) => (exit.id === "box-2531" ? { ...exit, note } : exit));
+}
+
 function exitsOf(current: Switch): ReadonlyArray<NetworkExit> {
   const proxy = proxyExit(current);
-  const tunnel = current.app ? [...APP_EXITS, ...current.configs] : current.tunnel ? EXITS : [];
+  const tunnel = current.app
+    ? [...appExits(current), ...current.configs]
+    : current.tunnel
+      ? EXITS
+      : [];
   return [...tunnel, ...(proxy ? [proxy] : [])];
 }
 
@@ -234,14 +261,16 @@ function startOf(): Switch {
   return {
     tunnel,
     app,
+    asleep: app && params?.get("exit") === "asleep",
+    engineReason: params?.get("engine") === "handshake",
     configs: [],
     proxy: proxy ? { ...SAMPLE_PROXY, ...(proxyDown ? { host: "bad.proxy.example" } : {}) } : null,
     proxyCheck: proxy ? demoCheck(proxyDown ? { host: "bad" } : SAMPLE_PROXY) : null,
     enabled: asked === "on" || asked === "down" || proxy === "on" || proxyDown,
     exitId: proxy === "on" || proxyDown || !tunnel ? "proxy" : app ? "box-2531" : "uno-de",
     protocol: "auto",
-    // Started "on": connected a week ago.
-    at: Date.now() - 7 * 86_400_000,
+    // Started "on": connected a week ago (a sleeping exit starts waking now).
+    at: app && params?.get("exit") === "asleep" ? Date.now() : Date.now() - 7 * 86_400_000,
     forcedDown: asked === "down",
     otherVpn: params?.get("vpn") === "cisco" ? { name: "Cisco Secure Client" } : null,
     permissionAskedAt: params?.get("perm") === "ask" ? 0 : null,
@@ -297,8 +326,10 @@ function stateOf(current: Switch): NetworkState {
   const waiting = current.enabled && needed;
   let status: NetworkStatus = "off";
   const viaProxy = exit?.kind === "proxy";
+  const wakingNow = waking(current);
   if (current.enabled && exit) {
     if (current.forcedDown || !exit.online) status = "down";
+    else if (wakingNow) status = "connecting";
     else if (waiting && !viaProxy) status = "connecting";
     else
       status =
@@ -317,11 +348,15 @@ function stateOf(current: Switch): NetworkState {
     strict: !current.app,
     canImport: current.app,
     reason:
-      status === "down" && current.app && exit
-        ? `${exit.label} stopped answering.`
-        : status === "connecting" && current.app && exit?.kind === "computer"
-          ? `Uno is setting up ${exit.label} as an exit.`
-          : null,
+      status === "down" && current.engineReason
+        ? `No handshake with ${exit?.address ?? "the exit"}:51820 over WireGuard.`
+        : status === "down" && current.app && exit
+          ? `${exit.label} stopped answering.`
+          : wakingNow && exit
+            ? `${exit.label} is waking up.`
+            : status === "connecting" && current.app && exit?.kind === "computer"
+              ? `Uno is setting up ${exit.label} as an exit.`
+              : null,
     permission: needed && !viaProxy ? "needed" : "granted",
     otherVpn: current.otherVpn,
     since: current.enabled ? new Date(current.at).toISOString() : null,
