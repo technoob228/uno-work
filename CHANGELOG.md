@@ -8,6 +8,11 @@
 
 ---
 
+## v0.0.197 — 2026-11-27
+
+- Usage data goes only to Uno: a few events about how Uno Work is used (which agents and models start, how many chats; never your prompts, the agents' replies, files, paths or keys). A computer that isn't signed in to Uno sends nothing. To turn it off, set `UNO_WORK_TELEMETRY_ENABLED=false` (or `DO_NOT_TRACK=1`) and restart Uno Work — what is sent and how, in [TELEMETRY.md](https://github.com/technoob228/uno-work/blob/v0.0.197/TELEMETRY.md).
+- Network: the browser panel of the Mac app goes through your proxy too, with the same "Skip for" list.
+
 ## v0.0.196 — 2026-11-26
 
 - Network: your own proxy for Uno Work. Open the shield on top of the sidebar → Add a proxy → pick HTTP, HTTPS or SOCKS5, enter host, port and an optional login and password, and press Check to see which address and country sites see. Once it's on, agents, terminals, git, downloads and the apps Uno Work starts on this computer go through the proxy; if it stops answering they stay offline instead of using your own address. Uno itself, localhost and private networks stay direct (add your own in "Skip for"). The password stays on the computer and never reaches logs. Apps that already run switch after a restart. The browser panel of the Mac app doesn't use the proxy yet.

@@ -687,7 +687,8 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
-  Layer.provideMerge(AnalyticsServiceLayerLive),
+  // Usage events go to the Uno console with this computer's token (TELEMETRY.md).
+  Layer.provideMerge(AnalyticsServiceLayerLive.pipe(Layer.provide(ServerSettingsLive))),
   Layer.provideMerge(OpenLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
   Layer.provideMerge(BrowserBridgeLive),

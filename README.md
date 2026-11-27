@@ -25,6 +25,10 @@ Install the latest desktop app from [GitHub Releases](https://github.com/technoo
 - **Remote environments** — connect to remote servers via SSH and work on files as if they were local.
 - **Onboarding wizard** — guided setup on first launch that detects installed harnesses and walks through configuration.
 
+## Usage data
+
+Uno Work sends a few usage events to Uno only, never to third parties, and never your prompts or files. What is sent and how to turn it off: [TELEMETRY.md](./TELEMETRY.md).
+
 ## Supported harnesses
 
 | Harness     | Auto-detected            | Auth                  |

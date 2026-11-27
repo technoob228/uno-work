@@ -66,10 +66,14 @@ export const HANDED_PULL_EVERY_MS = 20_000;
 export const HANDED_WOKEN_MS = 10 * 60_000;
 /** A computer that didn't answer is left alone this long. */
 export const HANDED_RETRY_MS = 60_000;
+/** A letter that has no answer in this long is tried again later (logged). */
+export const HANDED_SEND_TIMEOUT_MS = 30_000;
 /** Component of the system origin of what this module dispatches. */
 export const HANDED_REMOTE_ORIGIN_COMPONENT = "hand-to-remote";
 
 const deliveredKey = (messageId: string) => `handed-msg:${messageId}`;
+const minutesBetween = (fromMs: number, toMs: number) =>
+  Math.round(Math.max(0, toMs - fromMs) / 6_000) / 10;
 
 export interface HandedRemotePushDeps {
   readonly remote: Pick<RemoteComputersServiceShape, "request" | "self" | "computerAwake">;
@@ -121,6 +125,8 @@ export function makeHandedRemotePush(deps: HandedRemotePushDeps) {
   const acks = new Map<string, ReadonlyArray<string>>();
   /** Chats given back because their handing was refused: no "taken back" letter for them. */
   const refused = new Set<string>();
+  /** Per computer: since when a letter to it hasn't got through (for the log). */
+  const undeliveredSince = new Map<number, number>();
 
   const shellOf = (threadId: string) =>
     deps.projections.getThreadShellById(ThreadId.make(threadId)).pipe(
@@ -213,23 +219,52 @@ export function makeHandedRemotePush(deps: HandedRemotePushDeps) {
       const self = yield* deps.remote.self;
       const shell = yield* shellOf(body.chat.threadId);
       const status = shell === null ? undefined : yield* statusOf(shell);
+      const since = undeliveredSince.get(computer.boxId) ?? nowMs;
+      const notes = {
+        boxId: computer.boxId,
+        computer: computer.name,
+        kind: body.kind,
+        retryInSeconds: HANDED_RETRY_MS / 1000,
+        undeliveredMinutes: minutesBetween(since, nowMs),
+      };
       const delivery = yield* sendHandedLetter(deps.remote.request, computer, {
         ...body,
         from: { computerName: self.name, boxId: self.boxId },
         ...(status !== undefined ? { status } : {}),
       }).pipe(
-        Effect.timeoutOption("30 seconds"),
-        Effect.map(Option.getOrNull),
+        Effect.timeoutOption(`${HANDED_SEND_TIMEOUT_MS} millis`),
+        Effect.flatMap((value) =>
+          Option.isSome(value)
+            ? Effect.succeed(value.value)
+            : // A busy or waking computer: no error, just no answer in time.
+              Effect.logInfo(
+                "hand to: the handler's computer didn't answer a letter; retrying",
+              ).pipe(
+                Effect.annotateLogs({ ...notes, waitedSeconds: HANDED_SEND_TIMEOUT_MS / 1000 }),
+                Effect.as(null),
+              ),
+        ),
         Effect.catch((error) =>
           Effect.logInfo("hand to: the handler's computer didn't take a letter; retrying").pipe(
-            Effect.annotateLogs({ boxId: computer.boxId, code: error.code }),
+            Effect.annotateLogs({ ...notes, code: error.code }),
             Effect.as(null),
           ),
         ),
       );
       if (delivery === null) {
+        undeliveredSince.set(computer.boxId, since);
         retryAt.set(computer.boxId, nowMs + HANDED_RETRY_MS);
         return null;
+      }
+      if (undeliveredSince.delete(computer.boxId)) {
+        yield* Effect.logInfo("hand to: a letter got through after retries").pipe(
+          Effect.annotateLogs({
+            boxId: computer.boxId,
+            computer: computer.name,
+            kind: body.kind,
+            undeliveredMinutes: minutesBetween(since, nowMs),
+          }),
+        );
       }
       wroteAt.set(computer.boxId, nowMs);
       return delivery;

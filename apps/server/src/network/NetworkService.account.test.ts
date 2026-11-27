@@ -4,7 +4,10 @@
  * exit (private key never sent), the protocol picks the transports, and
  * fail-closed while the exit is being set up.
  */
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import * as Net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import type { NetworkProtocol } from "@t3tools/contracts";
 import { Effect, Exit, Scope } from "effect";
@@ -184,6 +187,7 @@ async function withService<A>(
     console: ConsoleNetworkClient | null;
     runtime: TunnelRuntime;
     store?: ReturnType<typeof memoryStore>;
+    browserProxyPath?: string;
   },
   body: (
     service: Effect.Success<ReturnType<typeof makeNetworkService>>,
@@ -203,6 +207,7 @@ async function withService<A>(
         engineBinary: "/fake/uno-net",
         runtime: deps.runtime,
         consoleClient: () => Effect.succeed(deps.console),
+        ...(deps.browserProxyPath ? { browserProxyPath: deps.browserProxyPath } : {}),
         checkProxy: async () => ({ status: "failed", reason: "unused", at: "x" }),
       }).pipe(
         Effect.flatMap((service) => body(service, env)),
@@ -296,6 +301,29 @@ describe("Network: the account's exits", () => {
         expect(applied.every((c) => c === null)).toBe(true);
         expect(env.HTTPS_PROXY).toBeDefined();
         expect(yield* Effect.promise(() => connectStatus(env.HTTPS_PROXY ?? ""))).toMatch(/502/);
+      }),
+    );
+  });
+
+  it("the desktop's browser panel follows the tunnel through the same bridge, closed while it's set up", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "net-browser-")), "browser-proxy.json");
+    const fake = fakeConsole({ notReadyTimes: 1 });
+    const { runtime } = fakeRuntime();
+    await withService({ console: fake.client, runtime, browserProxyPath: path }, (service, env) =>
+      Effect.gen(function* () {
+        yield* Effect.sleep(20);
+        expect(existsSync(path)).toBe(false);
+        // Setting up: the panel points at the bridge too, and the bridge refuses.
+        yield* service.change({ exitId: "box-2534" }, COMPUTER);
+        const bridge = new URL(env.HTTPS_PROXY ?? "");
+        const file = JSON.parse(readFileSync(path, "utf8"));
+        expect(file).toMatchObject({
+          server: `http://127.0.0.1:${bridge.port}`,
+          username: "uno",
+          password: bridge.password,
+        });
+        yield* service.change({ enabled: false }, COMPUTER);
+        expect(existsSync(path)).toBe(false);
       }),
     );
   });
