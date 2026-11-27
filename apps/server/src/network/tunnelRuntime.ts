@@ -63,8 +63,11 @@ const RESTART_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 /** The engine's last words → a sentence (uno-net already speaks plainly; keep it short). */
 function engineError(status: UnoNetStatus): string | null {
   if (!status.error) return null;
-  const first = status.error.split("\n")[0] ?? status.error;
-  return first.length > 200 ? `${first.slice(0, 200)}…` : first;
+  const first = (status.error.split("\n")[0] ?? status.error).trim();
+  const short = first.length > 200 ? `${first.slice(0, 200)}…` : first;
+  // A sentence for the panel: "The exit stopped answering."
+  const sentence = short.charAt(0).toUpperCase() + short.slice(1);
+  return /[.!?…]$/.test(sentence) ? sentence : `${sentence}.`;
 }
 
 export function makeTunnelRuntime(options: {

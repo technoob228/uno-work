@@ -11,7 +11,10 @@
  *   (allowing takes ~1.2 s in the demo, as if the person clicked Allow);
  * `tunnel=0` — a daemon without the tunnel yet (what ships first, 26.11):
  *   the person's proxy is the only exit;
- * `proxy=saved|on|down` — a proxy is already saved (and on / not answering).
+ * `proxy=saved|on|down` — a proxy is already saved (and on / not answering);
+ * `tunnel=app` — what ships first with the tunnel (27.11): Uno Work's own
+ *   apps go through it (not strict), the exits are the account's cloud
+ *   computer and pasted WireGuard configs; Uno addresses are "Coming soon".
  * A proxy whose host has "bad" in it fails its check. All addresses are made up.
  */
 import { HttpResponse, http, type HttpHandler } from "msw";
@@ -117,6 +120,36 @@ const EXITS: ReadonlyArray<NetworkExit> = [
   },
 ];
 
+/** `tunnel=app`: the account's cloud computer, Uno addresses still to come. */
+const APP_EXITS: ReadonlyArray<NetworkExit> = [
+  {
+    id: "box-2531",
+    kind: "computer",
+    label: "stage-work",
+    country: "NL",
+    city: null,
+    address: "46.17.102.25",
+    latencyMs: 6,
+    online: true,
+    addressType: "datacenter",
+    protocols: ["wireguard", "amneziawg"],
+    note: null,
+  },
+  {
+    id: "uno-17",
+    kind: "uno",
+    label: "Germany",
+    country: "DE",
+    city: "Frankfurt",
+    address: null,
+    latencyMs: null,
+    online: false,
+    addressType: "clean",
+    protocols: ["wireguard", "amneziawg"],
+    note: "Coming soon",
+  },
+];
+
 const CONNECT_MS = 1_500;
 
 interface Switch {
@@ -131,6 +164,9 @@ interface Switch {
   /** null — allowed; else when the person asked macOS (0 — not yet). */
   permissionAskedAt: number | null;
   tunnel: boolean;
+  /** `tunnel=app`: app-level (not strict), configs can be pasted. */
+  app: boolean;
+  configs: NetworkExit[];
   proxy: Omit<NetworkProxyInfo, "check" | "alwaysDirect"> | null;
   proxyCheck: NetworkProxyCheck | null;
 }
@@ -173,7 +209,8 @@ function proxyExit(current: Switch): NetworkExit | null {
 
 function exitsOf(current: Switch): ReadonlyArray<NetworkExit> {
   const proxy = proxyExit(current);
-  return [...(current.tunnel ? EXITS : []), ...(proxy ? [proxy] : [])];
+  const tunnel = current.app ? [...APP_EXITS, ...current.configs] : current.tunnel ? EXITS : [];
+  return [...tunnel, ...(proxy ? [proxy] : [])];
 }
 
 const ALLOW_MS = 1_200;
@@ -191,14 +228,17 @@ function startOf(): Switch {
   const params = typeof location === "undefined" ? null : new URLSearchParams(location.search);
   const asked = params?.get("net") ?? null;
   const tunnel = params?.get("tunnel") !== "0";
+  const app = params?.get("tunnel") === "app";
   const proxy = params?.get("proxy") ?? null;
   const proxyDown = proxy === "down";
   return {
     tunnel,
+    app,
+    configs: [],
     proxy: proxy ? { ...SAMPLE_PROXY, ...(proxyDown ? { host: "bad.proxy.example" } : {}) } : null,
     proxyCheck: proxy ? demoCheck(proxyDown ? { host: "bad" } : SAMPLE_PROXY) : null,
     enabled: asked === "on" || asked === "down" || proxy === "on" || proxyDown,
-    exitId: proxy === "on" || proxyDown || !tunnel ? "proxy" : "uno-de",
+    exitId: proxy === "on" || proxyDown || !tunnel ? "proxy" : app ? "box-2531" : "uno-de",
     protocol: "auto",
     // Started "on": connected a week ago.
     at: Date.now() - 7 * 86_400_000,
@@ -274,6 +314,14 @@ function stateOf(current: Switch): NetworkState {
     protocol: current.protocol,
     activeProtocol: status === "on" && !viaProxy ? transportOf(current, exit) : null,
     computers: computersOf(status, waiting && !viaProxy).slice(0, current.tunnel ? 3 : 1),
+    strict: !current.app,
+    canImport: current.app,
+    reason:
+      status === "down" && current.app && exit
+        ? `${exit.label} stopped answering.`
+        : status === "connecting" && current.app && exit?.kind === "computer"
+          ? `Uno is setting up ${exit.label} as an exit.`
+          : null,
     permission: needed && !viaProxy ? "needed" : "granted",
     otherVpn: current.otherVpn,
     since: current.enabled ? new Date(current.at).toISOString() : null,
@@ -310,7 +358,47 @@ export function networkHandlers(): HttpHandler[] {
         protocol?: unknown;
         askPermission?: unknown;
         proxy?: NetworkProxyInput | null;
+        importConfig?: { conf: string; label?: string };
+        removeExitId?: unknown;
       };
+      if (body.importConfig && current.app) {
+        const conf = body.importConfig.conf;
+        if (!/\[Interface\]/i.test(conf) || !/\[Peer\]/i.test(conf)) {
+          return HttpResponse.json(
+            {
+              error: "This doesn't look like a WireGuard config: it needs [Interface] and [Peer].",
+            },
+            { status: 400 },
+          );
+        }
+        await wait(600);
+        const host = /Endpoint\s*=\s*([^:\s]+)/i.exec(conf)?.[1] ?? null;
+        const config: NetworkExit = {
+          id: `config-${current.configs.length + 1}`,
+          kind: "config",
+          label: body.importConfig.label || host || "WireGuard config",
+          country: null,
+          city: null,
+          address: host,
+          latencyMs: 31,
+          online: true,
+          addressType: "unknown",
+          protocols: [/Jc\s*=/i.test(conf) ? "amneziawg" : "wireguard"],
+          removable: true,
+        };
+        current.configs.push(config);
+        current.exitId = config.id;
+        current.enabled = true;
+        current.forcedDown = false;
+        current.at = Date.now();
+      }
+      if (typeof body.removeExitId === "string") {
+        current.configs = current.configs.filter((item) => item.id !== body.removeExitId);
+        if (current.exitId === body.removeExitId) {
+          current.exitId = "box-2531";
+          current.enabled = false;
+        }
+      }
       if (body.proxy === null) {
         current.proxy = null;
         current.proxyCheck = null;

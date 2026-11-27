@@ -286,9 +286,12 @@ function ExitRow(props: {
           ? `${PROTOCOL_LABEL[own]} only`
           : exit.kind === "uno"
             ? (exit.city ?? "")
-            : [flagOf(exit.country), exit.address, own ? `· ${PROTOCOL_LABEL[own]}` : null]
+            : [
+                `${flagOf(exit.country)} ${exit.address ?? ""}`.trim(),
+                own ? PROTOCOL_LABEL[own] : null,
+              ]
                 .filter(Boolean)
-                .join(" ");
+                .join(" · ");
   return (
     <button
       type="button"
@@ -667,8 +670,10 @@ function MainView(props: {
   const { state } = props;
   const exit = currentExit(state);
   const viaProxy = exit?.kind === "proxy";
-  // Nothing to go through yet: the switch and the exit row open the proxy form.
+  // Nothing to go through yet: the switch and the exit row open where one is added.
   const noExit = state.exits.length === 0;
+  // With the tunnel, the exit list offers a config too; without it the proxy is the only way.
+  const firstView: PanelView = state.canImport ? "exits" : "proxy";
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3 px-3 pb-2.5">
@@ -693,7 +698,7 @@ function MainView(props: {
         <Switch
           checked={state.enabled}
           onCheckedChange={(checked) =>
-            checked && noExit ? props.onOpen("proxy") : props.onToggle(checked)
+            checked && noExit ? props.onOpen(firstView) : props.onToggle(checked)
           }
           aria-label="Network"
           data-testid="network-switch"
@@ -747,7 +752,7 @@ function MainView(props: {
         <PickRow
           label="Exit"
           testId="network-row-exit"
-          onOpen={() => props.onOpen(noExit ? "proxy" : "exits")}
+          onOpen={() => props.onOpen(noExit ? firstView : "exits")}
           value={
             exit ? (
               <>
@@ -756,7 +761,11 @@ function MainView(props: {
                 {exitPlace(exit)}
               </>
             ) : noExit ? (
-              "Add a proxy"
+              state.canImport ? (
+                "Add an exit"
+              ) : (
+                "Add a proxy"
+              )
             ) : (
               "Choose"
             )
