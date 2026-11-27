@@ -8,6 +8,10 @@
 
 ---
 
+## v0.0.198 — 2026-11-27
+
+- Network: a tunnel for Uno Work. In the shield on top of the sidebar, Add a WireGuard config (from your own server or a VPN provider) and turn it on: agents, terminals, git, downloads, the apps Uno Work starts and the browser panel of the Mac app go through it, over WireGuard or, when that's blocked, AmneziaWG. If the exit stops answering they stay offline instead of using your own address. Apps that ignore proxy settings go direct; a strict mode (everything or offline, Docker included) comes with the macOS extension. Your own Uno cloud computer as the exit is turning on account by account.
+
 ## v0.0.197 — 2026-11-27
 
 - Usage data goes only to Uno: a few events about how Uno Work is used (which agents and models start, how many chats; never your prompts, the agents' replies, files, paths or keys). A computer that isn't signed in to Uno sends nothing. To turn it off, set `UNO_WORK_TELEMETRY_ENABLED=false` (or `DO_NOT_TRACK=1`) and restart Uno Work — what is sent and how, in [TELEMETRY.md](https://github.com/technoob228/uno-work/blob/v0.0.197/TELEMETRY.md).
