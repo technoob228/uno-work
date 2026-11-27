@@ -345,7 +345,11 @@ describe("Hand to… across computers: the two sides together", () => {
 
     const retries = logs.filter((log) => log.message.includes("didn't take a letter"));
     expect(retries.map((log) => log.notes.undeliveredMinutes)).toEqual([0, 1]);
-    expect(retries[0]!.notes).toMatchObject({ boxId: UNO_WORK.boxId, kind: "brief", retryInSeconds: 60 });
+    expect(retries[0]!.notes).toMatchObject({
+      boxId: UNO_WORK.boxId,
+      kind: "brief",
+      retryInSeconds: 60,
+    });
     const landed = logs.find((log) => log.message.includes("got through after retries"));
     expect(landed?.notes).toMatchObject({ boxId: UNO_WORK.boxId, undeliveredMinutes: 3 });
   });

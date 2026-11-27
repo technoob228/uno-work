@@ -237,7 +237,9 @@ export function makeHandedRemotePush(deps: HandedRemotePushDeps) {
           Option.isSome(value)
             ? Effect.succeed(value.value)
             : // A busy or waking computer: no error, just no answer in time.
-              Effect.logInfo("hand to: the handler's computer didn't answer a letter; retrying").pipe(
+              Effect.logInfo(
+                "hand to: the handler's computer didn't answer a letter; retrying",
+              ).pipe(
                 Effect.annotateLogs({ ...notes, waitedSeconds: HANDED_SEND_TIMEOUT_MS / 1000 }),
                 Effect.as(null),
               ),
