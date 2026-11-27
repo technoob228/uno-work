@@ -17,6 +17,13 @@ import { Schema } from "effect";
 //   gets it in its environment (HTTP_PROXY / HTTPS_PROXY / ALL_PROXY /
 //   NO_PROXY), pointing at a local bridge of the daemon: the proxy's password
 //   stays in the daemon, never in a child's environment, a config or a log.
+//
+// Tunnel (27.11, Misha: "now like this, strict mode later"): the daemon runs
+// uno-net and the same bridge forwards to its SOCKS, on a Mac too, without
+// the network extension. App level: what honours proxy settings goes through
+// the tunnel or nowhere; apps that ignore them go direct. `strict: false`
+// says so; strict mode (everything or offline, incl. Docker) comes with the
+// macOS extension / Uno's node gateway.
 
 export const NETWORK_PROXY_EXIT_ID = "proxy";
 
@@ -125,6 +132,10 @@ export const NetworkExit = Schema.Struct({
   addressType: NetworkAddressType,
   /** What it can carry. An imported config carries only its own; a proxy none. */
   protocols: Schema.Array(NetworkTransport),
+  /** Why it can't be picked or used right now ("Setting up…", "Soon"); null — fine. */
+  note: Schema.optional(Schema.NullOr(Schema.String)),
+  /** The person may remove it here (an imported config). */
+  removable: Schema.optional(Schema.Boolean),
 });
 export type NetworkExit = typeof NetworkExit.Type;
 
@@ -172,7 +183,27 @@ export const NetworkState = Schema.Struct({
   since: Schema.NullOr(Schema.String),
   /** The person's proxy on this computer; null — none saved. */
   proxy: Schema.NullOr(NetworkProxyInfo),
+  /**
+   * true — everything goes through the exit or nowhere (network extension,
+   * node gateway). false / absent — app level: what Uno Work starts and
+   * honours proxy settings; apps that ignore them go direct.
+   */
+  strict: Schema.optional(Schema.Boolean),
+  /** Why it's down or still connecting, a sentence for the person; null — nothing to say. */
+  reason: Schema.optional(Schema.NullOr(Schema.String)),
+  /** Can this computer import a WireGuard / AmneziaWG config (the engine is installed)? */
+  canImport: Schema.optional(Schema.Boolean),
 });
+
+export const NETWORK_CONFIG_MAX_CHARS = 16_384;
+export const NETWORK_LABEL_MAX_CHARS = 64;
+
+/** A wg-quick / AmneziaWG config the person pastes or opens. */
+export const NetworkConfigImport = Schema.Struct({
+  conf: Schema.String.check(Schema.isMaxLength(NETWORK_CONFIG_MAX_CHARS)),
+  label: Schema.optional(Schema.String.check(Schema.isMaxLength(NETWORK_LABEL_MAX_CHARS))),
+});
+export type NetworkConfigImport = typeof NetworkConfigImport.Type;
 export type NetworkState = typeof NetworkState.Type;
 
 /** `POST /api/manager/network`. */
@@ -184,6 +215,10 @@ export const NetworkChangeInput = Schema.Struct({
   askPermission: Schema.optional(Schema.Boolean),
   /** Save the proxy (and check it); null — forget it (Network goes off if it was on it). */
   proxy: Schema.optional(Schema.NullOr(NetworkProxyInput)),
+  /** Add an imported config as an exit (and switch to it). */
+  importConfig: Schema.optional(NetworkConfigImport),
+  /** Remove an imported config (Network goes off if it was on it). */
+  removeExitId: Schema.optional(Schema.String),
 });
 export type NetworkChangeInput = typeof NetworkChangeInput.Type;
 

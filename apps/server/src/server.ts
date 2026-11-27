@@ -709,7 +709,12 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(AiProviderKeysLive.pipe(Layer.provide(ServerSecretStoreLive))),
   // Network (the sidebar's shield): the person's proxy in the environment of
   // everything Uno Work starts. Built before the layers that spawn children.
-  Layer.provideMerge(NetworkServiceLive.pipe(Layer.provide(ServerSecretStoreLive))),
+  Layer.provideMerge(
+    NetworkServiceLive.pipe(
+      Layer.provide(ServerSettingsLive),
+      Layer.provide(ServerSecretStoreLive),
+    ),
+  ),
   Layer.provideMerge(ServerBrowserLive),
   Layer.provide(NetService.layer),
 );

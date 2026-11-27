@@ -204,6 +204,19 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
+      # Network's tunnel engine (native/uno-net): the server build bundles it when Go is there.
+      - name: Setup Go
+        if: matrix.platform != 'win'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: native/uno-net/go.mod
+          cache-dependency-path: native/uno-net/go.sum
+
+      - name: Build Network engine
+        if: matrix.platform != 'win'
+        shell: bash
+        run: native/uno-net/build.sh "${{ needs.preflight.outputs.version }}"
+
       - name: Install Spectre-mitigated MSVC libs
         if: matrix.platform == 'win'
         shell: pwsh

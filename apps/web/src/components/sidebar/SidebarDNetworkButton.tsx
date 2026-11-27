@@ -20,6 +20,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   CloudIcon,
+  FileKey2Icon,
   InfoIcon,
   KeyRoundIcon,
   LaptopIcon,
@@ -28,14 +29,17 @@ import {
   ShieldAlertIcon,
   ShieldCheckIcon,
   ShieldIcon,
+  Trash2Icon,
   WaypointsIcon,
 } from "lucide-react";
-import { memo, type ReactNode, useState } from "react";
+import { type FormEvent, memo, type ReactNode, useState } from "react";
 
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { cn } from "../../lib/utils";
 import {
   ADDRESS_TYPE_LABEL,
+  NETWORK_CONFIG_MAX_CHARS,
+  NETWORK_LABEL_MAX_CHARS,
   NETWORK_PROXY_EXIT_ID,
   type NetworkAddressType,
   type NetworkChange,
@@ -56,7 +60,9 @@ import {
 } from "../../lib/networkApi";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ProxyCheckLine, ProxyForm, countryName } from "./SidebarDNetworkProxy";
 
@@ -85,8 +91,12 @@ function useSetNetwork(environmentId: EnvironmentId | null) {
     onMutate: async (change) => {
       await queryClient.cancelQueries({ queryKey: key });
       const before = queryClient.getQueryData<NetworkState>(key);
-      // A proxy is saved and checked first: the form waits for the daemon.
-      if (before && change.proxy === undefined) {
+      // A proxy or a config is saved and checked first: the form waits for the daemon.
+      const guess =
+        change.proxy === undefined &&
+        change.importConfig === undefined &&
+        change.removeExitId === undefined;
+      if (before && guess) {
         const enabled = change.enabled ?? (change.exitId !== undefined ? true : before.enabled);
         const status = enabled ? "connecting" : "off";
         queryClient.setQueryData<NetworkState>(key, {
@@ -268,15 +278,20 @@ function ExitRow(props: {
       : exit.address
         ? `${flagOf(exit.country)} ${exit.address}`.trim()
         : "Not checked yet"
-    : !exit.online
-      ? "Offline"
-      : !carries && own
-        ? `${PROTOCOL_LABEL[own]} only`
-        : exit.kind === "uno"
-          ? (exit.city ?? "")
-          : [flagOf(exit.country), exit.address, own ? `· ${PROTOCOL_LABEL[own]}` : null]
-              .filter(Boolean)
-              .join(" ");
+    : exit.note
+      ? exit.note
+      : !exit.online
+        ? "Offline"
+        : !carries && own
+          ? `${PROTOCOL_LABEL[own]} only`
+          : exit.kind === "uno"
+            ? (exit.city ?? "")
+            : [
+                `${flagOf(exit.country)} ${exit.address ?? ""}`.trim(),
+                own ? PROTOCOL_LABEL[own] : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
   return (
     <button
       type="button"
@@ -298,7 +313,7 @@ function ExitRow(props: {
         <span
           className={cn(
             "block truncate text-[11px] text-muted-foreground",
-            exit.kind !== "uno" && exit.online && carries && "font-mono",
+            exit.kind !== "uno" && exit.online && carries && !exit.note && "font-mono",
           )}
         >
           {sub}
@@ -383,9 +398,10 @@ const COMPUTER_DOT: Record<NetworkComputer["status"], string> = {
   permission: "bg-warning",
 };
 
-function computerSays(computer: NetworkComputer): string {
+function computerSays(computer: NetworkComputer, strict: boolean): string {
   switch (computer.status) {
     case "on":
+      if (!strict) return "Uno Work's apps";
       return computer.kind === "cloud" ? "The whole computer" : "Uno Work and Docker";
     case "connecting":
       return "Connecting…";
@@ -400,7 +416,7 @@ function computerSays(computer: NetworkComputer): string {
   }
 }
 
-function ComputerRow(props: { computer: NetworkComputer }) {
+function ComputerRow(props: { computer: NetworkComputer; strict: boolean }) {
   const { computer } = props;
   return (
     <div
@@ -419,7 +435,7 @@ function ComputerRow(props: { computer: NetworkComputer }) {
         </span>
         <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span className={cn("size-1.5 shrink-0 rounded-full", COMPUTER_DOT[computer.status])} />
-          <span className="truncate">{computerSays(computer)}</span>
+          <span className="truncate">{computerSays(computer, props.strict)}</span>
         </span>
       </span>
     </div>
@@ -443,28 +459,47 @@ function SubHeader(props: { title: string; onBack: () => void }) {
   );
 }
 
-type PanelView = "main" | "exits" | "protocol" | "proxy";
+type PanelView = "main" | "exits" | "protocol" | "proxy" | "import";
 
 function ExitsView(props: {
   state: NetworkState;
   onBack: () => void;
   onPick: (exitId: string) => void;
   onProxy: () => void;
+  onImport: () => void;
+  onRemove: (exitId: string) => void;
 }) {
   const { state } = props;
   const uno = state.exits.filter((item) => item.kind === "uno");
   const own = state.exits.filter((item) => item.kind !== "uno" && item.kind !== "proxy");
   const proxy = state.exits.find((item) => item.kind === "proxy") ?? null;
-  const tunnelExits = uno.length + own.length > 0;
-  const row = (item: NetworkExit) => (
-    <ExitRow
-      key={item.id}
-      exit={item}
-      protocol={state.protocol}
-      selected={item.id === state.exitId}
-      onPick={() => props.onPick(item.id)}
-    />
-  );
+  const tunnelExits = uno.length + own.length > 0 || state.canImport === true;
+  const row = (item: NetworkExit) => {
+    const exitRow = (
+      <ExitRow
+        key={item.id}
+        exit={item}
+        protocol={state.protocol}
+        selected={item.id === state.exitId}
+        onPick={() => props.onPick(item.id)}
+      />
+    );
+    if (!item.removable) return exitRow;
+    return (
+      <div key={item.id} className="flex items-center gap-0.5">
+        <div className="min-w-0 flex-1">{exitRow}</div>
+        <button
+          type="button"
+          onClick={() => props.onRemove(item.id)}
+          aria-label={`Remove ${item.label}`}
+          data-testid={`network-exit-remove-${item.id}`}
+          className="grid size-7 shrink-0 cursor-pointer place-items-center rounded-md text-muted-foreground outline-hidden hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5"
+        >
+          <Trash2Icon />
+        </button>
+      </div>
+    );
+  };
   return (
     <div className="flex flex-col" data-testid="network-exits">
       <SubHeader title="Exit" onBack={props.onBack} />
@@ -485,10 +520,29 @@ function ExitsView(props: {
             {uno.map(row)}
           </>
         ) : null}
-        {own.length > 0 ? (
+        {own.length > 0 || state.canImport ? (
           <>
             <SectionTitle first={uno.length === 0}>Your computers and servers</SectionTitle>
             {own.map(row)}
+            {state.canImport ? (
+              <button
+                type="button"
+                onClick={props.onImport}
+                data-testid="network-import-open"
+                className={cn(ROW, "hover:bg-accent")}
+              >
+                <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground [&_svg]:size-4">
+                  <FileKey2Icon />
+                </span>
+                <span className="min-w-0 flex-1 text-sm text-foreground">
+                  Add a WireGuard config
+                  <span className="block text-[11px] text-muted-foreground">
+                    From your own server or a VPN provider
+                  </span>
+                </span>
+                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+              </button>
+            ) : null}
           </>
         ) : null}
         <SectionTitle first={!tunnelExits}>Your proxy</SectionTitle>
@@ -541,6 +595,70 @@ function ProtocolView(props: {
   );
 }
 
+/** This computer is a cloud one (no macOS extension there: strictness comes from Uno's gateway). */
+function onCloud(state: NetworkState): boolean {
+  return state.computers.find((computer) => computer.current)?.kind === "cloud";
+}
+
+/** Paste a wg-quick config ([Interface] + [Peer]); the daemon keeps it, the key never leaves. */
+function ImportView(props: {
+  busy: boolean;
+  error: string | null;
+  onBack: () => void;
+  onUse: (conf: string, label: string) => void;
+}) {
+  const [conf, setConf] = useState("");
+  const [label, setLabel] = useState("");
+  const ready = /\[Interface\]/i.test(conf) && /\[Peer\]/i.test(conf);
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (ready && !props.busy) props.onUse(conf, label.trim());
+  };
+  return (
+    <div className="flex flex-col pb-2.5" data-testid="network-import">
+      <SubHeader title="WireGuard config" onBack={props.onBack} />
+      <form className="flex flex-col gap-2 border-t border-border px-3 pt-2.5" onSubmit={submit}>
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          Paste the text of a .conf file: [Interface] and [Peer]. Its key stays on this computer.
+          AmneziaWG configs work too.
+        </p>
+        <Textarea
+          size="sm"
+          value={conf}
+          onChange={(event) => setConf(event.target.value.slice(0, NETWORK_CONFIG_MAX_CHARS))}
+          placeholder={"[Interface]\nPrivateKey = …\nAddress = 10.0.0.2/32\n\n[Peer]\n…"}
+          spellCheck={false}
+          autoComplete="off"
+          className="max-h-48 overflow-auto font-mono text-[11px]"
+          data-testid="network-import-conf"
+        />
+        <Input
+          size="sm"
+          value={label}
+          onChange={(event) => setLabel(event.target.value.slice(0, NETWORK_LABEL_MAX_CHARS))}
+          placeholder="Name (optional)"
+          autoComplete="off"
+          data-testid="network-import-label"
+        />
+        {props.error ? (
+          <p className="text-xs text-destructive-foreground" data-testid="network-import-error">
+            {props.error}
+          </p>
+        ) : null}
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!ready || props.busy}
+          data-testid="network-import-use"
+        >
+          {props.busy ? <LoaderCircleIcon className="animate-spin" /> : null}
+          Use it
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 function MainView(props: {
   state: NetworkState;
   onToggle: (enabled: boolean) => void;
@@ -552,8 +670,10 @@ function MainView(props: {
   const { state } = props;
   const exit = currentExit(state);
   const viaProxy = exit?.kind === "proxy";
-  // Nothing to go through yet: the switch and the exit row open the proxy form.
+  // Nothing to go through yet: the switch and the exit row open where one is added.
   const noExit = state.exits.length === 0;
+  // With the tunnel, the exit list offers a config too; without it the proxy is the only way.
+  const firstView: PanelView = state.canImport ? "exits" : "proxy";
   return (
     <div className="flex flex-col">
       <div className="flex items-start gap-3 px-3 pb-2.5">
@@ -578,7 +698,7 @@ function MainView(props: {
         <Switch
           checked={state.enabled}
           onCheckedChange={(checked) =>
-            checked && noExit ? props.onOpen("proxy") : props.onToggle(checked)
+            checked && noExit ? props.onOpen(firstView) : props.onToggle(checked)
           }
           aria-label="Network"
           data-testid="network-switch"
@@ -612,8 +732,19 @@ function MainView(props: {
               leak. Fix the proxy or turn Network off.
             </>
           ) : (
-            "Uno Work is offline until it answers, so your own address doesn't leak. Pick another exit or turn Network off."
+            <>
+              {state.reason ? `${state.reason} ` : null}
+              Agents and apps here can't go online until it answers, so your own address doesn't
+              leak. Pick another exit or turn Network off.
+            </>
           )}
+        </div>
+      ) : state.status === "connecting" && state.reason && !viaProxy ? (
+        <div
+          className="mx-3 mb-2.5 rounded-md bg-muted px-2.5 py-2 text-xs text-muted-foreground"
+          data-testid="network-connecting"
+        >
+          {state.reason} Until then agents and apps here stay offline.
         </div>
       ) : null}
 
@@ -621,7 +752,7 @@ function MainView(props: {
         <PickRow
           label="Exit"
           testId="network-row-exit"
-          onOpen={() => props.onOpen(noExit ? "proxy" : "exits")}
+          onOpen={() => props.onOpen(noExit ? firstView : "exits")}
           value={
             exit ? (
               <>
@@ -630,7 +761,11 @@ function MainView(props: {
                 {exitPlace(exit)}
               </>
             ) : noExit ? (
-              "Add a proxy"
+              state.canImport ? (
+                "Add an exit"
+              ) : (
+                "Add a proxy"
+              )
             ) : (
               "Choose"
             )
@@ -686,7 +821,7 @@ function MainView(props: {
         <div className="border-t border-border px-1.5 pt-1.5" data-testid="network-computers">
           <SectionTitle first>Your computers</SectionTitle>
           {state.computers.map((computer) => (
-            <ComputerRow key={computer.id} computer={computer} />
+            <ComputerRow key={computer.id} computer={computer} strict={state.strict === true} />
           ))}
         </div>
       ) : null}
@@ -712,8 +847,16 @@ function MainView(props: {
             through the proxy. Running ones switch after a restart. Uno itself stays direct, so it
             can help if the proxy breaks.
           </>
-        ) : (
+        ) : state.strict ? (
           "Everything Uno Work does goes through the tunnel: agents, terminals, git, ssh, downloads, and Docker on this computer. Nothing goes around it. Other apps keep their own connection."
+        ) : (
+          <span data-testid="network-app-level">
+            Agents, terminals, git, downloads, the built-in browser and the apps Uno Work starts on
+            this computer go through the tunnel. Running ones switch after a restart.{" "}
+            {onCloud(state)
+              ? "Apps that ignore proxy settings go direct. Strict mode (the whole computer or offline, incl. Docker) comes with Uno's gateway."
+              : "Apps that ignore proxy settings go direct. Strict mode (everything or offline, incl. Docker) comes with the macOS extension."}
+          </span>
         )}
       </div>
     </div>
@@ -729,6 +872,7 @@ function NetworkPanel(props: {
   const queryClient = useQueryClient();
   const [view, setView] = useState<PanelView>("main");
   const [proxyError, setProxyError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const back = () => setView("main");
   const onChange = (next: NetworkChange) => change.mutate(next);
   const recheck = useMutation({
@@ -762,11 +906,29 @@ function NetworkPanel(props: {
             />
           </div>
         </div>
+      ) : view === "import" ? (
+        <ImportView
+          busy={change.isPending}
+          error={importError}
+          onBack={() => setView("exits")}
+          onUse={(conf, label) => {
+            setImportError(null);
+            change.mutate(
+              { importConfig: label ? { conf, label } : { conf } },
+              {
+                onSuccess: back,
+                onError: (error) => setImportError(networkErrorMessage(error)),
+              },
+            );
+          }}
+        />
       ) : view === "exits" ? (
         <ExitsView
           state={state}
           onBack={back}
           onProxy={() => setView("proxy")}
+          onImport={() => setView("import")}
+          onRemove={(removeExitId) => onChange({ removeExitId })}
           onPick={(exitId) => {
             onChange({ exitId });
             back();

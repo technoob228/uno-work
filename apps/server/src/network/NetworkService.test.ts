@@ -59,6 +59,8 @@ async function withService<A>(
       makeNetworkService({
         env,
         recheckMs: 0,
+        accountRefreshMs: 0,
+        engineBinary: null,
         checkProxy: options.check ?? (async () => OK),
         ...(options.browserProxyPath ? { browserProxyPath: options.browserProxyPath } : {}),
       }).pipe(
