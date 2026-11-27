@@ -65,8 +65,12 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { UnoGatewayKey } from "../../unoGatewayKey.ts";
 import { assistantCommandOrigin } from "../../orchestration/commandOrigin.ts";
-import { OrchestrationCommandInvariantError } from "../../orchestration/Errors.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
+import {
+  assistantFolderIdBase,
+  isProjectAlreadyExists,
+  makeAdoptionFailureLimiter,
+} from "../assistantFolderAdoption.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ManagerCapabilityTokenRepository } from "../../persistence/Services/ManagerCapabilityTokens.ts";
 import { ManagerConnectorRepository } from "../../persistence/Services/ManagerConnectors.ts";
@@ -579,22 +583,6 @@ function slugifyAssistantName(name: string): string {
 }
 
 /**
- * True for the invariant `project.create` raises on a project id that is
- * already in the orchestration read model — including one soft-deleted, so
- * invisible to `getProjectShellById`. Adoption treats this as "nothing to
- * do", not a failure: a folder is adopted once; a project that already
- * exists under this id (deleted on purpose, or a snapshot that hadn't
- * caught up yet) is not re-created on every scan.
- */
-function isProjectAlreadyExistsInvariant(cause: unknown, projectId: string): boolean {
-  return (
-    Schema.is(OrchestrationCommandInvariantError)(cause) &&
-    cause.commandType === "project.create" &&
-    cause.detail.includes(`'${projectId}' already exists`)
-  );
-}
-
-/**
  * Contents of a folder's `.uno-assistant.json` marker.
  *
  * Parsed by hand rather than through a schema because the only question ever
@@ -683,8 +671,15 @@ const makeManagerAssistantService = Effect.gen(function* () {
    * minute) — without this, each retry logged the full cause and stack
    * again: thousands of identical entries a day from one stuck folder.
    */
-  const adoptionFailureLog = new Map<string, { count: number; lastLoggedAt: number }>();
-  const ADOPTION_FAILURE_LOG_INTERVAL_MS = 30 * 60_000;
+  const shouldLogAdoptionFailure = makeAdoptionFailureLimiter();
+  /**
+   * Folders whose project id is already taken by a project this computer
+   * removed (deleted, not just archived — so not in the shell projection).
+   * Adopting one again is refused every time; it is skipped for the rest of
+   * this run instead of being re-tried (and its marker rewritten) on every
+   * scan. A restart tries once more.
+   */
+  const settledFolders = new Set<string>();
 
   /**
    * Assistants are plain folders in a place the user can see and open:
@@ -935,20 +930,28 @@ const makeManagerAssistantService = Effect.gen(function* () {
         }
       }
     }).pipe(
-      Effect.catch((cause) => {
-        if (isProjectAlreadyExistsInvariant(cause, projectId)) {
-          // Idempotent: the files/token above are already written, and a
-          // project under this id already exists one way or another — there
-          // is nothing left to do. Re-dispatching `project.create` on every
-          // scan (and failing the same way every time) is the loop this
-          // guards against.
-          return Effect.logInfo("assistant project already exists; adoption is a no-op").pipe(
-            Effect.annotateLogs({ projectId }),
-          );
-        }
-        return Schema.is(ManagerAssistantError)(cause)
+      Effect.catch((cause) =>
+        Schema.is(ManagerAssistantError)(cause)
           ? Effect.fail(cause)
-          : Effect.fail(toAssistantError(`Failed to ensure assistant ${projectId}.`)(cause));
+          : Effect.fail(toAssistantError(`Failed to ensure assistant ${projectId}.`)(cause)),
+      ),
+    );
+
+  /**
+   * Adoption's own `ensureAssistant`: a project id already taken (by a
+   * project this computer removed) settles the folder — nothing adopted, no
+   * retry — instead of failing. Only here: creating, restoring or moving in
+   * an assistant still fails loudly on it.
+   */
+  const ensureAdopted = (dir: string, projectId: ProjectId, title: string) =>
+    ensureAssistant({ projectId, title, workspaceRoot: dir }).pipe(
+      Effect.as<ProjectId | null>(projectId),
+      Effect.catch((cause) => {
+        if (!isProjectAlreadyExists(cause, projectId)) return Effect.fail(cause);
+        settledFolders.add(dir);
+        return Effect.logInfo(
+          "assistant folder belongs to a removed project; not adopting it again",
+        ).pipe(Effect.annotateLogs({ dir, projectId }), Effect.as(null));
       }),
     );
 
@@ -1038,22 +1041,14 @@ const makeManagerAssistantService = Effect.gen(function* () {
           .getProjectShellById(projectId)
           .pipe(Effect.mapError(toAssistantError("Failed to check existing assistants.")));
         if (Option.isSome(registered)) return null;
-        yield* ensureAssistant({ projectId, title: folderName, workspaceRoot: dir });
-        return projectId;
+        return yield* ensureAdopted(dir, projectId, folderName);
       }
       const hasInstructions = yield* fs
         .exists(path.join(dir, "AGENTS.md"))
         .pipe(Effect.orElseSucceed(() => false));
       if (!hasInstructions) return null;
-      // A folder named by an older convention already carries the project
-      // id prefix (e.g. `assistant-a4e99f`, from before `defaultWorkspaceRootFor`
-      // started stripping it). Slugifying and re-prefixing such a name
-      // doubled it into `assistant-assistant-a4e99f` — a new, wrong id every
-      // scan found "missing" and tried to create again.
-      const slugified = slugifyAssistantName(folderName);
-      const base = slugified.startsWith(ASSISTANT_PROJECT_ID_PREFIX)
-        ? slugified.slice(ASSISTANT_PROJECT_ID_PREFIX.length)
-        : slugified;
+      // `assistant-a4e99f` maps to `assistant-a4e99f`, not a doubled prefix.
+      const base = assistantFolderIdBase(slugifyAssistantName(folderName));
       let candidate = ProjectId.make(`${ASSISTANT_PROJECT_ID_PREFIX}${base}`);
       const existing = yield* projectionSnapshotQuery
         .getProjectShellById(candidate)
@@ -1063,8 +1058,7 @@ const makeManagerAssistantService = Effect.gen(function* () {
           `${ASSISTANT_PROJECT_ID_PREFIX}${base}-${crypto.randomUUID().slice(0, 6)}`,
         );
       }
-      yield* ensureAssistant({ projectId: candidate, title: folderName, workspaceRoot: dir });
-      return candidate;
+      return yield* ensureAdopted(dir, candidate, folderName);
     });
 
   const scanWorkspaceFolders: ManagerAssistantServiceShape["scanWorkspaceFolders"] = () =>
@@ -1078,21 +1072,17 @@ const makeManagerAssistantService = Effect.gen(function* () {
           const dir = path.join(assistantsBaseDir, entry);
           const info = yield* fs.stat(dir).pipe(Effect.orElseSucceed(() => null));
           if (info === null || info.type !== "Directory") continue;
+          if (settledFolders.has(dir)) continue;
           const projectId = yield* adoptFolder(dir, entry).pipe(
             Effect.catch((cause) => {
-              const now = Date.now();
-              const seen = adoptionFailureLog.get(dir);
-              const failuresSinceLastLog = (seen?.count ?? 0) + 1;
-              if (seen && now - seen.lastLoggedAt < ADOPTION_FAILURE_LOG_INTERVAL_MS) {
-                adoptionFailureLog.set(dir, {
-                  count: failuresSinceLastLog,
-                  lastLoggedAt: seen.lastLoggedAt,
-                });
-                return Effect.succeed(null);
-              }
-              adoptionFailureLog.set(dir, { count: 0, lastLoggedAt: now });
+              const verdict = shouldLogAdoptionFailure(dir, Date.now());
+              if (!verdict.log) return Effect.succeed(null);
               return Effect.logWarning("assistant folder adoption failed").pipe(
-                Effect.annotateLogs({ dir, cause, failuresSinceLastLog }),
+                Effect.annotateLogs({
+                  dir,
+                  cause,
+                  failuresSinceLastLog: verdict.failuresSinceLastLog,
+                }),
                 Effect.as(null),
               );
             }),
