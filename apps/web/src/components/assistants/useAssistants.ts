@@ -286,33 +286,53 @@ export function makeCreateAssistantDeps(
 export const LOCAL_ASSISTANTS_KEY = ["uno-assistants", "local"] as const;
 
 /**
+ * Whether it's worth polling this environment's REST endpoints right now:
+ * the primary (local, loopback) environment always is, a saved one only
+ * while its connection is actually up. A saved environment that is
+ * reconnecting, auth-blocked or given up on (self-heal "needs attention",
+ * e.g. an archived/deleted computer) has nothing to answer these calls —
+ * polling it anyway is what turned one dead saved environment into
+ * thousands of CORS-refused `/api/manager/assistants` fetches a day.
+ */
+function useEnvironmentPollable(environmentId: EnvironmentId | null): boolean {
+  const connectionState = useSavedEnvironmentRuntimeStore((state) =>
+    environmentId ? state.byId[environmentId]?.connectionState : undefined,
+  );
+  if (environmentId === null) return false;
+  if (isPrimaryEnvironmentId(environmentId)) return true;
+  return connectionState === "connected";
+}
+
+/**
  * The assistants that live on the computer the app is looking at, except
  * its own default one ("Uno", shown by its card): folders in
  * ~/UnoWork/Assistants with their own memory, apps and channels.
  */
 export function useLocalAssistants(environmentId: EnvironmentId | null) {
+  const pollable = useEnvironmentPollable(environmentId);
   return useQuery({
     queryKey: [...LOCAL_ASSISTANTS_KEY, environmentId],
     queryFn: async () =>
       (await listAssistants({ environmentId: environmentId! })).assistants.filter(
         (assistant) => assistant.projectId !== ASSISTANT_PROJECT_ID,
       ),
-    enabled: environmentId !== null,
-    refetchInterval: 15_000,
+    enabled: pollable,
+    refetchInterval: pollable ? 15_000 : false,
     retry: false,
   });
 }
 
 /** Deleted assistants of this computer still kept (Restore); older daemons have none. */
 export function useDeletedLocalAssistants(environmentId: EnvironmentId | null) {
+  const pollable = useEnvironmentPollable(environmentId);
   return useQuery({
     queryKey: [...LOCAL_ASSISTANTS_KEY, "deleted", environmentId],
     queryFn: () =>
       listDeletedLocalAssistants({ environmentId: environmentId! })
         .then((result) => result.deleted)
         .catch(() => []),
-    enabled: environmentId !== null,
-    refetchInterval: 30_000,
+    enabled: pollable,
+    refetchInterval: pollable ? 30_000 : false,
     retry: false,
   });
 }
