@@ -102,9 +102,21 @@ Other commands: `uno-net keygen` (a device key pair), `uno-net parse-conf`
 ## Build and test
 
 ```sh
-./build.sh              # dist/darwin-arm64, dist/darwin-amd64 (+ universal on macOS)
+./build.sh [version]    # dist/darwin-arm64, dist/darwin-x64, dist/linux-x64 (+ uno-gw)
+TARGETS="linux/amd64" ./build.sh   # one target
 go test ./...           # Linux is enough: the exit runs inside the test process
 ```
+
+Directory names follow Node's `process.platform`-`process.arch`, so the
+daemon finds its engine at `apps/server/dist/native/<platform>-<arch>/`
+(`apps/server/src/network/unoNet.ts`; `UNO_NET_BIN` overrides). The server
+build copies `dist/` there (building it first when Go is present); the
+desktop package keeps only its own platform, unpacked from the asar.
+
+`cmd/uno-net-testexit` is a test exit (amneziawg-go + netstack on loopback
+UDP, an echo on 10.66.0.1:7, a DNS answering `echo.test`): it prints a
+wg-quick config for a client and runs until stdin closes. The daemon's
+`tunnel.integration.test.ts` runs uno-net against it. Not shipped.
 
 `internal/e2e` brings up a real WireGuard / AmneziaWG exit in the test
 process and checks TCP and UDP (by address and by name), DNS through UDP,
@@ -126,9 +138,19 @@ Where Docker set the iptables FORWARD policy to DROP, uno-gw lets only its
 own interfaces through (DOCKER-USER), and removes that on exit.
 
 ```sh
-uno-gw run --config /etc/uno-gw/config.json   # SIGHUP reloads peers
+uno-gw init --dir /etc/uno-gw [--egress auto] [--obfuscation '{"jc":"4",…}']
+uno-gw install-service                         # systemd unit uno-gw.service, enabled and started
+uno-gw run --config /etc/uno-gw/config.json   # SIGHUP (systemctl reload uno-gw) reloads peers
 uno-gw ruleset --config …                      # print the nft script
 ```
+
+`init` makes the gateway's keys on the computer itself (`config.json`, 0600,
+in a 0700 directory) and an empty `peers.json`; an existing config is kept,
+so it is safe to run again. It prints only the public side (the public keys,
+ports and the AmneziaWG obfuscation) for the console. Peers live in
+`peers.json` (`[{"interface","publicKey","address","label"}]`), written by
+whoever registers devices, then `systemctl reload uno-gw`; peers in
+`config.json` still work and both lists are joined.
 
 ```json
 {
