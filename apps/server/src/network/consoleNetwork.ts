@@ -201,6 +201,27 @@ export function newDeviceKey(): { readonly privateKey: string; readonly publicKe
 
 const TIMEOUT_MS = 20_000;
 
+/**
+ * The console's check for a device id (fishcode `worknetwork.DesktopDevice`):
+ * 1–64 of `A-Z a-z 0-9 . _ : -`, and not `box-…` (a cloud computer's).
+ */
+export function isConsoleDeviceId(id: string): boolean {
+  return /^[A-Za-z0-9._:-]{1,64}$/.test(id) && !id.toLowerCase().startsWith("box-");
+}
+
+/**
+ * The state path for these credentials. The person's key names this device
+ * (`?device_id=`, the id it registers its key with): the console counts the
+ * request as "this device is online through the exit", which keeps the exit
+ * awake and wakes it when it sleeps. Without it the console counts every
+ * desktop of the account. A machine token already says which computer asks.
+ */
+export function consoleStatePath(credentials: ConsoleNetworkCredentials): string {
+  return credentials.kind === "account" && isConsoleDeviceId(credentials.deviceId)
+    ? `?device_id=${encodeURIComponent(credentials.deviceId)}`
+    : "";
+}
+
 export interface ConsoleNetworkClient {
   readonly state: () => Promise<ConsoleNetworkState>;
   readonly change: (input: {
@@ -294,8 +315,21 @@ export function makeConsoleNetworkClient(
   };
   return {
     state: async () => {
+      const statePath = consoleStatePath(credentials);
       try {
-        return parseConsoleNetworkState(await call("GET", ""));
+        try {
+          return parseConsoleNetworkState(await call("GET", statePath));
+        } catch (error) {
+          // A console that refuses this device id still answers without it.
+          if (
+            statePath !== "" &&
+            error instanceof ConsoleNetworkError &&
+            error.code === "INVALID_DEVICE_ID"
+          ) {
+            return parseConsoleNetworkState(await call("GET", ""));
+          }
+          throw error;
+        }
       } catch (error) {
         if (error instanceof ConsoleNetworkError && error.code === "NETWORK_DISABLED") {
           return CONSOLE_NETWORK_UNAVAILABLE;

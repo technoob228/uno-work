@@ -25,6 +25,7 @@ import {
   type NetworkComputerInfo,
   consoleCredentialsFrom,
   makeNetworkService,
+  networkStateOf,
 } from "./NetworkService.ts";
 import type { TunnelRuntime, TunnelSnapshot } from "./tunnelRuntime.ts";
 import type { UnoNetConfig } from "./unoNet.ts";
@@ -92,13 +93,23 @@ const TRANSPORTS = [
   },
 ];
 
-function fakeConsole(options: { notReadyTimes?: number } = {}) {
+function fakeConsole(
+  options: {
+    notReadyTimes?: number;
+    /** The `state` of a 409 NETWORK_EXIT_NOT_READY: setting_up | asleep. */
+    notReadyState?: string;
+  } = {},
+) {
   let state: ConsoleNetworkState = parseConsoleNetworkState(CONSOLE_BODY);
   let notReady = options.notReadyTimes ?? 0;
   const peers: Array<{ publicKey: string; exitId: string; label: string }> = [];
   const changes: unknown[] = [];
+  let stateReads = 0;
   const client: ConsoleNetworkClient = {
-    state: async () => state,
+    state: async () => {
+      stateReads += 1;
+      return state;
+    },
     change: async (input) => {
       changes.push(input);
       state = {
@@ -113,7 +124,8 @@ function fakeConsole(options: { notReadyTimes?: number } = {}) {
       peers.push(input);
       if (notReady > 0) {
         notReady -= 1;
-        throw new ConsoleNetworkError(409, "NETWORK_EXIT_NOT_READY", "setting up", "setting_up");
+        const notReadyState = options.notReadyState ?? "setting_up";
+        throw new ConsoleNetworkError(409, "NETWORK_EXIT_NOT_READY", notReadyState, notReadyState);
       }
       return {
         exitId: input.exitId,
@@ -123,7 +135,7 @@ function fakeConsole(options: { notReadyTimes?: number } = {}) {
       };
     },
   };
-  return { client, peers, changes };
+  return { client, peers, changes, stateReads: () => stateReads };
 }
 
 function fakeRuntime() {
@@ -188,6 +200,8 @@ async function withService<A>(
     runtime: TunnelRuntime;
     store?: ReturnType<typeof memoryStore>;
     browserProxyPath?: string;
+    accountRefreshMs?: number;
+    peerRetryMs?: number;
   },
   body: (
     service: Effect.Success<ReturnType<typeof makeNetworkService>>,
@@ -202,8 +216,8 @@ async function withService<A>(
       makeNetworkService({
         env,
         recheckMs: 0,
-        accountRefreshMs: 0,
-        peerRetryMs: 0,
+        accountRefreshMs: deps.accountRefreshMs ?? 0,
+        peerRetryMs: deps.peerRetryMs ?? 0,
         engineBinary: "/fake/uno-net",
         runtime: deps.runtime,
         consoleClient: () => Effect.succeed(deps.console),
@@ -303,6 +317,77 @@ describe("Network: the account's exits", () => {
         expect(yield* Effect.promise(() => connectStatus(env.HTTPS_PROXY ?? ""))).toMatch(/502/);
       }),
     );
+  });
+
+  it("a sleeping exit reads as waking up, not setting up, and is asked again every few seconds", async () => {
+    const fake = fakeConsole({ notReadyTimes: 3, notReadyState: "asleep" });
+    const { runtime, applied } = fakeRuntime();
+    await withService(
+      { console: fake.client, runtime, accountRefreshMs: 60_000, peerRetryMs: 25 },
+      (service, env) =>
+        Effect.gen(function* () {
+          yield* Effect.sleep(20);
+          const waiting = yield* service.change({ exitId: "box-2534" }, COMPUTER);
+          expect(waiting.status).toBe("connecting");
+          expect(waiting.reason).toBe("work-canary is waking up.");
+          expect(applied.every((c) => c === null)).toBe(true);
+          expect(yield* Effect.promise(() => connectStatus(env.HTTPS_PROXY ?? ""))).toMatch(/502/);
+          // Not the minute-long refresh: the key is offered again at the fast pace.
+          yield* Effect.sleep(300);
+          expect(fake.peers.length).toBeGreaterThanOrEqual(4);
+          const awake = yield* service.state(COMPUTER);
+          expect(awake.status).toBe("on");
+          expect(awake.reason).toBeNull();
+        }),
+    );
+  });
+
+  it("the chosen exit asleep with this device's key there: waking up, not the exit doesn't answer", () => {
+    const account = parseConsoleNetworkState({
+      ...CONSOLE_BODY,
+      enabled: true,
+      exit_id: "box-2534",
+      exits: CONSOLE_BODY.exits.map((e) => (e.id === "box-2534" ? { ...e, state: "asleep" } : e)),
+    });
+    const stored = {
+      version: 2 as const,
+      enabled: false,
+      exitId: null,
+      since: null,
+      proxy: null,
+      check: null,
+      bridge: { token: "t", port: 1 },
+      configs: [],
+      device: { id: "dev-1", privateKey: "priv", publicKey: "pub" },
+      account,
+      peers: [{ exitId: "box-2534", publicKey: "pub", transports: TRANSPORTS, at: "x" }],
+      tunnelCheck: null,
+      tunnelCheckExit: null,
+    };
+    const live = {
+      checking: false,
+      direct: [],
+      engine: true,
+      tunnel: {
+        status: "down" as const,
+        activeProtocol: null,
+        latencyMs: null,
+        since: null,
+        error: "No handshake with 203.0.113.5:40123 over WireGuard.",
+      },
+      pending: null,
+    };
+    const state = networkStateOf(stored, COMPUTER, live);
+    expect(state.status).toBe("connecting");
+    expect(state.reason).toBe("work-canary is waking up.");
+    expect(state.exits.find((e) => e.id === "box-2534")?.note).toBe("Waking up…");
+    // Once the tunnel is up the console's "asleep" is stale: on.
+    const on = networkStateOf(stored, COMPUTER, {
+      ...live,
+      tunnel: { ...live.tunnel, status: "on", error: null },
+    });
+    expect(on.status).toBe("on");
+    expect(on.exits.find((e) => e.id === "box-2534")?.note).toBe("Asleep · wakes when picked");
   });
 
   it("the desktop's browser panel follows the tunnel through the same bridge, closed while it's set up", async () => {

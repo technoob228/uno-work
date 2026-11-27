@@ -75,7 +75,7 @@ import {
   normalizeSkipList,
   proxyEnvironment,
 } from "./proxyEnv.ts";
-import { type TunnelRuntime, makeTunnelRuntime } from "./tunnelRuntime.ts";
+import { TRANSPORT_LABEL, type TunnelRuntime, makeTunnelRuntime } from "./tunnelRuntime.ts";
 import {
   type UnoNetConfig,
   type UnoNetTransport,
@@ -95,8 +95,16 @@ export const BROWSER_PROXY_FILE = "browser-proxy.json";
 export const NETWORK_RECHECK_MS = 3 * 60_000;
 /** How often the account's Network is read from the console. */
 export const NETWORK_ACCOUNT_REFRESH_MS = 60_000;
-/** While an exit is being set up, how often its key is offered again. */
+/** While an exit is being set up or wakes up, how often its key is offered again. */
 export const NETWORK_PEER_RETRY_MS = 10_000;
+
+/**
+ * `NetworkLive.pending` values that mean "waiting for the exit", not a
+ * refusal: Uno is setting it up, or the exit computer sleeps (the console
+ * lets an exit sleep after 3 days without devices) and is waking up.
+ */
+export const PENDING_SETTING_UP = "setting up";
+export const PENDING_WAKING = "waking";
 
 export const STRICT_MODE_NOTE =
   "Apps that ignore proxy settings go direct. Strict mode (everything or offline, incl. Docker) comes with the macOS extension.";
@@ -270,6 +278,12 @@ export function effectiveExit(stored: StoredNetwork): EffectiveExit | null {
   return null;
 }
 
+/** The account's exit this computer goes out through sleeps (as the console last said). */
+export function chosenExitAsleep(stored: StoredNetwork): boolean {
+  const effective = effectiveExit(stored);
+  return effective?.kind === "account" && effective.exit?.state === "asleep";
+}
+
 /** The uno-net config for a tunnel exit; null with the sentence why it can't run. */
 export function tunnelConfigFor(
   stored: StoredNetwork,
@@ -299,7 +313,7 @@ export function tunnelConfigFor(
   }));
   if (transports.length === 0) {
     return {
-      blocked: `This exit doesn't carry ${protocol === "wireguard" ? "WireGuard" : "AmneziaWG"}. Pick Auto.`,
+      blocked: `This exit doesn't carry ${protocol === "amneziawg" ? TRANSPORT_LABEL.amneziawg : TRANSPORT_LABEL.wireguard}. Pick Auto.`,
     };
   }
   return {
@@ -406,6 +420,7 @@ export function networkStateOf(
     if (exit.self) continue;
     const current = effective?.id === exit.id;
     const seen = current && tunnelCheck?.status === "ok" ? tunnelCheck : null;
+    const wakingNow = current && exit.state === "asleep" && live.tunnel.status !== "on";
     exits.push({
       id: exit.id,
       kind: exit.kind,
@@ -417,7 +432,7 @@ export function networkStateOf(
       online: exit.available && exit.state !== "failed",
       addressType: exit.addressType,
       protocols: exit.protocols,
-      note: accountExitNote(exit),
+      note: wakingNow ? "Waking up…" : accountExitNote(exit),
     });
   }
   for (const config of stored.configs) {
@@ -459,11 +474,22 @@ export function networkStateOf(
     status = proxyStatus(stored, live.checking);
     since = stored.since;
   } else if (effective) {
-    if (live.pending) {
-      status = live.pending === "setting up" ? "connecting" : "down";
+    const accountExit = effective.kind === "account" ? effective.exit : null;
+    // Asleep: the device's own state request (or its key) wakes it; until the
+    // tunnel is up that's a wait, not "the exit doesn't answer".
+    const waking =
+      live.pending === PENDING_WAKING ||
+      (accountExit?.state === "asleep" &&
+        live.tunnel.status !== "on" &&
+        (live.pending === null || live.pending === PENDING_SETTING_UP));
+    if (waking) {
+      status = "connecting";
+      reason = `${accountExit?.label ?? "The exit"} is waking up.`;
+    } else if (live.pending) {
+      status = live.pending === PENDING_SETTING_UP ? "connecting" : "down";
       reason =
-        live.pending === "setting up"
-          ? `Uno is setting up ${effective.kind === "account" && effective.exit ? effective.exit.label : "the exit"}. Uno Work stays offline until it's ready.`
+        live.pending === PENDING_SETTING_UP
+          ? `Uno is setting up ${accountExit ? accountExit.label : "the exit"}. Uno Work stays offline until it's ready.`
           : live.pending;
     } else {
       status = live.tunnel.status === "off" ? "connecting" : live.tunnel.status;
@@ -690,7 +716,8 @@ export const makeNetworkService = (options?: {
         if (!tunnel) pending = null;
         else if (tunnel.blocked !== "pending") pending = tunnel.blocked;
         // Waiting for the exit; a refusal from the console (set by reconcileAccount) stays.
-        else if (pending === null) pending = "setting up";
+        else if (pending === null || pending === PENDING_SETTING_UP)
+          pending = chosenExitAsleep(stored) ? PENDING_WAKING : PENDING_SETTING_UP;
         yield* Effect.promise(() => runtime.setDesired(null, null));
       }
 
@@ -813,7 +840,8 @@ export const makeNetworkService = (options?: {
         }
         const error = result.failure;
         if (error instanceof ConsoleNetworkError && error.code === "NETWORK_EXIT_NOT_READY") {
-          pending = "setting up";
+          // The console woke the exit on this request; ask again soon.
+          pending = error.state === "asleep" ? PENDING_WAKING : PENDING_SETTING_UP;
         } else {
           pending =
             error instanceof ConsoleNetworkError
@@ -864,17 +892,25 @@ export const makeNetworkService = (options?: {
       );
     }
     const accountRefreshMs = options?.accountRefreshMs ?? NETWORK_ACCOUNT_REFRESH_MS;
+    /** Waiting for the exit to be set up or to wake: read the console every 10 s, not every minute. */
+    const waitingForExit = () =>
+      pending === PENDING_SETTING_UP ||
+      pending === PENDING_WAKING ||
+      (chosenExitAsleep(stored) && runtime.snapshot().status !== "on");
     if (accountRefreshMs > 0) {
+      // Ticks at the short pace so a wait that starts mid-minute (an exit
+      // picked, a 409) speeds up at once; otherwise a refresh once a minute.
+      const peerRetryMs = options?.peerRetryMs ?? NETWORK_PEER_RETRY_MS;
+      const tickMs = peerRetryMs > 0 ? Math.min(peerRetryMs, accountRefreshMs) : accountRefreshMs;
       yield* Effect.forkScoped(
         Effect.gen(function* () {
+          let refreshedAt = Date.now();
           while (true) {
-            // Faster while an exit is being set up.
-            yield* Effect.sleep(
-              pending === "setting up"
-                ? (options?.peerRetryMs ?? NETWORK_PEER_RETRY_MS)
-                : accountRefreshMs,
-            );
-            yield* reconcile(pending === "setting up").pipe(Effect.ignore);
+            yield* Effect.sleep(tickMs);
+            const waiting = waitingForExit();
+            if (!waiting && Date.now() - refreshedAt < accountRefreshMs) continue;
+            refreshedAt = Date.now();
+            yield* reconcile(waiting).pipe(Effect.ignore);
           }
         }),
       );
