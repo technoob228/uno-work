@@ -234,6 +234,8 @@ UNO_WORK_HOST=${HOST}
 UNO_WORK_PORT=${PORT}
 UNO_WORK_STATE_DIR=${STATE_DIR}
 UNO_WORK_WORKSPACE=${WORKSPACE_DIR}
+# Usage events to the Uno console (TELEMETRY.md). To turn them off:
+# UNO_WORK_TELEMETRY_ENABLED=false
 ENVFILE
   chmod 0640 "${CONFIG_DIR}/uno-work.env"
 fi

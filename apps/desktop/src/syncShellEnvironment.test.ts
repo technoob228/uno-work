@@ -27,10 +27,26 @@ describe("syncShellEnvironment", () => {
       "HOMEBREW_REPOSITORY",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+      "UNO_WORK_TELEMETRY_ENABLED",
+      "DO_NOT_TRACK",
     ]);
     expect(env.PATH).toBe("/opt/homebrew/bin:/usr/bin:/Users/test/.local/bin");
     expect(env.SSH_AUTH_SOCK).toBe("/tmp/secretive.sock");
     expect(env.HOMEBREW_PREFIX).toBe("/opt/homebrew");
+  });
+
+  it("passes the usage events switch from the login shell to the backend", () => {
+    const env: NodeJS.ProcessEnv = { SHELL: "/bin/zsh", PATH: "/usr/bin" };
+    const readEnvironment = vi.fn(() => ({
+      PATH: "/usr/bin",
+      UNO_WORK_TELEMETRY_ENABLED: "false",
+      DO_NOT_TRACK: "1",
+    }));
+
+    syncShellEnvironment(env, { platform: "darwin", readEnvironment });
+
+    expect(env.UNO_WORK_TELEMETRY_ENABLED).toBe("false");
+    expect(env.DO_NOT_TRACK).toBe("1");
   });
 
   it("preserves an inherited SSH_AUTH_SOCK value", () => {
@@ -95,6 +111,8 @@ describe("syncShellEnvironment", () => {
       "HOMEBREW_REPOSITORY",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+      "UNO_WORK_TELEMETRY_ENABLED",
+      "DO_NOT_TRACK",
     ]);
     expect(env.PATH).toBe("/home/linuxbrew/.linuxbrew/bin:/usr/bin");
     expect(env.SSH_AUTH_SOCK).toBe("/tmp/secretive.sock");
@@ -130,6 +148,8 @@ describe("syncShellEnvironment", () => {
       "HOMEBREW_REPOSITORY",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+      "UNO_WORK_TELEMETRY_ENABLED",
+      "DO_NOT_TRACK",
     ]);
     expect(readEnvironment).toHaveBeenNthCalledWith(2, "/bin/zsh", [
       "PATH",
@@ -139,6 +159,8 @@ describe("syncShellEnvironment", () => {
       "HOMEBREW_REPOSITORY",
       "XDG_CONFIG_HOME",
       "XDG_DATA_HOME",
+      "UNO_WORK_TELEMETRY_ENABLED",
+      "DO_NOT_TRACK",
     ]);
     expect(readLaunchctlPath).toHaveBeenCalledTimes(1);
     expect(logWarning).toHaveBeenCalledWith(

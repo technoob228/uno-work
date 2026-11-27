@@ -12,12 +12,13 @@
 
 A rule that a machine can check is a check, not a line in this file. When an agent is corrected for the same mistake twice, add the check where it already runs before a release (a lint rule, a type, a test, a script in `bun lint`) with an error that names what to do instead, then add a row here.
 
-| Rule                                           | Enforced by                                      |
-| ---------------------------------------------- | ------------------------------------------------ |
-| No new lint warnings                           | `scripts/lint-ratchet.mjs` in `bun lint`         |
-| No colored side stripe                         | `scripts/check-no-side-stripe.mjs` in `bun lint` |
-| No new file over 2000 lines                    | `max-lines` in `.oxlintrc.json`, via the ratchet |
-| Types hold, no barrel imports in `apps/server` | `bun typecheck`                                  |
+| Rule                                                                                                  | Enforced by                                               |
+| ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| No new lint warnings                                                                                  | `scripts/lint-ratchet.mjs` in `bun lint`                  |
+| No colored side stripe                                                                                | `scripts/check-no-side-stripe.mjs` in `bun lint`          |
+| No new file over 2000 lines                                                                           | `max-lines` in `.oxlintrc.json`, via the ratchet          |
+| Types hold, no barrel imports in `apps/server`                                                        | `bun typecheck`                                           |
+| Usage events go to the Uno console only: no PostHog/T3 endpoints, no reading other tools' login files | `apps/server/src/telemetry/noThirdPartyTelemetry.test.ts` |
 
 ## UI rules
 
