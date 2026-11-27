@@ -609,6 +609,8 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
+    // Network's tunnel engine (uno-net) is a program the daemon starts: it can't run from inside app.asar.
+    asarUnpack: ["apps/server/dist/native/**"],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
   const publishConfig = resolveGitHubPublishConfig(updateChannel);
@@ -880,6 +882,17 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  // Only this platform's Network binaries (dist/native/<platform>-<arch>/).
+  const stageNativeDir = path.join(stageAppDir, "apps/server/dist/native");
+  if (yield* fs.exists(stageNativeDir)) {
+    const nodePlatform =
+      options.platform === "mac" ? "darwin" : options.platform === "win" ? "win32" : "linux";
+    for (const entry of yield* fs.readDirectory(stageNativeDir)) {
+      if (!entry.startsWith(`${nodePlatform}-`)) {
+        yield* fs.remove(path.join(stageNativeDir, entry), { recursive: true });
+      }
+    }
+  }
 
   yield* assertPlatformBuildResources(
     options.platform,

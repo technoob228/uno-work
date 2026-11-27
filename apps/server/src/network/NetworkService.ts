@@ -1,42 +1,65 @@
 /**
  * Network on this computer's daemon (`/api/manager/network`, the sidebar's
- * shield). Today it carries one kind of exit: the person's own proxy
- * (Misha, 26.11). The tunnel exits (uno-net, the macOS extension, the
- * console's account switch) come later and report `tunnel: false` until then.
+ * shield). Three kinds of exits:
  *
- * The proxy is this computer's (recommended default, open question for Misha:
- * per account later, through the console). It lives in the secret store as
- * one record — address, login, password, the bridge's token and port, the
- * switch and the last check — 0600, outside settings.json; the password
- * never leaves the daemon: not in an answer, a child's environment or a log
- * (it is registered with the log redaction).
+ * - the person's own proxy (Misha, 26.11) — this computer's;
+ * - an imported WireGuard / AmneziaWG config — this computer's;
+ * - the account's exits from the console (Misha 12.11: one switch per
+ *   account) — the person's cloud computers with Uno's gateway, later Uno's
+ *   addresses. This device registers its own key at the exit; the private
+ *   key never leaves the daemon.
  *
- * On: the bridge (`proxyBridge.ts`) forwards to the proxy and every child
- * started from now on gets the bridge in its environment (`proxyEnv.ts`).
- * Running chats, terminals and apps keep the environment they started with;
- * the bridge serves them as well (direct while off). A check runs on every
- * change and every few minutes while on: a proxy that stops answering reads
- * "down" — its users can't go online, nothing goes around it.
+ * Tunnel exits run in uno-net (`tunnelRuntime.ts`), a child process; on a
+ * Mac too, without the network extension (Misha 27.11: "now like this,
+ * strict mode later"). Everything rides one local bridge
+ * (`proxyBridge.ts`): every child started while Network is on gets it in its
+ * environment (`proxyEnv.ts`), the bridge forwards to the proxy or to the
+ * tunnel's SOCKS. Fail-closed at app level: the exit down → the bridge
+ * answers 502, never direct. Apps that ignore proxy settings go direct
+ * (`strict: false`) until the macOS extension / the node gateway.
+ *
+ * A local exit (proxy, config) on this computer wins over the account's
+ * exit; off, this computer follows the account.
+ *
+ * Everything lives in the secret store as one record (0600, outside
+ * settings.json): proxy login, configs, the device key, the bridge's token,
+ * the last console state (so a restart with the console unreachable stays
+ * in the tunnel — or offline — never direct). No secret reaches an answer,
+ * a child's environment or a log (all registered with the log redaction).
  */
 import { randomBytes } from "node:crypto";
+import * as OS from "node:os";
 
 import {
   NETWORK_PROXY_EXIT_ID,
   type NetworkChangeInput,
   type NetworkComputer,
   type NetworkExit,
+  type NetworkProtocol,
   type NetworkProxyCheck,
   type NetworkProxyInput,
   type NetworkProxyScheme,
   type NetworkState,
   type NetworkStatus,
+  type NetworkTransport,
 } from "@t3tools/contracts";
 import { Context, Effect, Layer } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerSecretStore } from "../auth/Services/ServerSecretStore.ts";
 import { registerKnownSecret } from "../secretRedaction.ts";
+import { ServerSettingsService } from "../serverSettings.ts";
 import { controlPlaneBaseUrl } from "../workspaceRegistry/unoCloudParse.ts";
+import {
+  type ConsoleNetworkClient,
+  type ConsoleNetworkCredentials,
+  ConsoleNetworkError,
+  type ConsoleNetworkExit,
+  type ConsoleNetworkState,
+  makeConsoleNetworkClient,
+  newDeviceKey,
+  transportsFor,
+} from "./consoleNetwork.ts";
 import { checkProxy } from "./exitTrace.ts";
 import { type ProxyBridge, startProxyBridge } from "./proxyBridge.ts";
 import type { UpstreamProxy } from "./proxyDial.ts";
@@ -47,10 +70,26 @@ import {
   normalizeSkipList,
   proxyEnvironment,
 } from "./proxyEnv.ts";
+import { type TunnelRuntime, makeTunnelRuntime } from "./tunnelRuntime.ts";
+import {
+  type UnoNetConfig,
+  type UnoNetTransport,
+  findNativeBinary,
+  parseConfWithUnoNet,
+} from "./unoNet.ts";
 
 export const NETWORK_SECRET_NAME = "network-proxy";
-/** While on, how often the proxy is checked. */
+/** While on, how often the exit is checked ("Sites see …"). */
 export const NETWORK_RECHECK_MS = 3 * 60_000;
+/** How often the account's Network is read from the console. */
+export const NETWORK_ACCOUNT_REFRESH_MS = 60_000;
+/** While an exit is being set up, how often its key is offered again. */
+export const NETWORK_PEER_RETRY_MS = 10_000;
+
+export const STRICT_MODE_NOTE =
+  "Apps that ignore proxy settings go direct. Strict mode (everything or offline, incl. Docker) comes with the macOS extension.";
+
+const CONFIG_EXIT_PREFIX = "config-";
 
 interface StoredProxy {
   readonly scheme: NetworkProxyScheme;
@@ -61,7 +100,46 @@ interface StoredProxy {
   readonly skip: ReadonlyArray<string>;
 }
 
+interface StoredConfig {
+  readonly id: string;
+  readonly label: string;
+  /** The wg-quick text as the person gave it (holds its private key). */
+  readonly conf: string;
+  readonly protocol: "wireguard" | "amneziawg";
+}
+
+interface StoredPeer {
+  readonly exitId: string;
+  readonly publicKey: string;
+  readonly transports: ReadonlyArray<UnoNetTransport>;
+  readonly at: string;
+}
+
 interface StoredNetwork {
+  readonly version: 2;
+  /** A local exit (proxy, config) is on. */
+  readonly enabled: boolean;
+  /** Which local exit: "proxy" or "config-…"; null — none chosen. */
+  readonly exitId: string | null;
+  readonly since: string | null;
+  readonly proxy: StoredProxy | null;
+  readonly check: NetworkProxyCheck | null;
+  readonly bridge: { readonly token: string; readonly port: number };
+  readonly configs: ReadonlyArray<StoredConfig>;
+  readonly device: {
+    readonly id: string;
+    readonly privateKey: string;
+    readonly publicKey: string;
+  } | null;
+  /** The account's Network as the console last said. */
+  readonly account: ConsoleNetworkState | null;
+  readonly peers: ReadonlyArray<StoredPeer>;
+  /** "Sites see" through the tunnel, for the exit `tunnelCheckExit`. */
+  readonly tunnelCheck: NetworkProxyCheck | null;
+  readonly tunnelCheckExit: string | null;
+}
+
+interface StoredNetworkV1 {
   readonly version: 1;
   readonly enabled: boolean;
   readonly since: string | null;
@@ -146,51 +224,281 @@ function proxyLabel(proxy: StoredProxy): string {
   return proxy.host.includes(":") ? `[${proxy.host}]:${proxy.port}` : `${proxy.host}:${proxy.port}`;
 }
 
-function statusOf(stored: StoredNetwork, checking: boolean): NetworkStatus {
-  if (!stored.enabled || !stored.proxy) return "off";
+/** Private keys inside a wg-quick text (registered with the log redaction). */
+export function confSecrets(conf: string): ReadonlyArray<string> {
+  return [...conf.matchAll(/^\s*(?:PrivateKey|PresharedKey)\s*=\s*(\S+)\s*$/gim)].flatMap((m) =>
+    m[1] ? [m[1]] : [],
+  );
+}
+
+/** What this computer goes out through right now. */
+export type EffectiveExit =
+  | { readonly kind: "proxy"; readonly id: string }
+  | { readonly kind: "config"; readonly id: string; readonly config: StoredConfig }
+  | {
+      readonly kind: "account";
+      readonly id: string;
+      readonly exit: ConsoleNetworkExit | null;
+    };
+
+export function effectiveExit(stored: StoredNetwork): EffectiveExit | null {
+  if (stored.enabled && stored.exitId === NETWORK_PROXY_EXIT_ID && stored.proxy) {
+    return { kind: "proxy", id: NETWORK_PROXY_EXIT_ID };
+  }
+  if (stored.enabled && stored.exitId?.startsWith(CONFIG_EXIT_PREFIX)) {
+    const config = stored.configs.find((c) => c.id === stored.exitId);
+    if (config) return { kind: "config", id: config.id, config };
+  }
+  const account = stored.account;
+  if (account?.available && account.enabled && account.exitId) {
+    const exit = account.exits.find((e) => e.id === account.exitId) ?? null;
+    // A computer is never its own exit: it keeps its own connection.
+    if (!exit?.self) return { kind: "account", id: account.exitId, exit };
+  }
+  return null;
+}
+
+/** The uno-net config for a tunnel exit; null with the sentence why it can't run. */
+export function tunnelConfigFor(
+  stored: StoredNetwork,
+  effective: EffectiveExit,
+): { readonly config: UnoNetConfig; readonly key: string } | { readonly blocked: string } | null {
+  if (effective.kind === "proxy") return null;
+  if (effective.kind === "config") {
+    return {
+      config: { transports: [{ conf: effective.config.conf }] },
+      key: `${effective.id}:${effective.config.conf.length}:${hashOf(effective.config.conf)}`,
+    };
+  }
+  const device = stored.device;
+  const peer = device
+    ? stored.peers.find((p) => p.exitId === effective.id && p.publicKey === device.publicKey)
+    : undefined;
+  if (!device || !peer) return { blocked: "pending" };
+  const protocol = stored.account?.protocol ?? "auto";
+  if (protocol === "openvpn") {
+    return {
+      blocked: "OpenVPN isn't available for this exit yet. Pick Auto, WireGuard or AmneziaWG.",
+    };
+  }
+  const transports = transportsFor(peer.transports, protocol).map((t) => ({
+    ...t,
+    privateKey: device.privateKey,
+  }));
+  if (transports.length === 0) {
+    return {
+      blocked: `This exit doesn't carry ${protocol === "wireguard" ? "WireGuard" : "AmneziaWG"}. Pick Auto.`,
+    };
+  }
+  return {
+    config: { transports },
+    key: `${effective.id}:${protocol}:${hashOf(JSON.stringify(peer.transports))}`,
+  };
+}
+
+function hashOf(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+function parseStored(bytes: Uint8Array | null): StoredNetwork | null {
+  if (!bytes) return null;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(bytes)) as StoredNetwork | StoredNetworkV1;
+    if (!value?.bridge?.token) return null;
+    if (value.version === 1) {
+      return {
+        ...emptyTunnelPart(),
+        version: 2,
+        enabled: value.enabled,
+        exitId: value.proxy ? NETWORK_PROXY_EXIT_ID : null,
+        since: value.since,
+        proxy: value.proxy,
+        check: value.check,
+        bridge: value.bridge,
+      };
+    }
+    if (value.version !== 2) return null;
+    return { ...emptyTunnelPart(), ...value };
+  } catch {
+    return null;
+  }
+}
+
+const emptyTunnelPart = () => ({
+  configs: [] as ReadonlyArray<StoredConfig>,
+  device: null,
+  account: null,
+  peers: [] as ReadonlyArray<StoredPeer>,
+  tunnelCheck: null,
+  tunnelCheckExit: null,
+});
+
+/** The pieces of live state the answer needs besides the record. */
+export interface NetworkLive {
+  readonly checking: boolean;
+  readonly direct: ReadonlyArray<string>;
+  /** uno-net is installed here. */
+  readonly engine: boolean;
+  readonly tunnel: {
+    readonly status: NetworkStatus;
+    readonly activeProtocol: NetworkTransport | null;
+    readonly latencyMs: number | null;
+    readonly since: string | null;
+    readonly error: string | null;
+  };
+  /** Waiting for the exit (being set up) or refused: a sentence; null — nothing. */
+  readonly pending: string | null;
+}
+
+function proxyStatus(stored: StoredNetwork, checking: boolean): NetworkStatus {
   if (checking || !stored.check) return "connecting";
   return stored.check.status === "ok" ? "on" : "down";
+}
+
+function accountExitNote(exit: ConsoleNetworkExit): string | null {
+  if (!exit.available)
+    return exit.reason === "soon" ? "Coming soon" : (exit.reason ?? "Not available");
+  switch (exit.state) {
+    case "setting_up":
+      return "Uno is setting it up…";
+    case "failed":
+      return exit.error ?? "Uno couldn't set it up";
+    case "asleep":
+      return "Asleep · wakes when picked";
+    case "not_set_up":
+      return "Uno sets it up when you pick it";
+    default:
+      return null;
+  }
 }
 
 export function networkStateOf(
   stored: StoredNetwork,
   computer: NetworkComputerInfo,
-  checking: boolean,
-  direct: ReadonlyArray<string>,
+  live: NetworkLive,
 ): NetworkState {
-  const status = statusOf(stored, checking);
+  const effective = effectiveExit(stored);
   const check = stored.check;
-  const exits: NetworkExit[] = stored.proxy
-    ? [
-        {
-          id: NETWORK_PROXY_EXIT_ID,
-          kind: "proxy",
-          label: proxyLabel(stored.proxy),
-          country: check?.status === "ok" ? check.country : null,
-          city: null,
-          address: check?.status === "ok" ? check.ip : null,
-          latencyMs: check?.status === "ok" ? check.latencyMs : null,
-          online: check?.status !== "failed",
-          addressType: "unknown",
-          protocols: [],
-        },
-      ]
-    : [];
+  const tunnelCheck =
+    effective && effective.kind !== "proxy" && stored.tunnelCheckExit === effective.id
+      ? stored.tunnelCheck
+      : null;
+  const exits: NetworkExit[] = [];
+  const account = stored.account?.available ? stored.account : null;
+  for (const exit of account?.exits ?? []) {
+    if (exit.self) continue;
+    const current = effective?.id === exit.id;
+    const seen = current && tunnelCheck?.status === "ok" ? tunnelCheck : null;
+    exits.push({
+      id: exit.id,
+      kind: exit.kind,
+      label: exit.label,
+      country: seen?.country ?? exit.country,
+      city: exit.city,
+      address: seen?.ip ?? exit.address,
+      latencyMs: current ? live.tunnel.latencyMs : null,
+      online: exit.available && exit.state !== "failed",
+      addressType: exit.addressType,
+      protocols: exit.protocols,
+      note: accountExitNote(exit),
+    });
+  }
+  for (const config of stored.configs) {
+    const seen = effective?.id === config.id && tunnelCheck?.status === "ok" ? tunnelCheck : null;
+    exits.push({
+      id: config.id,
+      kind: "config",
+      label: config.label,
+      country: seen?.country ?? null,
+      city: null,
+      address: seen?.ip ?? null,
+      latencyMs: effective?.id === config.id ? live.tunnel.latencyMs : null,
+      online: true,
+      addressType: "unknown",
+      protocols: [config.protocol],
+      note: live.engine ? null : "Needs the tunnel engine (update Uno Work)",
+      removable: true,
+    });
+  }
+  if (stored.proxy) {
+    exits.push({
+      id: NETWORK_PROXY_EXIT_ID,
+      kind: "proxy",
+      label: proxyLabel(stored.proxy),
+      country: check?.status === "ok" ? check.country : null,
+      city: null,
+      address: check?.status === "ok" ? check.ip : null,
+      latencyMs: check?.status === "ok" ? check.latencyMs : null,
+      online: check?.status !== "failed",
+      addressType: "unknown",
+      protocols: [],
+    });
+  }
+
+  let status: NetworkStatus = "off";
+  let reason: string | null = null;
+  let since: string | null = null;
+  if (effective?.kind === "proxy") {
+    status = proxyStatus(stored, live.checking);
+    since = stored.since;
+  } else if (effective) {
+    if (live.pending) {
+      status = live.pending === "setting up" ? "connecting" : "down";
+      reason =
+        live.pending === "setting up"
+          ? `Uno is setting up ${effective.kind === "account" && effective.exit ? effective.exit.label : "the exit"}. Uno Work stays offline until it's ready.`
+          : live.pending;
+    } else {
+      status = live.tunnel.status === "off" ? "connecting" : live.tunnel.status;
+      reason = status === "down" ? (live.tunnel.error ?? "The exit doesn't answer.") : null;
+    }
+    since =
+      effective.kind === "config" ? stored.since : (stored.account?.since ?? live.tunnel.since);
+  }
+
+  const protocol: NetworkProtocol =
+    effective?.kind === "config" ? effective.config.protocol : (account?.protocol ?? "auto");
+  const computers: NetworkComputer[] = [
+    { id: computer.id, name: computer.name, current: true, kind: computer.kind, status },
+  ];
+  for (const other of account?.computers ?? []) {
+    if (other.name === computer.name && other.kind === computer.kind) continue;
+    computers.push({
+      id: other.id,
+      name: other.name,
+      current: false,
+      kind: other.kind,
+      status:
+        other.status === "on" || other.status === "asleep"
+          ? other.status
+          : other.status === "down"
+            ? "down"
+            : "off",
+    });
+  }
+
   return {
     available: true,
-    tunnel: false,
-    enabled: stored.enabled && stored.proxy !== null,
+    tunnel: live.engine || (account?.exits.some((e) => !e.self) ?? false),
+    enabled: effective !== null,
     status,
-    exitId: stored.proxy ? NETWORK_PROXY_EXIT_ID : null,
+    exitId:
+      effective?.id ??
+      stored.exitId ??
+      account?.exitId ??
+      (stored.proxy ? NETWORK_PROXY_EXIT_ID : null),
     exits,
-    protocol: "auto",
-    activeProtocol: null,
-    computers: [
-      { id: computer.id, name: computer.name, current: true, kind: computer.kind, status },
-    ],
+    protocol,
+    activeProtocol: effective && effective.kind !== "proxy" ? live.tunnel.activeProtocol : null,
+    computers,
     permission: "granted",
     otherVpn: null,
-    since: status === "off" ? null : stored.since,
+    since: status === "off" ? null : since,
     proxy: stored.proxy
       ? {
           scheme: stored.proxy.scheme,
@@ -199,21 +507,37 @@ export function networkStateOf(
           username: stored.proxy.username,
           hasPassword: stored.proxy.password !== null,
           skip: stored.proxy.skip,
-          alwaysDirect: direct,
+          alwaysDirect: live.direct,
           check,
         }
       : null,
+    strict: false,
+    reason,
+    canImport: live.engine,
   };
 }
 
-function parseStored(bytes: Uint8Array | null): StoredNetwork | null {
-  if (!bytes) return null;
-  try {
-    const value = JSON.parse(new TextDecoder().decode(bytes)) as StoredNetwork;
-    return value && value.version === 1 && value.bridge?.token ? value : null;
-  } catch {
-    return null;
+/** Which console credentials this computer has: its machine token, else the person's account key. */
+export function consoleCredentialsFrom(
+  uno:
+    | {
+        readonly boxToken?: string | undefined;
+        readonly boxId?: number | null | undefined;
+        readonly apiKey?: string | undefined;
+      }
+    | null
+    | undefined,
+  deviceId: string,
+): ConsoleNetworkCredentials | null {
+  const boxToken = uno?.boxToken?.trim() ?? "";
+  const boxId = typeof uno?.boxId === "number" && uno.boxId > 0 ? uno.boxId : null;
+  if (boxToken && boxId !== null) return { kind: "machine", boxToken, boxId };
+  const accountKey = uno?.apiKey?.trim() ?? "";
+  // A `unollm_` key only buys AI.
+  if (accountKey && !accountKey.startsWith("unollm_")) {
+    return { kind: "account", accountKey, deviceId };
   }
+  return null;
 }
 
 export const makeNetworkService = (options?: {
@@ -221,11 +545,24 @@ export const makeNetworkService = (options?: {
   readonly env?: Record<string, string | undefined>;
   readonly checkProxy?: typeof checkProxy;
   readonly recheckMs?: number;
+  /** The console as this computer may speak to it; null — not linked. */
+  readonly consoleClient?: (deviceId: string) => Effect.Effect<ConsoleNetworkClient | null>;
+  readonly runtime?: TunnelRuntime;
+  /** uno-net's path; null — not installed (tests). */
+  readonly engineBinary?: string | null;
+  readonly accountRefreshMs?: number;
+  readonly peerRetryMs?: number;
+  readonly hostname?: string;
 }) =>
   Effect.gen(function* () {
     const secrets = yield* ServerSecretStore;
     const env = options?.env ?? process.env;
     const runCheck = options?.checkProxy ?? checkProxy;
+    const engineBinary =
+      options?.engineBinary !== undefined ? options.engineBinary : findNativeBinary("uno-net");
+    const runtime = options?.runtime ?? makeLoggedRuntime(engineBinary);
+    const consoleClient = options?.consoleClient ?? (() => Effect.succeed(null));
+    const hostname = options?.hostname ?? OS.hostname();
     // The person's own proxy variables (a corporate proxy in their shell), restored when off.
     const inherited = inheritedProxyEnvironment(env);
     applyProxyEnvironment(env, null, inherited);
@@ -233,23 +570,32 @@ export const makeNetworkService = (options?: {
     const lock = yield* Semaphore.make(1);
 
     const fresh = (): StoredNetwork => ({
-      version: 1,
+      version: 2,
       enabled: false,
+      exitId: null,
       since: null,
       proxy: null,
       check: null,
       bridge: { token: randomBytes(24).toString("hex"), port: 0 },
+      ...emptyTunnelPart(),
     });
     let stored: StoredNetwork =
       parseStored(yield* secrets.get(NETWORK_SECRET_NAME).pipe(Effect.orElseSucceed(() => null))) ??
       fresh();
     let bridge: ProxyBridge | null = null;
     let checking = false;
+    let pending: string | null = null;
+    let lastComputerName: string | null = null;
+    let accountReadAt = 0;
+    let nextPeerTry = 0;
 
     const remember = (value: StoredNetwork) => {
       registerKnownSecret(value.bridge.token);
       registerKnownSecret(value.proxy?.password);
       if (value.proxy?.password) registerKnownSecret(encodeURIComponent(value.proxy.password));
+      registerKnownSecret(value.device?.privateKey);
+      for (const config of value.configs)
+        for (const s of confSecrets(config.conf)) registerKnownSecret(s);
     };
     remember(stored);
 
@@ -264,9 +610,24 @@ export const makeNetworkService = (options?: {
           ),
         );
 
-    /** Bridge up (when a proxy is saved), its upstream and the children's env as `stored` says. */
+    const tunnelUpstream = (): UpstreamProxy | "blocked" => {
+      const socks = runtime.socks();
+      return socks
+        ? {
+            scheme: "socks5",
+            host: socks.host,
+            port: socks.port,
+            username: "work",
+            password: socks.token,
+          }
+        : "blocked";
+    };
+
+    /** Bridge, tunnel and the children's env as `stored` says. */
     const sync = Effect.gen(function* () {
-      if (stored.proxy && !bridge) {
+      const effective = effectiveExit(stored);
+      const needsBridge = stored.proxy !== null || stored.configs.length > 0 || effective !== null;
+      if (needsBridge && !bridge) {
         const started = yield* Effect.tryPromise(() =>
           startProxyBridge({
             token: stored.bridge.token,
@@ -287,11 +648,32 @@ export const makeNetworkService = (options?: {
           yield* persist(stored);
         }
       }
-      const on = stored.enabled && stored.proxy !== null && bridge !== null;
-      bridge?.setUpstream(on && stored.proxy ? upstreamOf(stored.proxy) : null);
+
+      // The tunnel: what uno-net should run.
+      let tunnel: ReturnType<typeof tunnelConfigFor> = null;
+      if (effective && effective.kind !== "proxy") tunnel = tunnelConfigFor(stored, effective);
+      if (tunnel && "config" in tunnel) {
+        pending = null;
+        yield* Effect.promise(() => runtime.setDesired(tunnel.config, tunnel.key));
+      } else {
+        if (!tunnel) pending = null;
+        else if (tunnel.blocked !== "pending") pending = tunnel.blocked;
+        // Waiting for the exit; a refusal from the console (set by reconcileAccount) stays.
+        else if (pending === null) pending = "setting up";
+        yield* Effect.promise(() => runtime.setDesired(null, null));
+      }
+
+      if (bridge) {
+        if (!effective) bridge.setUpstream(null);
+        else if (effective.kind === "proxy" && stored.proxy)
+          bridge.setUpstream(upstreamOf(stored.proxy));
+        else if (tunnel && "config" in tunnel) bridge.setUpstream(tunnelUpstream);
+        // On, but nothing to carry it yet: fail-closed.
+        else bridge.setUpstream("blocked");
+      }
       applyProxyEnvironment(
         env,
-        on && bridge
+        effective && bridge
           ? proxyEnvironment({
               bridgeUrl: bridge.url,
               direct: [...direct, ...(stored.proxy?.skip ?? [])],
@@ -314,8 +696,126 @@ export const makeNetworkService = (options?: {
       yield* persist(stored);
     });
 
+    /** "Sites see" through the tunnel, while it's on. */
+    const recheckTunnel = Effect.gen(function* () {
+      const effective = effectiveExit(stored);
+      if (!effective || effective.kind === "proxy" || runtime.snapshot().status !== "on") return;
+      const upstream = tunnelUpstream();
+      if (upstream === "blocked") return;
+      const result = yield* Effect.promise(() => runCheck(upstream));
+      if (effectiveExit(stored)?.id !== effective.id) return;
+      stored = { ...stored, tunnelCheck: result, tunnelCheckExit: effective.id };
+      yield* persist(stored);
+    });
+
+    const ensureDevice = () => {
+      if (stored.device) return stored.device;
+      const key = newDeviceKey();
+      const device = { id: `dev-${randomBytes(8).toString("hex")}`, ...key };
+      stored = { ...stored, device };
+      remember(stored);
+      return device;
+    };
+
+    /** The account's Network from the console, and this device's key at its exit. */
+    const reconcileAccount = (force: boolean) =>
+      Effect.gen(function* () {
+        const device = ensureDevice();
+        const client = yield* consoleClient(device.id);
+        if (!client) {
+          if (stored.account) {
+            stored = { ...stored, account: null };
+            yield* persist(stored);
+          }
+          return;
+        }
+        if (force || Date.now() - accountReadAt > 15_000) {
+          const account = yield* Effect.tryPromise(() => client.state()).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("network: console unreachable, keeping the last state").pipe(
+                Effect.annotateLogs({ cause: String(cause) }),
+                Effect.as(null),
+              ),
+            ),
+          );
+          if (account) {
+            accountReadAt = Date.now();
+            if (JSON.stringify(account) !== JSON.stringify(stored.account)) {
+              stored = { ...stored, account };
+              yield* persist(stored);
+            }
+          }
+        }
+        const effective = effectiveExit(stored);
+        if (effective?.kind !== "account") return;
+        const have = stored.peers.some(
+          (p) => p.exitId === effective.id && p.publicKey === device.publicKey,
+        );
+        if (have || (!force && Date.now() < nextPeerTry)) return;
+        nextPeerTry = Date.now() + (options?.peerRetryMs ?? NETWORK_PEER_RETRY_MS);
+        const label = lastComputerName ?? hostname;
+        const result = yield* Effect.tryPromise({
+          try: () =>
+            client.registerPeer({ publicKey: device.publicKey, exitId: effective.id, label }),
+          catch: (error) =>
+            error instanceof ConsoleNetworkError
+              ? error
+              : new ConsoleNetworkError(
+                  502,
+                  "CONSOLE_UNREACHABLE",
+                  "The Uno console didn't answer.",
+                ),
+        }).pipe(Effect.result);
+        if (result._tag === "Success") {
+          const peer: StoredPeer = {
+            exitId: result.success.exitId,
+            publicKey: device.publicKey,
+            transports: result.success.transports,
+            at: new Date().toISOString(),
+          };
+          stored = {
+            ...stored,
+            peers: [...stored.peers.filter((p) => p.exitId !== peer.exitId), peer],
+          };
+          pending = null;
+          yield* persist(stored);
+          return;
+        }
+        const error = result.failure;
+        if (error instanceof ConsoleNetworkError && error.code === "NETWORK_EXIT_NOT_READY") {
+          pending = "setting up";
+        } else {
+          pending =
+            error instanceof ConsoleNetworkError
+              ? error.message
+              : "Uno couldn't connect this computer to the exit.";
+        }
+      });
+
+    const reconcile = (force: boolean) =>
+      lock.withPermits(1)(
+        Effect.gen(function* () {
+          yield* reconcileAccount(force);
+          yield* sync;
+        }),
+      );
+
     yield* lock.withPermits(1)(sync);
-    if (stored.enabled && stored.proxy) yield* Effect.forkDetach(lock.withPermits(1)(recheck));
+    if (effectiveExit(stored)?.kind === "proxy") {
+      yield* Effect.forkDetach(lock.withPermits(1)(recheck));
+    }
+    yield* Effect.forkDetach(reconcile(true).pipe(Effect.ignore));
+
+    // The tunnel came up (or changed exits): see what sites see.
+    const runFork = Effect.runForkWith(yield* Effect.context<never>());
+    let lastTunnelStatus = runtime.snapshot().status;
+    runtime.onChange(() => {
+      const now = runtime.snapshot().status;
+      if (now === "on" && lastTunnelStatus !== "on") {
+        runFork(lock.withPermits(1)(recheckTunnel).pipe(Effect.ignore));
+      }
+      lastTunnelStatus = now;
+    });
 
     const recheckMs = options?.recheckMs ?? NETWORK_RECHECK_MS;
     if (recheckMs > 0) {
@@ -323,9 +823,28 @@ export const makeNetworkService = (options?: {
         Effect.gen(function* () {
           while (true) {
             yield* Effect.sleep(recheckMs);
-            if (stored.enabled && stored.proxy) {
+            const effective = effectiveExit(stored);
+            if (effective?.kind === "proxy") {
               yield* lock.withPermits(1)(recheck).pipe(Effect.ignore);
+            } else if (effective) {
+              yield* lock.withPermits(1)(recheckTunnel).pipe(Effect.ignore);
             }
+          }
+        }),
+      );
+    }
+    const accountRefreshMs = options?.accountRefreshMs ?? NETWORK_ACCOUNT_REFRESH_MS;
+    if (accountRefreshMs > 0) {
+      yield* Effect.forkScoped(
+        Effect.gen(function* () {
+          while (true) {
+            // Faster while an exit is being set up.
+            yield* Effect.sleep(
+              pending === "setting up"
+                ? (options?.peerRetryMs ?? NETWORK_PEER_RETRY_MS)
+                : accountRefreshMs,
+            );
+            yield* reconcile(pending === "setting up").pipe(Effect.ignore);
           }
         }),
       );
@@ -333,17 +852,61 @@ export const makeNetworkService = (options?: {
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
         applyProxyEnvironment(env, null, inherited);
+        await runtime.close();
         await bridge?.close();
       }),
     );
 
+    const live = (): NetworkLive => ({
+      checking,
+      direct,
+      engine: engineBinary !== null,
+      tunnel: runtime.snapshot(),
+      pending,
+    });
+
+    const consoleChange = (input: {
+      readonly enabled?: boolean;
+      readonly exitId?: string;
+      readonly protocol?: NetworkProtocol;
+    }) =>
+      Effect.gen(function* () {
+        const device = ensureDevice();
+        const client = yield* consoleClient(device.id);
+        if (!client) {
+          return yield* Effect.fail(
+            new NetworkInputError("This computer isn't linked to the Uno console."),
+          );
+        }
+        const account = yield* Effect.tryPromise({
+          try: () => client.change(input),
+          catch: (error) =>
+            new NetworkInputError(
+              error instanceof ConsoleNetworkError
+                ? error.message
+                : "The Uno console didn't answer.",
+            ),
+        });
+        accountReadAt = Date.now();
+        stored = { ...stored, account };
+      });
+
     const change: NetworkServiceShape["change"] = (input, computer) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
+          lastComputerName = computer.name;
           let next = stored;
+          let changedProxy = false;
+          let accountTouched = false;
           if (input.proxy !== undefined) {
             if (input.proxy === null) {
-              next = { ...next, proxy: null, check: null, enabled: false, since: null };
+              const wasOn = next.exitId === NETWORK_PROXY_EXIT_ID;
+              next = {
+                ...next,
+                proxy: null,
+                check: null,
+                ...(wasOn ? { enabled: false, exitId: null, since: null } : {}),
+              };
             } else {
               const proxy = yield* Effect.try({
                 try: () => normalizeProxyInput(input.proxy as NetworkProxyInput, stored.proxy),
@@ -355,19 +918,137 @@ export const makeNetworkService = (options?: {
               const same = JSON.stringify(proxy) === JSON.stringify(stored.proxy);
               next = { ...next, proxy, check: same ? next.check : null };
             }
+            changedProxy = next.proxy !== stored.proxy;
           }
-          const wantsOn =
-            input.enabled ?? (input.exitId === NETWORK_PROXY_EXIT_ID ? true : undefined);
-          if (wantsOn !== undefined) {
-            if (wantsOn && !next.proxy) {
-              return yield* Effect.fail(new NetworkInputError("Add a proxy first."));
+          if (input.importConfig) {
+            if (!engineBinary) {
+              return yield* Effect.fail(
+                new NetworkInputError(
+                  "The tunnel engine isn't installed on this computer. Update Uno Work.",
+                ),
+              );
             }
+            const conf = input.importConfig.conf.trim();
+            const parsed = yield* Effect.promise(() => parseConfWithUnoNet(engineBinary, conf));
+            if (!parsed.ok) return yield* Effect.fail(new NetworkInputError(parsed.reason));
+            const endpointHost = parsed.transport.peer?.endpoint
+              ?.replace(/:\d+$/, "")
+              .replace(/^\[|\]$/g, "");
+            const label = input.importConfig.label?.trim() || endpointHost || "Imported config";
+            const config: StoredConfig = {
+              id: `${CONFIG_EXIT_PREFIX}${randomBytes(4).toString("hex")}`,
+              label,
+              conf,
+              protocol: parsed.transport.protocol === "amneziawg" ? "amneziawg" : "wireguard",
+            };
             next = {
               ...next,
-              enabled: wantsOn,
-              since: wantsOn ? (next.enabled ? next.since : new Date().toISOString()) : null,
+              configs: [...next.configs, config],
+              enabled: true,
+              exitId: config.id,
+              since: new Date().toISOString(),
             };
           }
+          if (input.removeExitId?.startsWith(CONFIG_EXIT_PREFIX)) {
+            const wasOn = next.exitId === input.removeExitId;
+            next = {
+              ...next,
+              configs: next.configs.filter((c) => c.id !== input.removeExitId),
+              ...(wasOn ? { enabled: false, exitId: null, since: null } : {}),
+            };
+          }
+
+          const localExit = (id: string | undefined) =>
+            id === NETWORK_PROXY_EXIT_ID || (id?.startsWith(CONFIG_EXIT_PREFIX) ?? false);
+          if (input.exitId !== undefined && !input.importConfig) {
+            if (localExit(input.exitId)) {
+              if (input.exitId === NETWORK_PROXY_EXIT_ID && !next.proxy) {
+                return yield* Effect.fail(new NetworkInputError("Add a proxy first."));
+              }
+              if (
+                input.exitId.startsWith(CONFIG_EXIT_PREFIX) &&
+                !next.configs.some((c) => c.id === input.exitId)
+              ) {
+                return yield* Effect.fail(
+                  new NetworkInputError("That config isn't here any more."),
+                );
+              }
+              if (input.enabled !== false) {
+                next = {
+                  ...next,
+                  enabled: true,
+                  exitId: input.exitId,
+                  since:
+                    next.enabled && next.exitId === input.exitId
+                      ? next.since
+                      : new Date().toISOString(),
+                };
+              } else {
+                next = { ...next, exitId: input.exitId };
+              }
+            } else {
+              // The account's exit: one switch for every computer of the account.
+              stored = next;
+              yield* consoleChange({
+                exitId: input.exitId,
+                enabled: input.enabled ?? true,
+                ...(input.protocol ? { protocol: input.protocol } : {}),
+              });
+              accountTouched = true;
+              next = { ...stored, enabled: false, since: null };
+            }
+          } else if (input.enabled !== undefined && !input.importConfig) {
+            const current = effectiveExit(next);
+            if (input.enabled) {
+              if (current) {
+                // Already on.
+              } else if (next.exitId && localExit(next.exitId)) {
+                if (next.exitId === NETWORK_PROXY_EXIT_ID && !next.proxy) {
+                  return yield* Effect.fail(new NetworkInputError("Add a proxy first."));
+                }
+                next = { ...next, enabled: true, since: new Date().toISOString() };
+              } else if (next.account?.available && next.account.exitId) {
+                stored = next;
+                yield* consoleChange({ enabled: true });
+                accountTouched = true;
+                next = stored;
+              } else if (next.proxy) {
+                next = {
+                  ...next,
+                  enabled: true,
+                  exitId: NETWORK_PROXY_EXIT_ID,
+                  since: new Date().toISOString(),
+                };
+              } else if (next.configs[0]) {
+                next = {
+                  ...next,
+                  enabled: true,
+                  exitId: next.configs[0].id,
+                  since: new Date().toISOString(),
+                };
+              } else {
+                return yield* Effect.fail(
+                  new NetworkInputError(
+                    next.account?.available ? "Pick an exit first." : "Add a proxy first.",
+                  ),
+                );
+              }
+            } else if (current?.kind === "account") {
+              stored = next;
+              yield* consoleChange({ enabled: false });
+              accountTouched = true;
+              next = stored;
+            } else {
+              next = { ...next, enabled: false, since: null };
+            }
+          }
+          if (input.protocol !== undefined && !accountTouched && next.account?.available) {
+            stored = next;
+            yield* consoleChange({ protocol: input.protocol });
+            accountTouched = true;
+            next = stored;
+          }
+
           if (
             next.proxy &&
             bridge &&
@@ -380,14 +1061,19 @@ export const makeNetworkService = (options?: {
               ),
             );
           }
-          const changedProxy = next.proxy !== stored.proxy;
+          const turnedOnProxy =
+            effectiveExit(next)?.kind === "proxy" && effectiveExit(stored)?.kind !== "proxy";
           stored = next;
           remember(stored);
           yield* persist(stored);
+          if (accountTouched) {
+            nextPeerTry = 0;
+            yield* reconcileAccount(false);
+          }
           yield* sync;
           // A new proxy, or turned on: the person sees at once whether it works.
-          if (stored.proxy && (changedProxy || wantsOn === true)) yield* recheck;
-          return networkStateOf(stored, computer, checking, direct);
+          if (stored.proxy && (changedProxy || turnedOnProxy)) yield* recheck;
+          return networkStateOf(stored, computer, live());
         }),
       );
 
@@ -410,10 +1096,42 @@ export const makeNetworkService = (options?: {
       });
 
     return {
-      state: (computer) => Effect.sync(() => networkStateOf(stored, computer, checking, direct)),
+      state: (computer) =>
+        Effect.gen(function* () {
+          lastComputerName = computer.name;
+          // Fresh enough for the panel without waiting on the console every time.
+          if (Date.now() - accountReadAt > 15_000) {
+            yield* Effect.forkDetach(reconcile(false).pipe(Effect.ignore));
+          }
+          return networkStateOf(stored, computer, live());
+        }),
       change,
       check,
     } satisfies NetworkServiceShape;
   });
 
-export const NetworkServiceLive = Layer.effect(NetworkService, makeNetworkService());
+function makeLoggedRuntime(binary: string | null): TunnelRuntime {
+  return makeTunnelRuntime({
+    binary,
+    log: (message, fields) => {
+      Effect.runFork(Effect.logWarning(message).pipe(Effect.annotateLogs(fields ?? {})));
+    },
+  });
+}
+
+export const NetworkServiceLive = Layer.effect(
+  NetworkService,
+  Effect.gen(function* () {
+    const settings = yield* ServerSettingsService;
+    return yield* makeNetworkService({
+      consoleClient: (deviceId) =>
+        settings.getSettings.pipe(
+          Effect.map((current) => {
+            const credentials = consoleCredentialsFrom(current.uno, deviceId);
+            return credentials ? makeConsoleNetworkClient(credentials) : null;
+          }),
+          Effect.orElseSucceed(() => null),
+        ),
+    });
+  }),
+);

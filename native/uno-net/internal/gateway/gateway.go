@@ -65,12 +65,19 @@ var ifName = regexp.MustCompile(`^[a-z][a-z0-9]{1,14}$`)
 
 func Parse(data []byte) (*Config, error) {
 	var c Config
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("gateway config: %w", err)
+	if err := strictDecode(data, &c); err != nil {
+		return nil, err
 	}
 	return &c, c.Validate()
+}
+
+func strictDecode(data []byte, c *Config) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(c); err != nil {
+		return fmt.Errorf("gateway config: %w", err)
+	}
+	return nil
 }
 
 func (c *Config) BlockList() []string {

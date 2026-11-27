@@ -26,12 +26,23 @@ import { type UpstreamProxy, basicProxyAuthorization, dialThroughProxy } from ".
 
 export const BRIDGE_USER = "uno";
 
+/**
+ * Where the bridge sends streams: the person's proxy (or the tunnel's SOCKS),
+ * null — direct (Network off), "blocked" — refuse everything (on, but the
+ * tunnel's engine isn't there: fail-closed). A function is asked at every
+ * request (the tunnel's SOCKS port changes when its engine restarts).
+ */
+export type BridgeUpstream = UpstreamProxy | null | "blocked" | (() => UpstreamProxy | "blocked");
+
+const resolveUpstream = (upstream: BridgeUpstream): UpstreamProxy | null | "blocked" =>
+  typeof upstream === "function" ? upstream() : upstream;
+
 export interface ProxyBridge {
   readonly port: number;
   /** What children get: with the token, never the person's login. */
   readonly url: string;
-  /** null — go direct (Network off). */
-  readonly setUpstream: (upstream: UpstreamProxy | null) => void;
+  /** null — go direct (Network off); "blocked" — refuse (fail-closed). */
+  readonly setUpstream: (upstream: BridgeUpstream) => void;
   readonly close: () => Promise<void>;
 }
 
@@ -99,7 +110,7 @@ export function startProxyBridge(input: {
   readonly token: string;
   /** The port it had last time (children keep it in their env); 0 — any. */
   readonly port: number;
-  readonly upstream: UpstreamProxy | null;
+  readonly upstream: BridgeUpstream;
 }): Promise<ProxyBridge> {
   const token = Buffer.from(input.token, "utf8");
   let upstream = input.upstream;
@@ -123,7 +134,11 @@ export function startProxyBridge(input: {
       response.writeHead(400).end("Use CONNECT for https.");
       return;
     }
-    const current = upstream;
+    const current = resolveUpstream(upstream);
+    if (current === "blocked") {
+      response.writeHead(502).end();
+      return;
+    }
     const headers = forwardHeaders(request.headers);
     const port = Number(target.port) || 80;
     const onUpstream = (upstreamResponse: Http.IncomingMessage) => {
@@ -191,7 +206,12 @@ export function startProxyBridge(input: {
       refuse(client, "400 Bad Request");
       return;
     }
-    dial(upstream, target.host, target.port).then(
+    const current = resolveUpstream(upstream);
+    if (current === "blocked") {
+      refuse(client, "502 Bad Gateway");
+      return;
+    }
+    dial(current, target.host, target.port).then(
       (remote) => {
         sockets.add(remote);
         tunnels.add(remote);

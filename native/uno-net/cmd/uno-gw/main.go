@@ -6,7 +6,14 @@
 //
 //	uno-gw run --config /etc/uno-gw/config.json    (root; SIGHUP reloads peers)
 //	uno-gw ruleset --config …                       print the nft script
+//	uno-gw init --dir /etc/uno-gw [--egress auto] [--obfuscation '{"jc":"4",…}']
+//	    make config.json (keys made here) unless it exists, print the public side
+//	uno-gw install-service [--dir /etc/uno-gw]       copy itself to /usr/local/lib/uno-gw,
+//	    write uno-gw.service, enable and (re)start it
 //	uno-gw keygen
+//
+// Peers: config.json's own plus <dir>/peers.json (a JSON array the console
+// rewrites in full); `systemctl reload uno-gw` (SIGHUP) re-reads both.
 package main
 
 import (
@@ -43,6 +50,10 @@ func main() {
 		err = run(os.Args[2:])
 	case "ruleset":
 		err = ruleset(os.Args[2:])
+	case "init":
+		err = initCmd(os.Args[2:])
+	case "install-service":
+		err = installService(os.Args[2:])
 	case "keygen":
 		k, kerr := ecdh.X25519().GenerateKey(rand.Reader)
 		if kerr != nil {
@@ -70,11 +81,83 @@ func usage() {
 }
 
 func load(path string) (*gateway.Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	return gateway.Load(path)
+}
+
+func initCmd(args []string) error {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	dir := fs.String("dir", "/etc/uno-gw", "config directory")
+	egress := fs.String("egress", "auto", "interface traffic leaves by; auto: the default route's")
+	obf := fs.String("obfuscation", "", "AmneziaWG parameters, JSON object")
+	fs.Parse(args)
+	var o map[string]string
+	if *obf != "" {
+		if err := json.Unmarshal([]byte(*obf), &o); err != nil {
+			return fmt.Errorf("--obfuscation: %w", err)
+		}
 	}
-	return gateway.Parse(data)
+	eg := *egress
+	if eg == "auto" {
+		eg = defaultRouteInterface()
+	}
+	p, err := gateway.Init(*dir, eg, o)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(p)
+}
+
+// defaultRouteInterface: "eth0" from `ip -4 route show default`; empty when unknown.
+func defaultRouteInterface() string {
+	out, err := exec.Command("ip", "-4", "route", "show", "default").Output()
+	if err != nil {
+		return ""
+	}
+	f := strings.Fields(string(out))
+	for i := 0; i+1 < len(f); i++ {
+		if f[i] == "dev" {
+			return f[i+1]
+		}
+	}
+	return ""
+}
+
+const installedBin = "/usr/local/lib/uno-gw/uno-gw"
+
+func installService(args []string) error {
+	fs := flag.NewFlagSet("install-service", flag.ExitOnError)
+	dir := fs.String("dir", "/etc/uno-gw", "config directory")
+	fs.Parse(args)
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	// A copy outside Uno Work's folder: an update of Uno Work never pulls
+	// the binary from under the running gateway.
+	data, err := os.ReadFile(self)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll("/usr/local/lib/uno-gw", 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(installedBin+".new", data, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(installedBin+".new", installedBin); err != nil {
+		return err
+	}
+	unit := gateway.Unit(installedBin, *dir+"/"+gateway.ConfigFile)
+	if err := os.WriteFile("/etc/systemd/system/uno-gw.service", []byte(unit), 0o644); err != nil {
+		return err
+	}
+	for _, c := range [][]string{{"daemon-reload"}, {"enable", "uno-gw"}, {"restart", "uno-gw"}} {
+		if err := sh("systemctl", c...); err != nil {
+			return err
+		}
+	}
+	fmt.Println(`{"installed":true}`)
+	return nil
 }
 
 func ruleset(args []string) error {

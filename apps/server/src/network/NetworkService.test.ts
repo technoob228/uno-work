@@ -55,6 +55,8 @@ async function withService<A>(
       makeNetworkService({
         env,
         recheckMs: 0,
+        accountRefreshMs: 0,
+        engineBinary: null,
         checkProxy: options.check ?? (async () => OK),
       }).pipe(
         Effect.flatMap((service) => body(service, env)),

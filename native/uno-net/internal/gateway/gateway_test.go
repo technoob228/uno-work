@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -94,5 +96,67 @@ func TestRuleset(t *testing.T) {
 	// The block rules must come before the accept.
 	if strings.Index(r, "@block4 drop") > strings.Index(r, `oifname "eth0" accept`) {
 		t.Fatal("block after accept")
+	}
+}
+
+func TestInitAndPeersFile(t *testing.T) {
+	dir := t.TempDir()
+	p, err := Init(dir, "eth0", map[string]string{"jc": "4", "jmin": "40", "jmax": "70", "h1": "1234567"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Created || p.WireGuard.PublicKey == "" || p.AmneziaWG.PublicKey == "" || p.WireGuard.PublicKey == p.AmneziaWG.PublicKey {
+		t.Fatalf("public side %+v", p)
+	}
+	if p.WireGuard.ListenPort != WGPort || p.AmneziaWG.ListenPort != AWGPort {
+		t.Fatalf("ports %+v", p)
+	}
+	again, err := Init(dir, "eth0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Created || again.WireGuard.PublicKey != p.WireGuard.PublicKey {
+		t.Fatal("init must keep an existing config")
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, ConfigFile))
+	if strings.Contains(string(raw), p.WireGuard.PublicKey) {
+		t.Fatal("config stores private keys, not public ones")
+	}
+	st, _ := os.Stat(filepath.Join(dir, ConfigFile))
+	if st.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode %v", st.Mode())
+	}
+	peers := `[{"interface":"unowg0","publicKey":"` + devKey + `","address":"10.66.0.2","label":"account 85 · box-2531"},
+	           {"interface":"unoawg0","publicKey":"` + devKey + `","address":"10.67.0.2"}]`
+	if err := os.WriteFile(filepath.Join(dir, PeersFile), []byte(peers), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(filepath.Join(dir, ConfigFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Peers) != 2 {
+		t.Fatalf("peers %d", len(c.Peers))
+	}
+	dc, _ := c.DeviceConfig(WGInterface)
+	if !strings.Contains(dc, "allowed_ip=10.66.0.2/32") {
+		t.Fatalf("device config lacks the peer:\n%s", dc)
+	}
+	// A bad peers file is refused as a whole (reload keeps the old state).
+	os.WriteFile(filepath.Join(dir, PeersFile), []byte(`[{"interface":"unowg0","publicKey":"x","address":"10.66.0.2"}]`), 0o600)
+	if _, err := Load(filepath.Join(dir, ConfigFile)); err == nil {
+		t.Fatal("bad peer accepted")
+	}
+}
+
+func TestPublicOf(t *testing.T) {
+	k, _ := NewKey()
+	a, err := PublicOf(k)
+	if err != nil || a == "" {
+		t.Fatal(err)
+	}
+	b, _ := PublicOf(k)
+	if a != b {
+		t.Fatal("not deterministic")
 	}
 }

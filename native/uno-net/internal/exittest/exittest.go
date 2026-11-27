@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"testing"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/device"
@@ -33,10 +32,19 @@ var (
 	BlockedName = "loop.test"
 )
 
+// T is what Start needs of a test (testing.TB has it; so does the
+// stand-alone exit in cmd/uno-net-testexit).
+type T interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+	Cleanup(func())
+}
+
 // Key is a base64 key pair.
 type Key struct{ Private, Public string }
 
-func NewKey(t testing.TB) Key {
+func NewKey(t T) Key {
 	k, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +92,7 @@ type Options struct {
 }
 
 // Start runs an exit that accepts clientPub at ClientIP.
-func Start(t testing.TB, clientPub string, opt Options) *Exit {
+func Start(t T, clientPub string, opt Options) *Exit {
 	t.Helper()
 	key := NewKey(t)
 	if opt.Key != nil {
@@ -158,7 +166,7 @@ func Start(t testing.TB, clientPub string, opt Options) *Exit {
 	return e
 }
 
-func hexKey(t testing.TB, b64 string) string {
+func hexKey(t T, b64 string) string {
 	raw, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil || len(raw) != 32 {
 		t.Fatalf("bad key %q", b64)

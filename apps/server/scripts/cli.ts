@@ -166,6 +166,33 @@ const buildCmd = Command.make(
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
+
+      // Network's tunnel engine and exit (native/uno-net, Go): dist/native/<platform>-<arch>/.
+      // Built here when Go is on the machine; a build without it ships no tunnel
+      // (the daemon then answers `tunnel: false`, the proxy still works).
+      const nativeDir = path.join(repoRoot, "native/uno-net");
+      const nativeDist = path.join(nativeDir, "dist");
+      if (!(yield* fs.exists(nativeDist))) {
+        const built = yield* runCommand(
+          ChildProcess.make("bash", ["build.sh"], {
+            cwd: nativeDir,
+            stdout: config.verbose ? "inherit" : "ignore",
+            stderr: "inherit",
+          }),
+        ).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        );
+        if (!built) {
+          yield* Effect.logWarning(
+            "[cli] Couldn't build native/uno-net (is Go installed?) — this build has no Network tunnel.",
+          );
+        }
+      }
+      if (yield* fs.exists(nativeDist)) {
+        yield* fs.copy(nativeDist, path.join(serverDir, "dist/native"));
+        yield* Effect.log("[cli] Bundled uno-net / uno-gw into dist/native");
+      }
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 
